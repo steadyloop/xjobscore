@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>Teamtailor</title>
+    <description>Current job openings</description>
+    <link>https://career.teamtailor.com/jobs</link>
+    <item>
+      <title>Group Financial Controller</title>
+      <description>&lt;h4&gt;Join Teamtailor and Help Shape the Future of Work!!&lt;br&gt;&lt;/h4&gt;&lt;p&gt;Teamtailor is a global Employer Branding and ATS SaaS platform used by over 13,000 companies, 250,000 users, and available in 90 countries worldwide. &#127757;&lt;/p&gt;&lt;p&gt;&lt;span style="font-size:1em;font-weight:initial;letter-spacing:-0.011em;"&gt;Working at &lt;/span&gt;&lt;a target="_blank" href="https://www.teamtailor.com/en/"&gt;&lt;span style="font-size:1em;font-weight:initial;letter-spacing:-0.011em;"&gt;Teamtailor&lt;/span&gt;&lt;/a&gt;&lt;span style="font-size:1em;font-weight:initial;letter-spacing:-0.011em;"&gt; means being part of a dynamic, fast-paced tech company that values impact and responsibility. Our workplace fosters an environment where everyone can contribute meaningfully to the growth of the company. &#127881;&lt;/span&gt;&lt;/p&gt;&lt;p&gt;We are now looking for a Group Financial Controller to join our team, based in Stockholm&lt;/p&gt;&lt;p&gt;&lt;span&gt;The Group Financial Controller will own Group accounting, consolidation and statutory reporting across our international group of 10+ entities, with a Swedish parent company and subsidiaries across the US, UK, France, Germany and other markets.&lt;/span&gt;&lt;/p&gt;&lt;p&gt;If this role interests you please APPLY!&lt;/p&gt;&lt;figure data-alignment="left" class="relative" style="width:fit-content;margin-left:0px;margin-right:auto;"&gt;&lt;img src="https://images.teamtailor-cdn.com/images/s3/teamtailor-production/original-v3/image_uploads/e54f4356-afde-4ed2-acda-2cf1e369b392/original.jpeg" alt="Team picture on the beach" title="" data-alignment="left"&gt;&lt;/figure&gt;&lt;p&gt;&lt;/p&gt;</description>
+      <pubDate>Fri, 24 Jul 2026 13:57:16 +0200</pubDate>
+      <link>https://career.teamtailor.com/jobs/8124573-group-financial-controller</link>
+      <remoteStatus>hybrid</remoteStatus>
+      <guid>3ce2c88b-cbc6-4ae9-8ecb-000466c69037</guid>
+      <tt:locations>
+        <tt:location>
+          <tt:name>Stockholm</tt:name>
+          <tt:address>Östgötagatan 16</tt:address>
+          <tt:zip>116 21</tt:zip>
+          <tt:city>Stockholm</tt:city>
+          <tt:country>Sweden</tt:country>
+        </tt:location>
+      </tt:locations>
+      <tt:department>Finance</tt:department>
+      <tt:role/>
+      <tt:division/>
+    </item>
+    <item>
+      <title>Senior Backend Engineer</title>
+      <description>&lt;h4&gt;Join our Engineering team&lt;/h4&gt;&lt;p&gt;We are looking for a Senior Backend Engineer to help scale our platform across multiple regions.&lt;/p&gt;</description>
+      <pubDate>Mon, 27 Jul 2026 09:12:00 +0200</pubDate>
+      <link>https://career.teamtailor.com/jobs/8199001-senior-backend-engineer</link>
+      <remoteStatus>remote</remoteStatus>
+      <guid>7af1c4de-1234-4a11-9abc-abcdef012345</guid>
+      <tt:locations>
+        <tt:location>
+          <tt:name>Gothenburg</tt:name>
+          <tt:address>Kungsgatan 1</tt:address>
+          <tt:zip>411 19</tt:zip>
+          <tt:city>Gothenburg</tt:city>
+          <tt:country>Sweden</tt:country>
+        </tt:location>
+        <tt:location>
+          <tt:name>Remote (EU)</tt:name>
+          <tt:address></tt:address>
+          <tt:zip></tt:zip>
+          <tt:city></tt:city>
+          <tt:country></tt:country>
+        </tt:location>
+      </tt:locations>
+      <tt:department>Engineering</tt:department>
+      <tt:role>Individual Contributor</tt:role>
+      <tt:division/>
+    </item>
+  </channel>
+</rss>

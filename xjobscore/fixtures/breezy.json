@@ -1,0 +1,90 @@
+[
+  {
+    "id": "b8e6b722f7ed",
+    "friendly_id": "b8e6b722f7ed-assistant-field-managers-external-vacancy",
+    "name": "Assistant Field Managers -  (External Vacancy)",
+    "url": "https://new-incentives.breezy.hr/p/b8e6b722f7ed-assistant-field-managers-external-vacancy",
+    "published_date": "2026-05-25T14:45:23.799Z",
+    "type": {
+      "id": "fullTime",
+      "name": "Full-Time"
+    },
+    "location": {
+      "country": {
+        "name": "Nigeria",
+        "id": "NG"
+      },
+      "city": "Niger, Sokoto, Kebbi, Zamfara",
+      "primary": true,
+      "is_remote": false,
+      "name": "Niger, Sokoto, Kebbi, Zamfara, NG",
+      "id": "7ad8d074078b"
+    },
+    "department": "Operations",
+    "salary": "",
+    "company": {
+      "name": "New Incentives",
+      "logo_url": null,
+      "friendly_id": "new-incentives",
+      "isMultipleLocationsEnabled": false
+    },
+    "locations": [
+      {
+        "country": {
+          "name": "Nigeria",
+          "id": "NG"
+        },
+        "city": "Niger, Sokoto, Kebbi, Zamfara",
+        "primary": true,
+        "is_remote": false,
+        "name": "Niger, Sokoto, Kebbi, Zamfara, NG",
+        "id": "7ad8d074078b"
+      }
+    ],
+    "description": "<h3><strong>Organization Overview</strong></h3>\n<p>NI-ABAE is an evidence-based organization that aims to provide incentives to increase childhood vaccination rates and save lives in the most cost-effective way. While caregivers and infants remain our top priority, our operations are guided by accountability, integrity, and a commitment to excellence.</p>\n<h3><strong><strong>Job Summary</strong></strong></h3>\n<p>New Incentives is looking to identify Assistant Field Managers that will help to expand its team dedicated to preventing child mortality in the NW/NC Zone.</p>\n<p><strong><u>This post is strictly for External candidates.</u></strong>&nbsp;<br></p>\n<p>The&nbsp;<strong>Assistant&nbsp;</strong><strong>Field Manager</strong>&nbsp;will support a New Incentives’ program that utilizes cash transfers to encourage mothers to complete the immunization schedule of their infants. The program is operated in cooperation with the State Primary Healthcare Development Board in NW &amp; NE.</p>\n<p>The primary duty of the Assistant Field Manager is to assist Field Managers in providing cash transfer disbursements at public clinics with the goal of increasing immunization coverage and retention. Key duties for this position include: high-quality operations of the program at selected clinics and providing leadership for selected staff members that result in increased immunization coverage and retention while nurturing relationships with employees, clinic staff, and other stakeholders.</p>\n<p>Assistant Field Managers are hired full-time and supervise Field Officers at clinics throughout our states of operations. The ideal candidate for this position is someone who is primarily residing in /or who has a free place to stay and willing to relocate to one of the towns/LGAs of all&nbsp;states of operation.</p>\n<p><strong><u>Context:</u></strong></p>\n<p>Over the past decade, Nigeria has considerably expanded the availability of vaccination services for infants. Despite this progress of vaccine supply, demand for vaccinations remains relatively low. New Incentives encourages caregivers to fully vaccinate their infants with cash transfers conditional on vaccinations, and thereby ensure their babies are protected against deadly diseases. The cash transfers allow the mothers to afford transport to the clinic and compensates them for lost income.<br></p>\n<p>Required Qualifications:</p>\n<ul><ul><ul><li>Preferably a candidate already based in <strong>Niger, Sokoto, Kebbi and or Zamfara&nbsp;State.</strong></li><li>Minimum of ND, preferably in the field of health or other natural sciences.</li><li>Willingness to work at remote public clinics and field locations at least 4 days per week.</li><li>Experience with the Nigerian health system and clinic documentation, particularly related to infant health and vaccinations.</li><li>Experience in collecting, synthesizing, and drawing conclusions from (health) data is desirable.</li><li>Careful attention to financial matters and management of funds.</li><li>Detail-oriented and diligent professional who is hard-working, result-oriented, and loyal.</li><li>Passion to help others and reduce infant mortality.</li><li>Very good verbal and written communication skills, in English, Hausa dialects (verbal and written)</li><li>Excellent responsiveness to email and phone requests.</li><li>Proficiency in Microsoft Word/Excel, internet browsers, smartphones, and new communications technology in general.</li><li>Motivation to work in a young organization that is constantly changing based on stakeholder feedback and operates with a lean structure.</li><li>Ability to demonstrate good managerial and leadership skills.</li></ul></ul></ul>\n<p>Language requirements:</p>\n<ul><li>Proficiency in English Language (conversation, reading and writing) is required</li><li><strong>Knowledge of Hausa, Nupe,&nbsp;and/or other commonly spoken Languages in the Niger State is required</strong></li></ul>\n<p><strong>How to Apply:</strong></p>\n<ul><li><strong>All submissions should be through breezy.hr by filling out this<strong>&nbsp;<a data-faitracker-click-bind=\"true\" href=\"https://docs.google.com/forms/d/e/1FAIpQLSc6lD-TjbN1GA8rRY59j8Zmsk-qCNlNV7cLOAA4ro91JudrTA/viewform?usp=publish-editor\">Google Form questionnaire</a></strong>. This position is OPEN and candidates will be considered on a rolling basis.</strong></li><li><strong><strong><em>Speaking local languages in the states where we are operating would be an added advantage.</em></strong></strong></li><li><strong>The deadline for receiving applications is 29th May 2026.</strong></li><li><strong>Only shortlisted candidates will be contacted.<br></strong></li></ul>\n<p><strong>Women and persons with disabilities are strongly encouraged to apply for this position!</strong></p>\n<p><em><u><strong>All internal applications and employee are strongly advised to use their official email address while applying.</strong></u></em><br></p>\n<p><em><strong>DISCLAIMER: Beware of fraudulent job offers. New Incentives – All Babies Are Equal Initiative does not charge a fee at any stage of the recruitment process.</strong></em></p>"
+  },
+  {
+    "id": "6dead18c734d",
+    "friendly_id": "6dead18c734d-assistant-field-managers-internal-vacancy-multiple",
+    "name": "Assistant Field Managers -  Internal Vacancy (Multiple)",
+    "url": "https://new-incentives.breezy.hr/p/6dead18c734d-assistant-field-managers-internal-vacancy-multiple",
+    "published_date": "2026-06-17T09:19:54.089Z",
+    "type": {
+      "id": "fullTime",
+      "name": "Full-Time"
+    },
+    "location": {
+      "country": {
+        "name": "Nigeria",
+        "id": "NG"
+      },
+      "city": "Northeast & Northwest",
+      "primary": true,
+      "is_remote": false,
+      "name": "Northeast & Northwest, NG",
+      "id": "9b3baca98352"
+    },
+    "department": "Operations",
+    "salary": "",
+    "company": {
+      "name": "New Incentives",
+      "logo_url": null,
+      "friendly_id": "new-incentives",
+      "isMultipleLocationsEnabled": false
+    },
+    "locations": [
+      {
+        "country": {
+          "name": "Nigeria",
+          "id": "NG"
+        },
+        "city": "Northeast & Northwest",
+        "primary": true,
+        "is_remote": false,
+        "name": "Northeast & Northwest, NG",
+        "id": "9b3baca98352"
+      }
+    ],
+    "description": "<p>New Incentives is looking to identify Assistant Field Managers that will help to expand its team dedicated to preventing child mortality in the NW &amp; NE.&nbsp;</p>\n<p><strong><u>This post is strictly&nbsp;for internal candidates.&nbsp;</u></strong></p>\n<p>The&nbsp;<strong>Assistant&nbsp;</strong><strong>Field Manager</strong>&nbsp;will support a New Incentives’ program that utilizes cash transfers to encourage mothers to complete the immunization schedule of their infants. The program is operated in cooperation with the State Primary Healthcare Development Board in NW &amp; NE.</p>\n<p>The primary duty of the Assistant Field Manager is to assist Field Managers in providing cash transfer disbursements at public clinics with the goal of increasing immunization coverage and retention. Key duties for this position include: high-quality operations of the program at selected clinics and providing leadership for selected staff members that result in increased immunization coverage and retention while nurturing relationships with employees, clinic staff, and other stakeholders.</p>\n<p>Assistant Field Managers are hired full-time and supervise Field Officers at clinics throughout our states of operations. The ideal candidate for this position is someone who is primarily residing in /or who has a free place to stay and willing to relocate to one of the towns/LGAs of all&nbsp;states of operation.</p>\n<p><strong><u>Context:</u></strong></p>\n<p>Over the past decade, Nigeria has considerably expanded the availability of vaccination services for infants. Despite this progress of vaccine supply, demand for vaccinations remains relatively low. New Incentives encourages caregivers to fully vaccinate their infants with cash transfers conditional on vaccinations, and thereby ensure their babies are protected against deadly diseases. The cash transfers allow the mothers to afford transport to the clinic and compensates them for lost income.<br></p>\n<p>Required Qualifications:</p>\n<ul><ul><ul><li>Fluency in local languages/dialects spoken in all states of operation, especially Hausa. In your cover letter, please state the names of the languages/dialects you can speak and your fluency level for each language.</li><li>Minimum of ND, preferably in the field of health or other natural sciences.</li><li>Willingness to work at remote public clinics and field locations at least 4 days per week.</li><li>Experience with the Nigerian health system and clinic documentation, particularly related to infant health and vaccinations.</li><li>Experience in collecting, synthesizing, and drawing conclusions from (health) data is desirable.</li><li>Careful attention to financial matters and management of funds.</li><li>Detail-oriented and diligent professional who is hard-working, result-oriented, and loyal.</li><li>Passion to help others and reduce infant mortality.</li><li>Very good verbal and written communication skills, in English, Hausa dialects (verbal and written)</li><li>Excellent responsiveness to email and phone requests.</li><li>Proficiency in Microsoft Word/Excel, internet browsers, smartphones, and new communications technology in general.</li><li>Motivation to work in a young organization that is constantly changing based on stakeholder feedback and operates with a lean structure.</li><li>Ability to demonstrate good managerial and leadership skills.</li></ul></ul></ul>\n<p><em><u>This role is open only&nbsp;for internal application and qualified employee are strongly advised to use their official email address to apply.</u></em></p>\n<p><strong></strong><strong>How to Apply:</strong></p>\n<ul><li><strong>All submissions should be sent by filling out this&nbsp;<a href=\"https://forms.gle/ibZEpk7ehnA8HNR2A\" data-faitracker-click-bind=\"true\">Google Form</a>. The position is OPEN and candidates will be considered on a rolling basis.<br></strong></li><li><strong><strong>DISCLAIMER:&nbsp;<em>Beware of fraudulent job offers. New Incentives – All Babies Are Equal Initiative does not charge a fee at any stage of the recruitment process.</em></strong></strong></li><li><strong><strong><em>Speaking local languages in the states where we are operating would be an added advantage.</em></strong></strong></li></ul>\n<p><strong>Women and persons with disabilities are strongly encouraged to apply for this position!</strong></p>\n<p><em><u><strong>All internal applications and employee are strongly advised to use their official email address while applying.</strong></u></em></p>\n<p><em><strong>.</strong></em></p>"
+  }
+]

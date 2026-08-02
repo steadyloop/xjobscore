@@ -1,0 +1,29 @@
+[
+  {
+    "position": "Cybersecurity Analyst",
+    "location": "NYC",
+    "department": "Cybersecurity",
+    "team": "Cybersecurity",
+    "duration": "May-August",
+    "type": "Internship",
+    "status": "closed"
+  },
+  {
+    "position": "Hardware Engineer (FPGA/ASIC)",
+    "location": "NYC",
+    "department": "Technology",
+    "team": "Software Engineering",
+    "duration": "May-August",
+    "type": "Internship",
+    "status": "closed"
+  },
+  {
+    "position": "Hardware Engineer (FPGA/ASIC)",
+    "location": "LDN",
+    "department": "Technology",
+    "team": "Software Engineering",
+    "duration": "June-September",
+    "type": "Internship",
+    "status": "closed"
+  }
+]

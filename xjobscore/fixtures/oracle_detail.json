@@ -1,0 +1,111 @@
+{
+  "items": [
+    {
+      "Id": "330043",
+      "Title": "Senior Manager, Data Center Operations — Critical Environments (Multi-Site)",
+      "Category": "Technology Operations",
+      "RequisitionType": "Professional",
+      "JobGrade": null,
+      "RequisitionId": 302963961859554,
+      "ExternalPostedStartDate": "2026-07-30T14:48:09+00:00",
+      "JobLevel": null,
+      "JobSchedule": null,
+      "JobShift": null,
+      "StudyLevel": null,
+      "InternationalTravelRequired": null,
+      "ExternalContactName": null,
+      "ExternalContactEmail": null,
+      "ContractType": null,
+      "ExternalPostedEndDate": null,
+      "JobFamilyId": 302958497961746,
+      "GeographyId": 100000000729409,
+      "GeographyNodeId": 100257187669506,
+      "ExternalDescriptionStr": "<ul><li><p>Lead multi-site Critical Environments operations, ensuring safe, consistent execution across electrical and mechanical infrastructure that powers and cools Oracle's cloud (power distribution, UPS, generators, switchgear, cooling plants/CRAHs, controls/BMS, and airflow/containment) across multiple data center locations.</p></li></ul>",
+      "CorporateDescriptionStr": "<p>Only Oracle brings together the data, infrastructure, applications, and expertise to power everything from industry innovations to life-saving care.</p><p>Oracle is an Equal Employment Opportunity Employer.</p>",
+      "OrganizationDescriptionStr": "",
+      "ShortDescriptionStr": "Oversees Data Center Operations across multiple data centers, managing and integrating team performance, operations metrics, and capacity analysis into the broader business line strategy.",
+      "ContentLocale": "en",
+      "PrimaryLocation": "Abilene, TX, United States",
+      "PrimaryLocationCountry": "US",
+      "ObjectVerNumberProfile": "1",
+      "ApplyWhenNotPostedFlag": true,
+      "ExternalQualificationsStr": "Disclaimer:<br><br><b>Certain U.S. based or U.S. customer or client-facing roles may be required to comply with applicable requirements, such as immunization/occupational health mandates, and/or drug testing requirements.</b><br><br>US: Hiring Range in USD from: $126,200 to $264,100 per annum. May be eligible for bonus, equity, and compensation deferral.<p>Career Level - M3</p><br>",
+      "InternalQualificationsStr": "Disclaimer:<br><br>US: Hiring Range in USD from: $126,200 to $264,100 per annum.<p>Career Level - M3</p><br>",
+      "InternalResponsibilitiesStr": "<h2>What you'll do</h2><ul><li><p>Lead multi-site Critical Environments operations, ensuring rigorous execution across electrical and mechanical infrastructure (power distribution, UPS, generators, switchgear, cooling plants, pumps/CRAHs/CRACs, controls/BMS, containment/airflow).</p></li><li><p>Set the operational cadence (site health reviews, PM/CM execution, MOP/SOP/EOP readiness, risk registers, KPI reviews) to prevent downtime and reduce operational risk.</p></li></ul><h2>Why Abilene</h2><p>Abilene is a key, growing location in Oracle's data center footprint—offering meaningful ownership and visibility.</p>",
+      "ExternalResponsibilitiesStr": "<h2>What you'll do</h2><ul><li><p>Lead multi-site Critical Environments operations, ensuring rigorous execution across electrical and mechanical infrastructure (power distribution, UPS, generators, switchgear, cooling plants, pumps/CRAHs/CRACs, controls/BMS, containment/airflow).</p></li><li><p>Set the operational cadence (site health reviews, PM/CM execution, MOP/SOP/EOP readiness, risk registers, KPI reviews) to prevent downtime and reduce operational risk.</p></li></ul><h2>Why it matters</h2><p>Oracle Cloud Infrastructure supports always-on services where reliability is non-negotiable.</p><h2>Why Abilene</h2><p>Abilene is a key, growing location in Oracle's data center footprint—offering meaningful ownership and visibility. You'll lead critical infrastructure operations today while helping bring additional capacity online with the operational rigor required for world-class reliability.</p>",
+      "JobFunctionCode": "DCOPS",
+      "HotJobFlag": true,
+      "TrendingFlag": false,
+      "BeFirstToApplyFlag": true,
+      "WorkplaceTypeCode": null,
+      "WorkplaceType": "",
+      "OtherRequisitionTitle": null,
+      "NumberOfOpenings": null,
+      "HiringManager": null,
+      "Organization": null,
+      "BusinessUnitId": 300001096431127,
+      "LegalEmployerId": 300000000482027,
+      "OrganizationId": 300001902541887,
+      "WorkerType": null,
+      "JobType": null,
+      "WorkMonths": null,
+      "WorkYears": null,
+      "WorkHours": null,
+      "WorkDays": null,
+      "LegalEmployer": null,
+      "BusinessUnit": null,
+      "Department": null,
+      "DomesticTravelRequired": null,
+      "JobFunction": "Data Center Operations",
+      "secondaryLocations": [],
+      "media": [],
+      "workLocation": [],
+      "otherWorkLocations": [],
+      "requisitionFlexFields": [
+        {
+          "Prompt": "Role",
+          "Value": "People Manager",
+          "ControlType": "SingleChoiceList",
+          "SequenceNumber": 4
+        },
+        {
+          "Prompt": "Job Type",
+          "Value": "Regular Employee",
+          "ControlType": "SingleChoiceList",
+          "SequenceNumber": 5
+        }
+      ],
+      "primaryLocationCoordinates": [
+        {
+          "GeographyNodeId": 100257187669506,
+          "GeographyId": 100000000729409,
+          "Latitude": "32.44917",
+          "Longitude": "-99.74142",
+          "CountryCode": "US"
+        }
+      ],
+      "skills": [
+        {
+          "SectionName": "Skills",
+          "Skill": "Data Center Operations",
+          "SkillType": null,
+          "SkillId": "302964148525707",
+          "SectionId": "300699536645979",
+          "ContentItemId": null
+        }
+      ]
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 499,
+  "offset": 0,
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://eeho.fa.us2.oraclecloud.com:443/hcmRestApi/resources/11.13.18.05/recruitingCEJobRequisitionDetails",
+      "name": "recruitingCEJobRequisitionDetails",
+      "kind": "collection"
+    }
+  ]
+}

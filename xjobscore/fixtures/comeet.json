@@ -1,0 +1,115 @@
+[
+  {
+    "name": "AI Automation Teaching Experts",
+    "department": "Product Management",
+    "email": "tripleten.AC.F59@comeetapply.com",
+    "email_alias": null,
+    "url_comeet_hosted_page": "https://www.comeet.com/jobs/tripleten/98.008/ai-automation-teaching-experts/AC.F59",
+    "url_recruit_hosted_page": "https://www.comeet.com/jobs/tripleten/98.008/ai-automation-teaching-experts/AC.F59",
+    "url_active_page": "https://www.comeet.com/jobs/tripleten/98.008/ai-automation-teaching-experts/AC.F59",
+    "employment_type": "Hourly",
+    "experience_level": "Senior",
+    "uid": "AC.F59",
+    "location": {
+      "name": "Remote",
+      "country": "US",
+      "city": "Boston",
+      "state": "",
+      "postal_code": null,
+      "street_name": "",
+      "arrival_instructions": null,
+      "street_number": null,
+      "timezone": "America/Iqaluit",
+      "location_uid": "30.40C",
+      "is_remote": true
+    },
+    "internal_use_custom_id": null,
+    "is_consent_needed": true,
+    "is_sms_consent_needed": false,
+    "referrals_reward": null,
+    "is_reward": false,
+    "is_company_reward": true,
+    "company_referrals_reward": "",
+    "url_detected_page": null,
+    "picture_url": null,
+    "time_updated": "2026-06-17T10:10:02Z",
+    "company_name": "TripleTen",
+    "is_internal": false,
+    "linkedin_job_posting_id": null,
+    "workplace_type": "Remote",
+    "position_url": "https://www.comeet.co/careers-api/2.0/company/98.008/positions/AC.F59?token=89833903C282AF8044C011303C283C2819C8",
+    "details": [
+      {
+        "name": "Description",
+        "value": "<p><strong>Nebius Academy</strong> is an educational platform helping business professionals and operations teams stay ahead of the automation curve. We build specialized courses that teach practitioners how to design, implement, and scale AI-powered workflows using modern automation tools.</p>",
+        "order": 1
+      },
+      {
+        "name": "What you will do",
+        "value": "<p><strong>Available Roles</strong></p><p>We are building a talent pool of Instructors, Authors, and Subject Matter Experts for our AI Automation educational programs.</p>",
+        "order": 2
+      }
+    ],
+    "categories": [
+      {
+        "name": "Brand",
+        "value": "Nebius Academy",
+        "order": 1
+      }
+    ]
+  },
+  {
+    "name": "Senior Backend Engineer",
+    "department": "Engineering",
+    "email": "tripleten.AC.F60@comeetapply.com",
+    "email_alias": null,
+    "url_comeet_hosted_page": "https://www.comeet.com/jobs/tripleten/98.008/senior-backend-engineer/AC.F60",
+    "url_recruit_hosted_page": "https://www.comeet.com/jobs/tripleten/98.008/senior-backend-engineer/AC.F60",
+    "url_active_page": "https://www.comeet.com/jobs/tripleten/98.008/senior-backend-engineer/AC.F60",
+    "employment_type": "Full-time",
+    "experience_level": "Senior",
+    "uid": "AC.F60",
+    "location": {
+      "name": "Austin, TX",
+      "country": "US",
+      "city": "Austin",
+      "state": "TX",
+      "postal_code": "78701",
+      "street_name": "",
+      "arrival_instructions": null,
+      "street_number": null,
+      "timezone": "America/Chicago",
+      "location_uid": "30.40D",
+      "is_remote": false
+    },
+    "internal_use_custom_id": null,
+    "is_consent_needed": true,
+    "is_sms_consent_needed": false,
+    "referrals_reward": null,
+    "is_reward": false,
+    "is_company_reward": true,
+    "company_referrals_reward": "",
+    "url_detected_page": null,
+    "picture_url": null,
+    "time_updated": "2026-07-02T09:30:00Z",
+    "company_name": "TripleTen",
+    "is_internal": false,
+    "linkedin_job_posting_id": null,
+    "workplace_type": "On-site",
+    "position_url": "https://www.comeet.co/careers-api/2.0/company/98.008/positions/AC.F60?token=89833903C282AF8044C011303C283C2819C8",
+    "details": [
+      {
+        "name": "Description",
+        "value": "<p>We are looking for a Senior Backend Engineer to join our platform team.</p>",
+        "order": 1
+      }
+    ],
+    "categories": [
+      {
+        "name": "Brand",
+        "value": "TripleTen",
+        "order": 1
+      }
+    ]
+  }
+]

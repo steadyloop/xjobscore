@@ -1,0 +1,25 @@
+{
+  "searchResults": [
+    {
+      "positionId": "200500123",
+      "postingTitle": "Machine Learning Engineer - Siri",
+      "postingDate": "2023-10-10T14:30:00Z",
+      "jobSummary": "The Siri team is looking for...",
+      "locations": [
+        {
+          "city": "Cupertino",
+          "stateProvince": "Santa Clara Valley (SCV)",
+          "countryName": "United States",
+          "countryId": "USA"
+        }
+      ],
+      "department": {
+        "departmentId": "100003",
+        "departmentName": "Machine Learning and AI"
+      },
+      "transformedPostingTitle": "machine-learning-engineer-siri"
+    }
+  ],
+  "totalRecords": 1050,
+  "pageNumber": 1
+}

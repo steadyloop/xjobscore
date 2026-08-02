@@ -1,0 +1,138 @@
+{
+  "total": 2000,
+  "jobPostings": [
+    {
+      "title": "Distinguished Software Architect - Deep Learning and HPC Communications",
+      "externalPath": "/job/US-CA-Santa-Clara/Distinguished-Software-Architect---Deep-Learning-and-HPC-Communications_JR1980127",
+      "locationsText": "US, CA, Santa Clara",
+      "postedOn": "Posted Today",
+      "bulletFields": [
+        "JR1980127"
+      ]
+    },
+    {
+      "title": "Senior Data Center Performance Engineer - Benchmarking and Optimization",
+      "externalPath": "/job/US-CA-Santa-Clara/Senior-Data-Center-Performance-Engineer---Benchmarking-and-Optimization_JR2008808",
+      "locationsText": "2 Locations",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "JR2008808"
+      ]
+    }
+  ],
+  "facets": [
+    {
+      "facetParameter": "jobFamilyGroup",
+      "descriptor": "Job Category",
+      "values": [
+        {
+          "descriptor": "Engineering",
+          "id": "0c40f6bd1d8f10ae43ffaefd46dc7e78",
+          "count": 1838
+        },
+        {
+          "descriptor": "Sales",
+          "id": "0c40f6bd1d8f10ae43ffcac5bbec7e90",
+          "count": 287
+        },
+        {
+          "descriptor": "Operations",
+          "id": "0c40f6bd1d8f10ae43ffc3fc7d8c7e8a",
+          "count": 134
+        },
+        {
+          "descriptor": "Program Manager",
+          "id": "0c40f6bd1d8f10ae43ffc668c6847e8c",
+          "count": 113
+        },
+        {
+          "descriptor": "Marketing",
+          "id": "0c40f6bd1d8f10ae43ffc19725ec7e88",
+          "count": 86
+        },
+        {
+          "descriptor": "Research",
+          "id": "0c40f6bd1d8f10ae43ffc8817cf47e8e",
+          "count": 44
+        },
+        {
+          "descriptor": "IT - Information Technology",
+          "id": "0c40f6bd1d8f10ae43ffbd1459047e84",
+          "count": 28
+        },
+        {
+          "descriptor": "Professional Services",
+          "id": "e8bdc341a93101bd5f4d2b0a1c005e36",
+          "count": 22
+        },
+        {
+          "descriptor": "Finance",
+          "id": "0c40f6bd1d8f10ae43ffb5dd06f47e7e",
+          "count": 21
+        },
+        {
+          "descriptor": "Univ Employment",
+          "id": "0c40f6bd1d8f10ae43ffda1e8d447e94",
+          "count": 11
+        },
+        {
+          "descriptor": "Human Resources",
+          "id": "0c40f6bd1d8f10ae43ffbac3680c7e82",
+          "count": 11
+        },
+        {
+          "descriptor": "Business Development",
+          "id": "0c40f6bd1d8f10ae43ffac5fdfac7e76",
+          "count": 7
+        },
+        {
+          "descriptor": "Legal",
+          "id": "0c40f6bd1d8f10ae43ffbf4412147e86",
+          "count": 3
+        },
+        {
+          "descriptor": "Facilities",
+          "id": "0c40f6bd1d8f10ae43ffb3a6aaac7e7c",
+          "count": 3
+        },
+        {
+          "descriptor": "Administration",
+          "id": "0c40f6bd1d8f10ae43ffaa1e1d6c7e74",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "facetParameter": "workerSubType",
+      "descriptor": "Job Type",
+      "values": [
+        {
+          "descriptor": "Regular Employee",
+          "id": "0c40f6bd1d8f10adf6dae161b1844a15",
+          "count": 2329
+        },
+        {
+          "descriptor": "Management",
+          "id": "0c40f6bd1d8f10adf6dae2cd57444a16",
+          "count": 193
+        },
+        {
+          "descriptor": "New College Graduate",
+          "id": "ab40a98049581037a3ada55b087049b7",
+          "count": 77
+        },
+        {
+          "descriptor": "Intern (Fixed Term)",
+          "id": "0c40f6bd1d8f10adf6dae42e46d44a17",
+          "count": 11
+        },
+        {
+          "descriptor": "Regular Employee (Fixed Term)",
+          "id": "cc40d60d614c01809d56fe967144ce2c",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "userAuthenticated": false
+}

@@ -1,0 +1,36 @@
+{
+  "jobs": [
+    {
+      "id": "b1000000-0000-0000-0000-000000000000",
+      "title": "Staff Software Engineer",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "FullTime",
+      "location": "Remote - United States",
+      "shouldDisplayCompensationOnJobPostings": false,
+      "secondaryLocations": [],
+      "publishedAt": "2026-01-15T09:00:00.000+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "address": null,
+      "jobUrl": "https://jobs.ashbyhq.com/ashby/b1000000-0000-0000-0000-000000000000",
+      "applyUrl": "https://jobs.ashbyhq.com/ashby/b1000000-0000-0000-0000-000000000000/application",
+      "descriptionHtml": "<p>Join our platform team.</p>",
+      "descriptionPlain": "Join our platform team.",
+      "compensation": null
+    },
+    {
+      "id": "aa000000-0000-0000-0000-000000000001",
+      "title": "Unlisted Role",
+      "employmentType": "FullTime",
+      "location": "New York",
+      "publishedAt": "2026-02-01T00:00:00.000+00:00",
+      "isListed": false,
+      "workplaceType": "Onsite",
+      "jobUrl": "https://jobs.ashbyhq.com/ashby/aa000000-0000-0000-0000-000000000001",
+      "applyUrl": "https://jobs.ashbyhq.com/ashby/aa000000-0000-0000-0000-000000000001/application",
+      "descriptionHtml": "<p>Closed</p>"
+    }
+  ]
+}

@@ -1,0 +1,209 @@
+{
+  "items": [
+    {
+      "SearchId": 1,
+      "Keyword": null,
+      "CorrectedKeyword": null,
+      "UseExactKeywordFlag": false,
+      "SuggestedKeyword": null,
+      "ExecuteSpellCheckFlag": true,
+      "Location": null,
+      "LocationId": null,
+      "Radius": 0,
+      "RadiusUnit": "MI",
+      "SelectedTitlesFacet": null,
+      "SelectedCategoriesFacet": null,
+      "SelectedPostingDatesFacet": null,
+      "SelectedLocationsFacet": null,
+      "LastSelectedFacet": null,
+      "Facets": "LOCATIONS;WORK_LOCATIONS;WORKPLACE_TYPES;TITLES;CATEGORIES;ORGANIZATIONS;POSTING_DATES;FLEX_FIELDS",
+      "Offset": 0,
+      "Limit": 25,
+      "SortBy": "POSTING_DATES_DESC",
+      "TotalJobsCount": 2302,
+      "Latitude": null,
+      "Longitude": null,
+      "SiteNumber": "CX_45001",
+      "JobFamilyId": null,
+      "PostingStartDate": null,
+      "PostingEndDate": null,
+      "SelectedWorkLocationsFacet": null,
+      "RequisitionId": null,
+      "CandidateNumber": null,
+      "WorkLocationZipCode": null,
+      "WorkLocationCountryCode": null,
+      "SelectedFlexFieldsFacets": null,
+      "OrganizationId": null,
+      "SelectedOrganizationsFacet": null,
+      "UserTargetFacetName": null,
+      "UserTargetFacetInputTerm": null,
+      "HotJobFlag": null,
+      "WorkplaceType": null,
+      "SelectedWorkplaceTypesFacet": null,
+      "BotQRShortCode": null,
+      "requisitionList": [
+        {
+          "Id": "330043",
+          "Title": "Senior Manager, Data Center Operations — Critical Environments (Multi-Site)",
+          "PostedDate": "2026-07-30",
+          "PostingEndDate": null,
+          "Language": "US",
+          "PrimaryLocationCountry": "US",
+          "GeographyId": 100000000729409,
+          "HotJobFlag": true,
+          "WorkplaceTypeCode": null,
+          "JobFamily": null,
+          "JobFunction": null,
+          "WorkerType": null,
+          "ContractType": null,
+          "ManagerLevel": null,
+          "JobSchedule": null,
+          "JobShift": null,
+          "JobType": null,
+          "StudyLevel": null,
+          "DomesticTravelRequired": null,
+          "InternationalTravelRequired": null,
+          "WorkDurationYears": null,
+          "WorkDurationMonths": null,
+          "WorkHours": null,
+          "WorkDays": null,
+          "LegalEmployer": null,
+          "BusinessUnit": null,
+          "Department": null,
+          "Organization": null,
+          "BusinessUnitId": 300001096431127,
+          "LegalEmployerId": 300000000482027,
+          "OrganizationId": 300001902541887,
+          "MediaThumbURL": "https://img.youtube.com/vi/BV0GMCITXg4/hqdefault.jpg",
+          "ShortDescriptionStr": "Oversees Data Center Operations across multiple data centers, managing and integrating team performance, operations metrics, and capacity analysis into the broader business line strategy.",
+          "PrimaryLocation": "Abilene, TX, United States",
+          "Distance": 1785369600000.0,
+          "TrendingFlag": false,
+          "BeFirstToApplyFlag": true,
+          "Relevancy": 15,
+          "WorkplaceType": "",
+          "ExternalQualificationsStr": null,
+          "ExternalResponsibilitiesStr": null,
+          "secondaryLocations": []
+        }
+      ],
+      "categoriesFacet": [
+        {
+          "Id": 302958497961752,
+          "Name": "Product and Research",
+          "TotalCount": 538
+        },
+        {
+          "Id": 300000001917356,
+          "Name": "Product Development",
+          "TotalCount": 368
+        },
+        {
+          "Id": 300000001917358,
+          "Name": "Sales",
+          "TotalCount": 263
+        }
+      ],
+      "locationsFacet": [
+        {
+          "Id": 300000000149325,
+          "Name": "United States",
+          "TotalCount": 1515
+        },
+        {
+          "Id": 100000000686062,
+          "Name": "TN, United States",
+          "TotalCount": 338
+        },
+        {
+          "Id": 300000000106947,
+          "Name": "India",
+          "TotalCount": 254
+        }
+      ],
+      "postingDatesFacet": [
+        {
+          "Id": 7,
+          "Name": "Less than 7 days",
+          "TotalCount": 339
+        },
+        {
+          "Id": 30,
+          "Name": "Less than 30 days",
+          "TotalCount": 1268
+        },
+        {
+          "Id": 31,
+          "Name": "Greater than 30 days",
+          "TotalCount": 1034
+        }
+      ],
+      "titlesFacet": [
+        {
+          "Id": "SWE",
+          "Name": "Software Engineering",
+          "TotalCount": 301
+        },
+        {
+          "Id": "PRODEV-SWENG",
+          "Name": "PRODEV-SWENG",
+          "TotalCount": 264
+        },
+        {
+          "Id": "DCOPS",
+          "Name": "Data Center Operations",
+          "TotalCount": 232
+        }
+      ],
+      "workLocationsFacet": [],
+      "flexFieldsFacet": [
+        {
+          "Name": "AttributeChar29",
+          "Label": "Role"
+        },
+        {
+          "Name": "AttributeChar4",
+          "Label": "Job Type"
+        }
+      ],
+      "organizationsFacet": [
+        {
+          "Id": 300001902541887,
+          "Name": "CLBPTS - All Lines of Business",
+          "TotalCount": 2302
+        }
+      ],
+      "workplaceTypesFacet": [
+        {
+          "Id": "ORA_ON_SITE",
+          "Name": "On-site",
+          "TotalCount": 2302
+        }
+      ]
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 25,
+  "offset": 0,
+  "links": [
+    {
+      "rel": "self",
+      "href": "https://eeho.fa.us2.oraclecloud.com:443/hcmRestApi/resources/11.13.18.05/recruitingCEJobRequisitions",
+      "name": "recruitingCEJobRequisitions",
+      "kind": "collection"
+    },
+    {
+      "rel": "action",
+      "href": "https://eeho.fa.us2.oraclecloud.com:443/hcmRestApi/resources/11.13.18.05/recruitingCEJobRequisitions/action/getRequisitionsLocationCoordinates",
+      "name": "getRequisitionsLocationCoordinates",
+      "kind": "other"
+    },
+    {
+      "rel": "action",
+      "href": "https://eeho.fa.us2.oraclecloud.com:443/hcmRestApi/resources/11.13.18.05/recruitingCEJobRequisitions/action/getRequisitionDetailsForMap",
+      "name": "getRequisitionDetailsForMap",
+      "kind": "other"
+    }
+  ]
+}

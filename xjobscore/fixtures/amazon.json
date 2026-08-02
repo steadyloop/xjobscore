@@ -1,0 +1,25 @@
+{
+  "hits": 14235,
+  "jobs": [
+    {
+      "id": "2345678",
+      "title": "Software Development Engineer",
+      "job_path": "/jobs/2345678/software-development-engineer",
+      "company_name": "Amazon Web Services, Inc.",
+      "city": "Seattle",
+      "state": "WA",
+      "country_code": "US",
+      "basic_qualifications": "<ul><li>3+ years of programming experience...</li></ul>",
+      "preferred_qualifications": "<ul><li>Experience with distributed systems...</li></ul>",
+      "description": "At AWS, we are building...",
+      "posted_date": "2023-10-04",
+      "normalized_location": "Seattle, WA, USA",
+      "business_category": "Amazon Web Services"
+    }
+  ],
+  "facets": {
+    "business_category": [
+      {"id": "Amazon Web Services", "count": 4500}
+    ]
+  }
+}

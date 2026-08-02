@@ -1,0 +1,25 @@
+{
+  "operationResult": {
+    "result": {
+      "totalJobs": 2450,
+      "jobs": [
+        {
+          "jobId": "1598765",
+          "title": "Senior Software Engineer",
+          "postingDate": "2023-10-05T00:00:00",
+          "properties": {
+            "locations": [
+              "Redmond, Washington, United States"
+            ],
+            "workSiteId": "Redmond",
+            "profession": "Engineering",
+            "discipline": "Software Engineering",
+            "jobType": "Full-Time",
+            "description": "Microsoft Azure is looking for..."
+          }
+        }
+      ]
+    }
+  },
+  "isSuccess": true
+}

@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "totalCount": 10
+  },
+  "result": [
+    {
+      "id": "474",
+      "jobOpeningName": "Shipping Clerk- Internal Only ",
+      "departmentId": "18923",
+      "departmentLabel": "Shipping",
+      "employmentStatusLabel": "Full Time",
+      "location": {
+        "city": "Wooster",
+        "state": "Ohio"
+      },
+      "atsLocation": {
+        "country": null,
+        "state": null,
+        "province": null,
+        "city": null
+      },
+      "isRemote": null,
+      "locationType": "0"
+    },
+    {
+      "id": "477",
+      "jobOpeningName": "Assembler ",
+      "departmentId": "18518",
+      "departmentLabel": "Manufacturing",
+      "employmentStatusLabel": "Full Time",
+      "location": {
+        "city": "Wooster",
+        "state": "Ohio"
+      },
+      "atsLocation": {
+        "country": null,
+        "state": null,
+        "province": null,
+        "city": null
+      },
+      "isRemote": null,
+      "locationType": "0"
+    }
+  ]
+}

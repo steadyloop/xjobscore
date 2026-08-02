@@ -1,0 +1,30 @@
+{
+  "lookup": {
+    "departments": {
+      "1": "Engineering & Information Technology",
+      "2": "Manufacturing",
+      "3": "Sales & Customer Support"
+    },
+    "locations": {
+      "101": "Palo Alto, California",
+      "102": "Austin, Texas",
+      "103": "Berlin, Germany"
+    },
+    "types": {
+      "1": "Full-time",
+      "2": "Internship"
+    }
+  },
+  "listings": [
+    {
+      "id": "210987",
+      "t": "Vehicle Software Engineer",
+      "d": "1",
+      "l": "101",
+      "type": "1"
+    }
+  ],
+  "geo": {
+    "country": "US"
+  }
+}

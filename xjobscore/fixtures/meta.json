@@ -1,0 +1,24 @@
+{
+  "data": {
+    "job_search": {
+      "job_search_results": [
+        {
+          "id": "123456789012345",
+          "title": "Research Scientist, FAIR",
+          "locations": [
+            "Menlo Park, CA",
+            "New York, NY"
+          ],
+          "teams": ["Facebook AI Research"],
+          "description": "Meta is seeking a Research Scientist...",
+          "url": "/jobs/123456789012345/"
+        }
+      ],
+      "page_info": {
+        "has_next_page": true,
+        "end_cursor": "AQHz..."
+      },
+      "total_count": 890
+    }
+  }
+}
