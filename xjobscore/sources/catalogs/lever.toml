@@ -1,0 +1,20 @@
+schema_version = 1
+source = "lever"
+
+[[feed]]
+key = "palantir"
+company_id = "palantir"
+company = "Palantir"
+domain = "palantir.com"
+status = "live"
+enabled = true
+validated_at = "2026-07-31T18:09:19-0700"
+
+[[feed]]
+key = "shieldai"
+company_id = "shieldai"
+company = "Shield AI"
+domain = "shield.ai"
+status = "live"
+enabled = true
+validated_at = "2026-07-31T18:09:23-0700"

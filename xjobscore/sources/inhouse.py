@@ -1,31 +1,32 @@
-"""Shared config-driven adapter for in-house ATS endpoints.
+"""Shared config-driven adapter for in-house careers endpoints.
 
-Companies: Amazon, Apple, Microsoft, Tesla, Uber (and extensible to others).
+Companies: Amazon, Apple, Tesla, Uber (and extensible to others).
 
-Each company config lives in house_ats_configs.py with:
+Each company config lives in inhouse_configs.py with:
   - endpoint, method (GET/POST)
   - pagination strategy (offset, page, or none)
   - items_path and total_path (dotted notation for nested JSON)
   - field mappings (dotted path, template, or lookup)
 
-See sources/planned/house-ats.md for endpoint details and fixtures.
+See sources/planned/inhouse.md for endpoint details and fixtures.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 
 from xjobscore.net import Net, validators
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
-from xjobscore.sources.house_ats_configs import CONFIGS
+from xjobscore.sources.inhouse_configs import CONFIGS
 
 
 async def harvest(feed: Feed, net: Net) -> Record:
     """Fetch all items from endpoint, handling pagination and field extraction."""
     config = feed.config or CONFIGS.get(feed.key)
     if not config:
-        raise ValueError(f"No config found for house_ats feed key={feed.key}")
+        raise ValueError(f"No config found for inhouse feed key={feed.key}")
 
     endpoint = config["endpoint"]
     method = config.get("method", "GET").upper()
@@ -39,8 +40,11 @@ async def harvest(feed: Feed, net: Net) -> Record:
     envelope = {}
     truncated = False
 
-    # Build initial page params
-    page_params = _build_page_params(pagination_config)
+    # Query parameters describe the provider endpoint; pagination only owns
+    # the configured page/offset key. Keep them together so, for example,
+    # Amazon's result_limit and Microsoft's locale/page size are not dropped.
+    page_params = _build_page_params(config.get("query", {}), pagination_config)
+    headers = config.get("headers")
 
     while True:
         # Build URL and request body
@@ -60,9 +64,14 @@ async def harvest(feed: Feed, net: Net) -> Record:
         # Make request
         try:
             if method == "GET":
-                r = await net.get(url, params=params, state=feed.state if use_state else None)
+                r = await net.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    state=feed.state if use_state else None,
+                )
             else:
-                r = await net.post(url, json=body)
+                r = await net.post(url, json=body, headers=headers)
         except Exception:
             truncated = True
             break
@@ -105,7 +114,10 @@ async def harvest(feed: Feed, net: Net) -> Record:
                 continue
             # Determine external_id from config
             id_field = config["fields"].get("external_id")
-            external_id = str(_extract_nested(item_data, id_field)) if id_field else str(len(all_items))
+            id_value = _extract_nested(item_data, id_field) if id_field else len(all_items)
+            if id_value is None:
+                continue
+            external_id = str(id_value)
             all_items.append(Item(external_id=external_id, payload=item_data))
 
         # Check pagination end conditions
@@ -210,18 +222,20 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
 # Helper functions
 
 
-def _build_page_params(pagination_config: dict) -> dict:
+def _build_page_params(query: dict, pagination_config: dict) -> dict:
     """Initialize pagination parameters."""
-    params = {}
+    params = dict(query)
     if not pagination_config:
         return params
 
     page_type = pagination_config.get("type")
+    parameter = pagination_config.get("param")
+    start = pagination_config.get("start", 0 if page_type == "offset" else 1)
     if page_type == "offset":
-        params["offset"] = 0
+        params[parameter or "offset"] = start
         params["_page_num"] = 1
     elif page_type == "page":
-        params["page"] = 1
+        params[parameter or "page"] = start
         params["_page_num"] = 1
     else:
         params["_page_num"] = 1
@@ -233,12 +247,15 @@ def _advance_page(page_params: dict, pagination_config: dict) -> dict:
     """Advance to next page."""
     params = page_params.copy()
     page_type = pagination_config.get("type")
+    parameter = pagination_config.get("param")
     size = pagination_config.get("size", 50)
 
     if page_type == "offset":
-        params["offset"] = params.get("offset", 0) + size
+        key = parameter or "offset"
+        params[key] = params.get(key, 0) + size
     elif page_type == "page":
-        params["page"] = params.get("page", 1) + 1
+        key = parameter or "page"
+        params[key] = params.get(key, pagination_config.get("start", 1)) + 1
 
     params["_page_num"] = params.get("_page_num", 1) + 1
     return params
@@ -265,7 +282,7 @@ def _extract_nested(obj: Any, path: str | None) -> Any:
         return obj
 
     if isinstance(path, str):
-        parts = path.split(".")
+        parts = re.sub(r"\[([^\]]+)\]", r".\1", path).split(".")
         current = obj
         for part in parts:
             if isinstance(current, dict):
@@ -302,14 +319,17 @@ def _render_field(payload: dict, spec: Any, envelope: dict) -> str | None:
 
     if isinstance(spec, dict):
         if "template" in spec:
-            # Template string with {var} substitution
             template = spec["template"]
+
+            def substitute(match: re.Match[str]) -> str:
+                value = _extract_nested(payload, match.group(1))
+                if value is None:
+                    raise KeyError(match.group(1))
+                return str(value)
+
             try:
-                # Merge payload and envelope for template context
-                context = {**payload}
-                # Add envelope access via envelope.key notation - but just pass payload for now
-                return template.format(**payload)
-            except (KeyError, ValueError):
+                return re.sub(r"{([^{}]+)}", substitute, template)
+            except KeyError:
                 return None
 
         elif "lookup" in spec:

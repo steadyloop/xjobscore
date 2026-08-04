@@ -1,0 +1,20 @@
+schema_version = 1
+source = "icims"
+
+[[feed]]
+key = "campus-americas.icims.com"
+company_id = "atlassian"
+company = "Atlassian"
+domain = "atlassian.com"
+status = "planned"
+enabled = true
+validated_at = "2026-07-31T18:09:13-0700"
+
+[[feed]]
+key = "university-uber.icims.com"
+company_id = "uber"
+company = "Uber"
+domain = "uber.com"
+status = "planned"
+enabled = true
+validated_at = "2026-07-31T18:09:16-0700"

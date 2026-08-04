@@ -1,0 +1,11 @@
+schema_version = 1
+source = "teamtailor"
+
+[[feed]]
+key = "career"
+company_id = "teamtailor"
+company = "Teamtailor"
+domain = "teamtailor.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-04"

@@ -1,0 +1,20 @@
+schema_version = 1
+source = "bamboohr"
+
+[[feed]]
+key = "defensewerx"
+company_id = "defensewerx"
+company = "DEFENSEWERX"
+domain = "defensewerx.org"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"
+
+[[feed]]
+key = "datapelago"
+company_id = "datapelago"
+company = "DataPelago"
+domain = "datapelago.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"

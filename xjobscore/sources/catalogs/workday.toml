@@ -1,0 +1,20 @@
+schema_version = 1
+source = "workday"
+
+[[feed]]
+key = "nvidia/wd5/NVIDIAExternalCareerSite"
+company_id = "nvidia"
+company = "NVIDIA"
+domain = "nvidia.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"
+
+[[feed]]
+key = "argonne/wd1/Argonne_Careers"
+company_id = "argonne-national-laboratory"
+company = "Argonne National Laboratory"
+domain = "anl.gov"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"

@@ -1,0 +1,11 @@
+schema_version = 1
+source = "simplify"
+
+[[feed]]
+key = "SimplifyJobs/Summer2027-Internships"
+company_id = "simplify-jobs"
+company = "Simplify Jobs"
+domain = "simplify.jobs"
+status = "live"
+enabled = true
+validated_at = "2026-08-04"

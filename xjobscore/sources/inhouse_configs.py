@@ -1,7 +1,7 @@
-"""Per-company configs for the shared house_ats adapter.
+"""Per-company configs for the shared inhouse adapter.
 
 Add a new company by adding a dict to CONFIGS below. No code changes needed.
-See sources/planned/house-ats.md for endpoint details and fixtures.
+See sources/planned/inhouse.md for endpoint details and fixtures.
 """
 
 CONFIGS = {
@@ -12,6 +12,18 @@ CONFIGS = {
             "base_query": "",
             "offset": 0,
             "result_limit": 100,
+            "is_intern[]": ["1"],
+            "schedule_type_id[]": [
+                "Flex-Time",
+                "Part-Time",
+                "Reduced-Time",
+                "Flex-Time (<19 hours)",
+                "Part-Time (20-29 hours)",
+                "Reduced-Time (30-39 hours)",
+                "Flex Time (<19 hours)",
+                "Reduced Time (30-39 hours)",
+            ],
+            "employee_class[]": ["Seasonal/short-term"],
         },
         "items_path": "jobs",
         "total_path": "hits",
@@ -32,58 +44,37 @@ CONFIGS = {
         },
     },
     "apple": {
-        "endpoint": "https://jobs.apple.com/api/role/search",
+        "endpoint": "https://jobs.apple.com/api/v1/search",
         "method": "POST",
         "body": {
             "query": "",
-            "filters": {},
-            "page": 1,
+            "filters": {
+                "locations": ["postLocation-USA"],
+            },
+            "page": "{page}",
             "locale": "en-us",
+            "sort": "newest",
+            "format": {
+                "longDate": "MMMM D, YYYY",
+                "mediumDate": "MMM D, YYYY",
+            },
         },
-        "items_path": "searchResults",
-        "total_path": "totalRecords",
+        "items_path": "res.searchResults",
+        "total_path": "res.totalRecords",
         "pagination": {
             "type": "page",
             "param": "page",
-            "size": 50,
-            "max_pages": 50,
+            "size": 20,
+            "max_pages": 400,
         },
         "company_slug": "apple",
         "fields": {
             "external_id": "positionId",
             "title": "postingTitle",
-            "url_posting": {"template": "https://jobs.apple.com/en-us/details/{transformedPostingTitle}"},
+            "url_posting": {"template": "https://jobs.apple.com/en-us/details/{positionId}/{transformedPostingTitle}"},
             "location_raw": {"template": "{locations[0].city}, {locations[0].stateProvince}, {locations[0].countryName}"},
             "description_html": "jobSummary",
-            "published_at": "postingDate",
-        },
-    },
-    "microsoft": {
-        "endpoint": "https://gcsservices.careers.microsoft.com/search/api/v1/search",
-        "method": "GET",
-        "query": {
-            "q": "",
-            "l": "en_us",
-            "pg": 1,
-            "pgSz": 20,
-        },
-        "items_path": "operationResult.result.jobs",
-        "total_path": "operationResult.result.totalJobs",
-        "pagination": {
-            "type": "page",
-            "param": "pg",
-            "size": 20,
-            "max_pages": 200,
-        },
-        "company_slug": "microsoft",
-        "fields": {
-            "external_id": "jobId",
-            "title": "title",
-            "url_posting": {"template": "https://careers.microsoft.com/us/en/job/{jobId}"},
-            "location_raw": {"template": "{properties.locations[0]}"},
-            "description_html": "properties.description",
-            "employment_type": "properties.jobType",
-            "workplace_type_raw": "properties.discipline",
+            "published_at": "postDateInGMT",
         },
     },
     "tesla": {
@@ -117,6 +108,7 @@ CONFIGS = {
         "pagination": {
             "type": "page",
             "param": "page",
+            "start": 0,
             "size": 50,
             "max_pages": 50,
         },

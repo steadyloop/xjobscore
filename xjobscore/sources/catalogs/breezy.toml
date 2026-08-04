@@ -1,0 +1,20 @@
+schema_version = 1
+source = "breezy"
+
+[[feed]]
+key = "zero-hash"
+company_id = "zero-hash"
+company = "Zero Hash"
+domain = "zerohash.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"
+
+[[feed]]
+key = "zetier"
+company_id = "zetier"
+company = "Zetier"
+domain = "zetier.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"

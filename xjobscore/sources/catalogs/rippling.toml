@@ -1,0 +1,20 @@
+schema_version = 1
+source = "rippling"
+
+[[feed]]
+key = "rippling"
+company_id = "rippling"
+company = "Rippling"
+domain = "rippling.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"
+
+[[feed]]
+key = "heads-up-technologies"
+company_id = "heads-up-technologies"
+company = "Heads Up Technologies"
+domain = "heads-up.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-03"

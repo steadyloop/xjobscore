@@ -140,4 +140,4 @@ Several major companies layer Eightfold.ai AI proxies over legacy ATS systems, p
 - Eightfold.ai: 4 companies
 
 **Not Included (separate "Big 7" in-house adapters):**
-- Amazon, Apple, Microsoft, Tesla, Uber, Meta, Google — see `house-ats.md`
+- Amazon, Apple, Microsoft, Tesla, Uber, Meta, Google — see `inhouse.md`
