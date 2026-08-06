@@ -23,6 +23,7 @@ dev = [
 [tool.setuptools]
 packages = [
     "xjobscore",
+    "xjobscore.raw_inspection",
     "xjobscore.sources",
     "xjobscore.sources.planned",
     "xjobscore.tokscan",
