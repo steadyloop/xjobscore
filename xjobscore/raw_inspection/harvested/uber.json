@@ -1,0 +1,19 @@
+{
+  "elapsed_s": 0.151,
+  "envelope": null,
+  "error": {
+    "class": "NetError",
+    "detail": "HTTP 403"
+  },
+  "feed": {
+    "company_id": "uber",
+    "company_name": "Uber",
+    "config": {},
+    "id": -1937177546717161704,
+    "key": "uber"
+  },
+  "fetched_at": "2026-08-06T16:34:58.948185+00:00",
+  "item": null,
+  "ok": false,
+  "source": "uber"
+}

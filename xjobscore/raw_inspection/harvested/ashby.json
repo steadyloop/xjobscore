@@ -1,0 +1,51 @@
+{
+  "elapsed_s": 0.101,
+  "envelope": {
+    "apiVersion": "1"
+  },
+  "feed": {
+    "company_id": "0g",
+    "company_name": "0g",
+    "config": {},
+    "id": -7013309133782899563,
+    "key": "0g"
+  },
+  "fetched_at": "2026-08-06T16:33:43.759199+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "7350655f-4c96-4ceb-9812-e4b42b131559",
+    "kind": "json",
+    "payload": {
+      "address": null,
+      "applyUrl": "https://jobs.ashbyhq.com/0g/7350655f-4c96-4ceb-9812-e4b42b131559/application",
+      "compensation": {
+        "compensationTierSummary": null,
+        "compensationTiers": [],
+        "scrapeableCompensationSalarySummary": null,
+        "summaryComponents": []
+      },
+      "department": "General",
+      "descriptionHtml": "<p style=\"min-height:1.5em\">The Role<br />You'll work directly with the CEO and CFO as their force multiplier — turning executive priorities into organizational execution, keeping the company's most important initiatives moving, and making sure leadership time goes where it matters most. You'll sit at the center of strategy, operations, and finance, with visibility across everything the company does.<br /><br />What You'll Do</p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\"><strong>Drive strategic initiatives end-to-end</strong> — take ambiguous, high-priority mandates from the CEO and CFO and deliver finished outcomes.</p></li><li><p style=\"min-height:1.5em\"><strong>Run the executive operating rhythm</strong> — leadership meetings, planning cycles, OKRs/goals, and follow-through on decisions and action items.</p></li><li><p style=\"min-height:1.5em\"><strong>Synthesize and brief</strong> — distill information from across the company into clear, decision-ready materials for the CEO and CFO.</p></li><li><p style=\"min-height:1.5em\"><strong>Coordinate across functions</strong> — align engineering, product, GTM, and partnerships; identify and resolve cross-team dependencies before they become problems.</p></li><li><p style=\"min-height:1.5em\"><strong>Support finance and corporate workstreams</strong> — partner with the CFO on board, investor, and partner materials: analysis, modeling, and narratives that hold up to institutional scrutiny.</p></li><li><p style=\"min-height:1.5em\"><strong>Act as a trusted proxy</strong> — represent the CEO and CFO in meetings and workstreams, and handle confidential matters with discretion.</p></li></ul><p style=\"min-height:1.5em\"><br />What We're Looking For</p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\"><strong>4+ years in management consulting, investment banking, or an equivalent background</strong> (strategy, corporate development, or similar high-rigor roles) — this is a hard requirement.</p></li><li><p style=\"min-height:1.5em\"><strong>MBA preferred but not required. </strong>Structured problem-solver, equally comfortable with financial models, operational processes, and difficult conversations.</p></li><li><p style=\"min-height:1.5em\">Exceptional written and verbal communication; you make complex things simple.</p></li><li><p style=\"min-height:1.5em\">High agency, low ego — you get things done without needing formal authority, and handle sensitive information with discretion.</p></li><li><p style=\"min-height:1.5em\">Based in or willing to relocate to <strong>Singapore</strong>, with flexibility to travel between the three hubs.</p></li></ul><p style=\"min-height:1.5em\"></p><h1>What we offer</h1><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\"><em>Purpose</em>: The opportunity to contribute to making AI a public good</p></li><li><p style=\"min-height:1.5em\"><em>Growth</em>: A self-directed environment where you can take initiative to shape your role and career</p></li><li><p style=\"min-height:1.5em\"><em>Compensation</em>: Market-competitive compensation including, for most roles, exposure to pre-launch tokens</p></li></ul><p style=\"min-height:1.5em\">In addition, 0G Labs is committed to the health and well being of all of our team members. To that end, we provide reimbursements towards a  holistic set of experiences and courses:</p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\"><em>Core self</em>: Transcendental Meditation</p></li><li><p style=\"min-height:1.5em\"><em>Mind</em>: <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://www.landmarkworldwide.com\">Landmark Education</a></p></li><li><p style=\"min-height:1.5em\"><em>Emotion</em>: Art of Communication</p></li><li><p style=\"min-height:1.5em\"><em>Presence</em>: Speech Coach</p></li><li><p style=\"min-height:1.5em\"><em>Body</em>: Fitness, gym and exercise memberships/classes</p></li></ul>",
+      "descriptionPlain": "The Role\nYou'll work directly with the CEO and CFO as their force multiplier — turning executive priorities into organizational execution, keeping the company's most important initiatives moving, and making sure leadership time goes where it matters most. You'll sit at the center of strategy, operations, and finance, with visibility across everything the company does.\n\nWhat You'll Do\n\n - Drive strategic initiatives end-to-end — take ambiguous, high-priority mandates from the CEO and CFO and deliver finished outcomes.\n\n - Run the executive operating rhythm — leadership meetings, planning cycles, OKRs/goals, and follow-through on decisions and action items.\n\n - Synthesize and brief — distill information from across the company into clear, decision-ready materials for the CEO and CFO.\n\n - Coordinate across functions — align engineering, product, GTM, and partnerships; identify and resolve cross-team dependencies before they become problems.\n\n - Support finance and corporate workstreams — partner with the CFO on board, investor, and partner materials: analysis, modeling, and narratives that hold up to institutional scrutiny.\n\n - Act as a trusted proxy — represent the CEO and CFO in meetings and workstreams, and handle confidential matters with discretion.\n\n\nWhat We're Looking For\n\n - 4+ years in management consulting, investment banking, or an equivalent background (strategy, corporate development, or similar high-rigor roles) — this is a hard requirement.\n\n - MBA preferred but not required. Structured problem-solver, equally comfortable with financial models, operational processes, and difficult conversations.\n\n - Exceptional written and verbal communication; you make complex things simple.\n\n - High agency, low ego — you get things done without needing formal authority, and handle sensitive information with discretion.\n\n - Based in or willing to relocate to Singapore, with flexibility to travel between the three hubs.\n\n\n\n\nWHAT WE OFFER\n\n - Purpose: The opportunity to contribute to making AI a public good\n\n - Growth: A self-directed environment where you can take initiative to shape your role and career\n\n - Compensation: Market-competitive compensation including, for most roles, exposure to pre-launch tokens\n\nIn addition, 0G Labs is committed to the health and well being of all of our team members. To that end, we provide reimbursements towards a holistic set of experiences and courses:\n\n - Core self: Transcendental Meditation\n\n - Mind: Landmark Education https://www.landmarkworldwide.com\n\n - Emotion: Art of Communication\n\n - Presence: Speech Coach\n\n - Body: Fitness, gym and exercise memberships/classes",
+      "employmentType": "FullTime",
+      "id": "7350655f-4c96-4ceb-9812-e4b42b131559",
+      "isListed": true,
+      "isRemote": null,
+      "jobUrl": "https://jobs.ashbyhq.com/0g/7350655f-4c96-4ceb-9812-e4b42b131559",
+      "location": "Remote",
+      "publishedAt": "2026-07-13T08:15:50.567+00:00",
+      "secondaryLocations": [],
+      "shouldDisplayCompensationOnJobPostings": false,
+      "team": "General",
+      "title": "Chief of Staff",
+      "workplaceType": null
+    }
+  },
+  "item_count": 3,
+  "ok": true,
+  "source": "ashby",
+  "truncated": false,
+  "validators": {
+    "etag": "W/\"job-board:80d72471eb1196e7a2232893ca9373f6357dbc231f6a4048e2eb1ed1042d56b9\""
+  }
+}

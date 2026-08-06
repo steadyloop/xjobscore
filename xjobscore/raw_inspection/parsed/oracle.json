@@ -1,0 +1,151 @@
+{
+  "canonical_count": 1,
+  "canonicals": [
+    {
+      "apply_url": null,
+      "closed_evidence": null,
+      "company_raw": null,
+      "content_sections": [],
+      "deadline_at": null,
+      "description_html": "<p class=\"p4\"><span><span>This leader will own product engineering, architecture, execution, and operations while building a high-performing organization across distributed systems, data platforms, generative AI, and agentic workflows.</span></span></p>",
+      "employment_type": null,
+      "external_id": "335472",
+      "fidelity": "origin",
+      "location_raw": "Nashville, TN, United States",
+      "locations_extra": [
+        {
+          "CountryCode": "US",
+          "GeographyId": 100000000729618,
+          "GeographyNodeId": 100879842726481,
+          "Latitude": "30.45414",
+          "Longitude": "-97.78254",
+          "Name": "Austin, TX, United States",
+          "RequisitionLocationId": 302967428098536
+        },
+        {
+          "CountryCode": "US",
+          "GeographyId": 100000000731910,
+          "GeographyNodeId": 100879842726806,
+          "Latitude": "47.60357",
+          "Longitude": "-122.32945",
+          "Name": "Seattle, WA, United States",
+          "RequisitionLocationId": 302967428098027
+        },
+        {
+          "CountryCode": "US",
+          "GeographyId": 100000579041779,
+          "GeographyNodeId": 100879842726799,
+          "Latitude": "37.35579",
+          "Longitude": "-121.95509",
+          "Name": "Santa Clara, CA, United States",
+          "RequisitionLocationId": 302967428098028
+        }
+      ],
+      "origin_url": null,
+      "published_at": "2026-08-06 00:00:00",
+      "published_at_precision": "date",
+      "requisition_id": "335472",
+      "source_active": null,
+      "source_extra": {
+        "BusinessUnit": null,
+        "Category": "Product Development",
+        "ExternalQualificationsStr": "Disclaimer:<br><br><b>Certain U.S. based or U.S. customer or client-facing roles may be required to comply with applicable requirements, such as immunization/occupational health mandates, and/or drug testing requirements.</b><br><br><b>Range and benefit information provided in this posting are specific to the stated locations only</b><br><br>US: Hiring Range in USD from: $169,800 to $355,400 per annum. May be eligible for bonus, equity, and compensation deferral.<br><br><br>Oracle maintains broad salary ranges for its roles in order to account for variations in knowledge, skills, experience, market conditions and locations, as well as reflect Oracle's differing products, industries and lines of business.<br>Candidates are typically placed into the range based on the preceding factors as well as internal peer equity.<br><br>Oracle US offers a comprehensive benefits package which includes the following:<br>1.   Medical, dental, and vision insurance, including expert medical opinion<br>2.   Short term disability and long term disability<br>3.   Life insurance and AD&D<br>4.   Supplemental life insurance (Employee/Spouse/Child)<br>5.   Health care and dependent care Flexible Spending Accounts<br>6.   Pre-tax commuter and parking benefits<br>7.   401(k) Savings and Investment Plan with company match<br>8.   Paid time off: Flexible Vacation is provided to all eligible employees assigned to a salaried (non-overtime eligible) position. Accrued Vacation is provided to all other employees eligible for vacation benefits. For employees working at least 35 hours per week, the vacation accrual rate is 13 days annually for the first three years of employment and 18 days annually for subsequent years of employment. Vacation accrual is prorated for employees working between 20 and 34 hours per week. Employees working fewer than 20 hours per week are not eligible for vacation.<br>9.   11 paid holidays<br>10.  Paid sick leave: 72 hours of paid sick leave upon date of hire. Refreshes each calendar year. Unused balance will carry over each year up to a maximum cap of 112 hours.<br>11.  Paid parental leave<br>12.  Adoption assistance<br>13.  Employee Stock Purchase Plan<br>14.  Financial planning and group legal<br>15.  Voluntary benefits including auto, homeowner and pet insurance<br><br>The role will generally accept applications for at least three calendar days from the posting date or as long as the job remains posted.<p>Career Level - M4</p><br>",
+        "JobFamily": null,
+        "JobFunction": "PRODEV-SWENG",
+        "Organization": null,
+        "RequisitionId": 302965994245314,
+        "RequisitionType": "Professional",
+        "requisitionFlexFields": [
+          {
+            "ControlType": "SingleChoiceList",
+            "Prompt": "Role",
+            "SequenceNumber": 4,
+            "Value": "People Manager"
+          },
+          {
+            "ControlType": "SingleChoiceList",
+            "Prompt": "Job Type",
+            "SequenceNumber": 5,
+            "Value": "Regular Employee"
+          },
+          {
+            "ControlType": "SingleChoiceList",
+            "Prompt": "Does this position require a security clearance?",
+            "SequenceNumber": 12,
+            "Value": "No"
+          },
+          {
+            "ControlType": "SingleChoiceList",
+            "Prompt": "Years",
+            "SequenceNumber": 13,
+            "Value": "10+ years"
+          },
+          {
+            "ControlType": "TextArea",
+            "Prompt": "Applicants are required to read, write, and speak the following languages",
+            "SequenceNumber": 46,
+            "Value": "English"
+          }
+        ],
+        "skills": [
+          {
+            "ContentItemId": null,
+            "SectionId": "300699536645979",
+            "SectionName": "Skills",
+            "Skill": "AI Agents",
+            "SkillId": "302967428564335",
+            "SkillType": null
+          },
+          {
+            "ContentItemId": null,
+            "SectionId": "300699536645979",
+            "SectionName": "Skills",
+            "Skill": "AI Governance",
+            "SkillId": "302967428564336",
+            "SkillType": null
+          },
+          {
+            "ContentItemId": null,
+            "SectionId": "300699536645979",
+            "SectionName": "Skills",
+            "Skill": "LangChain",
+            "SkillId": "302967428564333",
+            "SkillType": null
+          },
+          {
+            "ContentItemId": null,
+            "SectionId": "300699536645979",
+            "SectionName": "Skills",
+            "Skill": "LangGraph",
+            "SkillId": "302967428564332",
+            "SkillType": null
+          },
+          {
+            "ContentItemId": null,
+            "SectionId": "300699536645979",
+            "SectionName": "Skills",
+            "Skill": "Large Language Models (LLMs)",
+            "SkillId": "302967428564331",
+            "SkillType": null
+          },
+          {
+            "ContentItemId": null,
+            "SectionId": "300699536645979",
+            "SectionName": "Skills",
+            "Skill": "RAG",
+            "SkillId": "302967428564334",
+            "SkillType": null
+          }
+        ]
+      },
+      "source_updated_at": null,
+      "state": "open",
+      "title": "Director, Core Infrastructure Engineering - AI Powered Digital Twin Platform",
+      "type": "Posting",
+      "url_posting": "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/job/335472/",
+      "workplace_type_raw": ""
+    }
+  ],
+  "ok": true,
+  "source": "oracle"
+}

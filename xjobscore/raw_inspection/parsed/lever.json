@@ -1,0 +1,51 @@
+{
+  "canonical_count": 1,
+  "canonicals": [
+    {
+      "apply_url": "https://jobs.lever.co/palantir/ac978161-6f46-4f6b-ad9e-a258e642751c/apply",
+      "closed_evidence": null,
+      "company_raw": "palantir",
+      "content_sections": [
+        {
+          "heading": "Administrative Business Partner (Foundry)",
+          "html": "\n<li>Provide administrative support to a portfolio of individuals/teams across the business.</li>\n<li>Handle sophisticated calendars in a fast-paced environment, and prioritize commitments to enhance time and productivity.</li>\n<li>Book travel arrangements (domestic and international).</li>\n<li>Track and process expense reports.</li>\n<li>Help plan, support, and complete office events and external gatherings.</li>\n<li>Work both autonomously and in collaboration with teammates, colleagues, and external contacts.</li>\n"
+        },
+        {
+          "heading": "What We Value",
+          "html": "\n<li>Ability to adjust quickly, anticipate needs, and implement autonomously, with strong attention to detail.</li>\n<li>Ability to interact with a wide range of teams internally and externally with thoughtfulness and tact.</li>\n<li>High level of integrity, confidentiality, and discretion in both internal and external interactions.</li>\n"
+        },
+        {
+          "heading": "What We Require",
+          "html": "\n<li>At least three years of previous administrative or personal support experience, preferably in a fast-paced environment.</li>\n<li>Excellent digital literacy, including proficiency with Microsoft products (Outlook, Excel, Word, PowerPoint, etc.).</li>\n<li>Experience with scheduling sophisticated international and domestic travel itineraries.</li>\n<li>Familiarity with travel booking and expense reporting software.</li>\n"
+        }
+      ],
+      "deadline_at": null,
+      "description_html": "<div><strong style=\"font-size: 18px;\">The Role</strong></div>\n<div>&nbsp;</div>\n<div>Our team of Administrative Business Partners does more than just support our leaders: we're the backbone of the busiest people at Palantir. We build positive relationships with the people we support and anticipate their needs without being asked. Our passion for helping others makes us an invaluable resource at Palantir!<br><br>As an Administrative Business Partner, you will be handling a variety of professional responsibilities, including calendaring, travel, and expenses. You are very organized and thrive off of enabling the people we support to be as productive and impactful as possible. You'll demonstrate your excellent communication skills, and exercise tact and diplomacy in helping to manage relationships with internal and external senior team members at Palantir. In this role you'll also demonstrate good judgment and critical thinking by understanding competing priorities and actioning accordingly.</div>",
+      "employment_type": "Full-time",
+      "external_id": "ac978161-6f46-4f6b-ad9e-a258e642751c",
+      "fidelity": "origin",
+      "location_raw": "London, United Kingdom",
+      "locations_extra": [
+        "London, United Kingdom"
+      ],
+      "origin_url": null,
+      "published_at": "2024-03-25 21:50:16.463000+00:00",
+      "published_at_precision": "exact",
+      "requisition_id": null,
+      "source_active": null,
+      "source_extra": {
+        "country": "GB",
+        "department": null,
+        "team": "Administrative"
+      },
+      "source_updated_at": null,
+      "state": "open",
+      "title": "Administrative Business Partner",
+      "type": "Posting",
+      "url_posting": "https://jobs.lever.co/palantir/ac978161-6f46-4f6b-ad9e-a258e642751c",
+      "workplace_type_raw": "hybrid"
+    }
+  ],
+  "ok": true,
+  "source": "lever"
+}

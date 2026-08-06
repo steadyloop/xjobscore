@@ -1,0 +1,19 @@
+{
+  "elapsed_s": 120.001,
+  "envelope": null,
+  "error": {
+    "class": "TimeoutError",
+    "detail": ""
+  },
+  "feed": {
+    "company_id": "apple",
+    "company_name": "Apple",
+    "config": {},
+    "id": -7003196981350799936,
+    "key": "apple"
+  },
+  "fetched_at": "2026-08-06T16:35:43.659881+00:00",
+  "item": null,
+  "ok": false,
+  "source": "apple"
+}

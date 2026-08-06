@@ -1,0 +1,53 @@
+{
+  "elapsed_s": 60.344,
+  "envelope": {},
+  "feed": {
+    "company_id": "barracuda-networks",
+    "company_name": "Barracuda Networks",
+    "config": {},
+    "id": -845166618612732753,
+    "key": "barracuda-networks-inc"
+  },
+  "fetched_at": "2026-08-06T16:34:48.115575+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "oO72zfwg",
+    "kind": "json",
+    "payload": {
+      "@context": "http://schema.org",
+      "@type": "JobPosting",
+      "baseSalary": {
+        "@type": "MonetaryAmount",
+        "currency": "",
+        "value": {
+          "@type": "QuantitativeValue",
+          "maxValue": "",
+          "minValue": "",
+          "unitText": ""
+        }
+      },
+      "datePosted": "2026-04-23",
+      "description": "<div>Come join our passionate team! Barracuda is a leading cybersecurity company providing complete protection against complex threats. Our platform protects email, data, applications, and networks with innovative solutions, and a managed XDR service, to strengthen cyber resilience. Hundreds of thousands of IT professionals and managed service providers worldwide trust us to protect and support them with solutions that are easy to buy, deploy, and use. </div><div> </div><div>We know a diverse workforce adds to our collective value and strength as an organization.  Barracuda Networks is proud to be an employer that complies with all applicable national, state and local laws pertaining to nondiscrimination and equal opportunity regardless of race, gender, religion, sex, sexual orientation, national origin, or disability. </div><div><br /><b>Envision yourself at Barracuda</b></div><div> </div><div>We are seeking a passionate, experienced Software Engineering Manager to join our Platform organization. We hire strong, technical, collaborative leaders to inspire and enable teams to be successful in delivering quality software.</div><div>The right candidate will have technical understanding and experience with an ability to code with the team along with experience mentoring and coaching agile development teams. You’ll be managing the day-to-day operations of a software team responsible for architecting, developing, testing, deploying, and scaling platform services.</div><div>Our products are generally built using modern technologies and languages and deploy to AWS or Azure via a CI/CD pipeline. Performance, monitoring and observability are first class citizens in our ecosystem. Some products are on their journey ‘to the public cloud’ and successful management of a product roadmap, and an architectural roadmap that includes addressing technical debt, is key.</div><div> </div><div><b>Tech Stack:  </b></div><ul><li><div><b>Domain: Customer </b>Authentication, Product Activation, API, and Database Management</div></li><li><div><b>Identity and Directory Management like</b> LDAP, MS AD, Google, Okta, Auth0.</div></li><li><div><b>Public cloud expertise</b> <b>like</b> AWS, Azure</div></li><li><div><b>CI/CD like</b> GitHub/GitHub Actions, Terraform, Ansible</div></li><li><div><b>Product Technology like</b> AWS/Azure (Server and Sever-less), Docker, K8S, ECS</div></li><li><div><b>High Level Programming Languages like</b> PHP, Typescript</div></li><li><div><b>API Frameworks and technologies like </b>API gateways, RESTful APIs, Express</div></li><li><div><b>Modern Frontend technologies like </b>ReactJS (preferred), Angular</div></li><li><div><b>Monitoring like</b> CloudWatch, NewRelic, Kibana, Prometheus, Grafana</div></li><li><div><b>Data Storages like</b> AWS S3, ElasticSearch, AWS Dynamo, Blobs</div></li><li><div><b>Database Management like </b>PostGres, Redis, MySQL</div></li><li><div><b>Data Pipelines like </b>DataBricks, Kafka, SQS, SNS</div></li><li><div><b>Automation Framework like </b>Playwright</div></li></ul><div> </div><div> </div><div><b>What you will be working on </b></div><ul><li><div>Provide people management for a cross-functional product development team.</div></li><ul><li><div>Manage HR activities as a direct manager.</div></li><li><div>Coach and mentor through 1x1s and other professional development means</div></li><li><div>Facilitate career growth opportunities.</div></li><li><div>Enable a flexible yet productive work environment supporting a distributed workforce.</div></li></ul><li><div>Partner with other engineering managers and product managers to outline roadmaps and communicate updates on progress.</div></li><li><div>Participate in software architectural discussions, influencing decisions, and collaborating with peers to maintain consistency across the organization.</div></li><li><div>Work with engineers to implement features, debug issues/escalations, and prioritize technical debt.</div></li><li><div>Ensure delivered solutions adhere to the software architecture strategy, coding standards, security guidelines, and established organizational policies and procedures.</div></li><li><div>Identify and champion process and productivity improvement strategies for the team(s)</div></li></ul><div> </div><div><b>What you bring to the role </b></div><ul><li><div>Bachelor’s degree in computer science, Engineering, or a related field. Master's degree preferred.</div></li><li><div>8-10 years of overall experience and 2-3 years of technical leadership experience.</div></li><li><div>Proven experience in managing and leading a full-stack team containing developers, SDETs etc., in a fast-paced, dynamic environment.</div></li><li><div>Experience with daily operations associated with a SAAS application running in a public cloud requiring 24/7 availability, and operating at a large data scale (Billions of data points being processed, Millions of concurrent users interacting with the product)</div></li><li><div>Experience managing an application containing both modern aspects, as well as legacy systems – and the ability to manage an architectural roadmap to modernize and manage technical debt appropriately.</div></li><li><div>Experience with Identity Management</div></li><li><div>Experience in software test automations</div></li><li><div>In-depth knowledge of software development methodologies, tools, and best practices.</div></li><li><div>Excellent problem-solving and decision-making skills, with the ability to prioritize tasks and meet deadlines.</div></li><li><div>Exceptional communication and interpersonal skills, with the ability to effectively collaborate with cross-functional teams and stakeholders.</div></li><li><div>Strong leadership abilities, with a track record of motivating and inspiring teams to achieve outstanding results.</div></li></ul><div><br /><b>What you will get from us:</b></div><div>A team where you can voice your opinion, make an impact, and where you and your experience are valued. Internal mobility – there are opportunities for cross training and the ability to attain your next career step within Barracuda. In addition, you will receive equity, in the form of non-qualifying options. </div><div><b>#LI-hybrid</b> </div>",
+      "hiringOrganization": "Barracuda Networks Inc.",
+      "identifier": "oO72zfwg",
+      "industry": "Engineering",
+      "jobLocation": [
+        {
+          "@type": "Place",
+          "address": {
+            "@type": "PostalAddress",
+            "addressCountry": "India",
+            "addressLocality": "Bangalore ",
+            "addressRegion": "Karnataka,"
+          }
+        }
+      ],
+      "title": "Manager, Software Engineering (\"Auth0 Exp\")"
+    }
+  },
+  "item_count": 59,
+  "ok": true,
+  "source": "jobvite",
+  "truncated": false,
+  "validators": {}
+}

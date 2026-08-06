@@ -1,0 +1,454 @@
+{
+  "elapsed_s": 1.095,
+  "envelope": {
+    "internships": [
+      {
+        "department": "Cybersecurity",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Cybersecurity Analyst",
+        "status": "closed",
+        "team": "Cybersecurity",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Hardware Engineer (FPGA/ASIC)",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Hardware Engineer (FPGA/ASIC)",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "December-February",
+        "location": "HKG",
+        "position": "IT Operations Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "IT Operations Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "IT Operations Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "IT Operations Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "Linux Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "December-February",
+        "location": "HKG",
+        "position": "Linux Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Linux Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Linux Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Machine Learning Engineer",
+        "status": "closed",
+        "team": "Machine Learning",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Machine Learning Researcher",
+        "status": "closed",
+        "team": "Machine Learning",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-September",
+        "location": "HKG",
+        "position": "Machine Learning Researcher",
+        "status": "closed",
+        "team": "Machine Learning",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Machine Learning Researcher",
+        "status": "closed",
+        "team": "Machine Learning",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Mechanical Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Network Engineer",
+        "status": "closed",
+        "team": "Network Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Procurement Specialist",
+        "status": "closed",
+        "team": "Procurement",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Procurement Specialist",
+        "status": "closed",
+        "team": "Procurement",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "December-February",
+        "location": "HKG",
+        "position": "Quantitative Researcher",
+        "status": "closed",
+        "team": "Quantitative Research",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "Quantitative Researcher",
+        "status": "closed",
+        "team": "Quantitative Research",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Quantitative Researcher",
+        "status": "closed",
+        "team": "Quantitative Research",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Quantitative Researcher",
+        "status": "closed",
+        "team": "Quantitative Research",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "December-February",
+        "location": "HKG",
+        "position": "Quantitative Trader",
+        "status": "closed",
+        "team": "Quantitative Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "Quantitative Trader",
+        "status": "closed",
+        "team": "Quantitative Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Quantitative Trader",
+        "status": "closed",
+        "team": "Quantitative Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Quantitative Trader",
+        "status": "closed",
+        "team": "Quantitative Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Institutional Sales and Trading",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "Sales and Trading",
+        "status": "closed",
+        "team": "Institutional Sales and Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Institutional Sales and Trading",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Sales and Trading",
+        "status": "closed",
+        "team": "Institutional Sales and Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Institutional Sales and Trading",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Sales and Trading",
+        "status": "closed",
+        "team": "Institutional Sales and Trading",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "December-February",
+        "location": "HKG",
+        "position": "Software Engineer",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "January-April",
+        "location": "NYC",
+        "position": "Software Engineer",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Co-Op"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "Software Engineer",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Software Engineer",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Software Engineer",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "September-December",
+        "location": "NYC",
+        "position": "Software Engineer",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Co-Op"
+      },
+      {
+        "department": "Technology",
+        "duration": "April-September",
+        "location": "LDN",
+        "position": "Software Engineer, Spring Off Cycle",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Strategy and Product",
+        "duration": "December-February",
+        "location": "HKG",
+        "position": "Strategy and Product",
+        "status": "closed",
+        "team": "Strategy and Product",
+        "type": "Internship"
+      },
+      {
+        "department": "Strategy and Product",
+        "duration": "May-August",
+        "location": "HKG",
+        "position": "Strategy and Product",
+        "status": "closed",
+        "team": "Strategy and Product",
+        "type": "Internship"
+      },
+      {
+        "department": "Strategy and Product",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Strategy and Product",
+        "status": "closed",
+        "team": "Strategy and Product",
+        "type": "Internship"
+      },
+      {
+        "department": "Strategy and Product",
+        "duration": "June-September",
+        "location": "LDN",
+        "position": "Strategy and Product",
+        "status": "closed",
+        "team": "Strategy and Product",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "Flexible",
+        "location": "NYC",
+        "position": "Tools and Compilers Research and Development",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Technology",
+        "duration": "Flexible",
+        "location": "LDN",
+        "position": "Tools and Compilers Research and Development",
+        "status": "closed",
+        "team": "Software Engineering",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Trading Desk Operations Engineer",
+        "status": "closed",
+        "team": "Trading Desk Operations",
+        "type": "Internship"
+      },
+      {
+        "department": "Trading, Research, and Machine Learning",
+        "duration": "Permanent",
+        "location": "NYC",
+        "position": "Trading Desk Operations Engineer",
+        "status": "closed",
+        "team": "Trading Desk Operations",
+        "type": "Full-Time: New Grad"
+      },
+      {
+        "department": "Technology",
+        "duration": "May-August",
+        "location": "NYC",
+        "position": "Windows Engineer",
+        "status": "closed",
+        "team": "IT and Systems Engineering",
+        "type": "Internship"
+      }
+    ]
+  },
+  "feed": {
+    "company_id": null,
+    "company_name": null,
+    "config": {},
+    "id": 0,
+    "key": "janestreet"
+  },
+  "fetched_at": "2026-08-06T16:33:47.766591+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "8594416002",
+    "kind": "json",
+    "payload": {
+      "availability": "Summer Internship",
+      "category": "Trading, Research, and Machine Learning",
+      "city": "LDN",
+      "duration": "June-September",
+      "id": 8594416002,
+      "max_salary": null,
+      "min_salary": null,
+      "overview": "<h3>About the Position</h3>\n<p>Our goals are to give you a real sense of what it&#39;s like to work at Jane Street as a Machine Learning Researcher while also providing a truly unparalleled educational experience. You&#39;ll work side by side with experienced ML Researchers on projects that we&#39;ve selected for their combination of novel ML ideas and relevance to real-world systematic trading strategies. You&#39;ll learn how we think about markets through challenging classes and activities, and practice using established methods alongside our own unique twists to train practical models.</p>\n<p>At Jane Street, the lines between research, technology, and trading are intentionally blurry, and you’ll have access to petabytes of data, a computing cluster with hundreds of thousands of cores, and a growing GPU cluster containing tens of thousands of high-end GPUs. Trading poses unusual challenges—large models and nonstationary datasets in a competitive multi-agent environment—that force us to search for novel techniques.</p>\n<p>You&#39;ll spend the bulk of your internship working closely with full-time machine learning researchers on projects drawn from their own work. You might conduct an end-to-end study of an unexplored dataset, try a new modelling paradigm for a thorny problem, or consider blue-sky approaches that we&#39;re still trying to figure out. The problems we work on rarely have clean, definitive answers, and they often require insights from colleagues across the firm with different areas of expertise. Depending on the day, you might be diving deep into market data, tuning hyperparameters, debugging training issues, or analysing the predictions your model makes.</p>\n<p>Note that given the IP-sensitive nature of machine learning research at Jane Street, it is unlikely that any research findings associated with the internship will be suitable for outside academic publication.</p>\n<h3>About you</h3>\n<p>If you&#39;ve never thought about a career in finance, you&#39;re in good company. Many of us were in the same position before working here. If you have a curious mind and a passion for solving interesting problems, we have a feeling you&#39;ll fit right in. We&#39;re more interested in how you think and learn than what you currently know. You should be:</p>\n<ul>\n<li>An undergraduate, PhD student, or postdoc with practical experience working on ML problems</li>\n<li>Interested in applying logical and mathematical thinking to all kinds of problems</li>\n<li>Curious about the machine learning landscape and excited to apply state-of-the-art techniques drawn from many problem domains</li>\n<li>Fluent with a versatile set of models and tricks</li>\n<li>Able to rapidly implement and iterate on your ideas in Python and your favourite ML framework</li>\n<li>Eager to ask questions, admit mistakes, and learn new things</li>\n<li>Fluent in English</li>\n</ul>\n<p>If you&#39;d like to learn more, you can read about our <a href=\"https://www.janestreet.com/join-jane-street/ml-research-interviews\">interview process</a> and <a href=\"https://www.janestreet.com/join-jane-street/get-to-know-us/\">meet some of the team</a>. Learn more about Jane Street&#39;s internship program <a href=\"https://www.janestreet.com/join-jane-street/internships/\">here</a>.</p>",
+      "position": "ꓟachine ꓡearning ꓣesearcher",
+      "team": "Machine Learning"
+    }
+  },
+  "item_count": 225,
+  "ok": true,
+  "source": "janestreet",
+  "truncated": false,
+  "validators": {
+    "etag": "W/\"6a74b5a1-a83d8\"",
+    "last_modified": "Thu, 06 Aug 2026 16:26:09 GMT"
+  }
+}

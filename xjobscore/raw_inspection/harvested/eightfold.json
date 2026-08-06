@@ -1,0 +1,24 @@
+{
+  "elapsed_s": 120.001,
+  "envelope": null,
+  "error": {
+    "class": "TimeoutError",
+    "detail": ""
+  },
+  "feed": {
+    "company_id": "microsoft",
+    "company_name": "Microsoft",
+    "config": {
+      "company_raw": "Microsoft",
+      "domain": "microsoft.com",
+      "host": "apply.careers.microsoft.com",
+      "query": ""
+    },
+    "id": -2524024834826871880,
+    "key": "microsoft"
+  },
+  "fetched_at": "2026-08-06T16:35:44.161602+00:00",
+  "item": null,
+  "ok": false,
+  "source": "eightfold"
+}

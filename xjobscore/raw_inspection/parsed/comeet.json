@@ -1,0 +1,46 @@
+{
+  "canonical_count": 1,
+  "canonicals": [
+    {
+      "apply_url": null,
+      "closed_evidence": null,
+      "company_raw": "Firebolt",
+      "content_sections": [
+        {
+          "heading": "Description",
+          "html": "<p><strong>About Firebolt</strong></p><p>Firebolt is open, real-time datalake infrastructure -&nbsp;the performance of a real-time system with the openness of a datalake. Customers run all their workloads on one platform, on open file formats (Vortex) and open metadata (DuckLake), with zero vendor lock-in. We’re looking for a Customer Engineer intern who wants to work at the intersection of deep technical problem-solving and enterprise customer success.</p><p><em>This is a 3-month internship designed to convert. Perform well and it leads to a full-time Customer Engineer role.</em></p><p><strong><em>﻿</em></strong></p><p><strong>About the role</strong></p><p>As a Customer Engineer at Firebolt, you sit at the intersection of technical support and solution architecture. You own the end-to-end success of enterprise customers on the platform. That means you are not just answering tickets, and you are not just designing architectures; you do both, and you own the outcome.</p><p>Your work splits into two broad modes you’ll move between constantly, plus a third that builds your and Firebolt’s reputation in the wider community:</p><ul><li>Deep technical work: investigating incidents, debugging performance, tracing logs, and reading execution plans to get to root cause.</li><li>Customer-facing engagement: discovery calls, POCs, migrations, and acting as the trusted technical advisor for your accounts.</li><li>External and community engagement: representing Firebolt to the wider engineering audience through public technical work.</li></ul><p><br></p><p><strong>What you’ll work on</strong></p><ul><li><strong>Query optimization: </strong>tuning queries, applying indexing and partitioning strategies, and reading execution plans to make real-time workloads fast.</li><li><strong>Migrations &amp; CDC: </strong>planning and executing data migration, including CDC pipelines, and helping build drop in migrations from other analytical DB’s</li><li><strong>Agentic workflows:</strong> building agentic workflows and tooling that make customer onboarding, diagnostics, and support faster and more repeatable.</li><li><strong>POCs &amp; architecture:</strong> owning POCs and technical evaluations end to end, from architecture design through to a working proof on the customer’s data.</li></ul>"
+        },
+        {
+          "heading": "Requirements",
+          "html": "<ul><li>Strong SQL and a solid grasp of Analytical database fundamentals: query optimization, indexing, partitioning.</li><li>&nbsp;Familiarity with data migration concepts and CDC pipelines (hands-on experience is a plus, not a requirement).</li><li>&nbsp;Interest in building agentic workflows/automation: you like turning a repetitive technical task into a tool.</li><li>&nbsp;Clear communication. You can explain a tricky technical finding to an engineer on a call and write it up cleanly afterward.</li><li>&nbsp;A customer-first instinct: you want to own the outcome</li></ul><p><br></p><p><strong>Nice to have</strong></p><ul><li>&nbsp;Exposure to real-time or embedded analytics, or ML/AI on live data.</li><li>&nbsp;Experience with open table/file formats (Iceberg, Parquet) or lakehouse architectures.</li><li>&nbsp;Any public technical work: blog posts, talks, open-source contributions, benchmarks.</li></ul><p><strong>﻿</strong></p><p><strong>Details</strong></p><ul><li><strong>Duration &amp; location: </strong>3-month internship, fully remote.</li><li><strong>Conversion: </strong>Full-time Customer Engineer role for interns who prove a strong fit.</li></ul><p><br></p><p><strong>How to apply</strong></p><p>Upload your resume and a short note on a technical problem you’re proud of solving to&nbsp;<a href=\"https://www.comeet.com/jobs/firebolt/26.004/customer-engineer-intern/0F.E65\" target=\"_blank\" rel=\"noopener noreferrer\"><u>https://www.comeet.com/jobs/firebolt/26.004/customer-engineer-intern/0F.E65</u></a>&nbsp;or to <a href=\"https://www.linkedin.com/jobs/view/4444438279/\" target=\"_blank\" rel=\"noopener noreferrer\">LinkedIn</a>.</p><p><br></p>"
+        }
+      ],
+      "deadline_at": null,
+      "description_html": "<p><strong>About Firebolt</strong></p><p>Firebolt is open, real-time datalake infrastructure -&nbsp;the performance of a real-time system with the openness of a datalake. Customers run all their workloads on one platform, on open file formats (Vortex) and open metadata (DuckLake), with zero vendor lock-in. We’re looking for a Customer Engineer intern who wants to work at the intersection of deep technical problem-solving and enterprise customer success.</p><p><em>This is a 3-month internship designed to convert. Perform well and it leads to a full-time Customer Engineer role.</em></p><p><strong><em>﻿</em></strong></p><p><strong>About the role</strong></p><p>As a Customer Engineer at Firebolt, you sit at the intersection of technical support and solution architecture. You own the end-to-end success of enterprise customers on the platform. That means you are not just answering tickets, and you are not just designing architectures; you do both, and you own the outcome.</p><p>Your work splits into two broad modes you’ll move between constantly, plus a third that builds your and Firebolt’s reputation in the wider community:</p><ul><li>Deep technical work: investigating incidents, debugging performance, tracing logs, and reading execution plans to get to root cause.</li><li>Customer-facing engagement: discovery calls, POCs, migrations, and acting as the trusted technical advisor for your accounts.</li><li>External and community engagement: representing Firebolt to the wider engineering audience through public technical work.</li></ul><p><br></p><p><strong>What you’ll work on</strong></p><ul><li><strong>Query optimization: </strong>tuning queries, applying indexing and partitioning strategies, and reading execution plans to make real-time workloads fast.</li><li><strong>Migrations &amp; CDC: </strong>planning and executing data migration, including CDC pipelines, and helping build drop in migrations from other analytical DB’s</li><li><strong>Agentic workflows:</strong> building agentic workflows and tooling that make customer onboarding, diagnostics, and support faster and more repeatable.</li><li><strong>POCs &amp; architecture:</strong> owning POCs and technical evaluations end to end, from architecture design through to a working proof on the customer’s data.</li></ul><ul><li>Strong SQL and a solid grasp of Analytical database fundamentals: query optimization, indexing, partitioning.</li><li>&nbsp;Familiarity with data migration concepts and CDC pipelines (hands-on experience is a plus, not a requirement).</li><li>&nbsp;Interest in building agentic workflows/automation: you like turning a repetitive technical task into a tool.</li><li>&nbsp;Clear communication. You can explain a tricky technical finding to an engineer on a call and write it up cleanly afterward.</li><li>&nbsp;A customer-first instinct: you want to own the outcome</li></ul><p><br></p><p><strong>Nice to have</strong></p><ul><li>&nbsp;Exposure to real-time or embedded analytics, or ML/AI on live data.</li><li>&nbsp;Experience with open table/file formats (Iceberg, Parquet) or lakehouse architectures.</li><li>&nbsp;Any public technical work: blog posts, talks, open-source contributions, benchmarks.</li></ul><p><strong>﻿</strong></p><p><strong>Details</strong></p><ul><li><strong>Duration &amp; location: </strong>3-month internship, fully remote.</li><li><strong>Conversion: </strong>Full-time Customer Engineer role for interns who prove a strong fit.</li></ul><p><br></p><p><strong>How to apply</strong></p><p>Upload your resume and a short note on a technical problem you’re proud of solving to&nbsp;<a href=\"https://www.comeet.com/jobs/firebolt/26.004/customer-engineer-intern/0F.E65\" target=\"_blank\" rel=\"noopener noreferrer\"><u>https://www.comeet.com/jobs/firebolt/26.004/customer-engineer-intern/0F.E65</u></a>&nbsp;or to <a href=\"https://www.linkedin.com/jobs/view/4444438279/\" target=\"_blank\" rel=\"noopener noreferrer\">LinkedIn</a>.</p><p><br></p>",
+      "employment_type": "Full-time",
+      "external_id": "0F.E65",
+      "fidelity": "origin",
+      "location_raw": "Bangalore, India",
+      "locations_extra": [],
+      "origin_url": null,
+      "published_at": null,
+      "published_at_precision": "unknown",
+      "requisition_id": null,
+      "source_active": null,
+      "source_extra": {
+        "categories": null,
+        "department": "Support",
+        "experience_level": "Intern",
+        "location_is_remote": true
+      },
+      "source_updated_at": "2026-07-23 12:07:06+00:00",
+      "state": "open",
+      "title": "Customer Engineer Intern",
+      "type": "Posting",
+      "url_posting": "https://www.comeet.com/jobs/firebolt/26.004/customer-engineer-intern/0F.E65",
+      "workplace_type_raw": "Remote"
+    }
+  ],
+  "ok": true,
+  "source": "comeet"
+}

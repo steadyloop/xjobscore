@@ -1,16 +1,19 @@
 """Harvest every source adapter once and dump what came back, as JSON.
 
 One file per registered source in `sources.SOURCES`, written to
-`xjobscore/raw-inspection/<source>.json` the moment that adapter's own fetch
-returns -- the directory fills in progressively rather than all at the end.
+`xjobscore/raw_inspection/harvested/<source>.json` the moment that adapter's
+own fetch returns -- the directory fills in progressively rather than all at
+the end. What it captures per source is `Record.envelope` plus
+`Record.items[0]`, which are precisely the two things that stop being visible
+once silver has normalized them away.
 
-This is a lens on the bronze boundary and nothing more: no database, no
-`sources.parser`, no adapter touched. What it captures per source is
-`Record.envelope` plus `Record.items[0]`, which are precisely the two things
-that stop being visible once silver has normalized them away. `envelope` in
-particular is carried on every bronze row but belongs to no single item, so a
-source that puts the company name only at the response root looks identical to
-one that omits it entirely until you read the envelope back.
+A second pass runs `sources.parser(source)` -- sync and pure, no net, no DB,
+per its own contract -- directly on that same harvested item, and writes
+`xjobscore/raw_inspection/parsed/<source>.json`. This is the vendor-shape
+mapping only: `normalize_title` and company-alias resolution happen later, in
+`silver.replay` against a live connection, so what lands here is the `Posting`
+(or `Target`/`Label`/`Fact`) exactly as the source module built it -- title
+un-normalized, `company_raw` unresolved. No adapter is touched by either pass.
 
 Feeds come from `sources.catalog`, not from `store` -- the catalog exists to be
 usable without Postgres, and that is the whole reason this runner is cheap.
@@ -29,11 +32,12 @@ from pathlib import Path
 
 from xjobscore import sources
 from xjobscore.net import Net
-from xjobscore.records import Feed
+from xjobscore.records import Feed, Item
 from xjobscore.sources import catalog
 
 __all__ = [
-    "DEFAULT_OUT",
+    "DEFAULT_HARVESTED",
+    "DEFAULT_PARSED",
     "Target",
     "UNRUNNABLE",
     "inspect_all",
@@ -41,9 +45,11 @@ __all__ = [
     "targets",
 ]
 
-# Sibling of the package, hyphenated, as requested. Resolved from __file__ so
-# the runner writes to the same place whatever the working directory is.
-DEFAULT_OUT = Path(__file__).resolve().parents[1] / "raw-inspection"
+# Both are siblings of this package's own files, resolved from __file__ so the
+# runner writes to the same place whatever the working directory is.
+_PACKAGE_DIR = Path(__file__).resolve().parent
+DEFAULT_HARVESTED = _PACKAGE_DIR / "harvested"
+DEFAULT_PARSED = _PACKAGE_DIR / "parsed"
 
 # Catalog feeds are transient and negative-id'd; this one is synthesized rather
 # than read, and nothing here ever persists a feed, so the id is inert.
@@ -137,76 +143,130 @@ def _identity(target: Target, started: float) -> dict:
     }
 
 
-async def inspect_one(target: Target, net: Net, out_dir: Path, timeout_s: float) -> dict:
+def _parse_result(target: Target, harvested: dict, item: Item | None, envelope: dict) -> dict:
+    """Run the registered parser on one harvested item, DB-free.
+
+    `sources.parser` raises `UnknownSource` for the one harvest-only source
+    (`workatastartup`); everything else that reaches this function already has
+    a harvest to explain first, via `harvested`.
+    """
+    base = {"source": target.source}
+
+    if not harvested["ok"]:
+        reason = harvested.get("skipped") or (harvested.get("error") or {}).get("class")
+        return base | {"ok": False, "skipped": f"harvest did not succeed: {reason}"}
+    if item is None:
+        return base | {"ok": False, "skipped": "no item harvested to parse"}
+
+    try:
+        parse = sources.parser(target.source)
+    except sources.UnknownSource:
+        return base | {"ok": False, "skipped": f"no parser registered for '{target.source}'"}
+
+    try:
+        canonicals = parse(target.feed, item, envelope)
+    except Exception as exc:
+        return base | {"ok": False, "error": {"class": type(exc).__name__, "detail": str(exc)}}
+
+    return base | {
+        "ok": True,
+        "canonical_count": len(canonicals),
+        # tagged with its dataclass name -- Canonical is a bare union
+        # (records.py:243) with no discriminant field of its own.
+        "canonicals": [{"type": type(c).__name__, **asdict(c)} for c in canonicals],
+    }
+
+
+async def inspect_one(
+    target: Target,
+    net: Net,
+    harvested_dir: Path,
+    parsed_dir: Path | None,
+    timeout_s: float,
+) -> dict:
     """Harvest one source and write its file before returning.
 
     The write happens here, inside the task, rather than in the caller after a
     gather -- that is what makes the output directory fill in as each adapter
-    finishes instead of all at once at the end.
+    finishes instead of all at once at the end. Parsing (when `parsed_dir` is
+    given) runs in the same task, directly on the in-memory `Item` -- no
+    round-trip through the harvested JSON.
 
     Every exception becomes a recorded error, exactly as run.poll:135 does it.
     Six adapters issue one detail request per listed row (json-api-configs.py
     DETAIL_A/DETAIL_B) against a 1 req/s per-host throttle, so `timeout_s` is
     load-bearing: without it a single board can hold the run open for an hour.
     """
-    path = out_dir / f"{target.source}.json"
+    harvested_path = harvested_dir / f"{target.source}.json"
 
     if target.skip is not None:
-        result = {"source": target.source, "ok": False, "skipped": target.skip}
-        _write(path, result)
-        return result
+        harvested = {"source": target.source, "ok": False, "skipped": target.skip}
+        _write(harvested_path, harvested)
+        if parsed_dir is not None:
+            _write(parsed_dir / f"{target.source}.json", _parse_result(target, harvested, None, {}))
+        return harvested
 
     started = time.monotonic()
+    item: Item | None = None
+    envelope: dict = {}
     try:
         harvest = sources.get(target.source)
         record = await asyncio.wait_for(harvest(target.feed, net), timeout_s)
     except Exception as exc:
-        result = _identity(target, started) | {
+        harvested = _identity(target, started) | {
             "ok": False,
             "error": {"class": type(exc).__name__, "detail": str(exc)},
             "envelope": None,
             "item": None,
         }
     else:
-        result = _identity(target, started) | {
+        item = record.items[0] if record.items else None
+        envelope = record.envelope
+        harvested = _identity(target, started) | {
             "ok": True,
             "http_status": record.http_status,
             "truncated": record.truncated,
             "validators": record.validators,
             "item_count": len(record.items),
-            "envelope": record.envelope,
+            "envelope": envelope,
             # items[0] only: a fixture, not an archive. An empty items list is
             # itself the interesting result for several adapters.
-            "item": asdict(record.items[0]) if record.items else None,
+            "item": asdict(item) if item is not None else None,
         }
 
-    _write(path, result)
-    return result
+    _write(harvested_path, harvested)
+    if parsed_dir is not None:
+        _write(parsed_dir / f"{target.source}.json", _parse_result(target, harvested, item, envelope))
+    return harvested
 
 
 async def inspect_all(
     plan: Sequence[Target],
     *,
-    out_dir: Path = DEFAULT_OUT,
+    harvested_dir: Path = DEFAULT_HARVESTED,
+    parsed_dir: Path | None = DEFAULT_PARSED,
     user_agent: str = "xjobscore/0.1",
     concurrency: int = 4,
-    timeout_s: float = 120.0,
+    timeout_s: float = 300.0,
     on_done: Callable[[dict], None] | None = None,
 ) -> list[dict]:
     """Run the whole plan under one Net, bounded by `concurrency`.
 
     Distinct sources are distinct hosts, so the per-host token bucket inside
     Net is not the limit here -- the semaphore is, and it is deliberately small
-    because this is a debugging tool pointed at other people's boards.
+    because this is a debugging tool pointed at other people's boards. Pass
+    `parsed_dir=None` to skip the parse pass entirely.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
+    harvested_dir.mkdir(parents=True, exist_ok=True)
+    if parsed_dir is not None:
+        parsed_dir.mkdir(parents=True, exist_ok=True)
     semaphore = asyncio.Semaphore(concurrency)
 
     async with Net(user_agent=user_agent) as net:
 
         async def run_one(target: Target) -> dict:
             async with semaphore:
-                result = await inspect_one(target, net, out_dir, timeout_s)
+                result = await inspect_one(target, net, harvested_dir, parsed_dir, timeout_s)
             if on_done is not None:
                 on_done(result)
             return result

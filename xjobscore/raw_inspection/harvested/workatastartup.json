@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "skipped": "harvest requires captured config['headers'] and config['body'] (sources/planned/workatastartup.py:22); it cannot be driven unattended",
+  "source": "workatastartup"
+}

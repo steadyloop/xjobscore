@@ -15,21 +15,30 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from xjobscore import sources
-from xjobscore.raw_inspection import DEFAULT_OUT, inspect_all, targets
+from xjobscore.raw_inspection import DEFAULT_HARVESTED, DEFAULT_PARSED, inspect_all, targets
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m xjobscore.raw_inspection",
         description=(
-            "Harvest each source adapter once against a live catalog feed and write "
-            "the envelope plus the first item to <out>/<source>.json."
+            "Harvest each source adapter once against a live catalog feed, write the "
+            "envelope plus the first item to <harvested-out>/<source>.json, then run "
+            "that source's parser on it and write <parsed-out>/<source>.json."
         ),
     )
     parser.add_argument("sources", nargs="*", help="restrict to these sources (default: all)")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help=f"default: {DEFAULT_OUT}")
+    parser.add_argument(
+        "--harvested-out", type=Path, default=DEFAULT_HARVESTED, help=f"default: {DEFAULT_HARVESTED}"
+    )
+    parser.add_argument(
+        "--parsed-out", type=Path, default=DEFAULT_PARSED, help=f"default: {DEFAULT_PARSED}"
+    )
+    parser.add_argument(
+        "--harvest-only", action="store_true", help="skip the parse pass entirely"
+    )
     parser.add_argument("--concurrency", type=int, default=4)
-    parser.add_argument("--timeout", type=float, default=120.0, help="seconds per source")
+    parser.add_argument("--timeout", type=float, default=300.0, help="seconds per source")
     parser.add_argument(
         "--user-agent",
         default=os.environ.get("XJOBSCORE_USER_AGENT") or "xjobscore/0.1",
@@ -86,10 +95,14 @@ async def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{target.source:<18} {feed.key:<44} {feed.company_name or ''}")
         return 0
 
-    print(f"-> {args.out}", file=sys.stderr)
+    parsed_dir = None if args.harvest_only else args.parsed_out
+    print(f"-> {args.harvested_out}", file=sys.stderr)
+    if parsed_dir is not None:
+        print(f"-> {parsed_dir}", file=sys.stderr)
     results = await inspect_all(
         plan,
-        out_dir=args.out,
+        harvested_dir=args.harvested_out,
+        parsed_dir=parsed_dir,
         user_agent=args.user_agent,
         concurrency=args.concurrency,
         timeout_s=args.timeout,
