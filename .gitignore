@@ -8,7 +8,6 @@ uv.lock
 notebooks/samples/
 work/
 backups/
-/.old_code-DO_NOT_USE
 /docs
 /postings
 /prototypes

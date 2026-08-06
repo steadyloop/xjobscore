@@ -21,10 +21,21 @@ dev = [
 # so name the packages rather than let flat-layout autodiscovery guess. viewer/
 # and cc_ats/ still resolve from the repo root and are deliberately not listed.
 [tool.setuptools]
-packages = ["xjobscore", "xjobscore.sources", "xjobscore.ingest"]
+packages = [
+    "xjobscore",
+    "xjobscore.sources",
+    "xjobscore.sources.planned",
+    "xjobscore.tokscan",
+]
 
+# manifest/*.toml is globbed at import time by sources._source_types(); omitting
+# it makes source_type() silently empty on an installed (non-editable) copy.
 [tool.setuptools.package-data]
-xjobscore = ["fixtures/*.json", "sources/catalogs/*.toml"]
+xjobscore = [
+    "fixtures/*.json",
+    "sources/catalogs/*.toml",
+    "sources/manifest/*.toml",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
