@@ -1,10 +1,6 @@
 {
-  "elapsed_s": 120.001,
-  "envelope": null,
-  "error": {
-    "class": "TimeoutError",
-    "detail": ""
-  },
+  "elapsed_s": 229.854,
+  "envelope": {},
   "feed": {
     "company_id": "apple",
     "company_name": "Apple",
@@ -12,8 +8,57 @@
     "id": -7003196981350799936,
     "key": "apple"
   },
-  "fetched_at": "2026-08-06T16:35:43.659881+00:00",
-  "item": null,
-  "ok": false,
-  "source": "apple"
+  "fetched_at": "2026-08-06T19:41:10.316484+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "114438158",
+    "kind": "json",
+    "payload": {
+      "homeOffice": false,
+      "id": "PIPE-114438158",
+      "isMultiLocation": false,
+      "jobPositionId": "PIPE-114438158",
+      "jobSummary": "Apple Retail is where the best of Apple comes together. We bring our expertise to help people do what they love, delivering an only-at-Apple experience. We believe inclusion is a shared responsibility and we work together to foster a culture where everyone belongs and is inspired to do their best work.\n\nAs a Specialist, you build brand loyalty and create owners of Apple products and services. You’re dedicated to selling and delivering a customer service experience that is unlike any other. A Specialist is curious — you ask questions to learn about our customers’ needs, customizing recommendations to enrich their lives.",
+      "localeInfo": {
+        "dateFormat": "MMM D, YYYY",
+        "defaultLocaleCode": "en-us",
+        "languageCode": "en_US"
+      },
+      "locations": [
+        {
+          "city": "",
+          "countryID": "iso-country-USA",
+          "countryName": "United States of America",
+          "level": 1,
+          "metro": "",
+          "name": "United States",
+          "postLocationId": "postLocation-USA",
+          "region": "",
+          "stateProvince": ""
+        }
+      ],
+      "managedPipelineRole": true,
+      "positionId": "114438158",
+      "postDateInGMT": "2026-08-06T19:37:20.857798644Z",
+      "postExternal": true,
+      "postingDate": "Aug 06, 2026",
+      "postingTitle": "US - Specialist: Seasonal, Part-time",
+      "reqId": "PIPE-114438158",
+      "standardWeeklyHours": 40,
+      "team": {
+        "teamCode": "APPST",
+        "teamID": "teamsAndSubTeams-APPST",
+        "teamName": "Apple Retail"
+      },
+      "transformedPostingTitle": "us-specialist-seasonal-part-time",
+      "type": "PIPE"
+    }
+  },
+  "item_count": 4574,
+  "ok": true,
+  "source": "apple",
+  "truncated": false,
+  "validators": {
+    "etag": "W/\"8ae3-nsX6q9x1xqyk6oKYWLKrCcd0IQo\""
+  }
 }

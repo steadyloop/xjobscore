@@ -1,5 +1,155 @@
 {
-  "ok": false,
-  "skipped": "harvest did not succeed: TimeoutError",
+  "canonical_count": 1,
+  "canonicals": [
+    {
+      "apply_url": "https://jobs.smartrecruiters.com/LinkedIn3/744000141988607-senior-ai-engineer-videoai?oga=true",
+      "closed_evidence": null,
+      "company_raw": "LinkedIn",
+      "content_sections": [],
+      "deadline_at": null,
+      "description_html": "<p>This role will be based in New York or Mountain View, CA.</p><p>At LinkedIn, our approach to flexible work is centered on trust and&#xa0;optimized&#xa0;for culture, connection, clarity, and the evolving needs of our business.&#xa0;The work location of this role is hybrid, meaning it will be performed both from home and from a LinkedIn office on select days, as&#xa0;determined&#xa0;by the business needs of the team.&#xa0;</p><p>The Video AI team sits at the heart of our LinkedIn’s ambitious growth strategy. Our team is a dynamic group of machine learning experts dedicated to revolutionizing the way we interact with video content. This team is at the forefront of developing cutting-edge artificial intelligence technologies that enhance video understanding, search, and personalization. By leveraging state-of-the-art AI techniques, the Video AI team is poised to open up new ways of engaging with videos on LinkedIn.</p><p>Our work encompasses a range of applications, from real-time video analytics to intelligent content recommendation systems, positioning our company as a leader in the rapidly evolving landscape of video technology. As LinkedIn continues to revolutionize our market presence, the Video AI team’s expertise will be instrumental in shaping our product offerings and achieving our strategic goals, ensuring we stay ahead of the competition and deliver unparalleled value to our 1 billion+ global users.</p><p>Below are a few examples of the problem spaces we work in (and much more!):</p><ul><li><p>Video Understanding: Building state of the art content understanding models and content embeddings to power all video use cases.</p></li><li><p>Video Feed Personalization: Identifying the most engaging content and distributing to users.</p></li><li><p>Video Search: Tackling the multimodal search problem, delivering videos that provide the highest user value.</p></li><li><p>Video Safety: Safeguarding users from malicious actors and content, building an open and safe community for all.</p></li></ul><p>Responsibilities</p><p>The Video AI team is at the forefront of building the AI systems that power LinkedIn's next generation of video experiences for more than one billion members. As a Senior AI Software Engineer, you will own end-to-end machine learning systems that run in production at LinkedIn scale from multimodal video understanding and large-scale recommendation to retrieval, ranking, and search. You won't just train models; you'll own the production AI systems that connect members with relevant, engaging, and trustworthy video content. Your responsibilities span the entire product lifecycle, from translating product requirements into scalable ML architectures, developing and deploying state-of-the-art models, designing and evaluating online experiments, to optimizing the distributed GPU infrastructure that serves billions of recommendations in milliseconds.</p>\n<p>Basic Qualifications:</p><ul><li><p>BA/BS Degree in Computer Science, Machine Learning or related technical discipline, or related practical experience.</p></li><li><p>2+ years experience in software design, development, and algorithm related solutions.</p></li><li><p>2+ years experience in programming languages such as Java, Python, etc.</p></li><li><p>2+ years experience with machine learning, data mining, and information retrieval or natural language processing</p></li></ul><p>Preferred Qualifications:</p><ul><li><p>4+ years of relevant AI/Machine Learning experience.</p></li><li><p>MS or PhD in Computer Science or related technical discipline</p></li><li><p>Experience with PyTorch or similar Deep Learning frameworks</p></li><li><p>Experience with Spark for data manipulation and transformation</p></li><li><p>Experience with A/B testing at scale in a consumer-facing product</p></li><li><p>Experience with AI code development (i.e ClaudeCode, Codex, Copilot)</p></li><li><p>Experience adapting pre-trained LLMs to production systems including fine-tuning and student-teacher model paradigms</p></li><li><p>Experience applying AI/ML to recommender systems at scale</p></li><li><p>Published work in academic conferences or industry circles.</p></li></ul><p>Suggested Skills</p><ul><li><p>Experience in Machine Learning and Deep Learning</p></li><li><p>Experience in Big Data</p></li><li><p>Strong technical background &amp; Strategic thinking</p></li><li><p>Experience in GAI and/or LLMs</p></li></ul><p>You will Benefit from our Culture</p><p>We strongly believe in the well-being of our employees and their families. That is why we offer generous health and wellness programs and time away for employees of all levels. LinkedIn is committed to fair and equitable compensation practices. The pay range for this role is $144,000 - $236,000.&#xa0; Actual compensation packages are based on several factors that are unique to each candidate, including but not limited to skill set, depth of experience, certifications, and specific work location. This may be different in other locations due to differences in the cost of labor. The total compensation package for this position may also include annual performance bonus, stock, benefits and/or other applicable incentive compensation plans. For more information, visit https://careers.linkedin.com/benefits.&#xa0;</p>\n<p>LinkedIn is the world's largest professional network, built to create economic opportunity for every member of the global workforce. Our products help people make powerful connections, discover exciting opportunities, build necessary skills, and gain valuable insights every day. We're also committed to providing transformational opportunities for our own employees by investing in their growth. We aspire to create a culture that's built on trust, care, inclusion, and fun – where everyone can succeed.</p><p>Join us to transform the way the world works.</p>\n<div sr-tagline=\"\"></div><p><strong>Equal Opportunity Statement&#xa0;</strong></p><p>We seek candidates with a wide range of perspectives and backgrounds and we are proud to be an equal opportunity employer. LinkedIn considers qualified applicants without regard to race, color, religion, creed, gender, national origin, age, disability, veteran status, marital status, pregnancy, sex, gender expression or identity, sexual orientation, citizenship, or any other legally protected class.</p><p>LinkedIn is committed to offering an inclusive and accessible experience for all job seekers, including individuals with disabilities. Our goal is to foster an inclusive and accessible workplace where everyone has the opportunity to be successful.</p><p>If you need a Reasonable Accommodation to search for a job opening, apply for a position, or participate in the interview process, connect with us and describe the specific Accommodation requested for a disability-related limitation.<br>\nFill out an Accommodation request here: https://app.smartsheet.com/b/form/b660a0327d044969abfd7a4e73d15c36</p><p>Reasonable accommodations are modifications or adjustments to the application or hiring process that would enable you to fully participate in that process. Examples of reasonable accommodations include but are not limited to:</p><ul><li>Documents in alternate formats or read aloud to you</li><li>Having interviews in an accessible location</li><li>Being accompanied by a service dog</li><li>Having a sign language interpreter present for the interview</li></ul><p>A request for an accommodation will be responded to within three business days. However, non-disability related requests, such as following up on an application, will not receive a response.</p><p>LinkedIn will not discharge or in any other manner discriminate against employees or applicants because they have inquired about, discussed, or disclosed their own pay or the pay of another employee or applicant. However, employees who have access to the compensation information of other employees or applicants as a part of their essential job functions cannot disclose the pay of other employees or applicants to individuals who do not otherwise have access to compensation information, unless the disclosure is (a) in response to a formal complaint or charge, (b) in furtherance of an investigation, proceeding, hearing, or action, including an investigation conducted by LinkedIn, or (c) consistent with LinkedIn's legal duty to furnish information.</p><p><strong>San Francisco Fair Chance Ordinance ​</strong></p><p>Pursuant to the San Francisco Fair Chance Ordinance, LinkedIn will consider for employment qualified applicants with arrest and conviction records.</p>\n<p><strong>Pay Transparency Policy Statement ​</strong></p><p>As a federal contractor, LinkedIn follows the Pay Transparency and non-discrimination provisions described at this link: https://lnkd.in/paytransparency.</p>\n<p><strong>Global Data Privacy Notice and Compliance Posters for Job Candidates&#xa0;</strong></p><p>Please use this link to access documents that provide information about how LinkedIn handles the personal data of employees and job applicants, as well as the E-Verify Participation Notice and the Department of Justice Immigrant and Employee Rights Section Right to Work posters: https://www.linkedin.com/legal/candidate-portal.</p>",
+      "employment_type": "Full-time",
+      "external_id": "744000141988607",
+      "fidelity": "origin",
+      "location_raw": "Mountain View, CA, United States",
+      "locations_extra": [],
+      "origin_url": null,
+      "published_at": "2026-08-06 19:17:14.056000+00:00",
+      "published_at_precision": "exact",
+      "requisition_id": "REQ23458",
+      "source_active": true,
+      "source_extra": {
+        "customField": [
+          {
+            "fieldId": "5fca73e7a502b54127820081",
+            "fieldLabel": "System Title",
+            "valueId": "Sr. Software Engineer Machine Learning",
+            "valueLabel": "Sr. Software Engineer, Machine Learning"
+          },
+          {
+            "fieldId": "5f342b6729cf3d34dae379be",
+            "fieldLabel": "Employee Type",
+            "valueId": "bb960dfc-ec2b-41c8-97cf-6fb155d89854",
+            "valueLabel": "Employee"
+          },
+          {
+            "fieldId": "5f342f14afa56d15f50c1a5b",
+            "fieldLabel": "Tertiary Language",
+            "valueId": "535057fb-da56-4f41-97c7-41e2e7351138",
+            "valueLabel": "N/A"
+          },
+          {
+            "fieldId": "6243642ce6aebe3bc5c22756",
+            "fieldLabel": "Workplace Type",
+            "valueId": "e089500a-bc74-4552-a50d-551cceec2265",
+            "valueLabel": "Hybrid"
+          },
+          {
+            "fieldId": "5f3425a7afa56d15f50c1a56",
+            "fieldLabel": "Recruiting Team",
+            "valueId": "adae896c-d331-4c49-b6e2-22684f4262d5",
+            "valueLabel": "NAMER Engineering"
+          },
+          {
+            "fieldId": "5fca7483c7f623505f9a0585",
+            "fieldLabel": "Career Track & Grade",
+            "valueId": "IC38",
+            "valueLabel": "IC3/8"
+          },
+          {
+            "fieldId": "5fca715152c79415257db289",
+            "fieldLabel": "Cost Center Country",
+            "valueId": "UnitedStates",
+            "valueLabel": "United States"
+          },
+          {
+            "fieldId": "5fca72a4c7f623505f9a0584",
+            "fieldLabel": "Job Family and Level",
+            "valueId": "Software Engineering - Machine Learning - IC",
+            "valueLabel": "Software Engineering - Machine Learning - IC"
+          },
+          {
+            "fieldId": "5fca7110c7f623505f9a0582",
+            "fieldLabel": "Cost Center:",
+            "valueId": "4018FlagshipExperience",
+            "valueLabel": "4018 - FlagshipExperience"
+          },
+          {
+            "fieldId": "COUNTRY",
+            "fieldLabel": "Country/Region",
+            "valueId": "us",
+            "valueLabel": "United States"
+          },
+          {
+            "fieldId": "5f342ede29cf3d34dae379c0",
+            "fieldLabel": "Secondary Language",
+            "valueId": "dc376009-020d-45f9-8052-cba8d16799d8",
+            "valueLabel": "N/A"
+          },
+          {
+            "fieldId": "5f342c57afa56d15f50c1a5a",
+            "fieldLabel": "Region",
+            "valueId": "083bcabf-7d75-4f51-a91a-331d89c0d1b7",
+            "valueLabel": "NAMER"
+          },
+          {
+            "fieldId": "5f342b9229cf3d34dae379bf",
+            "fieldLabel": "Time Type",
+            "valueId": "0f99a586-37a4-4870-918e-8d72d49996d2",
+            "valueLabel": "Full Time"
+          },
+          {
+            "fieldId": "5f342b333803e6711667cf97",
+            "fieldLabel": "Job Level",
+            "valueId": "d85494f8-2715-4ca0-aa54-9bd61ccd74b6",
+            "valueLabel": "Mid-Senior Level"
+          },
+          {
+            "fieldId": "5f3175c83263b149688b3d7b",
+            "fieldLabel": "Brands",
+            "valueId": "default",
+            "valueLabel": "LinkedIn"
+          },
+          {
+            "fieldId": "5f3175c83263b149688b3d7c",
+            "fieldLabel": "Department",
+            "valueId": "1713675",
+            "valueLabel": "Engineering"
+          }
+        ],
+        "department": {
+          "id": 1713675,
+          "label": "Engineering"
+        },
+        "experienceLevel": {
+          "id": "mid_senior_level",
+          "label": "Mid-Senior Level"
+        },
+        "function": {
+          "id": "engineering",
+          "label": "Engineering"
+        },
+        "industry": {
+          "id": "internet",
+          "label": "Internet"
+        },
+        "language": {
+          "code": "en",
+          "label": "English",
+          "labelNative": "English (US)"
+        },
+        "ref": null,
+        "referralUrl": "https://jobs.smartrecruiters.com/external-referrals/company/LinkedIn3/publication/0f07ff17-e2fb-4c34-ace6-2522bd9c60fb?dcr_ci=LinkedIn3",
+        "visibility": "PUBLIC"
+      },
+      "source_updated_at": null,
+      "state": "open",
+      "title": "Senior AI Engineer, VideoAI",
+      "type": "Posting",
+      "url_posting": "https://jobs.smartrecruiters.com/LinkedIn3/744000141988607-senior-ai-engineer-videoai",
+      "workplace_type_raw": null
+    }
+  ],
+  "ok": true,
   "source": "smartrecruiters"
 }

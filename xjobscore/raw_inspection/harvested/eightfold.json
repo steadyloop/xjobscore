@@ -1,10 +1,6 @@
 {
-  "elapsed_s": 120.001,
-  "envelope": null,
-  "error": {
-    "class": "TimeoutError",
-    "detail": ""
-  },
+  "elapsed_s": 195.715,
+  "envelope": {},
   "feed": {
     "company_id": "microsoft",
     "company_name": "Microsoft",
@@ -17,8 +13,36 @@
     "id": -2524024834826871880,
     "key": "microsoft"
   },
-  "fetched_at": "2026-08-06T16:35:44.161602+00:00",
-  "item": null,
-  "ok": false,
-  "source": "eightfold"
+  "fetched_at": "2026-08-06T19:40:36.180600+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "1970393556945433",
+    "kind": "json",
+    "payload": {
+      "atsJobId": "200045604",
+      "creationTs": 1785177229,
+      "department": "Logistics Technician",
+      "displayJobId": "200045604",
+      "id": 1970393556945433,
+      "isHot": 0,
+      "locationFlexibility": null,
+      "locations": [
+        "United States, Virginia, Sterling"
+      ],
+      "name": "Logistics Technician",
+      "positionUrl": "/careers/job/1970393556945433",
+      "postedTs": 1786043964,
+      "solrScore": null,
+      "standardizedLocations": [
+        "Sterling, VA, US"
+      ],
+      "stars": 0,
+      "workLocationOption": "onsite"
+    }
+  },
+  "item_count": 1933,
+  "ok": true,
+  "source": "eightfold",
+  "truncated": false,
+  "validators": {}
 }
