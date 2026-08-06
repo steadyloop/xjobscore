@@ -13,6 +13,7 @@ import json
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from functools import partial
+from html import unescape
 from html.parser import HTMLParser
 from importlib import import_module
 from typing import Any
@@ -263,20 +264,39 @@ def _rss(config: dict, feed: Feed, item: Item) -> Posting:
     rss = config["rss"]
     namespace = rss["namespace"]
     qualified = lambda path: "/".join(f"{{{namespace}}}{part}" for part in path.split("/"))
-    locations = [_text(el.find(f"{{{namespace}}}name")) for el in element.findall(qualified(rss["location_path"]))]
+    # A feed either nests the place name a level down (Teamtailor's
+    # <location><name>) or states it as the element's own text
+    # (SuccessFactors' <g:location>). Fall back rather than branch on a flag:
+    # the nested lookup simply finds nothing in the flat shape.
+    located = element.findall(qualified(rss["location_path"]))
+    locations = [_text(el.find(f"{{{namespace}}}name")) or _text(el) for el in located]
     locations = [value for value in locations if value]
     published_at = None
     if (pub_date := _text(element.find("pubDate"))):
         published_at = parsedate_to_datetime(pub_date)
     extras = {key: _text(element.find(qualified(path))) for key, path in rss["extra_paths"].items()}
     extras["guid"] = _text(element.find("guid"))
+    # Most RSS boards are per-company, so the feed key names the employer. A
+    # multi-tenant feed keyed by host carries the real name in an element
+    # instead, and `company_path` points at it.
+    company_raw = feed.key
+    if (path := rss.get("company_path")):
+        company_raw = _text(element.find(qualified(path))) or feed.key
+    # A feed may CDATA-wrap markup that is itself entity-escaped, so the text
+    # node reads '&lt;p&gt;' rather than '<p>'. Exactly one unescape restores
+    # the markup; a second would decode entities that belong inside attribute
+    # values. Opt-in, because a feed sending plain HTML must not have a
+    # literal '&lt;' a job author typed turned into a tag.
+    description_html = _text(element.find("description"))
+    if description_html and rss.get("unescape_description"):
+        description_html = unescape(description_html)
     return Posting(
         external_id=item.external_id,
         title=_text(element.find("title")) or "",
         url_posting=_text(element.find("link")) or "",
-        company_raw=feed.key,
+        company_raw=company_raw,
         location_raw=locations[0] if locations else None,
-        description_html=_text(element.find("description")),
+        description_html=description_html,
         workplace_type_raw=_text(element.find("remoteStatus")),
         published_at=published_at,
         published_at_precision="exact" if published_at else "unknown",
