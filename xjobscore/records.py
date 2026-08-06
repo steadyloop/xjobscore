@@ -4,7 +4,7 @@
 thread, an inbox query), demuxed into single-listing raw `Item`s with the
 response envelope alongside. A source peels the vendor-specific transport layer
 and translates nothing -- the payload it hands back is the payload the server
-sent, so bronze (`raw_document`) is genuinely replayable and a parser bug is
+sent, so bronze (`raw_posting`) is genuinely replayable and a parser bug is
 fixed by re-running over stored payloads, never by re-fetching postings that
 may have closed.
 
@@ -45,7 +45,7 @@ __all__ = [
     "Target",
 ]
 
-# Mirrors raw_document.kind: the vendor transport format the payload arrived
+# Mirrors raw_posting.kind: the vendor transport format the payload arrived
 # in, not the role it plays (that is Record.envelope, routed separately).
 # 'json' -> payload_json; 'xml' | 'html' | 'mime' -> payload_text -- a source
 # must say which of the three, since router cannot tell them apart from a
@@ -56,7 +56,7 @@ Kind = Literal["json", "xml", "html", "mime"]
 # never lands canonical; it is promoted by re-fetch at origin.
 Fidelity = Literal["origin", "secondhand"]
 
-# What the *source* says about the posting. Not posting.status, which the
+# What the *source* says about the posting. Not job_posting.status, which the
 # engine owns and which also has 'unlisted'.
 PostState = Literal["open", "closed"]
 
@@ -64,7 +64,7 @@ PostState = Literal["open", "closed"]
 # the whole reason the field exists.
 Provenance = Literal["source", "model", "human"]
 
-# Mirrors posting.published_at_precision. Gates detect_latency_s so latency is
+# Mirrors job_posting.published_at_precision. Gates detect_latency_s so latency is
 # never fabricated out of a "Posted Today".
 Precision = Literal["exact", "date", "unknown"]
 
@@ -107,14 +107,14 @@ class Item:
     """One demuxed unit, verbatim -- one job or one detail fetch.
 
     `payload` is exactly what the source received for this unit, no field
-    dropped and no value converted. That is what makes `raw_document` genuinely
+    dropped and no value converted. That is what makes `raw_posting` genuinely
     replayable: a parsing bug is fixed by re-running over stored `Item`s, never
     by re-fetching a posting that may have closed since.
     """
 
-    external_id: str  # -> raw_document.external_id; text always, per Posting
+    external_id: str  # -> raw_posting.external_id; text always, per Posting
     payload: dict | str  # -> payload_json / payload_text
-    kind: Kind = "json"  # -> raw_document.kind; the source knows its own transport
+    kind: Kind = "json"  # -> raw_posting.kind; the source knows its own transport
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,11 +141,6 @@ class Record:
 @dataclass(frozen=True, slots=True)
 class Posting:
     """A job.
-
-    `fidelity='origin'` means you fetched the employer's own listing. Anything
-    else is `secondhand`, and must be accompanied by a `Target` for
-    `origin_url` -- promotion happens by re-fetch, never by trust.
-
     `state='closed'` is a *stated* closure: an aggregator's `active: false`, a
     404 on a detail page, an explicit "this role is filled". It requires
     `closed_evidence`. Absence from a listing is not closure and is not yours
@@ -153,19 +148,18 @@ class Posting:
     flagged `complete` and `closes`.
     """
 
-    external_id: str  # text always: int, uuid, slug and hash all appear
-    title: str
-    url_posting: str
+    external_id: str  # source_key
+    
+    title: str        # title
+    url_posting: str  # source_url
 
-    fidelity: Fidelity = "origin"
-    state: PostState = "open"
-    closed_evidence: str | None = None  # required when state == 'closed'
+    fidelity: Fidelity = "origin" # unused
+    state: PostState = "open"     # status
+    closed_evidence: str | None = None
 
-    # Resolution runs on this string. Most sources name the company on the
-    # element itself; the rest carry it on the response root or in the feed.
     company_raw: str | None = None
 
-    apply_url: str | None = None  # distinct from url_posting on 6/14 sources
+    apply_url: str | None = None  # apply_url
     location_raw: str | None = None
 
     # NULL marks a pointer row (aggregator, email): no body means it cannot be
