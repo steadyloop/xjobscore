@@ -19,6 +19,5 @@ backups/
 /xjobscore/feed_ats_bind
 xjobscore/sources/SOURCES.md
 xjobscore/discover.log
-/xjobscore/inspector
 xjobscore/.DS_Store
 .DS_Store
