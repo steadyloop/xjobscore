@@ -96,6 +96,10 @@ class Feed:
     credentialed: bool = False  # failure is expected on expiry; best-effort
     cadence_s: int = 900  # base poll interval; backoff writes over it
     next_poll_at: datetime | None = None
+    # Inspector-only display metadata. Harvesters deliberately ignore it;
+    # the company label is resolved from feed_ats/company when available.
+    company_id: str | None = None
+    company_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

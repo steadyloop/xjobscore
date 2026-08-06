@@ -20,30 +20,29 @@ that may have closed since. Both functions may emit `Posting`; only `parse`
 may also emit `Target`, `Label` or `Fact` -- `harvest` returns one `Record`
 and nothing else.
 
-## shared JSON ATS adapter
+## shared JSON API adapter
 
-JSON ATS vendors use the plain `CONFIGS` table in `ats_configs.py`. The small
-engine in `ats.py` owns conditional list requests, pagination, optional detail
+JSON API sources use the plain `CONFIGS` table in `json-api-configs.py`. The small
+engine in `json-api.py` owns conditional list requests, pagination, optional detail
 fan-out, payload demultiplexing and partial-result handling. Config values use
 only paths, templates, fallbacks, joins, dates, lookups, lists and sections;
 raw `Item` payloads retain vendor-specific data without parser hooks.
 
-The registry binds each vendor name to `ats.harvester(name)` and
-`ats.parser(name)`, so public source names and call signatures do not change.
-## shared public document-board adapter
+The registry binds each vendor name to `json-api.harvester(name)` and
+`json-api.parser(name)`, so public source names and call signatures do not change.
+## shared docxtract adapter
 
-`webboard.py` follows the same engine/config split for public document boards.
+`docxtract.py` follows the same engine/config split for public job documents and feeds.
 Its compact configurations support direct embedded JSON-LD, HTML link
 discovery followed by JSON-LD detail pages, RSS/XML items, and static JSON
 listing documents.  Jobvite, generic JSON-LD careers pages, Teamtailor, and
-Simplify are profiles in `webboard_configs.py`.
+Simplify are profiles in `docxtract-configs.py`.
 
 Jane Street (secondary-feed join) remains focused because it does not share
 those document shapes.
 
-`inhouse.py` is a gated prototype, not part of the shared adapter. Its
-source-local golden tests document the request, rendering and bootstrap
-capabilities it must satisfy before a future atomic migration.
+Amazon, Apple, Tesla, and Uber are JSON API profiles. Company ownership does
+not create a separate adapter type.
 
 ## harvest decides granularity
 
@@ -231,8 +230,8 @@ across.
 
 ## adding one
 
-1. For a JSON ATS, add one compact entry to `ats_configs.py`; for a compatible
-   public document board, add one to `webboard_configs.py`.  For another
+1. For a JSON API, add one compact entry to `json-api-configs.py`; for a compatible
+   public job document or feed, add one to `docxtract-configs.py`. For another
    transport, write `<name>.py` exporting `harvest` and `parse` and register
    it explicitly.
 2. Save one real response to `fixtures/<name>.json`; assert `harvest` on it
@@ -251,3 +250,31 @@ Removal is those lines in reverse. Nothing else in the tree names a source.
 - A truncated listing must not be returned as if whole; a board you failed to page
   through is not evidence that the missing postings are gone. Report it: set
   `Record.truncated = True`.
+
+## planned discovery sources
+
+### Workable Jobs by Workable / SmartRecruiters job-seeker search
+
+Cross-company public job marketplaces that can discover ATS company identifiers
+from fresh role and location searches. A result URL carries the identifier:
+
+- Workable: `apply.workable.com/<company-token>/job/<job-id>`
+- SmartRecruiters: `jobs.smartrecruiters.com/<company-id>/<job-id>`
+
+These are discovery sources, not replacements for the existing ATS adapters. The
+identifier should be passed to the corresponding adapter for live validation.
+Neither vendor currently documents an unauthenticated global-enumeration API;
+automation would need an approved portal integration or permitted page/endpoint
+collection. Employers also appear only when they publish to that marketplace.
+
+### iCIMS hosted careers portal
+
+The hosted portal, `https://{tenant}.icims.com/jobs/search`, is separate from
+the implemented iCIMS vanity JSON board,
+`https://careers.{company}.com/api/jobs`. A portal hostname must not be used to
+derive that vanity hostname: for example, `campus-americas.icims.com` does not
+imply that `careers.campus-americas.com` exists.
+
+Revisit this when a live portal yields a stable, unauthenticated listing
+endpoint or a compatible public document shape. Until then, treat portal hosts
+as discovery targets, not fetchable iCIMS JSON feeds.

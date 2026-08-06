@@ -9,3 +9,30 @@ domain = "teamtailor.com"
 status = "live"
 enabled = true
 validated_at = "2026-08-04"
+
+[[feed]]
+key = "aswo"
+company_id = "aswo"
+company = "ASWO"
+domain = "aswo.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-05"
+
+[[feed]]
+key = "huaweidusseldorf-1719303222"
+company_id = "huawei-europe"
+company = "Huawei Europe"
+domain = "huawei.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-05"
+
+[[feed]]
+key = "kpmgglobalservices"
+company_id = "kpmg-global-services-hungary"
+company = "KPMG Global Services Hungary"
+domain = "kpmg.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-05"

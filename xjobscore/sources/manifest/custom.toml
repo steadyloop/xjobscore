@@ -1,0 +1,14 @@
+schema_version = 1
+adapter = "custom"
+
+[[source]]
+id = "janestreet"
+runtime_source = "janestreet"
+type = "Web Board"
+status = "implemented"
+
+[[source]]
+id = "workatastartup"
+runtime_source = "workatastartup"
+type = "Web Board"
+status = "implemented"

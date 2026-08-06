@@ -1,0 +1,10 @@
+schema_version = 1
+source = "amazon"
+
+[[feed]]
+key = "amazon"
+company_id = "amazon"
+company = "Amazon"
+domain = "amazon.jobs"
+status = "live"
+enabled = true

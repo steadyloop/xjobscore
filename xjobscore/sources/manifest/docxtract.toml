@@ -1,0 +1,33 @@
+schema_version = 1
+adapter = "docxtract"
+
+# Status manifest only. Extraction and parser definitions remain in
+# xjobscore/sources/docxtract-configs.py.
+
+[[source]]
+id = "jobvite"
+runtime_source = "jobvite"
+type = "ATS"
+config = "../docxtract-configs.py#jobvite"
+status = "implemented"
+
+[[source]]
+id = "jsonld"
+runtime_source = "jsonld"
+type = "Web Board"
+config = "../docxtract-configs.py#jsonld"
+status = "implemented"
+
+[[source]]
+id = "simplify"
+runtime_source = "simplify"
+type = "Web Board"
+config = "../docxtract-configs.py#simplify"
+status = "implemented"
+
+[[source]]
+id = "teamtailor"
+runtime_source = "teamtailor"
+type = "ATS"
+config = "../docxtract-configs.py#teamtailor"
+status = "implemented"

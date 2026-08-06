@@ -1,0 +1,3920 @@
+# Deduplicated targets from docs/planning/selecting-companies/*.md.
+# Blank domains are unresolved and are skipped until populated.
+[[company]]
+name = "100ms"
+domain = ""
+[[company]]
+name = "1X"
+domain = "1x.tech"
+[[company]]
+name = "3Red Partners"
+domain = "3redpartners.com"
+[[company]]
+name = "ABB"
+domain = ""
+[[company]]
+name = "Abbott"
+domain = ""
+[[company]]
+name = "ABL Space Systems"
+domain = "ablspacesystems.com"
+[[company]]
+name = "Ably"
+domain = ""
+[[company]]
+name = "Abnormal Security"
+domain = ""
+[[company]]
+name = "Acadian Asset Management"
+domain = "acadian-asset.com"
+[[company]]
+name = "Achronix"
+domain = ""
+[[company]]
+name = "Activeloop"
+domain = ""
+[[company]]
+name = "Adobe"
+domain = "adobe.com"
+[[company]]
+name = "Advantest"
+domain = ""
+[[company]]
+name = "Adyen"
+domain = ""
+[[company]]
+name = "Aerospike"
+domain = ""
+[[company]]
+name = "AeroVironment"
+domain = ""
+[[company]]
+name = "Aeva"
+domain = ""
+[[company]]
+name = "Affirm"
+domain = "affirm.com"
+[[company]]
+name = "Agility Robotics"
+domain = ""
+[[company]]
+name = "Agnisys"
+domain = ""
+[[company]]
+name = "Agora"
+domain = ""
+[[company]]
+name = "Ai2 (Allen Institute for AI)"
+domain = ""
+[[company]]
+name = "AI21 Labs"
+domain = "ai21.com"
+[[company]]
+name = "Aikido"
+domain = ""
+[[company]]
+name = "Air Force Research Laboratory"
+domain = "afrl.af.mil"
+[[company]]
+name = "Airbnb"
+domain = "airbnb.com"
+[[company]]
+name = "Airbyte"
+domain = ""
+[[company]]
+name = "Airtable"
+domain = ""
+[[company]]
+name = "Airwallex"
+domain = ""
+[[company]]
+name = "Aiven"
+domain = ""
+[[company]]
+name = "Akamai"
+domain = "akamai.com"
+[[company]]
+name = "Akash Network"
+domain = "akash.network"
+[[company]]
+name = "Akuna Capital"
+domain = "akunacapital.com"
+[[company]]
+name = "Albedo"
+domain = ""
+[[company]]
+name = "All Hands AI"
+domain = ""
+[[company]]
+name = "Allen Control Systems"
+domain = ""
+[[company]]
+name = "Allen Institute for AI"
+domain = "allenai.org"
+[[company]]
+name = "Allen Institute for AI (Ai2)"
+domain = ""
+[[company]]
+name = "Alloy"
+domain = ""
+[[company]]
+name = "Allstate"
+domain = ""
+[[company]]
+name = "Allston Trading"
+domain = "allstontrading.com"
+[[company]]
+name = "Alpaca"
+domain = ""
+[[company]]
+name = "Alphawave Semi"
+domain = "alphawavesemi.com"
+[[company]]
+name = "Alteryx"
+domain = ""
+[[company]]
+name = "Amazon"
+domain = "amazon.com"
+[[company]]
+name = "Amazon / AWS"
+domain = ""
+[[company]]
+name = "Amazon AGI"
+domain = ""
+[[company]]
+name = "Ambarella"
+domain = ""
+[[company]]
+name = "Amber Group"
+domain = "ambergroup.io"
+[[company]]
+name = "AMD"
+domain = "amd.com"
+[[company]]
+name = "Amentum"
+domain = ""
+[[company]]
+name = "American Airlines"
+domain = ""
+[[company]]
+name = "American Express"
+domain = ""
+[[company]]
+name = "Ames National Laboratory"
+domain = "ameslab.gov"
+[[company]]
+name = "Ampere Computing"
+domain = "amperecomputing.com"
+[[company]]
+name = "Amplitude"
+domain = "amplitude.com"
+[[company]]
+name = "Analog Devices"
+domain = "analog.com"
+[[company]]
+name = "Andes Technology"
+domain = ""
+[[company]]
+name = "Anduril"
+domain = ""
+[[company]]
+name = "Anduril Industries"
+domain = "anduril.com"
+[[company]]
+name = "Anova Financial Networks"
+domain = ""
+[[company]]
+name = "Ansys"
+domain = ""
+[[company]]
+name = "Ant Media"
+domain = ""
+[[company]]
+name = "Anthropic"
+domain = "anthropic.com"
+[[company]]
+name = "Anyscale"
+domain = "anyscale.com"
+[[company]]
+name = "Anysphere"
+domain = "cursor.com"
+[[company]]
+name = "Anza"
+domain = "anza.xyz"
+[[company]]
+name = "Apex Fintech"
+domain = ""
+[[company]]
+name = "Apex Space"
+domain = ""
+[[company]]
+name = "api.video"
+domain = ""
+[[company]]
+name = "Apollo Research"
+domain = "apolloresearch.ai"
+[[company]]
+name = "Apple"
+domain = "apple.com"
+[[company]]
+name = "Apple AIML"
+domain = ""
+[[company]]
+name = "Applied Digital"
+domain = ""
+[[company]]
+name = "Applied Intuition"
+domain = "appliedintuition.com"
+[[company]]
+name = "Applied Materials"
+domain = ""
+[[company]]
+name = "Aptiv"
+domain = ""
+[[company]]
+name = "AQR Capital"
+domain = ""
+[[company]]
+name = "AQR Capital Management"
+domain = "aqr.com"
+[[company]]
+name = "Aquatic Capital Management"
+domain = "aquaticcapital.com"
+[[company]]
+name = "Arcade AI"
+domain = ""
+[[company]]
+name = "Arcee AI"
+domain = "arcee.ai"
+[[company]]
+name = "Ares Industries"
+domain = ""
+[[company]]
+name = "Argonne"
+domain = ""
+[[company]]
+name = "Argonne National Laboratory"
+domain = "anl.gov"
+[[company]]
+name = "Argyle"
+domain = ""
+[[company]]
+name = "Arista Networks"
+domain = ""
+[[company]]
+name = "Arize AI"
+domain = "arize.com"
+[[company]]
+name = "Arm"
+domain = "arm.com"
+[[company]]
+name = "Army DEVCOM"
+domain = ""
+[[company]]
+name = "Army Research Laboratory"
+domain = ""
+[[company]]
+name = "Array Labs"
+domain = ""
+[[company]]
+name = "Arrcus"
+domain = ""
+[[company]]
+name = "Arrowstreet Capital"
+domain = "arrowstreetcapital.com"
+[[company]]
+name = "Arroyo"
+domain = ""
+[[company]]
+name = "Arteris"
+domain = ""
+[[company]]
+name = "Asana"
+domain = ""
+[[company]]
+name = "ASML"
+domain = ""
+[[company]]
+name = "Aspect Capital"
+domain = ""
+[[company]]
+name = "AssemblyAI"
+domain = ""
+[[company]]
+name = "Astera Labs"
+domain = "asteralabs.com"
+[[company]]
+name = "Astranis"
+domain = "astranis.com"
+[[company]]
+name = "Astronomer"
+domain = "astronomer.io"
+[[company]]
+name = "AT&T"
+domain = ""
+[[company]]
+name = "Atlassian"
+domain = "atlassian.com"
+[[company]]
+name = "Atomic"
+domain = ""
+[[company]]
+name = "Augment Code"
+domain = ""
+[[company]]
+name = "Aurora"
+domain = "aurora.tech"
+[[company]]
+name = "Aurora Innovation"
+domain = ""
+[[company]]
+name = "Auros"
+domain = "auros.global"
+[[company]]
+name = "Auterion"
+domain = ""
+[[company]]
+name = "Autodesk"
+domain = ""
+[[company]]
+name = "Aviz Networks"
+domain = ""
+[[company]]
+name = "AWS"
+domain = ""
+[[company]]
+name = "Axelera AI"
+domain = "axelera.ai"
+[[company]]
+name = "Axiom"
+domain = ""
+[[company]]
+name = "Axiom Space"
+domain = ""
+[[company]]
+name = "Ayar Labs"
+domain = "ayarlabs.com"
+[[company]]
+name = "B2C2"
+domain = "b2c2.com"
+[[company]]
+name = "Backblaze"
+domain = ""
+[[company]]
+name = "BAE Systems"
+domain = "baesystems.com"
+[[company]]
+name = "BAE Systems Inc"
+domain = ""
+[[company]]
+name = "Balyasny"
+domain = ""
+[[company]]
+name = "Balyasny (BAM)"
+domain = ""
+[[company]]
+name = "Balyasny Asset Management"
+domain = "bamfunds.com"
+[[company]]
+name = "Bank of America"
+domain = ""
+[[company]]
+name = "Barclays (US)"
+domain = ""
+[[company]]
+name = "Baseten"
+domain = "baseten.co"
+[[company]]
+name = "Basis Theory"
+domain = ""
+[[company]]
+name = "Battelle"
+domain = ""
+[[company]]
+name = "Beam Cloud"
+domain = "beam.cloud"
+[[company]]
+name = "Becton Dickinson"
+domain = ""
+[[company]]
+name = "Becton Dickinson (BD)"
+domain = ""
+[[company]]
+name = "Beeks Group"
+domain = ""
+[[company]]
+name = "Belvedere Trading"
+domain = "belvederetrading.com"
+[[company]]
+name = "BentoML"
+domain = ""
+[[company]]
+name = "Berkeley Lab (LBNL)"
+domain = ""
+[[company]]
+name = "Best Buy"
+domain = ""
+[[company]]
+name = "Better Stack"
+domain = ""
+[[company]]
+name = "Big-tech AI-infra orgs"
+domain = ""
+[[company]]
+name = "Bishop Fox"
+domain = ""
+[[company]]
+name = "Bitmovin"
+domain = ""
+[[company]]
+name = "Black Forest Labs"
+domain = ""
+[[company]]
+name = "BlackRock"
+domain = "blackrock.com"
+[[company]]
+name = "BlackRock Systematic"
+domain = ""
+[[company]]
+name = "BlackSky"
+domain = ""
+[[company]]
+name = "Blacksmith"
+domain = ""
+[[company]]
+name = "Blaize"
+domain = "blaize.com"
+[[company]]
+name = "Block"
+domain = "block.xyz"
+[[company]]
+name = "Bloomberg"
+domain = "bloomberg.com"
+[[company]]
+name = "Bloomberg LP"
+domain = ""
+[[company]]
+name = "Blue Origin"
+domain = "blueorigin.com"
+[[company]]
+name = "BNY"
+domain = ""
+[[company]]
+name = "Boeing"
+domain = "boeing.com"
+[[company]]
+name = "Booking.com"
+domain = ""
+[[company]]
+name = "Booz Allen Hamilton"
+domain = "boozallen.com"
+[[company]]
+name = "Bosch"
+domain = ""
+[[company]]
+name = "Bot Auto"
+domain = ""
+[[company]]
+name = "Box"
+domain = "box.com"
+[[company]]
+name = "Brain Corp"
+domain = ""
+[[company]]
+name = "Braintrust"
+domain = "braintrust.dev"
+[[company]]
+name = "Breker Verification"
+domain = ""
+[[company]]
+name = "Brevan Howard"
+domain = "brevanhoward.com"
+[[company]]
+name = "Brex"
+domain = "brex.com"
+[[company]]
+name = "Bridgewater Associates"
+domain = "bridgewater.com"
+[[company]]
+name = "Bright Machines"
+domain = ""
+[[company]]
+name = "Brightcove"
+domain = ""
+[[company]]
+name = "Broadcom"
+domain = "broadcom.com"
+[[company]]
+name = "Broadcom / VMware"
+domain = ""
+[[company]]
+name = "Broadridge"
+domain = ""
+[[company]]
+name = "Brookhaven"
+domain = ""
+[[company]]
+name = "Brookhaven National Laboratory"
+domain = "bnl.gov"
+[[company]]
+name = "Browserbase"
+domain = ""
+[[company]]
+name = "Bugcrowd"
+domain = ""
+[[company]]
+name = "BuildBuddy"
+domain = ""
+[[company]]
+name = "Buildkite"
+domain = ""
+[[company]]
+name = "Bungie"
+domain = ""
+[[company]]
+name = "Bunny.net"
+domain = ""
+[[company]]
+name = "ByteDance"
+domain = "bytedance.com"
+[[company]]
+name = "ByteDance / TikTok"
+domain = ""
+[[company]]
+name = "CACI"
+domain = "caci.com"
+[[company]]
+name = "Cadence"
+domain = ""
+[[company]]
+name = "Cadence Design Systems"
+domain = "cadence.com"
+[[company]]
+name = "Campbell & Company"
+domain = ""
+[[company]]
+name = "Canonical"
+domain = "canonical.com"
+[[company]]
+name = "Canva"
+domain = "canva.com"
+[[company]]
+name = "Capella Space"
+domain = "capellaspace.com"
+[[company]]
+name = "Capital Fund Management"
+domain = ""
+[[company]]
+name = "Capital One"
+domain = ""
+[[company]]
+name = "Captions"
+domain = ""
+[[company]]
+name = "Capula Investment Management"
+domain = "capulaglobal.com"
+[[company]]
+name = "Cartesia"
+domain = ""
+[[company]]
+name = "Castelion"
+domain = "castelion.com"
+[[company]]
+name = "Caterpillar"
+domain = ""
+[[company]]
+name = "Causely"
+domain = ""
+[[company]]
+name = "Cboe"
+domain = ""
+[[company]]
+name = "Cboe Global Markets"
+domain = "cboe.com"
+[[company]]
+name = "Celestial AI"
+domain = "celestial.ai"
+[[company]]
+name = "Cerebras"
+domain = ""
+[[company]]
+name = "Cerebras Systems"
+domain = "cerebras.ai"
+[[company]]
+name = "Cerebrium"
+domain = ""
+[[company]]
+name = "Ceva"
+domain = ""
+[[company]]
+name = "Chainalysis"
+domain = "chainalysis.com"
+[[company]]
+name = "Chainguard"
+domain = ""
+[[company]]
+name = "Chalk"
+domain = "chalk.ai"
+[[company]]
+name = "Chaos Industries"
+domain = "chaosindustries.com"
+[[company]]
+name = "Character.AI"
+domain = "character.ai"
+[[company]]
+name = "Charles Schwab"
+domain = ""
+[[company]]
+name = "Charter (Spectrum)"
+domain = ""
+[[company]]
+name = "Check Point"
+domain = ""
+[[company]]
+name = "Checkmarx"
+domain = ""
+[[company]]
+name = "Checkout.com"
+domain = ""
+[[company]]
+name = "Chevron"
+domain = ""
+[[company]]
+name = "Chicago Trading Company"
+domain = "chicagotrading.com"
+[[company]]
+name = "Chicago Trading Company (CTC)"
+domain = ""
+[[company]]
+name = "Chime"
+domain = ""
+[[company]]
+name = "Chipotle"
+domain = ""
+[[company]]
+name = "Chroma"
+domain = "trychroma.com"
+[[company]]
+name = "Chronosphere"
+domain = "chronosphere.io"
+[[company]]
+name = "Ciena"
+domain = ""
+[[company]]
+name = "Cigna / Evernorth"
+domain = ""
+[[company]]
+name = "Cipher Mining"
+domain = ""
+[[company]]
+name = "Circle"
+domain = "circle.com"
+[[company]]
+name = "CircleCI"
+domain = ""
+[[company]]
+name = "Cirrascale"
+domain = ""
+[[company]]
+name = "Cirrus Logic"
+domain = ""
+[[company]]
+name = "Cisco"
+domain = "cisco.com"
+[[company]]
+name = "Citadel"
+domain = "citadel.com"
+[[company]]
+name = "Citadel Securities"
+domain = "citadelsecurities.com"
+[[company]]
+name = "Citi"
+domain = "citigroup.com"
+[[company]]
+name = "Clear Street"
+domain = ""
+[[company]]
+name = "ClearML"
+domain = "clear.ml"
+[[company]]
+name = "ClickHouse"
+domain = "clickhouse.com"
+[[company]]
+name = "ClickHouse Inc"
+domain = ""
+[[company]]
+name = "Cloud Software Group"
+domain = ""
+[[company]]
+name = "Cloudera"
+domain = ""
+[[company]]
+name = "Cloudflare"
+domain = "cloudflare.com"
+[[company]]
+name = "Cloudian"
+domain = ""
+[[company]]
+name = "Cloudinary"
+domain = ""
+[[company]]
+name = "CME Group"
+domain = "cmegroup.com"
+[[company]]
+name = "CNA"
+domain = ""
+[[company]]
+name = "CNA Corporation"
+domain = ""
+[[company]]
+name = "Cockroach Labs"
+domain = "cockroachlabs.com"
+[[company]]
+name = "Codeplay (Intel)"
+domain = ""
+[[company]]
+name = "Coder"
+domain = ""
+[[company]]
+name = "Cognition"
+domain = "cognition.ai"
+[[company]]
+name = "Cohere"
+domain = "cohere.com"
+[[company]]
+name = "Coherent"
+domain = ""
+[[company]]
+name = "Cohesity"
+domain = "cohesity.com"
+[[company]]
+name = "Coinbase"
+domain = "coinbase.com"
+[[company]]
+name = "Collins Aerospace"
+domain = ""
+[[company]]
+name = "Column"
+domain = ""
+[[company]]
+name = "Comcast / NBCUniversal"
+domain = ""
+[[company]]
+name = "Comet"
+domain = "comet.com"
+[[company]]
+name = "Comet ML"
+domain = ""
+[[company]]
+name = "Composio"
+domain = ""
+[[company]]
+name = "Confluent"
+domain = "confluent.io"
+[[company]]
+name = "Consolidated Trading"
+domain = "consolidatedtrading.com"
+[[company]]
+name = "Contextual AI"
+domain = "contextual.ai"
+[[company]]
+name = "Continental"
+domain = ""
+[[company]]
+name = "Continue.dev"
+domain = ""
+[[company]]
+name = "Contrast Security"
+domain = ""
+[[company]]
+name = "Convex"
+domain = ""
+[[company]]
+name = "Coralogix"
+domain = ""
+[[company]]
+name = "Core Scientific"
+domain = ""
+[[company]]
+name = "CoreWeave"
+domain = "coreweave.com"
+[[company]]
+name = "Cornelis Networks"
+domain = ""
+[[company]]
+name = "Corsair"
+domain = ""
+[[company]]
+name = "Costco"
+domain = ""
+[[company]]
+name = "Couchbase"
+domain = "couchbase.com"
+[[company]]
+name = "CQG"
+domain = ""
+[[company]]
+name = "Crabel Capital"
+domain = ""
+[[company]]
+name = "Credo Semiconductor"
+domain = "credosemi.com"
+[[company]]
+name = "CrewAI"
+domain = ""
+[[company]]
+name = "Cribl"
+domain = ""
+[[company]]
+name = "CrowdStrike"
+domain = ""
+[[company]]
+name = "Crunchy Data"
+domain = ""
+[[company]]
+name = "Crusoe"
+domain = "crusoe.ai"
+[[company]]
+name = "Cubic"
+domain = ""
+[[company]]
+name = "Cubic Corporation"
+domain = "cubic.com"
+[[company]]
+name = "Cudo Compute"
+domain = ""
+[[company]]
+name = "Cumberland"
+domain = "cumberland.io"
+[[company]]
+name = "Cumberland (DRW)"
+domain = ""
+[[company]]
+name = "Cummins"
+domain = ""
+[[company]]
+name = "Current"
+domain = ""
+[[company]]
+name = "Cursor (Anysphere)"
+domain = ""
+[[company]]
+name = "Curtiss-Wright"
+domain = ""
+[[company]]
+name = "Cutler Group"
+domain = ""
+[[company]]
+name = "CVS Health"
+domain = ""
+[[company]]
+name = "CX2"
+domain = ""
+[[company]]
+name = "CyberArk"
+domain = ""
+[[company]]
+name = "D-ID"
+domain = ""
+[[company]]
+name = "d-Matrix"
+domain = "d-matrix.ai"
+[[company]]
+name = "D. E. Shaw"
+domain = "deshaw.com"
+[[company]]
+name = "Da Vinci Derivatives"
+domain = ""
+[[company]]
+name = "Da Vinci Trading"
+domain = "davincitrading.com"
+[[company]]
+name = "Dagster Labs"
+domain = "dagster.io"
+[[company]]
+name = "Daily"
+domain = ""
+[[company]]
+name = "DARPA"
+domain = ""
+[[company]]
+name = "Dassault Systèmes"
+domain = ""
+[[company]]
+name = "Databento"
+domain = ""
+[[company]]
+name = "Databricks"
+domain = "databricks.com"
+[[company]]
+name = "Databricks (Mosaic)"
+domain = ""
+[[company]]
+name = "DataCrunch"
+domain = "datacrunch.io"
+[[company]]
+name = "Datadog"
+domain = "datadoghq.com"
+[[company]]
+name = "Dataiku"
+domain = ""
+[[company]]
+name = "DataRobot"
+domain = ""
+[[company]]
+name = "DataStax"
+domain = "datastax.com"
+[[company]]
+name = "Daytona"
+domain = ""
+[[company]]
+name = "DBOS"
+domain = ""
+[[company]]
+name = "dbt Labs"
+domain = "getdbt.com"
+[[company]]
+name = "DDN"
+domain = ""
+[[company]]
+name = "Decagon"
+domain = "decagon.ai"
+[[company]]
+name = "Decart"
+domain = ""
+[[company]]
+name = "Decodable"
+domain = ""
+[[company]]
+name = "Deel"
+domain = "deel.com"
+[[company]]
+name = "Deep Infra"
+domain = ""
+[[company]]
+name = "Deepgram"
+domain = ""
+[[company]]
+name = "DeepInfra"
+domain = "deepinfra.com"
+[[company]]
+name = "Deere"
+domain = ""
+[[company]]
+name = "Dell Technologies"
+domain = "dell.com"
+[[company]]
+name = "Delta Air Lines"
+domain = ""
+[[company]]
+name = "Deno"
+domain = ""
+[[company]]
+name = "Denso"
+domain = ""
+[[company]]
+name = "Denvr Dataworks"
+domain = ""
+[[company]]
+name = "Depot"
+domain = ""
+[[company]]
+name = "Descript"
+domain = ""
+[[company]]
+name = "Deutsche Bank (US)"
+domain = ""
+[[company]]
+name = "Deutsche Börse / Eurex"
+domain = ""
+[[company]]
+name = "DevZero"
+domain = ""
+[[company]]
+name = "Dexcom"
+domain = "dexcom.com"
+[[company]]
+name = "Dexterity"
+domain = ""
+[[company]]
+name = "DigitalOcean"
+domain = "digitalocean.com"
+[[company]]
+name = "Dimensional Fund Advisors"
+domain = ""
+[[company]]
+name = "Discord"
+domain = "discord.com"
+[[company]]
+name = "Discover"
+domain = ""
+[[company]]
+name = "Distributed Spectrum"
+domain = ""
+[[company]]
+name = "Divergent Technologies"
+domain = ""
+[[company]]
+name = "Docker"
+domain = "docker.com"
+[[company]]
+name = "Dolby.io"
+domain = ""
+[[company]]
+name = "Domino Data Lab"
+domain = ""
+[[company]]
+name = "Domino's"
+domain = ""
+[[company]]
+name = "DoorDash"
+domain = "doordash.com"
+[[company]]
+name = "DraftKings"
+domain = ""
+[[company]]
+name = "Draper"
+domain = "draper.com"
+[[company]]
+name = "Draper Laboratory"
+domain = ""
+[[company]]
+name = "Drata"
+domain = ""
+[[company]]
+name = "Dremio"
+domain = ""
+[[company]]
+name = "DriveNets"
+domain = ""
+[[company]]
+name = "DriveWealth"
+domain = ""
+[[company]]
+name = "Dropbox"
+domain = "dropbox.com"
+[[company]]
+name = "DRW"
+domain = "drw.com"
+[[company]]
+name = "DTCC"
+domain = ""
+[[company]]
+name = "DuckDB Labs"
+domain = "duckdblabs.com"
+[[company]]
+name = "Duolingo"
+domain = ""
+[[company]]
+name = "Dust"
+domain = ""
+[[company]]
+name = "DV Trading"
+domain = ""
+[[company]]
+name = "Dwolla"
+domain = ""
+[[company]]
+name = "Dynatrace"
+domain = ""
+[[company]]
+name = "E2B"
+domain = ""
+[[company]]
+name = "eBay"
+domain = "ebay.com"
+[[company]]
+name = "Eclipse Trading"
+domain = "eclipsetrading.com"
+[[company]]
+name = "EDB"
+domain = ""
+[[company]]
+name = "Edge Delta"
+domain = ""
+[[company]]
+name = "EdgeRunner AI"
+domain = ""
+[[company]]
+name = "Efinix"
+domain = ""
+[[company]]
+name = "Einride"
+domain = ""
+[[company]]
+name = "Elastic"
+domain = "elastic.co"
+[[company]]
+name = "Elbit America"
+domain = ""
+[[company]]
+name = "ElectricSQL"
+domain = ""
+[[company]]
+name = "Electronic Arts"
+domain = ""
+[[company]]
+name = "EleutherAI"
+domain = "eleuther.ai"
+[[company]]
+name = "ElevenLabs"
+domain = "elevenlabs.io"
+[[company]]
+name = "Emerson"
+domain = ""
+[[company]]
+name = "EnCharge AI"
+domain = "enchargeai.com"
+[[company]]
+name = "Endor Labs"
+domain = ""
+[[company]]
+name = "Enfabrica"
+domain = "enfabrica.net"
+[[company]]
+name = "EngFlow"
+domain = ""
+[[company]]
+name = "Engineers Gate"
+domain = "engineersgate.com"
+[[company]]
+name = "Epic Games"
+domain = "epicgames.com"
+[[company]]
+name = "Epic Systems"
+domain = ""
+[[company]]
+name = "Epirus"
+domain = "epirusinc.com"
+[[company]]
+name = "Equifax"
+domain = ""
+[[company]]
+name = "Esperanto Technologies"
+domain = ""
+[[company]]
+name = "Estuary"
+domain = ""
+[[company]]
+name = "Etched"
+domain = "etched.com"
+[[company]]
+name = "eToro"
+domain = ""
+[[company]]
+name = "Euronext"
+domain = ""
+[[company]]
+name = "Exegy"
+domain = ""
+[[company]]
+name = "ExodusPoint"
+domain = ""
+[[company]]
+name = "ExodusPoint Capital"
+domain = "exoduspoint.com"
+[[company]]
+name = "Expedera"
+domain = ""
+[[company]]
+name = "Expedia"
+domain = ""
+[[company]]
+name = "Experian (North America)"
+domain = ""
+[[company]]
+name = "Extropic"
+domain = "extropic.ai"
+[[company]]
+name = "ExxonMobil"
+domain = ""
+[[company]]
+name = "Factory AI"
+domain = ""
+[[company]]
+name = "FactSet"
+domain = ""
+[[company]]
+name = "fal"
+domain = "fal.ai"
+[[company]]
+name = "fal.ai"
+domain = ""
+[[company]]
+name = "FalconX"
+domain = "falconx.io"
+[[company]]
+name = "FanDuel"
+domain = ""
+[[company]]
+name = "Fannie Mae"
+domain = ""
+[[company]]
+name = "Fastly"
+domain = "fastly.com"
+[[company]]
+name = "Featherless AI"
+domain = ""
+[[company]]
+name = "Federal Reserve Bank of New York"
+domain = ""
+[[company]]
+name = "Federal Reserve Board of Governors"
+domain = ""
+[[company]]
+name = "FedEx"
+domain = ""
+[[company]]
+name = "Feldera"
+domain = ""
+[[company]]
+name = "Fermi National Accelerator Laboratory"
+domain = "fnal.gov"
+[[company]]
+name = "Fermilab"
+domain = ""
+[[company]]
+name = "FICO"
+domain = "fico.com"
+[[company]]
+name = "Fiddler AI"
+domain = "fiddler.ai"
+[[company]]
+name = "Fidelity Investments"
+domain = "fidelity.com"
+[[company]]
+name = "Figma"
+domain = "figma.com"
+[[company]]
+name = "Figure AI"
+domain = "figure.ai"
+[[company]]
+name = "Finix"
+domain = ""
+[[company]]
+name = "FINRA"
+domain = ""
+[[company]]
+name = "Fireblocks"
+domain = "fireblocks.com"
+[[company]]
+name = "Firebolt"
+domain = "firebolt.io"
+[[company]]
+name = "Firefly Aerospace"
+domain = "fireflyspace.com"
+[[company]]
+name = "FireHydrant"
+domain = ""
+[[company]]
+name = "Firestorm Labs"
+domain = ""
+[[company]]
+name = "Fireworks AI"
+domain = "fireworks.ai"
+[[company]]
+name = "Firmus"
+domain = ""
+[[company]]
+name = "FIS"
+domain = ""
+[[company]]
+name = "Fiserv"
+domain = ""
+[[company]]
+name = "Five Rings"
+domain = "fiveringsllc.com"
+[[company]]
+name = "Fivetran"
+domain = ""
+[[company]]
+name = "Flashbots"
+domain = ""
+[[company]]
+name = "Florin Court Capital"
+domain = ""
+[[company]]
+name = "Flow Traders"
+domain = "flowtraders.com"
+[[company]]
+name = "Flowdesk"
+domain = "flowdesk.co"
+[[company]]
+name = "Fluidstack"
+domain = ""
+[[company]]
+name = "Fly.io"
+domain = "fly.io"
+[[company]]
+name = "Ford"
+domain = ""
+[[company]]
+name = "FormFactor"
+domain = ""
+[[company]]
+name = "Fortem Technologies"
+domain = ""
+[[company]]
+name = "Fortinet"
+domain = ""
+[[company]]
+name = "Foundry"
+domain = "mlfoundry.com"
+[[company]]
+name = "Franklin Templeton"
+domain = ""
+[[company]]
+name = "Freddie Mac"
+domain = ""
+[[company]]
+name = "Freeplay"
+domain = ""
+[[company]]
+name = "Freestone Grove Partners"
+domain = ""
+[[company]]
+name = "Friendli AI"
+domain = ""
+[[company]]
+name = "Furiosa AI"
+domain = ""
+[[company]]
+name = "FuriosaAI"
+domain = "furiosa.ai"
+[[company]]
+name = "G-Research"
+domain = ""
+[[company]]
+name = "Galaxy Digital"
+domain = "galaxy.com"
+[[company]]
+name = "Galileo"
+domain = "galileo.ai"
+[[company]]
+name = "Garda Capital Partners"
+domain = "gardacapital.com"
+[[company]]
+name = "Garmin"
+domain = ""
+[[company]]
+name = "Gatik"
+domain = ""
+[[company]]
+name = "Gcore"
+domain = ""
+[[company]]
+name = "GE Aerospace"
+domain = ""
+[[company]]
+name = "GE Vernova"
+domain = ""
+[[company]]
+name = "GEICO"
+domain = ""
+[[company]]
+name = "Gel (EdgeDB)"
+domain = ""
+[[company]]
+name = "Gelber Group"
+domain = "gelbergroup.com"
+[[company]]
+name = "Gemini"
+domain = "gemini.com"
+[[company]]
+name = "Genentech"
+domain = ""
+[[company]]
+name = "General Atomics"
+domain = "ga.com"
+[[company]]
+name = "General Dynamics"
+domain = ""
+[[company]]
+name = "General Dynamics Mission Systems"
+domain = "gdmissionsystems.com"
+[[company]]
+name = "General Motors"
+domain = ""
+[[company]]
+name = "Genesis Cloud"
+domain = "genesiscloud.com"
+[[company]]
+name = "Geneva Trading"
+domain = "genevatrading.com"
+[[company]]
+name = "Georgia Tech Research Institute"
+domain = ""
+[[company]]
+name = "ggml.ai"
+domain = ""
+[[company]]
+name = "GitHub"
+domain = "github.com"
+[[company]]
+name = "GitLab"
+domain = "gitlab.com"
+[[company]]
+name = "Gitpod"
+domain = ""
+[[company]]
+name = "Glean"
+domain = "glean.com"
+[[company]]
+name = "Global Payments"
+domain = ""
+[[company]]
+name = "GlobalFoundries"
+domain = "gf.com"
+[[company]]
+name = "Goldman Sachs"
+domain = "goldmansachs.com"
+[[company]]
+name = "Goodfire"
+domain = "goodfire.ai"
+[[company]]
+name = "Google"
+domain = "google.com"
+[[company]]
+name = "Google Cloud"
+domain = ""
+[[company]]
+name = "Google DeepMind"
+domain = "deepmind.google"
+[[company]]
+name = "GoPro"
+domain = ""
+[[company]]
+name = "Govini"
+domain = "govini.com"
+[[company]]
+name = "Grafana Labs"
+domain = "grafana.com"
+[[company]]
+name = "Graham Capital"
+domain = ""
+[[company]]
+name = "Graid Technology"
+domain = ""
+[[company]]
+name = "Graphcore"
+domain = "graphcore.ai"
+[[company]]
+name = "Graphcore (SoftBank)"
+domain = ""
+[[company]]
+name = "Grasshopper Asia"
+domain = "grasshopperasia.com"
+[[company]]
+name = "Gravitics"
+domain = ""
+[[company]]
+name = "Groq"
+domain = "groq.com"
+[[company]]
+name = "Groundcover"
+domain = ""
+[[company]]
+name = "Group One Trading"
+domain = "group1.com"
+[[company]]
+name = "GSR"
+domain = "gsr.io"
+[[company]]
+name = "GTS"
+domain = ""
+[[company]]
+name = "Guardrails AI"
+domain = ""
+[[company]]
+name = "Gusto"
+domain = "gusto.com"
+[[company]]
+name = "H2O.ai"
+domain = ""
+[[company]]
+name = "HackerOne"
+domain = ""
+[[company]]
+name = "Hadrian"
+domain = "hadrian.co"
+[[company]]
+name = "Hailo"
+domain = "hailo.ai"
+[[company]]
+name = "Hammerspace"
+domain = ""
+[[company]]
+name = "Hap Capital"
+domain = ""
+[[company]]
+name = "Harness"
+domain = ""
+[[company]]
+name = "Harvey"
+domain = "harvey.ai"
+[[company]]
+name = "HashiCorp"
+domain = "hashicorp.com"
+[[company]]
+name = "Hatchet"
+domain = ""
+[[company]]
+name = "HawkEye 360"
+domain = "he360.com"
+[[company]]
+name = "Headlands Technologies"
+domain = "headlandstech.com"
+[[company]]
+name = "Hedra"
+domain = ""
+[[company]]
+name = "Helius"
+domain = ""
+[[company]]
+name = "Hewlett Packard Enterprise"
+domain = "hpe.com"
+[[company]]
+name = "HeyGen"
+domain = ""
+[[company]]
+name = "Higgsfield"
+domain = ""
+[[company]]
+name = "Highnote"
+domain = ""
+[[company]]
+name = "Hologic"
+domain = ""
+[[company]]
+name = "Home Depot"
+domain = ""
+[[company]]
+name = "Honeycomb"
+domain = "honeycomb.io"
+[[company]]
+name = "Honeywell"
+domain = ""
+[[company]]
+name = "Honeywell Aerospace"
+domain = ""
+[[company]]
+name = "Hookdeck"
+domain = ""
+[[company]]
+name = "HP"
+domain = ""
+[[company]]
+name = "HPE"
+domain = ""
+[[company]]
+name = "Hudson Bay Capital"
+domain = "hudsonbaycapital.com"
+[[company]]
+name = "Hudson River Trading"
+domain = "hudsonrivertrading.com"
+[[company]]
+name = "Hugging Face"
+domain = "huggingface.co"
+[[company]]
+name = "Humanloop"
+domain = ""
+[[company]]
+name = "Hume AI"
+domain = ""
+[[company]]
+name = "Huntington Ingalls"
+domain = ""
+[[company]]
+name = "Hut 8"
+domain = ""
+[[company]]
+name = "Hyperbolic"
+domain = "hyperbolic.ai"
+[[company]]
+name = "Hyperliquid"
+domain = ""
+[[company]]
+name = "Hyperstack (NexGen Cloud)"
+domain = ""
+[[company]]
+name = "IARPA"
+domain = ""
+[[company]]
+name = "IBM"
+domain = "ibm.com"
+[[company]]
+name = "IBM Research"
+domain = ""
+[[company]]
+name = "ICE / NYSE"
+domain = ""
+[[company]]
+name = "Idaho National Laboratory"
+domain = "inl.gov"
+[[company]]
+name = "Ideogram"
+domain = ""
+[[company]]
+name = "IEX"
+domain = ""
+[[company]]
+name = "Igalia"
+domain = ""
+[[company]]
+name = "Illumina"
+domain = "illumina.com"
+[[company]]
+name = "Illumio"
+domain = ""
+[[company]]
+name = "ImageKit"
+domain = ""
+[[company]]
+name = "Imbue"
+domain = ""
+[[company]]
+name = "IMC Trading"
+domain = "imc.com"
+[[company]]
+name = "imgix"
+domain = ""
+[[company]]
+name = "Imply"
+domain = "imply.io"
+[[company]]
+name = "Impulse Space"
+domain = ""
+[[company]]
+name = "Incident.io"
+domain = ""
+[[company]]
+name = "Increase"
+domain = ""
+[[company]]
+name = "Inferless"
+domain = ""
+[[company]]
+name = "Infineon"
+domain = ""
+[[company]]
+name = "Infineon Technologies"
+domain = "infineon.com"
+[[company]]
+name = "Infinera (Nokia)"
+domain = ""
+[[company]]
+name = "InfinyOn"
+domain = ""
+[[company]]
+name = "InfluxData"
+domain = "influxdata.com"
+[[company]]
+name = "Informatica"
+domain = ""
+[[company]]
+name = "Innatera"
+domain = ""
+[[company]]
+name = "Inngest"
+domain = ""
+[[company]]
+name = "Innoviz"
+domain = ""
+[[company]]
+name = "Instacart"
+domain = "instacart.com"
+[[company]]
+name = "InstantDB"
+domain = ""
+[[company]]
+name = "Institute for Defense Analyses"
+domain = "ida.org"
+[[company]]
+name = "Institute for Defense Analyses (IDA)"
+domain = ""
+[[company]]
+name = "Intel"
+domain = "intel.com"
+[[company]]
+name = "Intercontinental Exchange"
+domain = "ice.com"
+[[company]]
+name = "Intuit"
+domain = "intuit.com"
+[[company]]
+name = "Inversion Space"
+domain = ""
+[[company]]
+name = "Invesco"
+domain = ""
+[[company]]
+name = "Inworld AI"
+domain = ""
+[[company]]
+name = "io.net"
+domain = "io.net"
+[[company]]
+name = "IREN"
+domain = ""
+[[company]]
+name = "Ithaca"
+domain = ""
+[[company]]
+name = "Jack Henry"
+domain = ""
+[[company]]
+name = "Jacobs"
+domain = ""
+[[company]]
+name = "Jane Street"
+domain = "janestreet.com"
+[[company]]
+name = "Jarvislabs"
+domain = ""
+[[company]]
+name = "Jefferies"
+domain = ""
+[[company]]
+name = "JetBrains"
+domain = ""
+[[company]]
+name = "Jito"
+domain = ""
+[[company]]
+name = "Jito Labs"
+domain = "jito.network"
+[[company]]
+name = "John Deere"
+domain = ""
+[[company]]
+name = "Johns Hopkins APL"
+domain = ""
+[[company]]
+name = "Johns Hopkins Applied Physics Lab"
+domain = ""
+[[company]]
+name = "Johns Hopkins Applied Physics Laboratory"
+domain = "jhuapl.edu"
+[[company]]
+name = "Johnson Controls"
+domain = ""
+[[company]]
+name = "JPMorgan Chase"
+domain = "jpmorgan.com"
+[[company]]
+name = "JPMorganChase"
+domain = ""
+[[company]]
+name = "Jump Crypto"
+domain = "jumpcrypto.com"
+[[company]]
+name = "Jump Trading"
+domain = "jumptrading.com"
+[[company]]
+name = "Juniper Networks"
+domain = ""
+[[company]]
+name = "JW Player"
+domain = ""
+[[company]]
+name = "K2 Space"
+domain = "k2space.com"
+[[company]]
+name = "Kaiser Permanente"
+domain = ""
+[[company]]
+name = "Kansas City National Security Campus"
+domain = "kcnsc.doe.gov"
+[[company]]
+name = "Kapwing"
+domain = ""
+[[company]]
+name = "KBR"
+domain = "kbr.com"
+[[company]]
+name = "Kestra"
+domain = ""
+[[company]]
+name = "Keyrock"
+domain = "keyrock.com"
+[[company]]
+name = "Keysight"
+domain = ""
+[[company]]
+name = "Kioxia"
+domain = ""
+[[company]]
+name = "KLA"
+domain = ""
+[[company]]
+name = "Klarna"
+domain = ""
+[[company]]
+name = "Kneron"
+domain = "kneron.com"
+[[company]]
+name = "Kodiak Robotics"
+domain = ""
+[[company]]
+name = "Komodor"
+domain = ""
+[[company]]
+name = "Kong"
+domain = ""
+[[company]]
+name = "Koyeb"
+domain = ""
+[[company]]
+name = "Kraken"
+domain = "kraken.com"
+[[company]]
+name = "Kratos Defense"
+domain = "kratosdefense.com"
+[[company]]
+name = "Krea"
+domain = ""
+[[company]]
+name = "Kroger"
+domain = ""
+[[company]]
+name = "Kronos Research"
+domain = "kronosresearch.com"
+[[company]]
+name = "Kùzu"
+domain = ""
+[[company]]
+name = "L3Harris"
+domain = "l3harris.com"
+[[company]]
+name = "Labelbox"
+domain = "labelbox.com"
+[[company]]
+name = "Lam Research"
+domain = ""
+[[company]]
+name = "Lambda"
+domain = "lambda.ai"
+[[company]]
+name = "LanceDB"
+domain = ""
+[[company]]
+name = "LangChain"
+domain = "langchain.com"
+[[company]]
+name = "Latitude AI"
+domain = ""
+[[company]]
+name = "Latitude.sh"
+domain = ""
+[[company]]
+name = "Lattice Semiconductor"
+domain = ""
+[[company]]
+name = "Lawrence Berkeley National Laboratory"
+domain = "lbl.gov"
+[[company]]
+name = "Lawrence Livermore (LLNL)"
+domain = ""
+[[company]]
+name = "Lawrence Livermore National Laboratory"
+domain = "llnl.gov"
+[[company]]
+name = "Leidos"
+domain = "leidos.com"
+[[company]]
+name = "Lenovo"
+domain = ""
+[[company]]
+name = "LeoLabs"
+domain = ""
+[[company]]
+name = "Leonardo.ai"
+domain = ""
+[[company]]
+name = "Letta"
+domain = ""
+[[company]]
+name = "Liberty Mutual"
+domain = ""
+[[company]]
+name = "Lightbits Labs"
+domain = ""
+[[company]]
+name = "Lightelligence"
+domain = ""
+[[company]]
+name = "Lightmatter"
+domain = "lightmatter.co"
+[[company]]
+name = "Lightning AI"
+domain = "lightning.ai"
+[[company]]
+name = "Lightning AI / Voltage Park"
+domain = ""
+[[company]]
+name = "Linear"
+domain = ""
+[[company]]
+name = "LinkedIn"
+domain = "linkedin.com"
+[[company]]
+name = "Liquid AI"
+domain = "liquid.ai"
+[[company]]
+name = "Liquid Capital"
+domain = ""
+[[company]]
+name = "Lithic"
+domain = ""
+[[company]]
+name = "Liveblocks"
+domain = ""
+[[company]]
+name = "LiveKit"
+domain = ""
+[[company]]
+name = "LlamaIndex"
+domain = "llamaindex.ai"
+[[company]]
+name = "LM Studio"
+domain = "lmstudio.ai"
+[[company]]
+name = "LMSYS"
+domain = "lmsys.org"
+[[company]]
+name = "Lockheed Martin"
+domain = "lockheedmartin.com"
+[[company]]
+name = "Loft Orbital"
+domain = ""
+[[company]]
+name = "Logitech"
+domain = ""
+[[company]]
+name = "Logz.io"
+domain = ""
+[[company]]
+name = "Los Alamos (LANL)"
+domain = ""
+[[company]]
+name = "Los Alamos National Laboratory"
+domain = "lanl.gov"
+[[company]]
+name = "Lovable"
+domain = ""
+[[company]]
+name = "Lowe's"
+domain = ""
+[[company]]
+name = "LPL Financial"
+domain = ""
+[[company]]
+name = "LSEG"
+domain = ""
+[[company]]
+name = "LSEG (US)"
+domain = ""
+[[company]]
+name = "Lucid Motors"
+domain = "lucidmotors.com"
+[[company]]
+name = "Luma AI"
+domain = "lumalabs.ai"
+[[company]]
+name = "Lumentum"
+domain = ""
+[[company]]
+name = "Luminal"
+domain = ""
+[[company]]
+name = "Luminar"
+domain = ""
+[[company]]
+name = "Lyft"
+domain = "lyft.com"
+[[company]]
+name = "Mach Industries"
+domain = "machindustries.com"
+[[company]]
+name = "MACOM"
+domain = ""
+[[company]]
+name = "Magic"
+domain = "magic.dev"
+[[company]]
+name = "Magic.dev"
+domain = ""
+[[company]]
+name = "Magna"
+domain = ""
+[[company]]
+name = "Mako Group"
+domain = ""
+[[company]]
+name = "Mako Trading"
+domain = ""
+[[company]]
+name = "Man AHL"
+domain = ""
+[[company]]
+name = "Man Group"
+domain = "man.com"
+[[company]]
+name = "ManTech"
+domain = ""
+[[company]]
+name = "MarketAxess"
+domain = ""
+[[company]]
+name = "Marqeta"
+domain = "marqeta.com"
+[[company]]
+name = "Marqo"
+domain = ""
+[[company]]
+name = "Marquette Partners"
+domain = "marquettepartners.com"
+[[company]]
+name = "Marriott International"
+domain = ""
+[[company]]
+name = "Marshall Wace"
+domain = "mwam.com"
+[[company]]
+name = "Marvell"
+domain = ""
+[[company]]
+name = "Marvell Technology"
+domain = "marvell.com"
+[[company]]
+name = "Massed Compute"
+domain = ""
+[[company]]
+name = "Mastercard"
+domain = ""
+[[company]]
+name = "Material Security"
+domain = ""
+[[company]]
+name = "Materialize"
+domain = "materialize.com"
+[[company]]
+name = "MathWorks"
+domain = ""
+[[company]]
+name = "Matter Labs"
+domain = ""
+[[company]]
+name = "MatX"
+domain = "matx.com"
+[[company]]
+name = "Maven Securities"
+domain = "mavensecurities.com"
+[[company]]
+name = "Maxar"
+domain = "maxar.com"
+[[company]]
+name = "McDonald's"
+domain = ""
+[[company]]
+name = "McKay Brothers"
+domain = ""
+[[company]]
+name = "Measurabl"
+domain = ""
+[[company]]
+name = "MediaTek"
+domain = ""
+[[company]]
+name = "Medtronic"
+domain = ""
+[[company]]
+name = "Memgraph"
+domain = ""
+[[company]]
+name = "MEMX"
+domain = ""
+[[company]]
+name = "Mercor"
+domain = "mercor.com"
+[[company]]
+name = "Mercury"
+domain = "mercury.com"
+[[company]]
+name = "Mercury Systems"
+domain = ""
+[[company]]
+name = "Meta"
+domain = "meta.com"
+[[company]]
+name = "Meta AI"
+domain = "ai.meta.com"
+[[company]]
+name = "Meta Superintelligence Labs / FAIR"
+domain = ""
+[[company]]
+name = "Method Financial"
+domain = ""
+[[company]]
+name = "METR"
+domain = "metr.org"
+[[company]]
+name = "MIAX"
+domain = ""
+[[company]]
+name = "MIAX (Miami International Holdings)"
+domain = ""
+[[company]]
+name = "Microchip Technology"
+domain = ""
+[[company]]
+name = "Micron"
+domain = ""
+[[company]]
+name = "Micron Technology"
+domain = "micron.com"
+[[company]]
+name = "Microsoft"
+domain = "microsoft.com"
+[[company]]
+name = "Microsoft AI"
+domain = ""
+[[company]]
+name = "Microsoft Azure"
+domain = ""
+[[company]]
+name = "Middesk"
+domain = ""
+[[company]]
+name = "Midjourney"
+domain = "midjourney.com"
+[[company]]
+name = "Millennium"
+domain = "mlp.com"
+[[company]]
+name = "Millennium Management"
+domain = ""
+[[company]]
+name = "MinIO"
+domain = "min.io"
+[[company]]
+name = "Miro"
+domain = ""
+[[company]]
+name = "Mistral AI"
+domain = "mistral.ai"
+[[company]]
+name = "MIT Lincoln Laboratory"
+domain = "ll.mit.edu"
+[[company]]
+name = "Mitchell International"
+domain = ""
+[[company]]
+name = "MITRE"
+domain = "mitre.org"
+[[company]]
+name = "Mixpanel"
+domain = "mixpanel.com"
+[[company]]
+name = "MLC AI"
+domain = ""
+[[company]]
+name = "Mobileye"
+domain = ""
+[[company]]
+name = "Modal"
+domain = "modal.com"
+[[company]]
+name = "Modern Treasury"
+domain = "moderntreasury.com"
+[[company]]
+name = "Moderna"
+domain = ""
+[[company]]
+name = "Modular"
+domain = "modular.com"
+[[company]]
+name = "Momento"
+domain = ""
+[[company]]
+name = "MongoDB"
+domain = "mongodb.com"
+[[company]]
+name = "Moody's"
+domain = ""
+[[company]]
+name = "Moog"
+domain = ""
+[[company]]
+name = "Moov"
+domain = ""
+[[company]]
+name = "Morgan Stanley"
+domain = "morganstanley.com"
+[[company]]
+name = "Morningstar"
+domain = ""
+[[company]]
+name = "MotherDuck"
+domain = "motherduck.com"
+[[company]]
+name = "Motional"
+domain = "motional.com"
+[[company]]
+name = "MSCI"
+domain = ""
+[[company]]
+name = "MulticoreWare"
+domain = ""
+[[company]]
+name = "Muon Space"
+domain = ""
+[[company]]
+name = "Mux"
+domain = ""
+[[company]]
+name = "MX"
+domain = ""
+[[company]]
+name = "Mythic"
+domain = "mythic.ai"
+[[company]]
+name = "Namespace"
+domain = ""
+[[company]]
+name = "Nanocosmos"
+domain = ""
+[[company]]
+name = "NASA Ames Research Center"
+domain = ""
+[[company]]
+name = "NASA Glenn Research Center"
+domain = ""
+[[company]]
+name = "NASA Goddard Space Flight Center"
+domain = ""
+[[company]]
+name = "NASA Jet Propulsion Laboratory"
+domain = "jpl.nasa.gov"
+[[company]]
+name = "NASA Johnson Space Center"
+domain = ""
+[[company]]
+name = "NASA JPL"
+domain = ""
+[[company]]
+name = "NASA Kennedy Space Center"
+domain = ""
+[[company]]
+name = "NASA Langley Research Center"
+domain = ""
+[[company]]
+name = "NASA Marshall Space Flight Center"
+domain = ""
+[[company]]
+name = "Nasdaq"
+domain = "nasdaq.com"
+[[company]]
+name = "National Center for Supercomputing Applications"
+domain = ""
+[[company]]
+name = "National Energy Technology Laboratory"
+domain = ""
+[[company]]
+name = "National Renewable Energy Laboratory"
+domain = "nrel.gov"
+[[company]]
+name = "National Security Agency"
+domain = "nsa.gov"
+[[company]]
+name = "Naval Research Laboratory"
+domain = "nrl.navy.mil"
+[[company]]
+name = "Naval Surface Warfare Center"
+domain = ""
+[[company]]
+name = "Naval Undersea Warfare Center"
+domain = ""
+[[company]]
+name = "NCAR"
+domain = "ncar.ucar.edu"
+[[company]]
+name = "NCC Group"
+domain = ""
+[[company]]
+name = "nCino"
+domain = ""
+[[company]]
+name = "NCSA"
+domain = "ncsa.illinois.edu"
+[[company]]
+name = "Nebius"
+domain = "nebius.com"
+[[company]]
+name = "Neo4j"
+domain = ""
+[[company]]
+name = "Neon"
+domain = "neon.tech"
+[[company]]
+name = "Neptune"
+domain = "neptune.ai"
+[[company]]
+name = "Neros"
+domain = ""
+[[company]]
+name = "Neros Technologies"
+domain = ""
+[[company]]
+name = "NetApp"
+domain = "netapp.com"
+[[company]]
+name = "Netdata"
+domain = ""
+[[company]]
+name = "Netflix"
+domain = "netflix.com"
+[[company]]
+name = "Nethermind"
+domain = ""
+[[company]]
+name = "Netlify"
+domain = "netlify.com"
+[[company]]
+name = "Netskope"
+domain = ""
+[[company]]
+name = "Neuchips"
+domain = ""
+[[company]]
+name = "Neural Magic"
+domain = "neuralmagic.com"
+[[company]]
+name = "New Relic"
+domain = ""
+[[company]]
+name = "NextSilicon"
+domain = ""
+[[company]]
+name = "Nike"
+domain = ""
+[[company]]
+name = "Nintendo of America"
+domain = ""
+[[company]]
+name = "NIST"
+domain = "nist.gov"
+[[company]]
+name = "NIWC Pacific"
+domain = "niwc.navy.mil"
+[[company]]
+name = "Noblis"
+domain = ""
+[[company]]
+name = "Nomura (US)"
+domain = ""
+[[company]]
+name = "Nordic Semiconductor"
+domain = ""
+[[company]]
+name = "Normal Computing"
+domain = "normalcomputing.ai"
+[[company]]
+name = "Northern Trust"
+domain = ""
+[[company]]
+name = "Northflank"
+domain = ""
+[[company]]
+name = "Northrop Grumman"
+domain = "northropgrumman.com"
+[[company]]
+name = "Northwestern Mutual"
+domain = ""
+[[company]]
+name = "Notion"
+domain = "notion.so"
+[[company]]
+name = "Nous Research"
+domain = "nousresearch.com"
+[[company]]
+name = "NovaSparks"
+domain = ""
+[[company]]
+name = "Novita AI"
+domain = "novita.ai"
+[[company]]
+name = "NREL"
+domain = ""
+[[company]]
+name = "NSA"
+domain = ""
+[[company]]
+name = "Nscale"
+domain = "nscale.com"
+[[company]]
+name = "Nubis Communications"
+domain = ""
+[[company]]
+name = "Nuro"
+domain = "nuro.ai"
+[[company]]
+name = "Nutanix"
+domain = "nutanix.com"
+[[company]]
+name = "Nuvei"
+domain = ""
+[[company]]
+name = "NVIDIA"
+domain = "nvidia.com"
+[[company]]
+name = "NVIDIA Research"
+domain = ""
+[[company]]
+name = "Nx"
+domain = ""
+[[company]]
+name = "NXP Semiconductors"
+domain = "nxp.com"
+[[company]]
+name = "Oak Ridge (ORNL)"
+domain = ""
+[[company]]
+name = "Oak Ridge National Laboratory"
+domain = "ornl.gov"
+[[company]]
+name = "Observe Inc"
+domain = ""
+[[company]]
+name = "OCC"
+domain = ""
+[[company]]
+name = "Ocrolus"
+domain = ""
+[[company]]
+name = "Odigos"
+domain = ""
+[[company]]
+name = "Offchain Labs"
+domain = ""
+[[company]]
+name = "Okta"
+domain = ""
+[[company]]
+name = "Old Mission Capital"
+domain = "oldmissioncapital.com"
+[[company]]
+name = "Ollama"
+domain = "ollama.com"
+[[company]]
+name = "Onehouse"
+domain = ""
+[[company]]
+name = "onsemi"
+domain = ""
+[[company]]
+name = "Onto Innovation"
+domain = ""
+[[company]]
+name = "OP Labs"
+domain = ""
+[[company]]
+name = "OpenAI"
+domain = "openai.com"
+[[company]]
+name = "OpenLight"
+domain = ""
+[[company]]
+name = "OpenObserve"
+domain = ""
+[[company]]
+name = "OpenRouter"
+domain = ""
+[[company]]
+name = "Options Clearing Corporation"
+domain = ""
+[[company]]
+name = "Optiver"
+domain = "optiver.com"
+[[company]]
+name = "Opus Clip"
+domain = ""
+[[company]]
+name = "Oracle"
+domain = "oracle.com"
+[[company]]
+name = "Oracle Cloud Infrastructure"
+domain = ""
+[[company]]
+name = "Orbit Fab"
+domain = ""
+[[company]]
+name = "Orca Security"
+domain = ""
+[[company]]
+name = "Ori"
+domain = ""
+[[company]]
+name = "Ouster"
+domain = ""
+[[company]]
+name = "Outerbounds"
+domain = "outerbounds.co"
+[[company]]
+name = "Oven (Bun)"
+domain = ""
+[[company]]
+name = "Overland AI"
+domain = ""
+[[company]]
+name = "OVHcloud"
+domain = "ovhcloud.com"
+[[company]]
+name = "Oxide Computer"
+domain = ""
+[[company]]
+name = "Oxide Computer Company"
+domain = "oxide.computer"
+[[company]]
+name = "Pacific Northwest National Laboratory"
+domain = "pnnl.gov"
+[[company]]
+name = "PagerDuty"
+domain = ""
+[[company]]
+name = "Palantir"
+domain = "palantir.com"
+[[company]]
+name = "Palo Alto Networks"
+domain = ""
+[[company]]
+name = "Panasonic"
+domain = ""
+[[company]]
+name = "Paperspace"
+domain = "paperspace.com"
+[[company]]
+name = "Paperspace (DigitalOcean)"
+domain = ""
+[[company]]
+name = "ParadeDB"
+domain = ""
+[[company]]
+name = "Paradigm"
+domain = "paradigm.xyz"
+[[company]]
+name = "Paramount Skydance"
+domain = ""
+[[company]]
+name = "Parasail"
+domain = "parasail.io"
+[[company]]
+name = "Parsons"
+domain = "parsons.com"
+[[company]]
+name = "Path Robotics"
+domain = ""
+[[company]]
+name = "Patronus AI"
+domain = ""
+[[company]]
+name = "Payabli"
+domain = ""
+[[company]]
+name = "PayPal"
+domain = "paypal.com"
+[[company]]
+name = "PDT Partners"
+domain = "pdtpartners.com"
+[[company]]
+name = "Peak6"
+domain = "peak6.com"
+[[company]]
+name = "Peraton"
+domain = "peraton.com"
+[[company]]
+name = "Percona"
+domain = ""
+[[company]]
+name = "Perplexity"
+domain = "perplexity.ai"
+[[company]]
+name = "Perplexity AI"
+domain = ""
+[[company]]
+name = "Persona"
+domain = ""
+[[company]]
+name = "pgEdge"
+domain = ""
+[[company]]
+name = "Phenix"
+domain = ""
+[[company]]
+name = "Phison"
+domain = ""
+[[company]]
+name = "Photoroom"
+domain = ""
+[[company]]
+name = "Physical Intelligence"
+domain = "physicalintelligence.company"
+[[company]]
+name = "Pico"
+domain = ""
+[[company]]
+name = "Pika"
+domain = ""
+[[company]]
+name = "PIMCO"
+domain = ""
+[[company]]
+name = "Pinecone"
+domain = "pinecone.io"
+[[company]]
+name = "PingCAP"
+domain = ""
+[[company]]
+name = "Pinterest"
+domain = "pinterest.com"
+[[company]]
+name = "Pinwheel"
+domain = ""
+[[company]]
+name = "Pittsburgh Supercomputing Center"
+domain = "psc.edu"
+[[company]]
+name = "Plaid"
+domain = "plaid.com"
+[[company]]
+name = "Planet Labs"
+domain = "planet.com"
+[[company]]
+name = "PlanetScale"
+domain = "planetscale.com"
+[[company]]
+name = "PlayAI"
+domain = ""
+[[company]]
+name = "Pliops"
+domain = ""
+[[company]]
+name = "Plus"
+domain = ""
+[[company]]
+name = "PNNL"
+domain = ""
+[[company]]
+name = "Point72"
+domain = "point72.com"
+[[company]]
+name = "Point72 / Cubist"
+domain = ""
+[[company]]
+name = "Polygon.io"
+domain = ""
+[[company]]
+name = "Poolside"
+domain = "poolside.ai"
+[[company]]
+name = "Portal Space Systems"
+domain = ""
+[[company]]
+name = "Porter"
+domain = ""
+[[company]]
+name = "Portofino Technologies"
+domain = "portofino.tech"
+[[company]]
+name = "Positron AI"
+domain = "positron.ai"
+[[company]]
+name = "PowerSync"
+domain = ""
+[[company]]
+name = "Praetorian"
+domain = ""
+[[company]]
+name = "Pratt & Whitney"
+domain = ""
+[[company]]
+name = "Predibase"
+domain = "predibase.com"
+[[company]]
+name = "Prefect"
+domain = "prefect.io"
+[[company]]
+name = "Prime Intellect"
+domain = "primeintellect.ai"
+[[company]]
+name = "Primer"
+domain = ""
+[[company]]
+name = "Princeton Plasma Physics Laboratory"
+domain = "pppl.gov"
+[[company]]
+name = "Prisma"
+domain = ""
+[[company]]
+name = "Progressive"
+domain = ""
+[[company]]
+name = "Proofpoint"
+domain = ""
+[[company]]
+name = "pSemi (Murata)"
+domain = ""
+[[company]]
+name = "PTC"
+domain = ""
+[[company]]
+name = "Public"
+domain = ""
+[[company]]
+name = "PubNub"
+domain = ""
+[[company]]
+name = "Pure Storage"
+domain = "purestorage.com"
+[[company]]
+name = "QCP Group"
+domain = ""
+[[company]]
+name = "Qdrant"
+domain = "qdrant.tech"
+[[company]]
+name = "Qencode"
+domain = ""
+[[company]]
+name = "Qodo"
+domain = ""
+[[company]]
+name = "Qorvo"
+domain = ""
+[[company]]
+name = "Quadrature Capital"
+domain = ""
+[[company]]
+name = "Quadric"
+domain = ""
+[[company]]
+name = "Qualcomm"
+domain = "qualcomm.com"
+[[company]]
+name = "Qualys"
+domain = ""
+[[company]]
+name = "Quansight"
+domain = ""
+[[company]]
+name = "Quantlab"
+domain = "quantlab.com"
+[[company]]
+name = "Qube Research & Technologies"
+domain = ""
+[[company]]
+name = "Qube Research and Technologies"
+domain = "qube-rt.com"
+[[company]]
+name = "QuestDB"
+domain = "questdb.io"
+[[company]]
+name = "Qumulo"
+domain = ""
+[[company]]
+name = "Radix Trading"
+domain = "radixtrading.co"
+[[company]]
+name = "Railway"
+domain = "railway.com"
+[[company]]
+name = "Rain AI"
+domain = "rain.ai"
+[[company]]
+name = "Rambus"
+domain = ""
+[[company]]
+name = "Ramp"
+domain = "ramp.com"
+[[company]]
+name = "RAND"
+domain = ""
+[[company]]
+name = "RAND Corporation"
+domain = ""
+[[company]]
+name = "Rapid7"
+domain = ""
+[[company]]
+name = "Rapyd"
+domain = ""
+[[company]]
+name = "Razer"
+domain = ""
+[[company]]
+name = "RBC Capital Markets"
+domain = ""
+[[company]]
+name = "Rebellion Defense"
+domain = "rebelliondefense.com"
+[[company]]
+name = "Rebellions"
+domain = "rebellions.ai"
+[[company]]
+name = "Recogni"
+domain = ""
+[[company]]
+name = "Recursion Pharmaceuticals"
+domain = ""
+[[company]]
+name = "Red Hat"
+domain = "redhat.com"
+[[company]]
+name = "Red Hat (Neural Magic)"
+domain = ""
+[[company]]
+name = "Red Hat AI (vLLM/Neural Magic)"
+domain = ""
+[[company]]
+name = "Reddit"
+domain = "reddit.com"
+[[company]]
+name = "Redis"
+domain = "redis.io"
+[[company]]
+name = "Redline Trading Solutions"
+domain = ""
+[[company]]
+name = "Redpanda"
+domain = "redpanda.com"
+[[company]]
+name = "Redwire"
+domain = ""
+[[company]]
+name = "Redwood Research"
+domain = "redwoodresearch.org"
+[[company]]
+name = "Reflection AI"
+domain = "reflection.ai"
+[[company]]
+name = "Regeneron"
+domain = ""
+[[company]]
+name = "Regent"
+domain = ""
+[[company]]
+name = "Relativity Space"
+domain = "relativityspace.com"
+[[company]]
+name = "Renaissance Technologies"
+domain = "rentec.com"
+[[company]]
+name = "Render"
+domain = "render.com"
+[[company]]
+name = "Renesas"
+domain = "renesas.com"
+[[company]]
+name = "Replicate"
+domain = "replicate.com"
+[[company]]
+name = "Replit"
+domain = ""
+[[company]]
+name = "Resemble AI"
+domain = ""
+[[company]]
+name = "ResMed"
+domain = "resmed.com"
+[[company]]
+name = "Restate"
+domain = ""
+[[company]]
+name = "Restream"
+domain = ""
+[[company]]
+name = "Revolut"
+domain = ""
+[[company]]
+name = "Riot Games"
+domain = "riotgames.com"
+[[company]]
+name = "Ripple"
+domain = "ripple.com"
+[[company]]
+name = "Rippling"
+domain = "rippling.com"
+[[company]]
+name = "RISC Zero"
+domain = ""
+[[company]]
+name = "RisingWave"
+domain = "risingwave.com"
+[[company]]
+name = "Riverside Research"
+domain = ""
+[[company]]
+name = "Riverside.fm"
+domain = ""
+[[company]]
+name = "Rivian"
+domain = "rivian.com"
+[[company]]
+name = "Rivos"
+domain = "rivosinc.com"
+[[company]]
+name = "Robinhood"
+domain = "robinhood.com"
+[[company]]
+name = "Roblox"
+domain = "roblox.com"
+[[company]]
+name = "Roboflow"
+domain = "roboflow.com"
+[[company]]
+name = "Rocicorp"
+domain = ""
+[[company]]
+name = "Rocket Lab"
+domain = "rocketlabcorp.com"
+[[company]]
+name = "Rockwell Automation"
+domain = ""
+[[company]]
+name = "Roku"
+domain = ""
+[[company]]
+name = "Rootly"
+domain = ""
+[[company]]
+name = "RTX"
+domain = "rtx.com"
+[[company]]
+name = "RTX (Raytheon)"
+domain = ""
+[[company]]
+name = "Rubrik"
+domain = "rubrik.com"
+[[company]]
+name = "RunPod"
+domain = "runpod.io"
+[[company]]
+name = "Runway"
+domain = "runwayml.com"
+[[company]]
+name = "S&P Global"
+domain = ""
+[[company]]
+name = "Safe Superintelligence"
+domain = "ssi.inc"
+[[company]]
+name = "Safe Superintelligence (SSI)"
+domain = ""
+[[company]]
+name = "SAIC"
+domain = "saic.com"
+[[company]]
+name = "Sakana AI"
+domain = "sakana.ai"
+[[company]]
+name = "Salad"
+domain = "salad.com"
+[[company]]
+name = "Salad Technologies"
+domain = ""
+[[company]]
+name = "Salesforce"
+domain = "salesforce.com"
+[[company]]
+name = "Salk Institute"
+domain = ""
+[[company]]
+name = "SambaNova"
+domain = ""
+[[company]]
+name = "SambaNova Systems"
+domain = "sambanova.ai"
+[[company]]
+name = "Samsara"
+domain = "samsara.com"
+[[company]]
+name = "Samsung Research America"
+domain = "sra.samsung.com"
+[[company]]
+name = "Samsung Semiconductor"
+domain = ""
+[[company]]
+name = "Samsung Semiconductor US"
+domain = ""
+[[company]]
+name = "San Diego Supercomputer Center"
+domain = "sdsc.edu"
+[[company]]
+name = "San Diego Supercomputer Center (UCSD)"
+domain = ""
+[[company]]
+name = "Sandia National Laboratories"
+domain = "sandia.gov"
+[[company]]
+name = "Sanford Burnham Prebys"
+domain = ""
+[[company]]
+name = "SAP"
+domain = ""
+[[company]]
+name = "Sardine"
+domain = ""
+[[company]]
+name = "Saronic"
+domain = "saronic.com"
+[[company]]
+name = "Saronic Technologies"
+domain = ""
+[[company]]
+name = "SAS Institute"
+domain = ""
+[[company]]
+name = "Savannah River National Laboratory"
+domain = "srnl.gov"
+[[company]]
+name = "Scale AI"
+domain = "scale.com"
+[[company]]
+name = "ScaleFlux"
+domain = ""
+[[company]]
+name = "Scaleway"
+domain = "scaleway.com"
+[[company]]
+name = "Schneider Electric"
+domain = ""
+[[company]]
+name = "Schonfeld"
+domain = "schonfeld.com"
+[[company]]
+name = "Schonfeld Strategic Advisors"
+domain = ""
+[[company]]
+name = "Scripps Research"
+domain = ""
+[[company]]
+name = "ScyllaDB"
+domain = "scylladb.com"
+[[company]]
+name = "Seagate"
+domain = ""
+[[company]]
+name = "Second Front Systems"
+domain = "secondfront.com"
+[[company]]
+name = "Secureframe"
+domain = ""
+[[company]]
+name = "Seismic"
+domain = "seismic.com"
+[[company]]
+name = "Selini Capital"
+domain = "selinicapital.com"
+[[company]]
+name = "Semgrep"
+domain = ""
+[[company]]
+name = "Semidynamics"
+domain = ""
+[[company]]
+name = "SentinelOne"
+domain = ""
+[[company]]
+name = "Sentry"
+domain = "sentry.io"
+[[company]]
+name = "ServiceNow"
+domain = "servicenow.com"
+[[company]]
+name = "Sesame AI"
+domain = ""
+[[company]]
+name = "SF Compute"
+domain = "sfcompute.com"
+[[company]]
+name = "Shadeform"
+domain = "shadeform.ai"
+[[company]]
+name = "Shield AI"
+domain = "shield.ai"
+[[company]]
+name = "Shopify"
+domain = "shopify.com"
+[[company]]
+name = "Siemens"
+domain = ""
+[[company]]
+name = "Siemens EDA"
+domain = ""
+[[company]]
+name = "Sierra"
+domain = "sierra.ai"
+[[company]]
+name = "Sierra Nevada Corporation"
+domain = ""
+[[company]]
+name = "Sierra Space"
+domain = "sierraspace.com"
+[[company]]
+name = "Sieve"
+domain = ""
+[[company]]
+name = "SiFive"
+domain = "sifive.com"
+[[company]]
+name = "SigNoz"
+domain = ""
+[[company]]
+name = "Silicon Labs"
+domain = ""
+[[company]]
+name = "Silicon Motion"
+domain = ""
+[[company]]
+name = "Silvaco"
+domain = ""
+[[company]]
+name = "SiMa.ai"
+domain = "sima.ai"
+[[company]]
+name = "Simplex Trading"
+domain = ""
+[[company]]
+name = "Simplismart"
+domain = ""
+[[company]]
+name = "SingleStore"
+domain = "singlestore.com"
+[[company]]
+name = "SK hynix"
+domain = ""
+[[company]]
+name = "SK hynix America"
+domain = "skhynix.com"
+[[company]]
+name = "Skild AI"
+domain = "skild.ai"
+[[company]]
+name = "Skydio"
+domain = "skydio.com"
+[[company]]
+name = "Skyworks Solutions"
+domain = ""
+[[company]]
+name = "SLAC"
+domain = ""
+[[company]]
+name = "SLAC National Accelerator Laboratory"
+domain = "slac.stanford.edu"
+[[company]]
+name = "SLB"
+domain = ""
+[[company]]
+name = "Slingshot Aerospace"
+domain = ""
+[[company]]
+name = "Snap"
+domain = "snap.com"
+[[company]]
+name = "Snorkel AI"
+domain = "snorkel.ai"
+[[company]]
+name = "Snowflake"
+domain = "snowflake.com"
+[[company]]
+name = "Snyk"
+domain = ""
+[[company]]
+name = "Socket"
+domain = ""
+[[company]]
+name = "SoFi"
+domain = ""
+[[company]]
+name = "Solar Turbines"
+domain = ""
+[[company]]
+name = "Solidigm"
+domain = ""
+[[company]]
+name = "Sonos"
+domain = ""
+[[company]]
+name = "Sony Interactive Entertainment"
+domain = "sonyinteractive.com"
+[[company]]
+name = "Sophos"
+domain = ""
+[[company]]
+name = "Sourcegraph"
+domain = ""
+[[company]]
+name = "Southwest Airlines"
+domain = ""
+[[company]]
+name = "Southwest Research Institute"
+domain = "swri.org"
+[[company]]
+name = "SpaceX"
+domain = "spacex.com"
+[[company]]
+name = "SpaceXAI (ex-xAI)"
+domain = ""
+[[company]]
+name = "Speechmatics"
+domain = ""
+[[company]]
+name = "Speedata"
+domain = ""
+[[company]]
+name = "Splunk"
+domain = "splunk.com"
+[[company]]
+name = "Spot Trading"
+domain = ""
+[[company]]
+name = "Spotify"
+domain = "spotify.com"
+[[company]]
+name = "Spreedly"
+domain = ""
+[[company]]
+name = "Squarepoint Capital"
+domain = "squarepoint-capital.com"
+[[company]]
+name = "SRI International"
+domain = ""
+[[company]]
+name = "SS&C Technologies"
+domain = ""
+[[company]]
+name = "Stability AI"
+domain = "stability.ai"
+[[company]]
+name = "Stack AV"
+domain = ""
+[[company]]
+name = "StackBlitz"
+domain = ""
+[[company]]
+name = "Starbucks"
+domain = ""
+[[company]]
+name = "Starburst"
+domain = ""
+[[company]]
+name = "Starfish Space"
+domain = ""
+[[company]]
+name = "StarkWare"
+domain = ""
+[[company]]
+name = "StarTree"
+domain = "startree.ai"
+[[company]]
+name = "State Farm"
+domain = ""
+[[company]]
+name = "State Street"
+domain = ""
+[[company]]
+name = "STMicroelectronics"
+domain = "st.com"
+[[company]]
+name = "Stoke Space"
+domain = "stokespace.com"
+[[company]]
+name = "Strava"
+domain = ""
+[[company]]
+name = "StreamNative"
+domain = "streamnative.io"
+[[company]]
+name = "Stripe"
+domain = "stripe.com"
+[[company]]
+name = "Stryker"
+domain = ""
+[[company]]
+name = "Sublime Security"
+domain = ""
+[[company]]
+name = "Succinct"
+domain = ""
+[[company]]
+name = "Sumo Capital"
+domain = ""
+[[company]]
+name = "Sumo Logic"
+domain = ""
+[[company]]
+name = "Suno"
+domain = "suno.com"
+[[company]]
+name = "Supabase"
+domain = "supabase.com"
+[[company]]
+name = "Superlinked"
+domain = ""
+[[company]]
+name = "Surge AI"
+domain = "surgehq.ai"
+[[company]]
+name = "SurrealDB"
+domain = ""
+[[company]]
+name = "Susquehanna (SIG)"
+domain = ""
+[[company]]
+name = "Susquehanna International Group"
+domain = "sig.com"
+[[company]]
+name = "Sustainable Metal Cloud"
+domain = ""
+[[company]]
+name = "Svix"
+domain = ""
+[[company]]
+name = "Synack"
+domain = ""
+[[company]]
+name = "Synaptics"
+domain = ""
+[[company]]
+name = "Synopsys"
+domain = "synopsys.com"
+[[company]]
+name = "Synthesia"
+domain = ""
+[[company]]
+name = "Syntiant"
+domain = ""
+[[company]]
+name = "Sysdig"
+domain = ""
+[[company]]
+name = "Systematica"
+domain = ""
+[[company]]
+name = "T-Mobile"
+domain = ""
+[[company]]
+name = "T. Rowe Price"
+domain = ""
+[[company]]
+name = "Taalas"
+domain = "taalas.com"
+[[company]]
+name = "Tabnine"
+domain = ""
+[[company]]
+name = "Tailscale"
+domain = ""
+[[company]]
+name = "Take-Two / Rockstar"
+domain = ""
+[[company]]
+name = "Talos"
+domain = "talos.com"
+[[company]]
+name = "Target"
+domain = ""
+[[company]]
+name = "Tavus"
+domain = ""
+[[company]]
+name = "Tealium"
+domain = "tealium.com"
+[[company]]
+name = "Tecton"
+domain = "tecton.ai"
+[[company]]
+name = "Teledyne"
+domain = "teledyne.com"
+[[company]]
+name = "Teller"
+domain = ""
+[[company]]
+name = "Tembo"
+domain = ""
+[[company]]
+name = "Temenos"
+domain = ""
+[[company]]
+name = "Temporal"
+domain = "temporal.io"
+[[company]]
+name = "Temporal Technologies"
+domain = ""
+[[company]]
+name = "Tempus AI"
+domain = ""
+[[company]]
+name = "Tenable"
+domain = ""
+[[company]]
+name = "TensorDock"
+domain = ""
+[[company]]
+name = "TensorWave"
+domain = "tensorwave.com"
+[[company]]
+name = "Tenstorrent"
+domain = "tenstorrent.com"
+[[company]]
+name = "Teradata"
+domain = "teradata.com"
+[[company]]
+name = "Teradyne"
+domain = ""
+[[company]]
+name = "TeraWulf"
+domain = ""
+[[company]]
+name = "Tesla"
+domain = "tesla.com"
+[[company]]
+name = "Tessl"
+domain = ""
+[[company]]
+name = "Texas Advanced Computing Center"
+domain = "tacc.utexas.edu"
+[[company]]
+name = "Texas Instruments"
+domain = "ti.com"
+[[company]]
+name = "Textron"
+domain = ""
+[[company]]
+name = "Textron Systems"
+domain = "textronsystems.com"
+[[company]]
+name = "Teza Technologies"
+domain = "teza.com"
+[[company]]
+name = "The Aerospace Corporation"
+domain = "aerospace.org"
+[[company]]
+name = "The New York Times"
+domain = ""
+[[company]]
+name = "The Voleon Group"
+domain = ""
+[[company]]
+name = "The Walt Disney Company"
+domain = ""
+[[company]]
+name = "THEO Technologies"
+domain = ""
+[[company]]
+name = "Thermo Fisher"
+domain = ""
+[[company]]
+name = "Thermo Fisher Scientific"
+domain = ""
+[[company]]
+name = "Thinking Machines Lab"
+domain = "thinkingmachines.ai"
+[[company]]
+name = "Thomas Jefferson National Accelerator Facility"
+domain = "jlab.org"
+[[company]]
+name = "Tibra Capital"
+domain = "tibra.com"
+[[company]]
+name = "TigerBeetle"
+domain = ""
+[[company]]
+name = "TigerData"
+domain = ""
+[[company]]
+name = "TigerGraph"
+domain = ""
+[[company]]
+name = "TikTok"
+domain = "tiktok.com"
+[[company]]
+name = "Timescale"
+domain = "timescale.com"
+[[company]]
+name = "TMX Group"
+domain = ""
+[[company]]
+name = "Together AI"
+domain = "together.ai"
+[[company]]
+name = "Torc Robotics"
+domain = ""
+[[company]]
+name = "Tower Research Capital"
+domain = "tower-research.com"
+[[company]]
+name = "Toyota Motor North America"
+domain = ""
+[[company]]
+name = "Toyota Research Institute"
+domain = ""
+[[company]]
+name = "Tradebot Systems"
+domain = "tradebot.com"
+[[company]]
+name = "Tradeweb"
+domain = ""
+[[company]]
+name = "Trading Technologies"
+domain = ""
+[[company]]
+name = "Trail of Bits"
+domain = ""
+[[company]]
+name = "Transloadit"
+domain = ""
+[[company]]
+name = "Transluce"
+domain = "transluce.org"
+[[company]]
+name = "TransMarket Group"
+domain = "transmarketgroup.com"
+[[company]]
+name = "TransUnion"
+domain = ""
+[[company]]
+name = "Travelers"
+domain = ""
+[[company]]
+name = "Trellix"
+domain = ""
+[[company]]
+name = "Trexquant"
+domain = ""
+[[company]]
+name = "Trigger.dev"
+domain = ""
+[[company]]
+name = "Triton One"
+domain = ""
+[[company]]
+name = "True Anomaly"
+domain = ""
+[[company]]
+name = "TSMC"
+domain = "tsmc.com"
+[[company]]
+name = "Tudor Investment"
+domain = "tudor.com"
+[[company]]
+name = "turbopuffer"
+domain = ""
+[[company]]
+name = "Turion Space"
+domain = ""
+[[company]]
+name = "Turso"
+domain = ""
+[[company]]
+name = "Twelve Labs"
+domain = ""
+[[company]]
+name = "Twilio"
+domain = "twilio.com"
+[[company]]
+name = "Twitch"
+domain = ""
+[[company]]
+name = "Two Sigma"
+domain = "twosigma.com"
+[[company]]
+name = "Two Sigma Ventures"
+domain = ""
+[[company]]
+name = "Uber"
+domain = "uber.com"
+[[company]]
+name = "Ubicloud"
+domain = ""
+[[company]]
+name = "Ubisoft"
+domain = ""
+[[company]]
+name = "UBS (US)"
+domain = ""
+[[company]]
+name = "Udio"
+domain = ""
+[[company]]
+name = "Umbra"
+domain = "umbra.space"
+[[company]]
+name = "Union"
+domain = "union.ai"
+[[company]]
+name = "Union.ai"
+domain = ""
+[[company]]
+name = "Uniswap Labs"
+domain = "uniswap.org"
+[[company]]
+name = "Unit"
+domain = ""
+[[company]]
+name = "United Airlines"
+domain = ""
+[[company]]
+name = "United Launch Alliance"
+domain = ""
+[[company]]
+name = "UnitedHealth / Optum"
+domain = ""
+[[company]]
+name = "Unity"
+domain = "unity.com"
+[[company]]
+name = "UPS"
+domain = ""
+[[company]]
+name = "Upstash"
+domain = ""
+[[company]]
+name = "Ursa Major"
+domain = "ursamajor.com"
+[[company]]
+name = "USAA"
+domain = ""
+[[company]]
+name = "Val Town"
+domain = ""
+[[company]]
+name = "Valkyrie Trading"
+domain = "valkyrietrading.com"
+[[company]]
+name = "Valve"
+domain = ""
+[[company]]
+name = "Vanguard"
+domain = ""
+[[company]]
+name = "Vannevar Labs"
+domain = "vannevarlabs.com"
+[[company]]
+name = "Vanta"
+domain = ""
+[[company]]
+name = "Vantor (Maxar)"
+domain = ""
+[[company]]
+name = "Vantor / Lanteris (ex-Maxar)"
+domain = ""
+[[company]]
+name = "Varda Space Industries"
+domain = "varda.com"
+[[company]]
+name = "Varo"
+domain = ""
+[[company]]
+name = "Vast"
+domain = "vastspace.com"
+[[company]]
+name = "VAST Data"
+domain = "vastdata.com"
+[[company]]
+name = "Vast.ai"
+domain = "vast.ai"
+[[company]]
+name = "Vatic Investments"
+domain = ""
+[[company]]
+name = "Vatic Labs"
+domain = "vaticlabs.com"
+[[company]]
+name = "Vdura"
+domain = ""
+[[company]]
+name = "Veed"
+domain = ""
+[[company]]
+name = "Ventana Micro Systems"
+domain = ""
+[[company]]
+name = "Veracode"
+domain = ""
+[[company]]
+name = "Vercel"
+domain = "vercel.com"
+[[company]]
+name = "Verition"
+domain = ""
+[[company]]
+name = "Verition Fund Management"
+domain = "verition.com"
+[[company]]
+name = "Verizon"
+domain = ""
+[[company]]
+name = "Verkada"
+domain = "verkada.com"
+[[company]]
+name = "Very Good Security"
+domain = ""
+[[company]]
+name = "Vespa"
+domain = "vespa.ai"
+[[company]]
+name = "Viasat"
+domain = "viasat.com"
+[[company]]
+name = "VideoLAN"
+domain = ""
+[[company]]
+name = "Virtu Financial"
+domain = "virtu.com"
+[[company]]
+name = "Visa"
+domain = ""
+[[company]]
+name = "Vizio"
+domain = ""
+[[company]]
+name = "VMware"
+domain = "vmware.com"
+[[company]]
+name = "Volant Trading"
+domain = "volanttrading.com"
+[[company]]
+name = "Voleon"
+domain = "voleon.com"
+[[company]]
+name = "Voloridge Investment Management"
+domain = ""
+[[company]]
+name = "Voltage Park"
+domain = "voltagepark.com"
+[[company]]
+name = "Vonage"
+domain = ""
+[[company]]
+name = "Voxel51"
+domain = "voxel51.com"
+[[company]]
+name = "Vultr"
+domain = ""
+[[company]]
+name = "Waabi"
+domain = ""
+[[company]]
+name = "Walleye Capital"
+domain = "walleyecapital.com"
+[[company]]
+name = "Walmart (Global Tech)"
+domain = ""
+[[company]]
+name = "Warner Bros. Discovery"
+domain = ""
+[[company]]
+name = "Warp"
+domain = ""
+[[company]]
+name = "WarpBuild"
+domain = ""
+[[company]]
+name = "WarpStream"
+domain = ""
+[[company]]
+name = "Wasabi"
+domain = ""
+[[company]]
+name = "Waymo"
+domain = "waymo.com"
+[[company]]
+name = "Wayve"
+domain = "wayve.ai"
+[[company]]
+name = "Weaviate"
+domain = "weaviate.io"
+[[company]]
+name = "Webull"
+domain = ""
+[[company]]
+name = "Weights & Biases"
+domain = ""
+[[company]]
+name = "Weights and Biases"
+domain = "wandb.ai"
+[[company]]
+name = "Weka"
+domain = "weka.io"
+[[company]]
+name = "Wells Fargo"
+domain = ""
+[[company]]
+name = "Western Digital"
+domain = ""
+[[company]]
+name = "WH Trading"
+domain = ""
+[[company]]
+name = "Whoop"
+domain = ""
+[[company]]
+name = "WhyLabs"
+domain = "whylabs.ai"
+[[company]]
+name = "Windmill"
+domain = ""
+[[company]]
+name = "Windsurf"
+domain = "windsurf.com"
+[[company]]
+name = "Wintermute"
+domain = "wintermute.com"
+[[company]]
+name = "Winton"
+domain = ""
+[[company]]
+name = "Wise"
+domain = ""
+[[company]]
+name = "Wiz"
+domain = ""
+[[company]]
+name = "Wolverine Trading"
+domain = "wolve.com"
+[[company]]
+name = "Workday"
+domain = "workday.com"
+[[company]]
+name = "World Labs"
+domain = "worldlabs.ai"
+[[company]]
+name = "WorldQuant"
+domain = "worldquant.com"
+[[company]]
+name = "Woven by Toyota"
+domain = ""
+[[company]]
+name = "Wowza"
+domain = ""
+[[company]]
+name = "Writer"
+domain = "writer.com"
+[[company]]
+name = "X"
+domain = "x.com"
+[[company]]
+name = "X-Bow Systems"
+domain = ""
+[[company]]
+name = "xAI"
+domain = "x.ai"
+[[company]]
+name = "Xata"
+domain = ""
+[[company]]
+name = "Xinnor"
+domain = ""
+[[company]]
+name = "Xona Space Systems"
+domain = ""
+[[company]]
+name = "XR Trading"
+domain = ""
+[[company]]
+name = "Xscape Photonics"
+domain = ""
+[[company]]
+name = "Xsight Labs"
+domain = "xsightlabs.com"
+[[company]]
+name = "XTX Markets"
+domain = "xtxmarkets.com"
+[[company]]
+name = "Yugabyte"
+domain = "yugabyte.com"
+[[company]]
+name = "Zed Industries"
+domain = ""
+[[company]]
+name = "Zenlayer"
+domain = ""
+[[company]]
+name = "ZF"
+domain = ""
+[[company]]
+name = "Zilliz"
+domain = "zilliz.com"
+[[company]]
+name = "Zipline"
+domain = "flyzipline.com"
+[[company]]
+name = "Zoom"
+domain = "zoom.us"
+[[company]]
+name = "Zoox"
+domain = "zoox.com"
+[[company]]
+name = "Zscaler"
+domain = ""

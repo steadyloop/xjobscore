@@ -9,3 +9,30 @@ domain = "egnyte.com"
 status = "live"
 enabled = true
 validated_at = "2026-08-04"
+
+[[feed]]
+key = "barracuda-networks-inc"
+company_id = "barracuda-networks"
+company = "Barracuda Networks"
+domain = "barracuda.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-05"
+
+[[feed]]
+key = "gigamon"
+company_id = "gigamon"
+company = "Gigamon"
+domain = "gigamon.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-05"
+
+[[feed]]
+key = "nutanix"
+company_id = "nutanix"
+company = "Nutanix"
+domain = "nutanix.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-05"

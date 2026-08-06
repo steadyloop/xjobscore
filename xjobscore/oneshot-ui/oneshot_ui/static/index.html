@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>OneShot</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/layout.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Primary navigation">
+      <a class="brand" href="#today" data-view-link="today"><span class="brand-mark">◌</span>oneshot</a>
+      <button class="capture-trigger" data-action="capture" title="Capture a job URL"><span>＋</span> Capture <kbd>C</kbd></button>
+      <nav class="nav-list">
+        <p>Workspace</p>
+        <a href="#today" data-view-link="today">Today <b data-count="today">—</b></a>
+        <a href="#discover" data-view-link="discover">Discover <b data-count="discover">—</b></a>
+        <a href="#pipeline" data-view-link="pipeline">Pipeline</a>
+        <a href="#saved" data-view-link="saved">Saved <b data-count="saved">—</b></a>
+        <p>Quality</p>
+        <a href="#dedupe" data-view-link="dedupe">Dedupe review <b data-count="dedupe">—</b></a>
+        <a href="#coverage" data-view-link="coverage">Source coverage</a>
+      </nav>
+      <div class="rail-foot"><span class="manual-dot"></span><span>Manual fetches only</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button>
+        <div class="global-search"><span>⌕</span><input id="global-search" placeholder="Search opportunities" autocomplete="off"><kbd>⌘K</kbd></div>
+        <button class="icon-button" data-action="capture" title="Capture URL">＋</button>
+      </header>
+      <div id="flash" class="flash" role="status" aria-live="polite"></div>
+      <section id="view" class="view" aria-live="polite">
+        <div class="state loading"><i></i><h1>Loading your workspace</h1><p>Reading the latest API data.</p></div>
+      </section>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+</body>
+</html>
