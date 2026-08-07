@@ -1,0 +1,15 @@
+schema_version = 1
+source = "vincere"
+
+# `key` is the Vincere tenant subdomain. Verified live: /careers/ lists
+# /careers/job/{id}/{slug} links, and the detail page carries JobPosting
+# JSON-LD with hiringOrganization.name = "ZealHR".
+
+[[feed]]
+key = "zealhr"
+company_id = "zealhr"
+company = "ZealHR"
+domain = "zealhr.co.za"
+status = "live"
+enabled = true
+validated_at = "2026-08-06"

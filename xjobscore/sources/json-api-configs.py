@@ -99,6 +99,252 @@ SIMPLE: dict[str, dict] = {
             "full_location": "@full_location",
         },
     },
+    # One GET returns the whole board with descriptions and requirements inline
+    # -- no pagination, no detail fetch. Verified against `transperfect`: 614
+    # offers in a single 8.8 MB response, so set a cadence with that transfer in
+    # mind rather than the 900s default.
+    #
+    # Every timestamp this board emits ("2026-08-06 15:57:36 UTC") is rejected by
+    # `datetime.fromisoformat`, and the config vocabulary has no way to reshape a
+    # string, so mapping one to `published_at` would raise inside `parse`. They
+    # stay in `source_extra` verbatim; latency is not measurable from this source
+    # until the engine can parse a format.
+    "recruitee": {
+        "list": {"url": "https://{key}.recruitee.com/api/offers/", "items": "offers", "id": "@id"},
+        "fields": {
+            "title": "@title", "url_posting": "@careers_url", "apply_url": "@careers_apply_url",
+            "company_raw": "@company_name",
+            "location_raw": {"fallback": ["@location", {"join": ["@city", "@state_name", "@country"]}]},
+            "description_html": {"concat": ["@description", "@requirements"], "sep": "\n"},
+            "requisition_id": "@guid", "employment_type": "@employment_type_code",
+            "source_active": {"eq": ["@status", "published"]},
+            "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
+        },
+        "extra": {
+            "department": "@department", "category_code": "@category_code", "experience_code": "@experience_code",
+            "education_code": "@education_code", "salary": "@salary", "tags": "@tags", "highlight": "@highlight",
+            "remote": "@remote", "hybrid": "@hybrid", "on_site": "@on_site", "status": "@status",
+            "created_at": "@created_at", "published_at": "@published_at", "updated_at": "@updated_at",
+            "close_at": "@close_at",
+        },
+    },
+    # Descriptions arrive split across four labelled blocks; concatenating them
+    # keeps the whole ad in `description_html` while the headers stay in
+    # `source_extra`. `deadline_at` is deliberately not mapped: it was null on
+    # every posting across four tenants, so its format is unverified and a
+    # non-ISO value would raise in `parse`.
+    "pinpoint": {
+        "list": {"url": "https://{key}.pinpointhq.com/postings.json", "items": "data", "id": "@id"},
+        "fields": {
+            "title": "@title", "url_posting": "@url", "company_raw": "$key",
+            "location_raw": {"fallback": ["@location.name", {"join": ["@location.city", "@location.province"]}]},
+            "description_html": {
+                "concat": ["@description", "@key_responsibilities", "@skills_knowledge_expertise", "@benefits"],
+                "sep": "\n",
+            },
+            "requisition_id": "@job.requisition_id", "employment_type": "@employment_type_text",
+            "workplace_type_raw": "@workplace_type",
+        },
+        "extra": {
+            "department": "@job.department.name", "division": "@job.division", "job": "@job",
+            "compensation": "@compensation", "compensation_minimum": "@compensation_minimum",
+            "compensation_maximum": "@compensation_maximum", "compensation_currency": "@compensation_currency",
+            "workplace_type_text": "@workplace_type_text", "reporting_to": "@reporting_to",
+            "location": "@location", "deadline_at": "@deadline_at", "path": "@path",
+            "key_responsibilities_header": "@key_responsibilities_header",
+            "skills_knowledge_expertise_header": "@skills_knowledge_expertise_header",
+            "benefits_header": "@benefits_header",
+        },
+    },
+    # A DRF paginator: `count` is the board total and `page` is a 1-based integer,
+    # so the engine's own cursor drives it. `organization_name` is the department,
+    # not the employer -- the employer is the board slug.
+    "manatal": {
+        "list": {
+            "url": "https://www.careers-page.com/api/v1.0/c/{key}/jobs/",
+            "params": {"page": "$cursor", "page_size": 50},
+            "items": "results", "id": "@id",
+            "page": {"total": "@count", "start": 1, "size": 50, "step": 1},
+        },
+        "fields": {
+            "title": "@position_name",
+            "url_posting": {"template": "https://www.careers-page.com/{key}/job/{hash}"},
+            "company_raw": "$key",
+            "location_raw": {"fallback": ["@location_display", {"join": ["@city", "@state", "@country"]}]},
+            "description_html": "@description", "requisition_id": "@hash",
+        },
+        "extra": {
+            "organization_name": "@organization_name", "address": "@address", "city": "@city",
+            "state": "@state", "country": "@country", "zipcode": "@zipcode",
+            "is_salary_visible": "@is_salary_visible", "is_pinned_in_career_page": "@is_pinned_in_career_page",
+        },
+    },
+    # A platform-wide opportunity search, not a per-employer board: one feed
+    # covers every listing, so `key` names the feed rather than a tenant and the
+    # employer comes off each row. `approved_date` ("… GMT+0530") is not
+    # ISO-parseable; `updated_at` and the registration window are, so those carry
+    # the timestamps.
+    #
+    # `total` reports a flat 10,000 over exactly 200 pages on every query -- an
+    # API ceiling, not the corpus size. Results come back newest-first (page 1 is
+    # today, page 200 is roughly eight months back), so capping at 20 pages keeps
+    # the newest 1,000 and still overlaps several days of postings between polls.
+    # Without the cap a single poll walks all 200 pages.
+    "unstop": {
+        "list": {
+            "url": "https://unstop.com/api/public/opportunity/search-result",
+            "params": {"opportunity": "internships", "page": "$cursor", "per_page": 50},
+            "items": "data.data", "id": "@id",
+            "page": {"total": "@data.total", "start": 1, "size": 50, "step": 1, "max": 20},
+        },
+        "fields": {
+            "title": "@title", "url_posting": "@seo_url", "apply_url": "@short_url",
+            "company_raw": "@organisation.name",
+            "location_raw": {"first": {"map": "@locations", "value": "@city"}},
+            "locations_extra": {"rest": {"map": "@locations", "value": "@city"}},
+            "description_html": "@details", "employment_type": "@subtype",
+            "workplace_type_raw": "@region",
+            "published_at": {"date": "@regnRequirements.start_regn_dt"}, "published_at_precision": "exact",
+            "deadline_at": {"date": "@end_date"}, "source_updated_at": {"date": "@updated_at"},
+            "source_active": {"eq": ["@status", "LIVE"]},
+        },
+        "extra": {
+            "short_id": "@short_id", "public_url": "@public_url", "type": "@type", "subtype": "@subtype",
+            "organisation": "@organisation", "organization_id": "@organization_id", "jobDetail": "@jobDetail",
+            "required_skills": "@required_skills", "workfunction": "@workfunction", "filters": "@filters",
+            "regnRequirements": "@regnRequirements", "approved_date": "@approved_date",
+            "registerCount": "@registerCount", "viewsCount": "@viewsCount", "isPaid": "@isPaid",
+        },
+    },
+    # An unauthenticated Elasticsearch proxy in front of the whole TalentReef
+    # estate -- one feed, ~196k postings across every client, so there is no
+    # tenant in the key. `_source` is the document, hence `unwrap`.
+    #
+    # Two deliberate choices:
+    #   `url_posting` is built from clientId+jobId rather than read from `url`.
+    #     `url` is empty on about a third of documents and relative on the rest;
+    #     the canonical form apply.jobappnetwork.com/clients/{c}/posting/{j}/en is
+    #     what those relative paths redirect to, and it is derivable for every row.
+    #   `max` caps the sweep at the newest 5,000. No result-window limit was
+    #     observed (from=10001 still answers), so the cap is a cost decision, not
+    #     a server one: an exhaustive pass is ~1,970 requests. The engine reports
+    #     `truncated` when it bites, so the shortfall is never silent.
+    "talentreef": {
+        "list": {
+            "method": "POST",
+            "url": "https://prod-kong.internal.talentreef.com/apply/proxy-es/search-en-us/posting/_search",
+            "body": {
+                "size": 100,
+                "from": "$cursor",
+                "query": {"match_all": {}},
+                "sort": [{"createdDate": "desc"}],
+            },
+            "items": "hits.hits", "unwrap": "_source", "id": "@jobId",
+            "page": {"total": "@hits.total", "size": 100, "step": 100, "max": 50},
+        },
+        "fields": {
+            "title": "@title",
+            "url_posting": {"template": "https://apply.jobappnetwork.com/clients/{clientId}/posting/{jobId}/en"},
+            "company_raw": {"fallback": ["@clientName", "@brand"]},
+            "location_raw": {"join": ["@address.city", "@address.stateOrProvince"]},
+            "description_html": "@description",
+            # positionId is a JSON number; requisition_id is typed str.
+            "requisition_id": {"template": "{positionId}"},
+            "employment_type": "@contractType",
+            "published_at": {"date": "@createdDate"}, "published_at_precision": "date",
+        },
+        "extra": {
+            "brand": "@brand", "brandId": "@brandId", "category": "@category", "department": "@department",
+            "positionType": "@positionType", "position": "@position", "client": "@client",
+            "clientId": "@clientId", "location": "@location", "address": "@address", "geo": "@geo",
+            "shifts": "@shifts", "isSalaried": "@isSalaried", "internalOrExternal": "@internalOrExternal",
+            "startDate": "@startDate", "endDate": "@endDate", "url": "@url",
+        },
+    },
+    # A board is addressed by a host and two opaque values, so the key carries all
+    # three: "recruiting.ultipro.com/COM1060COMOI/5cbca35a-adf1-993f-4fc9-41ad8639e2cb".
+    # The host is not decoration -- tenants are sharded across recruiting,
+    # recruiting2, ... and a board answers on exactly one of them (ARU1000ARUP is
+    # 200 on recruiting2 and 404 on recruiting), so it cannot be hardcoded.
+    #
+    # The search POST needs no headers at all -- an empty body already answers 200
+    # -- and `Skip` is a plain integer, so the engine's cursor drives pagination
+    # directly.
+    #
+    # `description_html` is only the teaser. There is no JSON detail endpoint to
+    # fan out to: the full body (~19 kB where BriefDescription gives 450 chars)
+    # exists solely inside the Knockout page at OpportunityDetail, and five
+    # plausible JSON paths -- LoadOpportunity, LoadOpportunityDetail,
+    # GetOpportunityDetails, LoadOpportunities, Opportunity/{id} -- all 404.
+    # Full descriptions need an HTML reader, which this engine is not; treat this
+    # config as complete for discovery and truncated for content.
+    #
+    # Employment fields are all enums on the wire (`FullTime` boolean,
+    # `OpportunityType`/`JobLocationType` integers) with no published mapping, so
+    # they stay in `source_extra` rather than being guessed into
+    # `employment_type`.
+    "ukg": {
+        "key_parts": ("host", "companyCode", "boardGuid"),
+        "list": {
+            "method": "POST",
+            "url": (
+                "https://{host}/{companyCode}/JobBoard/{boardGuid}"
+                "/JobBoardView/LoadSearchResults"
+            ),
+            "url_override": False,
+            "body": {
+                "opportunitySearch": {
+                    "Top": 50,
+                    "Skip": "$cursor",
+                    "QueryString": "",
+                    "OrderBy": [
+                        {"Value": "postedDateDesc", "PropertyName": "PostedDate", "Ascending": False},
+                    ],
+                    "Filters": [],
+                },
+                "matchCriteria": {
+                    "PreferredJobs": [],
+                    "Educations": [],
+                    "LicenseAndCertifications": [],
+                    "Skills": [],
+                    "hasNoLicenses": False,
+                    "SkippedSkills": [],
+                },
+            },
+            "items": "opportunities",
+            "id": "@Id",
+            # Boards are usually well under this; the cap is a runaway guard.
+            "page": {"total": "@totalCount", "size": 50, "step": 50, "max": 40},
+        },
+        "fields": {
+            "title": "@Title",
+            "url_posting": {
+                "template": (
+                    "https://{host}/{companyCode}/JobBoard/{boardGuid}"
+                    "/OpportunityDetail?opportunityId={Id}"
+                )
+            },
+            "company_raw": "$company_raw",
+            "location_raw": {
+                "join": ["@Locations[0].Address.City", "@Locations[0].Address.State.Code"]
+            },
+            "locations_extra": {
+                "rest": {
+                    "map": "@Locations",
+                    "value": {"join": ["@Address.City", "@Address.State.Code"]},
+                }
+            },
+            "description_html": "@BriefDescription",
+            "requisition_id": "@RequisitionNumber",
+            "published_at": {"date": "@PostedDate"},
+            "published_at_precision": "exact",
+        },
+        "extra": {
+            "JobCategoryName": "@JobCategoryName", "FullTime": "@FullTime",
+            "OpportunityType": "@OpportunityType", "JobLocationType": "@JobLocationType",
+            "Featured": "@Featured", "Locations": "@Locations", "MatchScore": "@MatchScore",
+        },
+    },
 }
 COMPANY_JSON: dict[str, dict] = {
     "amazon": {

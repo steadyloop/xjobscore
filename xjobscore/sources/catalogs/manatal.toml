@@ -1,0 +1,11 @@
+schema_version = 1
+source = "manatal"
+
+[[feed]]
+key = "manatal"
+company_id = "manatal"
+company = "Manatal"
+domain = "manatal.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-06"

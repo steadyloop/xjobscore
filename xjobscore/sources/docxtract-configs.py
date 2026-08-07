@@ -93,6 +93,35 @@ CONFIGS: dict[str, dict] = {
             },
         },
     },
+    # Vincere. The `/careers/` list page itself carries only `WebPage` JSON-LD,
+    # but each `/careers/job/{id}/{slug}` detail page carries `['WebPage',
+    # 'JobPosting']`. The JobPosting block has no `url` field of its own, so
+    # posting_url is templated from key+id rather than left to the job.get("url")
+    # fallback; the slug-free form 301s through to the same page (verified).
+    "vincere": {
+        "list": {
+            "url": "https://{key}.vincere.io/careers/",
+            "extract": "html_links",
+            "pattern": r"/careers/job/(?P<id>\d+)/",
+        },
+        "detail": {"extract": "jsonld", "id": "discovered"},
+        "parser": "schemaorg",
+        "posting_url": "https://{key}.vincere.io/careers/job/{id}",
+    },
+    # JazzHR (Employ Inc). The RSS feed candidates.md lists is retired
+    # (/apply/jobs/feed 404s, /apply/jobs.rss is 410 Gone), but /apply/jobs/
+    # lists /apply/jobs/details/{id} links, and each detail page carries a
+    # full JobPosting JSON-LD block alongside an Organization block -- _jsonld
+    # already filters to @type == JobPosting.
+    "jazzhr": {
+        "list": {
+            "url": "https://{key}.applytojob.com/apply/jobs/",
+            "extract": "html_links",
+            "pattern": r"/apply/jobs/details/(?P<id>[A-Za-z0-9]+)",
+        },
+        "detail": {"extract": "jsonld", "id": "discovered"},
+        "parser": "schemaorg",
+    },
     "simplify": {
         "list": {
             "url": "https://raw.githubusercontent.com/{key}/dev/.github/scripts/listings.json",
