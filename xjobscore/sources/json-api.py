@@ -133,11 +133,17 @@ async def _request(request: dict, feed: Feed, net: Net, context: dict[str, Any],
     settings = getattr(feed, "config", None) or {}
     template = settings.get("url", request["url"]) if request.get("url_override", True) else request["url"]
     url = _format(template, None, context)
+    # Headers are the one thing every value in a config is already resolved
+    # through _render for: $-prefixed values pull from feed.config (an API
+    # key, a contact email), same as `params` and `body` do.
+    headers = _render(request["headers"], context) if request.get("headers") else None
     if request.get("method", "GET") == "POST":
-        return await net.post(url, json=_render(request.get("body", {}), context))
+        return await net.post(url, json=_render(request.get("body", {}), context), headers=headers)
     kwargs: dict[str, Any] = {}
     if request.get("params"):
         kwargs["params"] = _render(request["params"], context)
+    if headers:
+        kwargs["headers"] = headers
     if first and request.get("conditional", True):
         kwargs["state"] = feed.state
     return await net.get(url, **kwargs)

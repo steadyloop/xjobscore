@@ -305,6 +305,81 @@ def _rss(config: dict, feed: Feed, item: Item) -> Posting:
     )
 
 
+ATOM_NS = "http://www.w3.org/2005/Atom"
+
+
+def _atom(config: dict, feed: Feed, item: Item) -> Posting:
+    """Atom is RSS's opposite case: every base field, not just extensions,
+    lives in a namespace, and the URL is an attribute (link/@href) rather
+    than element text. _rss's unprefixed element.find("title") reads nothing
+    here, which is what makes this a separate function rather than a flag.
+    """
+    assert isinstance(item.payload, str)
+    element = ET.fromstring(item.payload)
+    atom = config["atom"]
+    qualified = lambda path: "/".join(f"{{{ATOM_NS}}}{part}" for part in path.split("/"))
+    link = next(
+        (el for el in element.findall(qualified("link")) if el.get("rel") in (None, "alternate")),
+        None,
+    )
+    url_posting = (link.get("href") if link is not None else None) or _text(element.find(qualified("id"))) or ""
+    published_at = None
+    if (published := _text(element.find(qualified("published")))):
+        published_at = datetime.fromisoformat(published)
+    extras = {key: _text(element.find(qualified(path))) for key, path in atom.get("extra_paths", {}).items()}
+    # Most Atom boards this engine sees are per-tenant, so the feed key names
+    # the employer, matching _rss's default; company_path is there for a
+    # multi-tenant feed that states the real name on an element instead.
+    company_raw = feed.key
+    if (path := atom.get("company_path")):
+        company_raw = _text(element.find(qualified(path))) or feed.key
+    return Posting(
+        external_id=item.external_id,
+        title=_text(element.find(qualified("title"))) or "",
+        url_posting=url_posting,
+        company_raw=company_raw,
+        description_html=_text(element.find(qualified("content"))),
+        published_at=published_at,
+        published_at_precision="exact" if published_at else "unknown",
+        source_extra=extras,
+    )
+
+
+def _xml_map(config: dict, feed: Feed, item: Item) -> Posting:
+    """A flat, unqualified XML schema that is neither RSS nor Atom -- a plain
+    field-name-to-element-path map, for a vendor with its own bespoke tag set
+    (Personio's `<workzag-jobs><position>`). No namespace handling: a vendor
+    that needs one belongs in `_rss` or `_atom`, not here.
+    """
+    assert isinstance(item.payload, str)
+    element = ET.fromstring(item.payload)
+    xml_map = config["xml_map"]
+    fields = xml_map["fields"]
+    field = lambda name: _text(element.find(fields[name])) if fields.get(name) else None
+    locations = [value for path in xml_map.get("location_paths", ()) if (value := _text(element.find(path)))]
+    published_at, precision = _parse_date(field("published"))
+    url_posting = field("url")
+    if not url_posting and config.get("posting_url"):
+        url_posting = _format(config["posting_url"], feed, id=item.external_id)
+    company_raw = feed.key
+    if (path := xml_map.get("company_path")):
+        company_raw = _text(element.find(path)) or feed.key
+    extras = {key: _text(element.find(path)) for key, path in xml_map.get("extra_paths", {}).items()}
+    return Posting(
+        external_id=item.external_id,
+        title=field("title") or "",
+        url_posting=url_posting or "",
+        company_raw=company_raw,
+        location_raw=locations[0] if locations else None,
+        description_html=field("description"),
+        employment_type=field("employment_type"),
+        published_at=published_at,
+        published_at_precision=precision,
+        locations_extra=locations[1:],
+        source_extra=extras,
+    )
+
+
 def _simplify(config: dict, item: Item) -> Posting:
     payload = item.payload
     assert isinstance(payload, dict)
@@ -336,6 +411,10 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         return [_schemaorg(config, feed, item)]
     if config["parser"] == "rss":
         return [_rss(config, feed, item)]
+    if config["parser"] == "atom":
+        return [_atom(config, feed, item)]
+    if config["parser"] == "xml_map":
+        return [_xml_map(config, feed, item)]
     if config["parser"] == "simplify":
         return [_simplify(config, item)]
     raise ValueError(f"unsupported web-board parser: {config['parser']}")

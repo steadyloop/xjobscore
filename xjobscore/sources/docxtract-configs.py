@@ -122,6 +122,65 @@ CONFIGS: dict[str, dict] = {
         "detail": {"extract": "jsonld", "id": "discovered"},
         "parser": "schemaorg",
     },
+    # PeopleAdmin. `.json` 406s and the plain HTML search page has no
+    # JSON-LD, but `/postings/search.atom` is a full board with descriptions
+    # inline -- one GET, no detail fetch. `key` is the institution subdomain
+    # ("marshall" -> marshall.peopleadmin.com).
+    #
+    # Every base field lives in the Atom namespace, unlike RSS, so this needs
+    # the `atom` parser rather than `rss` -- see docxtract.py's `_atom`.
+    # `content` is entity-escaped HTML but needs no unescape flag: XML parsing
+    # already decodes it once (there is no CDATA double-wrap here, unlike
+    # SuccessFactors' RSS feed). No `location_path` is configured -- postings
+    # carry no place field at all, only the hiring unit in `author/name`,
+    # which is too fine-grained to be company_raw (e.g. "Public Safety -
+    # MU5500"), so it goes to `source_extra` instead and company_raw stays
+    # the tenant key, matching every other per-tenant board in this file.
+    "peopleadmin": {
+        "list": {
+            "url": "https://{key}.peopleadmin.com/postings/search.atom",
+            "extract": "xml_items",
+            "path": "{http://www.w3.org/2005/Atom}entry",
+            "id": ("{http://www.w3.org/2005/Atom}id",),
+        },
+        "parser": "atom",
+        "atom": {
+            "extra_paths": {"hiring_unit": "author/name"},
+        },
+    },
+    # Personio. `/xml` (also `.com`) is a bespoke `<workzag-jobs><position>`
+    # schema, not RSS -- no namespace, and none of RSS/Atom's element names
+    # (title is `name`, no `link`). `key` is the tenant subdomain.
+    #
+    # No `<url>` element exists on a position at all, so `posting_url` is
+    # templated from key+id; verified live that `.../job/{id}` resolves to
+    # the matching posting. `jobDescriptions` was empty on the one live
+    # posting this was checked against (Personio's own tenant) -- the field
+    # is mapped for tenants that populate it, but is unverified as non-empty.
+    "personio": {
+        "list": {
+            "url": "https://{key}.jobs.personio.de/xml",
+            "extract": "xml_items",
+            "path": "position",
+            "id": ("id",),
+        },
+        "parser": "xml_map",
+        "posting_url": "https://{key}.jobs.personio.de/job/{id}",
+        "xml_map": {
+            "fields": {
+                "title": "name", "description": "jobDescriptions", "published": "createdAt",
+                "employment_type": "employmentType",
+            },
+            "location_paths": ("office", "additionalOffices/office"),
+            "company_path": "subcompany",
+            "extra_paths": {
+                "department": "department", "recruiting_category": "recruitingCategory",
+                "seniority": "seniority", "schedule": "schedule",
+                "years_of_experience": "yearsOfExperience", "occupation": "occupation",
+                "occupation_category": "occupationCategory",
+            },
+        },
+    },
     "simplify": {
         "list": {
             "url": "https://raw.githubusercontent.com/{key}/dev/.github/scripts/listings.json",
