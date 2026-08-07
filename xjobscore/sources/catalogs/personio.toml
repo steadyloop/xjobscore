@@ -1,0 +1,16 @@
+schema_version = 1
+source = "personio"
+
+# `key` is the Personio tenant subdomain. Verified live: /xml returns the
+# bespoke <workzag-jobs><position> feed. Only one open position at capture
+# time, with an empty <jobDescriptions> -- non-empty description content is
+# mapped but unverified.
+
+[[feed]]
+key = "personio"
+company_id = "personio"
+company = "Personio SE & Co. KG"
+domain = "personio.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-06"

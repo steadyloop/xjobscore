@@ -1,0 +1,15 @@
+schema_version = 1
+source = "peopleadmin"
+
+# `key` is the PeopleAdmin (higher-ed ATS) tenant subdomain. Verified live:
+# /postings/search.atom returns a full Atom board (115 entries) with
+# descriptions inline, no detail fetch needed.
+
+[[feed]]
+key = "marshall"
+company_id = "marshall-university"
+company = "Marshall University"
+domain = "marshall.edu"
+status = "live"
+enabled = true
+validated_at = "2026-08-06"

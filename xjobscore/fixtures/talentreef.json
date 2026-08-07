@@ -1,0 +1,82 @@
+{
+  "hits": {
+    "total": 1,
+    "hits": [
+      {
+        "_id": "11086949",
+        "_source": {
+          "title": "Clerk",
+          "positionType": "Clerk",
+          "address": {
+            "street1": "1610 North Missouri Street",
+            "street2": "Niemann Foods - HayMakers #745",
+            "city": "Macon",
+            "stateOrProvince": "MO",
+            "postalCode": "63552",
+            "country": "US"
+          },
+          "stateOrProvinceFull": "Missouri",
+          "brand": "Haymakers",
+          "brandId": "1378",
+          "jobId": 11086949,
+          "description": "<p class=\"ql-align-center\"><strong class=\"ql-size-large\">Get paid daily! We’ve partnered with DailyPay to offer employees more control over their earnings!!!</strong></p><p><br></p><p><strong>SUMMARY</strong></p><p>The Haymakers Clerk recei…",
+          "category": "Haymakers",
+          "socialRecruitingAttribute1": "HayMakers",
+          "recruiter": {
+            "id": 2647646,
+            "firstName": "MaconHaymakers",
+            "lastName": "StoreDirector",
+            "email": "745sd@niemannfoods.com"
+          },
+          "manager": {
+            "id": 2647646,
+            "firstName": "MaconHaymakers",
+            "lastName": "StoreDirector",
+            "email": "745sd@niemannfoods.com"
+          },
+          "url": "/apply/c_nf/l_en/Haymakers-Clerk-job-Macon-MO-US-11086949.html",
+          "startDate": "2027-08-01",
+          "endDate": "2027-08-01",
+          "createdDate": "2027-08-01",
+          "location": {
+            "id": 98979,
+            "name": "745 Haymakers",
+            "number": "745"
+          },
+          "geo": {
+            "lat": 0,
+            "lon": 0
+          },
+          "clientId": 13757,
+          "clientName": "Niemann Foods",
+          "client": {
+            "uuid": "c1be3618-6f5a-4cd1-8ee7-a68d9488c260"
+          },
+          "department": {
+            "name": "Grocery",
+            "id": 521021
+          },
+          "contractType": "partTime",
+          "shifts": {
+            "firstShift": false,
+            "secondShift": true,
+            "thirdShift": true
+          },
+          "internalOrExternal": "externalOnly",
+          "internalExpireDate": null,
+          "isSalaried": false,
+          "positionId": 52359,
+          "position": {
+            "uuid": "20299e89-c68b-42e8-a53e-00258dd2d8d7",
+            "category": {
+              "uuid": ""
+            }
+          },
+          "postingUuid": "380262de-6c50-494a-bc10-66c42da9174b",
+          "maxCompensationType": "annual",
+          "pubCompensation": 0
+        }
+      }
+    ]
+  }
+}

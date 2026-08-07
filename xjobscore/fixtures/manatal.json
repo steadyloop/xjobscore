@@ -1,0 +1,22 @@
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 1333846,
+      "hash": "L8597V4V",
+      "organization_name": "Customer Success",
+      "position_name": "Business Development Internship (12PM - 9PM)",
+      "description": "<p><a href=\"https://www.manatal.com/\">Manatal</a> is an HRTech software service (B2B SaaS) company headquartered in Bangkok, Thailand. It is one of the fastest-growing start-ups in the region, backed by Surge and Sequoia Capital. Manatal ha…",
+      "country": "Thailand",
+      "state": "Bangkok",
+      "city": "Bangkok",
+      "address": "16th Floor, 26/58 Orakarn Building, Khwaeng Lumphini, Khet Pathum Wan, Krung Thep Maha Nakhon 10330",
+      "zipcode": "",
+      "location_display": "Bangkok, Bangkok, Thailand",
+      "is_salary_visible": false,
+      "is_pinned_in_career_page": false
+    }
+  ]
+}

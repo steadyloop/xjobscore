@@ -1,0 +1,53 @@
+{
+  "opportunities": [
+    {
+      "Id": "0eae2087-d555-4853-aee3-1ed23f6e4067",
+      "Featured": true,
+      "Title": "Senior Manager, Finance and Grants, Family Planning 2030",
+      "RequisitionNumber": "SENIO002183",
+      "FullTime": true,
+      "JobCategoryName": "Career Opportunities",
+      "Locations": [
+        {
+          "Id": "117a705c-3c3b-53d6-9ccd-77f9a71aa8fd",
+          "LocalizedName": null,
+          "LocalizedLocationId": null,
+          "LocalizedDescription": "Headquarters",
+          "Address": {
+            "Line1": "1750 Pennsylvania Ave NW",
+            "Line2": "Suite 300",
+            "City": "Washington",
+            "PostalCode": "20006",
+            "State": {
+              "Code": "DC",
+              "Name": "District of Columbia"
+            },
+            "Country": {
+              "Code": "USA",
+              "Name": "United States"
+            }
+          },
+          "DisplayName": false,
+          "DisplayLocationId": false,
+          "DisplayAddress": true,
+          "DisplayStreetAddress": false,
+          "DisplayDescription": false,
+          "SourceOfTruth": 1,
+          "Coordinates": {
+            "Latitude": 38.898945,
+            "Longitude": -77.040765
+          }
+        }
+      ],
+      "PostedDate": "2026-08-03T13:08:04.417Z",
+      "BriefDescription": "Family Planning 2030 (FP2030) is a global partnership of governments, civil society, multilateral organizations, donors, the private sector, and researchers committed to ensuring that women and girls everywhere can make informed choices abo…",
+      "MatchScore": 1.0,
+      "MatchedLocations": [],
+      "Distance": null,
+      "JobLocationType": 0,
+      "OpportunityType": 0
+    }
+  ],
+  "totalCount": 1,
+  "locations": []
+}

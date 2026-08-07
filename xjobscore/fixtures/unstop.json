@@ -1,0 +1,191 @@
+{
+  "data": {
+    "total": 1,
+    "current_page": 1,
+    "last_page": 1,
+    "per_page": 50,
+    "data": [
+      {
+        "id": 1731836,
+        "public_url": "internships/campus-ambassador-internship-smarted-innovations-1731836",
+        "title": "Campus Ambassador Internship",
+        "organization_id": 1330163,
+        "type": "jobs",
+        "subtype": "internships",
+        "regn_open": 1,
+        "updated_at": "2026-08-07T02:20:57+05:30",
+        "region": "online",
+        "visibility": "public",
+        "details": "<p><strong>Roles and Responsibilities:</strong></p>\n<ul>\n<li>Represent SmartED Innovations on campus and promote its programs and initiatives.</li>\n<li>Organize and lead campus events, workshops, and information sessions.</li>\n<li>Engage wi…",
+        "short_id": "S6YF5KQ",
+        "logoUrl2": "https://d8it4huxumps7.cloudfront.net/uploads/images/150x150/uploadedManual-6a746f0c16464_screenshot_2026-01-09_203642.png",
+        "organisation": {
+          "id": 1330163,
+          "name": "SmartED Innovations",
+          "public_url": "c/smarted-innovations-1330163",
+          "logoUrl": "",
+          "logoUrl2": "",
+          "show_evaluator_login_link": false,
+          "official_email_domains": null,
+          "tier": null
+        },
+        "seo_url": "https://unstop.com/internships/campus-ambassador-internship-smarted-innovations-1731836",
+        "status": "LIVE",
+        "tags": [],
+        "thumb": null,
+        "isPaid": false,
+        "festival": null,
+        "prizes": [],
+        "address_with_country_logo": {
+          "address": "",
+          "city": "",
+          "state": "",
+          "country": ""
+        },
+        "short_url": "https://unstop.com/o/S6YF5KQ",
+        "workfunction": [
+          {
+            "id": 1976,
+            "name": "Campus Ambassador",
+            "description": "",
+            "created_at": "2026-02-06T23:31:46+05:30",
+            "updated_at": "2026-02-06T23:31:46+05:30",
+            "work_function_name": null,
+            "batch_id": 11,
+            "pivot": {
+              "entity_id": 1731836,
+              "subject_id": 1976,
+              "id": 5732997,
+              "ai_generated": true
+            }
+          }
+        ],
+        "assignedTag": {
+          "tag": null
+        },
+        "opportunity_config": {
+          "id": 1431819,
+          "opportunity_id": 1731836,
+          "banner_config": "{\"color\":\"color-bg8\",\"text\":\"Smart Bridge Campus Ambassdor\",\"type\":7,\"banner_data\":[2]}",
+          "show_registrations_count": 0,
+          "show_impressions": 1,
+          "show_team_size": 1,
+          "show_region": 1
+        },
+        "payment_services": [],
+        "filters": [
+          {
+            "id": 426,
+            "name": "Undergraduate",
+            "type": "eligible",
+            "subtype": null,
+            "file_name": "undergraduate",
+            "domain_id": 0,
+            "icon_url": "https://d8it4huxumps7.cloudfront.net/images/icons/color_icons/undergraduate.svg"
+          },
+          {
+            "id": 424,
+            "name": "Postgraduate",
+            "type": "eligible",
+            "subtype": null,
+            "file_name": "postgraduate",
+            "domain_id": 0,
+            "icon_url": "https://d8it4huxumps7.cloudfront.net/images/icons/color_icons/postgraduate.svg"
+          },
+          {
+            "id": 4022,
+            "name": "Management",
+            "type": "eligible",
+            "subtype": null,
+            "file_name": null,
+            "domain_id": 0,
+            "icon_url": "https://d8it4huxumps7.cloudfront.net/images/icons/color_icons/.svg"
+          }
+        ],
+        "required_skills": [
+          {
+            "id": 647018,
+            "skill": "Proactiveness",
+            "skill_name": "Proactiveness",
+            "pivot": {
+              "entity_id": 1731836,
+              "subject_id": 647018,
+              "id": 5732996,
+              "ai_generated": true
+            }
+          },
+          {
+            "id": 645802,
+            "skill": "Communication Skills",
+            "skill_name": "Communication Skills",
+            "pivot": {
+              "entity_id": 1731836,
+              "subject_id": 645802,
+              "id": 5732992,
+              "ai_generated": true
+            }
+          },
+          {
+            "id": 646085,
+            "skill": "Enthusiasm",
+            "skill_name": "Enthusiasm",
+            "pivot": {
+              "entity_id": 1731836,
+              "subject_id": 646085,
+              "id": 5732993,
+              "ai_generated": true
+            }
+          }
+        ],
+        "locations": [
+          {
+            "id": 1810557,
+            "city": "Bangalore",
+            "state": "Karnataka",
+            "country": "India",
+            "addressable_id": 1731836,
+            "addressable_type": "App\\Model\\Opportunity"
+          }
+        ],
+        "jobDetail": {
+          "entity_id": 1731836,
+          "max_salary": null,
+          "currency": "fa-rupee",
+          "locations": [
+            "Bangalore"
+          ],
+          "type": "wfh",
+          "min_salary": null,
+          "show_salary": 1,
+          "min_experience": null,
+          "max_experience": null,
+          "timing": "full_time",
+          "paid_unpaid": "unpaid",
+          "pay_in": "monthly",
+          "not_disclosed": false
+        },
+        "end_date": "2026-08-20T00:00:00+05:30",
+        "approved_date": "2026-08-07 02:20:57 GMT+0530",
+        "viewsCount": 22,
+        "registerCount": 0,
+        "regnRequirements": {
+          "opportunity_id": 1731836,
+          "start_regn_dt": "2026-08-06T00:00:00+05:30",
+          "end_regn_dt": "2026-08-20T00:00:00+05:30",
+          "show_deadline": 1,
+          "min_team_size": 1,
+          "max_team_size": 1,
+          "work_location_type": "city",
+          "eligibility": "{\"sector\":[\"students\"],\"engineering\":[],\"bSchools\":[\"allCourses\",{\"course\":\"mba1\",\"type\":\"bSchools\",\"programme\":[\"all\"],\"passoutYear\":[\"all\"],\"specialization\":[\"all\"],\"duration\":1},{\"course\":\"mba2\",\"type\":\"bSchools\",\"programme\":[\"all\"],\"pas…",
+          "reg_status": "STARTED",
+          "remainingDaysArray": {
+            "durations": 12,
+            "text": " days left"
+          },
+          "remain_days": "12 days left",
+          "remaining_time": 1114425
+        }
+      }
+    ]
+  }
+}

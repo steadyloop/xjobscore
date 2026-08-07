@@ -1,0 +1,207 @@
+{
+  "offers": [
+    {
+      "city": "Paris",
+      "position": 1770,
+      "sharing_description": "About TransPerfectTransPerfect is the world's largest privately held provider of language services and technology solutions. With over 100 offices globally and more than 5,000 full-time employees, we ",
+      "options_salutation": "off",
+      "guid": "umekk",
+      "options_title": "off",
+      "locations": [
+        {
+          "id": 240197,
+          "name": "Paris",
+          "state": "Île-de-France",
+          "country": "France",
+          "city": "Paris",
+          "translations": {
+            "en": {
+              "name": "Paris",
+              "city": "Paris",
+              "postal_code": null,
+              "street": null,
+              "note": null
+            }
+          },
+          "country_code": "FR",
+          "postal_code": null,
+          "state_code": "IDF",
+          "street": null,
+          "note": null
+        }
+      ],
+      "requirements": "<p class=\"MsoNormal\"><span style=\"color:#424242\">Experience</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Minimum 3–7 years of B2B sales experience, with a strong track record in new business development</span></p></li>…",
+      "hybrid": false,
+      "updated_at": "2026-08-06 15:57:36 UTC",
+      "locations_question": "What is your preferred work location?",
+      "options_photo": "off",
+      "dynamic_fields": [],
+      "translations": {
+        "en": {
+          "description": "<p class=\"MsoNormal\"><u><span style=\"color:#424242\">About TransPerfect</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">TransPerfect is the world's largest privately held provider of language services and technology solutions.…",
+          "title": "Director, Business Development",
+          "highlight": "<p>An exciting role for a professional who values integrity, combines strong commercial drive with a passion for excellence, and is dedicated to delivering exceptional client experiences.</p>",
+          "sharing_image": null,
+          "requirements": "<p class=\"MsoNormal\"><span style=\"color:#424242\">Experience</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Minimum 3–7 years of B2B sales experience, with a strong track record in new business development</span></p></li>…",
+          "sharing_title": "Account Manager",
+          "sharing_description": "About TransPerfectTransPerfect is the world's largest privately held provider of language services and technology solutions. With over 100 offices globally and more than 5,000 full-time employees, we ",
+          "locations_question": "What is your preferred work location?"
+        }
+      },
+      "options_cv": "required",
+      "published_at": "2026-08-06 15:57:36 UTC",
+      "mailbox_email": "job.umekk@transperfect.recruitee.com",
+      "sharing_image": null,
+      "open_questions": [
+        {
+          "id": 4292249,
+          "position": 1,
+          "options": {},
+          "required": true,
+          "body": "What is your English proficiency level?",
+          "kind": "single_choice",
+          "translations": {
+            "en": {
+              "body": "What is your English proficiency level?"
+            }
+          },
+          "open_question_options": [
+            {
+              "id": 6604056,
+              "position": 0,
+              "body": "Native / Bilingual Proficiency",
+              "translations": {
+                "en": {
+                  "body": "Native / Bilingual Proficiency"
+                }
+              }
+            },
+            {
+              "id": 6604057,
+              "position": 1,
+              "body": "Full Professional Proficiency",
+              "translations": {
+                "en": {
+                  "body": "Full Professional Proficiency"
+                }
+              }
+            },
+            {
+              "id": 6604058,
+              "position": 2,
+              "body": "Conversational ",
+              "translations": {
+                "en": {
+                  "body": "Conversational "
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 4292250,
+          "position": 2,
+          "options": {},
+          "required": true,
+          "body": "What is your French Proficiency level",
+          "kind": "single_choice",
+          "translations": {
+            "en": {
+              "body": "What is your French Proficiency level"
+            }
+          },
+          "open_question_options": [
+            {
+              "id": 6604060,
+              "position": 0,
+              "body": "Native / Bilingual",
+              "translations": {
+                "en": {
+                  "body": "Native / Bilingual"
+                }
+              }
+            },
+            {
+              "id": 6604061,
+              "position": 1,
+              "body": "Full Professional Proficiency",
+              "translations": {
+                "en": {
+                  "body": "Full Professional Proficiency"
+                }
+              }
+            },
+            {
+              "id": 6604062,
+              "position": 2,
+              "body": "Conversational",
+              "translations": {
+                "en": {
+                  "body": "Conversational"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 4292251,
+          "position": 3,
+          "options": {},
+          "required": true,
+          "body": "Will you now or in the future require sponsorship for employment visa status?",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "Will you now or in the future require sponsorship for employment visa status?"
+            }
+          },
+          "open_question_options": []
+        }
+      ],
+      "highlight": "<p>An exciting role for a professional who values integrity, combines strong commercial drive with a passion for excellence, and is dedicated to delivering exceptional client experiences.</p>",
+      "company_name": "TransPerfect",
+      "min_hours_per_week": null,
+      "on_site": true,
+      "min_hours": null,
+      "location_question_visible": false,
+      "state_name": "Île-de-France",
+      "state_code": "IDF",
+      "country": "France",
+      "options_phone": "required",
+      "created_at": "2026-08-06 15:54:45 UTC",
+      "education_code": "bachelor_degree",
+      "experience_code": "entry_level",
+      "description": "<p class=\"MsoNormal\"><u><span style=\"color:#424242\">About TransPerfect</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">TransPerfect is the world's largest privately held provider of language services and technology solutions.…",
+      "careers_url": "https://transperfect.com/o/director-business-development-5",
+      "salary": {
+        "max": null,
+        "min": null,
+        "period": null,
+        "currency": null
+      },
+      "close_at": null,
+      "sharing_title": "Account Manager",
+      "employment_type_code": "fulltime_permanent",
+      "tags": [
+        "Full Time (Permanent)"
+      ],
+      "slug": "director-business-development-5",
+      "remote": false,
+      "location": "Paris, Île-de-France, France",
+      "options_cover_letter": "optional",
+      "country_code": "FR",
+      "max_hours": null,
+      "postal_code": null,
+      "id": 2702830,
+      "department": "Sales",
+      "careers_apply_url": "https://transperfect.com/o/director-business-development-5/c/new",
+      "cover_image": null,
+      "locations_question_required": true,
+      "title": "Director, Business Development",
+      "locations_question_type": "multiple_choice",
+      "category_code": "sales",
+      "status": "published",
+      "max_hours_per_week": null
+    }
+  ]
+}
