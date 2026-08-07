@@ -1,0 +1,315 @@
+{
+  "elapsed_s": 1.663,
+  "envelope": {},
+  "feed": {
+    "company_id": "transperfect",
+    "company_name": "TransPerfect",
+    "config": {},
+    "id": -814739627570208619,
+    "key": "transperfect"
+  },
+  "fetched_at": "2026-08-06T21:26:03.119561+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "2702830",
+    "kind": "json",
+    "payload": {
+      "careers_apply_url": "https://transperfect.com/o/director-business-development-5/c/new",
+      "careers_url": "https://transperfect.com/o/director-business-development-5",
+      "category_code": "sales",
+      "city": "Paris",
+      "close_at": null,
+      "company_name": "TransPerfect",
+      "country": "France",
+      "country_code": "FR",
+      "cover_image": null,
+      "created_at": "2026-08-06 15:54:45 UTC",
+      "department": "Sales",
+      "description": "<p class=\"MsoNormal\"><u><span style=\"color:#424242\">About TransPerfect</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">TransPerfect is the world's largest privately held provider of language services and technology solutions. With over 100 offices globally and more than 5,000 full-time employees, we work with the world's leading organisations across Legal, Corporate, Life Sciences, Financial, and Creative sectors to help them communicate, operate, and grow across languages, cultures, and markets.</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Following our acquisition of The Mill — one of the world's most acclaimed creative studios — TransPerfect now offers an expanded suite of creative production services, including Artistic Direction, VFX, and Motion Design, serving luxury, fashion, beauty, and lifestyle brands globally.</span></p><p class=\"MsoNormal\" style=\"min-height: 1.7em;\"></p><p class=\"MsoNormal\"><u><span style=\"color:#424242\">Role Overview</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">We are looking for a Director of Business Development to join our Corporate vertical in France. This is a pure new business hunter role — your mission is to identify, prospect, and close net new accounts across TransPerfect's full portfolio of services.</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">You will be selling into mid-to-large corporate accounts across a broad range of industries, with a particular focus on sectors where TransPerfect's expanded capabilities — including creative production via The Mill — create strong differentiation and cross-sell opportunity.</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">This role is ideal for a commercially driven professional who combines structured B2B sales discipline with genuine curiosity about creative, digital, and linguistic services.</span></p><p style=\"min-height: 1.7em;\"></p><p class=\"MsoNormal\"><u><span style=\"color:#424242\">What You Will Sell</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">You will represent TransPerfect's full Corporate service portfolio, including:</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Translation &amp; Localisation** — documents, marketing, legal, technical, and digital content</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Interpretation** — simultaneous, consecutive, remote (RSI)</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Technology &amp; AI Solutions** — GlobalLink TMS, MT/MTPE, AI-powered workflows</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Digital &amp; Multimedia** — subtitling, dubbing, voice-over, e-learning localisation</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Creative Production (The Mill)** — Artistic Direction, VFX, Motion Design for luxury, fashion, beauty, and lifestyle brands</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Globalisation Consulting** — content strategy, workflow optimisation, language asset management</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><u><span style=\"color:#424242\">Key Responsibilities</span></u></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Build and manage a pipeline of net new business across the French and European corporate market</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Identify and engage key decision-makers — CMOs, Heads of Communication, Procurement Directors, Creative Directors, and Heads of Production</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Develop tailored pitches and proposals that draw on the full breadth of TransPerfect's service offering, including creative capabilities</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Lead the full sales cycle from prospecting to close, including RFP/RFI responses, commercial negotiation, and contract finalisation</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Collaborate with internal teams (Solutions, Operations, The Mill creative teams) to design compelling, client-specific solutions</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Represent TransPerfect at industry events, trade shows, and networking forums</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Contribute to market intelligence — identify trends, competitor movements, and emerging client needs</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Report pipeline, forecast, and activity accurately</span></p></li></ul>",
+      "dynamic_fields": [],
+      "education_code": "bachelor_degree",
+      "employment_type_code": "fulltime_permanent",
+      "experience_code": "entry_level",
+      "guid": "umekk",
+      "highlight": "<p>An exciting role for a professional who values integrity, combines strong commercial drive with a passion for excellence, and is dedicated to delivering exceptional client experiences.</p>",
+      "hybrid": false,
+      "id": 2702830,
+      "location": "Paris, Île-de-France, France",
+      "location_question_visible": false,
+      "locations": [
+        {
+          "city": "Paris",
+          "country": "France",
+          "country_code": "FR",
+          "id": 240197,
+          "name": "Paris",
+          "note": null,
+          "postal_code": null,
+          "state": "Île-de-France",
+          "state_code": "IDF",
+          "street": null,
+          "translations": {
+            "en": {
+              "city": "Paris",
+              "name": "Paris",
+              "note": null,
+              "postal_code": null,
+              "street": null
+            }
+          }
+        }
+      ],
+      "locations_question": "What is your preferred work location?",
+      "locations_question_required": true,
+      "locations_question_type": "multiple_choice",
+      "mailbox_email": "job.umekk@transperfect.recruitee.com",
+      "max_hours": null,
+      "max_hours_per_week": null,
+      "min_hours": null,
+      "min_hours_per_week": null,
+      "on_site": true,
+      "open_questions": [
+        {
+          "body": "What is your English proficiency level?",
+          "id": 4292249,
+          "kind": "single_choice",
+          "open_question_options": [
+            {
+              "body": "Native / Bilingual Proficiency",
+              "id": 6604056,
+              "position": 0,
+              "translations": {
+                "en": {
+                  "body": "Native / Bilingual Proficiency"
+                }
+              }
+            },
+            {
+              "body": "Full Professional Proficiency",
+              "id": 6604057,
+              "position": 1,
+              "translations": {
+                "en": {
+                  "body": "Full Professional Proficiency"
+                }
+              }
+            },
+            {
+              "body": "Conversational ",
+              "id": 6604058,
+              "position": 2,
+              "translations": {
+                "en": {
+                  "body": "Conversational "
+                }
+              }
+            },
+            {
+              "body": "No Proficiency",
+              "id": 6604059,
+              "position": 3,
+              "translations": {
+                "en": {
+                  "body": "No Proficiency"
+                }
+              }
+            }
+          ],
+          "options": {},
+          "position": 1,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "What is your English proficiency level?"
+            }
+          }
+        },
+        {
+          "body": "What is your French Proficiency level",
+          "id": 4292250,
+          "kind": "single_choice",
+          "open_question_options": [
+            {
+              "body": "Native / Bilingual",
+              "id": 6604060,
+              "position": 0,
+              "translations": {
+                "en": {
+                  "body": "Native / Bilingual"
+                }
+              }
+            },
+            {
+              "body": "Full Professional Proficiency",
+              "id": 6604061,
+              "position": 1,
+              "translations": {
+                "en": {
+                  "body": "Full Professional Proficiency"
+                }
+              }
+            },
+            {
+              "body": "Conversational",
+              "id": 6604062,
+              "position": 2,
+              "translations": {
+                "en": {
+                  "body": "Conversational"
+                }
+              }
+            },
+            {
+              "body": "No Proficiency",
+              "id": 6604063,
+              "position": 3,
+              "translations": {
+                "en": {
+                  "body": "No Proficiency"
+                }
+              }
+            }
+          ],
+          "options": {},
+          "position": 2,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "What is your French Proficiency level"
+            }
+          }
+        },
+        {
+          "body": "Will you now or in the future require sponsorship for employment visa status?",
+          "id": 4292251,
+          "kind": "boolean",
+          "open_question_options": [],
+          "options": {},
+          "position": 3,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "Will you now or in the future require sponsorship for employment visa status?"
+            }
+          }
+        },
+        {
+          "body": "Please state your annual base salary (gross) expectations.",
+          "id": 4292252,
+          "kind": "number",
+          "open_question_options": [],
+          "options": {},
+          "position": 4,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "Please state your annual base salary (gross) expectations."
+            }
+          }
+        },
+        {
+          "body": "Are you comfortable working in an onsite setting?",
+          "id": 4292253,
+          "kind": "boolean",
+          "open_question_options": [],
+          "options": {},
+          "position": 5,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "Are you comfortable working in an onsite setting?"
+            }
+          }
+        },
+        {
+          "body": "Where are you currently located?",
+          "id": 4292254,
+          "kind": "string",
+          "open_question_options": [],
+          "options": {},
+          "position": 6,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "Where are you currently located?"
+            }
+          }
+        },
+        {
+          "body": "Have you completed the following level of education: Bachelor's Degree?\n",
+          "id": 4292255,
+          "kind": "boolean",
+          "open_question_options": [],
+          "options": {},
+          "position": 7,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "Have you completed the following level of education: Bachelor's Degree?\n"
+            }
+          }
+        },
+        {
+          "body": "<p>I have read and agree to the <a href=\"https://www.transperfect.com/privacy/vendors\" target=\"_blank\" rel=\"noopener\">TransPerfect Data Privacy Policy</a>.</p>",
+          "id": 4292256,
+          "kind": "legal",
+          "open_question_options": [],
+          "options": {},
+          "position": 8,
+          "required": true,
+          "translations": {
+            "en": {
+              "body": "<p>I have read and agree to the <a href=\"https://www.transperfect.com/privacy/vendors\" target=\"_blank\" rel=\"noopener\">TransPerfect Data Privacy Policy</a>.</p>"
+            }
+          }
+        }
+      ],
+      "options_cover_letter": "optional",
+      "options_cv": "required",
+      "options_phone": "required",
+      "options_photo": "off",
+      "options_salutation": "off",
+      "options_title": "off",
+      "position": 1770,
+      "postal_code": null,
+      "published_at": "2026-08-06 15:57:36 UTC",
+      "remote": false,
+      "requirements": "<p class=\"MsoNormal\"><span style=\"color:#424242\">Experience</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Minimum 3–7 years of B2B sales experience, with a strong track record in new business development</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Experience selling , multi-service solutions to corporate clients — ideally in one or more of the following: creative services, digital production, marketing services, SaaS/tech, or professional services</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Proven ability to close six-figure deals and manage multi-stakeholder, long-cycle sales processes</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Exposure to or genuine interest in creative industries (luxury, fashion, beauty, lifestyle, advertising) — a strong differentiator</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Experience navigating large organisations — identifying budget holders, managing procurement processes, and building internal champions</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Skills &amp; Competencies</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Hunter profile— proactive, autonomous, energised by opening new doors</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Ability to sell both transactional and strategic engagements depending on client maturity</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Strong discovery and consultative selling skills— listens before pitching</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Comfortable discussing technology, AI, and workflow solutions as well as creative services</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Excellent communication and presentation skills in both French and English</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Commercially rigorous — accurate pipeline management, disciplined forecasting</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Languages</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">French — native or bilingual (essential)</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">English — fluent, business-level (essential)</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Additional languages a plus</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Education</span></p><ul><li><p><span style=\"color:#424242\">Degree in **Business, Marketing, Communications, Languages, or a creative discipline** — or equivalent professional experience</span></p></li></ul><p style=\"text-align:start;min-height: 1.7em;\"></p><p style=\"text-align:start;\"><em>TransPerfect values equal opportunities. Applicants are therefore considered regardless of their age, gender, race, ethnic origin, skin colour, religion, belief, descent, genes, disabilities, sexual orientation, marital status or other characteristics worthy of protection. Applicants with disabilities are welcome and encouraged. If you experience any issues with your application process or require assistance please contact careers@transperfect.com.</em></p><p style=\"text-align:start;min-height: 1.7em;\"></p><p style=\"text-align:start;\"><strong>By applying, I confirm I have read and accept TransPerfect's Privacy Policy: https://www.transperfect.com/about/data-privacy-recruiting</strong></p><p style=\"min-height: 1.7em;\"></p><p style=\"min-height: 1.7em;\"></p><p style=\"text-align:start;min-height: 1.7em;\"></p><p style=\"min-height: 1.7em;\"></p>",
+      "salary": {
+        "currency": null,
+        "max": null,
+        "min": null,
+        "period": null
+      },
+      "sharing_description": "About TransPerfectTransPerfect is the world's largest privately held provider of language services and technology solutions. With over 100 offices globally and more than 5,000 full-time employees, we ",
+      "sharing_image": null,
+      "sharing_title": "Account Manager",
+      "slug": "director-business-development-5",
+      "state_code": "IDF",
+      "state_name": "Île-de-France",
+      "status": "published",
+      "tags": [
+        "Full Time (Permanent)"
+      ],
+      "title": "Director, Business Development",
+      "translations": {
+        "en": {
+          "description": "<p class=\"MsoNormal\"><u><span style=\"color:#424242\">About TransPerfect</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">TransPerfect is the world's largest privately held provider of language services and technology solutions. With over 100 offices globally and more than 5,000 full-time employees, we work with the world's leading organisations across Legal, Corporate, Life Sciences, Financial, and Creative sectors to help them communicate, operate, and grow across languages, cultures, and markets.</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Following our acquisition of The Mill — one of the world's most acclaimed creative studios — TransPerfect now offers an expanded suite of creative production services, including Artistic Direction, VFX, and Motion Design, serving luxury, fashion, beauty, and lifestyle brands globally.</span></p><p class=\"MsoNormal\" style=\"min-height: 1.7em;\"></p><p class=\"MsoNormal\"><u><span style=\"color:#424242\">Role Overview</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">We are looking for a Director of Business Development to join our Corporate vertical in France. This is a pure new business hunter role — your mission is to identify, prospect, and close net new accounts across TransPerfect's full portfolio of services.</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">You will be selling into mid-to-large corporate accounts across a broad range of industries, with a particular focus on sectors where TransPerfect's expanded capabilities — including creative production via The Mill — create strong differentiation and cross-sell opportunity.</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">This role is ideal for a commercially driven professional who combines structured B2B sales discipline with genuine curiosity about creative, digital, and linguistic services.</span></p><p style=\"min-height: 1.7em;\"></p><p class=\"MsoNormal\"><u><span style=\"color:#424242\">What You Will Sell</span></u></p><p class=\"MsoNormal\"><span style=\"color:#424242\">You will represent TransPerfect's full Corporate service portfolio, including:</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Translation &amp; Localisation** — documents, marketing, legal, technical, and digital content</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Interpretation** — simultaneous, consecutive, remote (RSI)</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Technology &amp; AI Solutions** — GlobalLink TMS, MT/MTPE, AI-powered workflows</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Digital &amp; Multimedia** — subtitling, dubbing, voice-over, e-learning localisation</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Creative Production (The Mill)** — Artistic Direction, VFX, Motion Design for luxury, fashion, beauty, and lifestyle brands</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Globalisation Consulting** — content strategy, workflow optimisation, language asset management</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><u><span style=\"color:#424242\">Key Responsibilities</span></u></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Build and manage a pipeline of net new business across the French and European corporate market</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Identify and engage key decision-makers — CMOs, Heads of Communication, Procurement Directors, Creative Directors, and Heads of Production</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Develop tailored pitches and proposals that draw on the full breadth of TransPerfect's service offering, including creative capabilities</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Lead the full sales cycle from prospecting to close, including RFP/RFI responses, commercial negotiation, and contract finalisation</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Collaborate with internal teams (Solutions, Operations, The Mill creative teams) to design compelling, client-specific solutions</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Represent TransPerfect at industry events, trade shows, and networking forums</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Contribute to market intelligence — identify trends, competitor movements, and emerging client needs</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Report pipeline, forecast, and activity accurately</span></p></li></ul>",
+          "highlight": "<p>An exciting role for a professional who values integrity, combines strong commercial drive with a passion for excellence, and is dedicated to delivering exceptional client experiences.</p>",
+          "locations_question": "What is your preferred work location?",
+          "requirements": "<p class=\"MsoNormal\"><span style=\"color:#424242\">Experience</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Minimum 3–7 years of B2B sales experience, with a strong track record in new business development</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Experience selling , multi-service solutions to corporate clients — ideally in one or more of the following: creative services, digital production, marketing services, SaaS/tech, or professional services</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Proven ability to close six-figure deals and manage multi-stakeholder, long-cycle sales processes</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Exposure to or genuine interest in creative industries (luxury, fashion, beauty, lifestyle, advertising) — a strong differentiator</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Experience navigating large organisations — identifying budget holders, managing procurement processes, and building internal champions</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Skills &amp; Competencies</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Hunter profile— proactive, autonomous, energised by opening new doors</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Ability to sell both transactional and strategic engagements depending on client maturity</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Strong discovery and consultative selling skills— listens before pitching</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Comfortable discussing technology, AI, and workflow solutions as well as creative services</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Excellent communication and presentation skills in both French and English</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Commercially rigorous — accurate pipeline management, disciplined forecasting</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Languages</span></p><ul><li><p class=\"MsoNormal\"><span style=\"color:#424242\">French — native or bilingual (essential)</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">English — fluent, business-level (essential)</span></p></li><li><p class=\"MsoNormal\"><span style=\"color:#424242\">Additional languages a plus</span></p></li></ul><p class=\"MsoNormal\"><span style=\"color:#424242\">&nbsp;</span></p><p class=\"MsoNormal\"><span style=\"color:#424242\">Education</span></p><ul><li><p><span style=\"color:#424242\">Degree in **Business, Marketing, Communications, Languages, or a creative discipline** — or equivalent professional experience</span></p></li></ul><p style=\"text-align:start;min-height: 1.7em;\"></p><p style=\"text-align:start;\"><em>TransPerfect values equal opportunities. Applicants are therefore considered regardless of their age, gender, race, ethnic origin, skin colour, religion, belief, descent, genes, disabilities, sexual orientation, marital status or other characteristics worthy of protection. Applicants with disabilities are welcome and encouraged. If you experience any issues with your application process or require assistance please contact careers@transperfect.com.</em></p><p style=\"text-align:start;min-height: 1.7em;\"></p><p style=\"text-align:start;\"><strong>By applying, I confirm I have read and accept TransPerfect's Privacy Policy: https://www.transperfect.com/about/data-privacy-recruiting</strong></p><p style=\"min-height: 1.7em;\"></p><p style=\"min-height: 1.7em;\"></p><p style=\"text-align:start;min-height: 1.7em;\"></p><p style=\"min-height: 1.7em;\"></p>",
+          "sharing_description": "About TransPerfectTransPerfect is the world's largest privately held provider of language services and technology solutions. With over 100 offices globally and more than 5,000 full-time employees, we ",
+          "sharing_image": null,
+          "sharing_title": "Account Manager",
+          "title": "Director, Business Development"
+        }
+      },
+      "updated_at": "2026-08-06 15:57:36 UTC"
+    }
+  },
+  "item_count": 614,
+  "ok": true,
+  "source": "recruitee",
+  "truncated": false,
+  "validators": {}
+}

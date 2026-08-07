@@ -1,0 +1,37 @@
+{
+  "elapsed_s": 1.353,
+  "envelope": {},
+  "feed": {
+    "company_id": "manatal",
+    "company_name": "Manatal",
+    "config": {},
+    "id": -9126851125614130106,
+    "key": "manatal"
+  },
+  "fetched_at": "2026-08-06T21:26:02.807204+00:00",
+  "http_status": 200,
+  "item": {
+    "external_id": "1333846",
+    "kind": "json",
+    "payload": {
+      "address": "16th Floor, 26/58 Orakarn Building, Khwaeng Lumphini, Khet Pathum Wan, Krung Thep Maha Nakhon 10330",
+      "city": "Bangkok",
+      "country": "Thailand",
+      "description": "<p><a href=\"https://www.manatal.com/\">Manatal</a> is an HRTech software service (B2B SaaS) company headquartered in Bangkok, Thailand. It is one of the fastest-growing start-ups in the region, backed by Surge and Sequoia Capital. Manatal has a global presence, trusted by thousands of businesses in over 135 countries, and has been recognized by <a href=\"https://www.forbes.com/advisor/business/software/best-recruiting-software/\">Forbes</a> as the Best Recruiting Software of 2024.</p>\n<p>Our goal is to transform the entire hiring process by making it simple, efficient, and enjoyable for recruiters, hiring managers, and candidates alike.</p>\n<p>Our mission is to offer best-in-class AI-powered technologies to empower small, medium, and large businesses in their staffing & recruitment transformation.</p>\n<p><strong>Role Overview</strong><br>You will be a key member of the Manatal sales team assisting in the successful acquisition of new clients. This role is for someone who has an entrepreneurial spirit and is seeking a fast-paced environment.</p>\n<p><strong>Responsibilities</strong></p>\n<ul><li><strong>Qualify inbound leads</strong> in order to ensure that potential customers match defined eligibility criteria.</li><li><strong>Source new sales opportunities</strong> through inbound lead follow-up and outbound cold calls and emails.</li><li>Use <strong>cold calling</strong> and other outbound tactics to reach out to prospects, creating a great first impression and inspiring them to learn how Manatal can benefit their business.</li><li><strong>Research accounts</strong>, identify prospective key stakeholders through outbound research methods.</li><li>Understand and analyze customers' <strong>business needs</strong>, technical requirements, and current challenges. Position the right offering accordingly, highlighting the relevant product capabilities to demonstrate value.</li><li><strong>Initiate and nurture relationships</strong> with prospects, then set up meetings between prospects and members of our Customer Success team.</li><li>Utilize <strong>Outreach sequences</strong> to achieve weekly prospecting metrics and optimize prospecting techniques.</li><li><strong>Hit and consistently exceed targets</strong>.</li><li>Keep <strong>meticulous records</strong> of interactions with leads in our CRM.</li><li>Analyze commercial results to identify potential opportunities and improvements in products, technology, and internal operational models.</li><li>Other tasks as assigned by the CEO and management.</li></ul>\n<p><strong>Requirements</strong></p>\n<ul><li>0-3 years of <strong>business development experience</strong>.</li><li>Excellent <strong>consultative and solution-selling skills</strong>.</li><li>Superb <strong>communication skills</strong> (written and verbal).</li><li>High <strong>energy levels</strong>, a high degree of integrity, self-motivated, positive attitude, proactive approach to work, and confidence.</li><li>Demonstrated success in a <strong>B2B sales environment</strong>.</li><li>Comfortable using tools such as <strong>CRM</strong> for process management and reporting.</li><li>Comfortable with different <strong>shift allocation</strong> (12 PM to 9 PM).</li></ul>\n<p><strong>Working with Manatal</strong><br>This role is based at our Bangkok office, located in the heart of the city center.<br>As a team of diverse cultures and nationalities, English proficiency is required.<br>We enjoy collaborating in person, and the team works on-site.</p>\n<p><strong>Why You'll Enjoy Working with Manatal</strong></p>\n<ul><li>Well-funded start-up, backed by Surge & Sequoia.</li><li>Be part of one of the fastest-growing B2B SaaS start-ups in the region.</li><li>Work alongside talented professionals in the industry.</li><li>Join a lively and highly international team.</li><li>Experience a challenging and innovative working culture.</li><li>Attractive medical healthcare plan.</li><li>Personal development allowance.</li><li>Regular fun team-building activities.</li></ul>\n<p><strong>Watch our Demo</strong></p>\n<p><a href=\"https://www.youtube.com/watch?v=-GG1GqXkAKQ\">https://www.youtube.com/watch?v=-GG1GqXkAKQ</a></p>\n<p><a href=\"https://www.youtube.com/watch?v=VjinpYMUMoc\">https://www.youtube.com/watch?v=VjinpYMUMoc</a></p>\n<p><strong>Manatal Hiring</strong></p>\n<p><em>At Manatal, we are dedicated to building an intuitive AI-powered applicant tracking system to streamline and transform the entire hiring and recruitment process.</em></p>\n<p><em>We are devoted to attracting the best talent worldwide to join our team and take pride in being an equal-opportunity workplace. We are committed to equal employment opportunities regardless of religion, race, ethnicity, ancestry, national origin, gender, gender identity, sex, sexual orientation, marital or parental status, disability, age, citizenship or other class protected by applicable law.</em></p>",
+      "hash": "L8597V4V",
+      "id": 1333846,
+      "is_pinned_in_career_page": false,
+      "is_salary_visible": false,
+      "location_display": "Bangkok, Bangkok, Thailand",
+      "organization_name": "Customer Success",
+      "position_name": "Business Development Internship (12PM - 9PM)",
+      "state": "Bangkok",
+      "zipcode": ""
+    }
+  },
+  "item_count": 29,
+  "ok": true,
+  "source": "manatal",
+  "truncated": false,
+  "validators": {}
+}
