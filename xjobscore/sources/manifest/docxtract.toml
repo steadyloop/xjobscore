@@ -5,6 +5,13 @@ adapter = "docxtract"
 # xjobscore/sources/docxtract-configs.py.
 
 [[source]]
+id = "flyio"
+runtime_source = "flyio"
+type = "Web Board"
+config = "../docxtract-configs.py#flyio"
+status = "implemented"
+
+[[source]]
 id = "jobvite"
 runtime_source = "jobvite"
 type = "ATS"

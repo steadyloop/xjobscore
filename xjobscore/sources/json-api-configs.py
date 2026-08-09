@@ -283,6 +283,88 @@ SIMPLE: dict[str, dict] = {
     # `OpportunityType`/`JobLocationType` integers) with no published mapping, so
     # they stay in `source_extra` rather than being guessed into
     # `employment_type`.
+    # Bullhorn's public job-board REST is `/query/JobBoardPost` -- the more
+    # obvious `/search/JobBoardPost` does not exist (400 "Unknown search
+    # entity"). A corpToken answers on exactly one numbered cluster, so the
+    # host is part of the key, same shape as UKG. `showTotalMatched=true` is
+    # required or `total` is simply absent from the response and the engine
+    # cannot tell a short page from the end. Descriptions and dates are
+    # inline on every row (verified 773/773 on `44/CJAT1S`) -- no detail
+    # fetch. Every date field is epoch *milliseconds*, never ISO.
+    #
+    # Bullhorn silently drops unrecognized `fields` names (HTTP 200, key just
+    # absent) -- the field list below is the verified-good set; do not extend
+    # it without re-probing live. The payload never names an employer or a
+    # canonical posting URL, so both come from `feed.config`.
+    "bullhorn": {
+        "key_parts": ("swimlane", "corpToken"),
+        "list": {
+            "url": "https://public-rest{swimlane}.bullhornstaffing.com/rest-services/{corpToken}/query/JobBoardPost",
+            "url_override": False,
+            "params": {
+                "fields": (
+                    "id,title,publishedCategory(id,name),address(address1,city,state,zip,countryID),"
+                    "employmentType,dateAdded,dateLastPublished,startDate,dateEnd,publicDescription,"
+                    "isOpen,isPublic,isDeleted,salary,salaryUnit,payRate,benefits,yearsRequired,"
+                    "travelRequirements,willRelocate"
+                ),
+                "where": "isOpen=true", "start": "$cursor", "count": 100,
+                "orderBy": "-dateLastPublished", "showTotalMatched": "true",
+            },
+            "items": "data", "id": "@id",
+            "page": {"start": 0, "size": 100, "step": 100, "total": "@total", "max": 50},
+        },
+        "fields": {
+            "title": "@title",
+            "url_posting": {"template": "{board_url}{id}"},
+            "company_raw": "$company_raw",
+            "location_raw": {"join": ["@address.city", "@address.state"]},
+            "description_html": "@publicDescription",
+            "employment_type": "@employmentType",
+            "published_at": {"epoch_ms": "@dateLastPublished"}, "published_at_precision": "exact",
+            "source_updated_at": {"epoch_ms": "@dateLastPublished"},
+            "source_active": "@isOpen",
+        },
+        "extra": {
+            "category": "@publishedCategory.name", "salary": "@salary", "salaryUnit": "@salaryUnit",
+            "payRate": "@payRate", "dateAdded": "@dateAdded", "yearsRequired": "@yearsRequired",
+            "travelRequirements": "@travelRequirements", "benefits": "@benefits", "startDate": "@startDate",
+            "dateEnd": "@dateEnd", "willRelocate": "@willRelocate",
+        },
+    },
+    # A single unauthenticated POST returns the whole board inline -- no
+    # pagination (verified: a 2,166-job tenant in one response). Two
+    # corrections to the endpoint as commonly documented: `batch=true` must be
+    # dropped, or the response carries settings and the account object but no
+    # `jobs` array at all; and `Origin`/`Referer` are mandatory, or a
+    # recognized account still answers 200 with a soft
+    # "You are not allowed to access this URL" failure that looks like a bad
+    # slug rather than a missing header.
+    #
+    # There is no per-job date field anywhere in this schema (list or detail),
+    # so `published_at` is permanently unmappable for this source, not a
+    # config gap. Descriptions (`jdtext`) and location are populated on some
+    # rows and empty strings on others -- `fallback` turns the empty string
+    # into `None` rather than a blank field.
+    "recruitcrm": {
+        "list": {
+            "method": "POST",
+            "url": "https://albatross.recruitcrm.io/v1/external-pages/jobs-by-account/get?account={key}",
+            "url_override": False,
+            "headers": {"Origin": "https://careers.recruitcrm.io", "Referer": "https://careers.recruitcrm.io/"},
+            "items": "data.jobs", "id": "@slug",
+        },
+        "envelope": {"account": "@data.account"},
+        "fields": {
+            "title": "@name",
+            "url_posting": {"template": "https://app.recruitcrm.io/jobs/{key}/{slug}"},
+            "company_raw": {"fallback": ["@companyname", "$envelope.account.title"]},
+            "location_raw": {"fallback": [{"join": ["@city", "@locality"]}]},
+            "description_html": {"fallback": ["@jdtext"]},
+            "requisition_id": {"fallback": ["@jobcode"]},
+        },
+        "extra": {"srno": "@srno", "accountpage": "$envelope.account.accountpage"},
+    },
     "ukg": {
         "key_parts": ("host", "companyCode", "boardGuid"),
         "list": {
@@ -343,6 +425,66 @@ SIMPLE: dict[str, dict] = {
             "JobCategoryName": "@JobCategoryName", "FullTime": "@FullTime",
             "OpportunityType": "@OpportunityType", "JobLocationType": "@JobLocationType",
             "Featured": "@Featured", "Locations": "@Locations", "MatchScore": "@MatchScore",
+        },
+    },
+    # USAJOBS Search API -- the official federal system of record, one
+    # platform-wide feed (no tenant in the key, same shape as unstop/bullhorn).
+    # Unauthenticated GET returns 401; needs a free Authorization-Key (minted
+    # against one registered email) plus a User-Agent set to that same email
+    # -- see catalogs/usajobs.toml for why that pair must never be committed.
+    #
+    # JobCategoryCode is the highest-value fetch-side filter in this tree: it
+    # turns an all-department federal board into an IT/CS/Math-only fetch at
+    # the source. 2210=Information Technology Management, 1550=Computer
+    # Science, 1520=Mathematics. Per the API reference
+    # (developer.usajobs.gov/api-reference/get-api-search), multiple values
+    # are semicolon-delimited in one string, not a repeated key or JSON list
+    # -- confirmed against the live docs page, not guessed.
+    #
+    # Path is SearchResult.SearchResultItems[].MatchedObjectDescriptor, total
+    # is SearchResult.SearchResultCountAll (confirmed against a real archived
+    # 200 response, fixtures/usajobs.json). Fields=Full returns descriptions
+    # inline, so no detail fetch. MajorDuties is a list[str], not a scalar --
+    # {"concat": ..., "sep": "\n"} joins it; PositionFormattedDescription is
+    # deliberately not used, since on this response shape it carries no
+    # Content key. apply_url/employment_type are left unmapped rather than
+    # guessed: no verified field path for either turned up in the captured
+    # response.
+    "usajobs": {
+        "list": {
+            "url": "https://data.usajobs.gov/api/search",
+            "params": {
+                "JobCategoryCode": "2210;1550;1520",
+                "ResultsPerPage": 500,
+                "Page": "$cursor",
+                "Fields": "Full",
+            },
+            "headers": {"Authorization-Key": "$api_key", "User-Agent": "$ua_email"},
+            "items": "SearchResult.SearchResultItems", "id": "@MatchedObjectId",
+            "page": {
+                "start": 1, "size": 500, "step": 1,
+                "total": "@SearchResult.SearchResultCountAll",
+                "max": 20,  # 10,000-row API ceiling at 500/page
+            },
+        },
+        "fields": {
+            "title": "@MatchedObjectDescriptor.PositionTitle",
+            "url_posting": "@MatchedObjectDescriptor.PositionURI",
+            "company_raw": {"fallback": [
+                "@MatchedObjectDescriptor.OrganizationName",
+                "@MatchedObjectDescriptor.DepartmentName",
+            ]},
+            "location_raw": "@MatchedObjectDescriptor.PositionLocationDisplay",
+            "description_html": {"concat": "@MatchedObjectDescriptor.UserArea.Details.MajorDuties", "sep": "\n"},
+            "requisition_id": "@MatchedObjectDescriptor.PositionID",
+            "published_at": {"date": "@MatchedObjectDescriptor.PositionStartDate"},
+            "published_at_precision": "exact",
+            "deadline_at": {"date": "@MatchedObjectDescriptor.PositionEndDate"},
+        },
+        "extra": {
+            "hiring_path": "@MatchedObjectDescriptor.UserArea.Details.HiringPath",
+            "job_summary": "@MatchedObjectDescriptor.UserArea.Details.JobSummary",
+            "qualification_summary": "@MatchedObjectDescriptor.QualificationSummary",
         },
     },
 }
@@ -619,6 +761,131 @@ DETAIL_A: dict[str, dict] = {
     },
 }
 DETAIL_B: dict[str, dict] = {
+    # The list operation (`JobBoardList`) is not in the entry bundle the board
+    # page loads -- it sits in a lazily-loaded chunk the entry bundle only
+    # names (`ExternalJobBoardList.*.min.js`). `$boardId` is the vanity path
+    # (the catalog key), not the tracking UUID embedded in the page HTML.
+    # The batch endpoint takes an array body and returns an array; `items`
+    # digs through the first (only) operation's result with a numeric index,
+    # same as `_dig` treats any other list.
+    #
+    # The list carries no description, so a detail fetch reuses the board's
+    # own `ExternalJobPostingQuery`, posted to the same URL. `{id}` in
+    # `url_posting` resolves against the payload (the base64 GraphQL node id)
+    # rather than context, because `_format` checks context first and there is
+    # no `id` there for `url_posting`. Nothing in either response names the
+    # employer.
+    "gem": {
+        "list": {
+            "method": "POST",
+            "url": "https://jobs.gem.com/api/public/graphql/batch",
+            "url_override": False,
+            "body": [{
+                "operationName": "JobBoardList",
+                "query": (
+                    "query JobBoardList($boardId: String!) { "
+                    "oatsExternalJobPostings(boardId: $boardId) { jobPostings { "
+                    "id extId title "
+                    "locations { id name city isoCountry isRemote extId } "
+                    "job { id department { id name extId } locationType employmentType } } } }"
+                ),
+                "variables": {"boardId": "$key"},
+            }],
+            "items": "0.data.oatsExternalJobPostings.jobPostings", "id": "@extId",
+        },
+        "detail": {
+            "method": "POST",
+            "url": "https://jobs.gem.com/api/public/graphql/batch",
+            "url_override": False,
+            "body": [{
+                "operationName": "ExternalJobPostingQuery",
+                "query": (
+                    "query ExternalJobPostingQuery($boardId: String!, $extId: String!) { "
+                    "oatsExternalJobPosting(boardId: $boardId, extId: $extId) { "
+                    "id title descriptionHtml extId startDateTs firstPublishedTsSec "
+                    "companyUrl isUnlistedExternally "
+                    "locations { id extId name city isoCountry isRemote } "
+                    "job { id locationType employmentType requisitionId teamDisplayName "
+                    "department { id extId name } } } }"
+                ),
+                "variables": {"boardId": "$key", "extId": "$id"},
+            }],
+            "id": "@extId", "payload": "0.data.oatsExternalJobPosting", "item_id": "@extId",
+        },
+        "fields": {
+            "title": "@title",
+            "url_posting": {"template": "https://jobs.gem.com/{key}/{id}"},
+            "company_raw": "$company_raw",
+            "description_html": "@descriptionHtml",
+            "location_raw": {"first": {"map": "@locations", "value": "@name"}},
+            "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
+            "employment_type": "@job.employmentType",
+            "workplace_type_raw": "@job.locationType",
+            "requisition_id": "@job.requisitionId",
+            "published_at": {"epoch_s": "@firstPublishedTsSec"},
+            "published_at_precision": "exact",
+        },
+        "extra": {
+            "department": "@job.department.name", "team": "@job.teamDisplayName",
+            "node_id": "@id", "start_date_ts": "@startDateTs",
+            "is_unlisted_externally": "@isUnlistedExternally",
+        },
+    },
+    # `$top`/`$skip` are OData-style but not OData: `$top` is hard-capped at
+    # 20 regardless of what is requested, and `$skip` is 1-based -- `$skip=20`
+    # returns rows 20-39, one row of overlap with page 1. Paging from 1 by 20
+    # (verified against a 50-requisition board: 3 pages, 50 unique ids) is
+    # what avoids the overlap.
+    #
+    # `ccId` is optional (a bogus value returns 200 with an empty array, not
+    # an error) and is kept only because every observed tenant emits it.
+    # Descriptions are not in the list; the detail response is the bare
+    # object (no wrapper), a superset of the list row, so no `merge` is
+    # needed. Use `postDate`, not `customFieldGroup.dateFields[].dateValue`
+    # ("2026-08-03T15:37Z", second-less) -- the payload never names the
+    # employer.
+    "adp": {
+        "key_parts": ("cid", "ccId"),
+        "list": {
+            "url": (
+                "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
+                "events/staffing/v1/job-requisitions"
+            ),
+            "url_override": False,
+            "params": {"cid": "$cid", "ccId": "$ccId", "$top": 20, "$skip": "$cursor"},
+            "items": "jobRequisitions", "id": "@itemID",
+            "page": {"start": 1, "size": 20, "step": 20, "total": "@meta.totalNumber", "max": 50},
+        },
+        "detail": {
+            "url": (
+                "https://workforcenow.adp.com/mascsr/default/careercenter/public/"
+                "events/staffing/v1/job-requisitions/{id}?cid={cid}&ccId={ccId}"
+            ),
+            "url_override": False,
+            "id": "@itemID", "item_id": "@itemID",
+        },
+        "fields": {
+            "title": "@requisitionTitle",
+            "url_posting": {
+                "template": (
+                    "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/"
+                    "recruitment.html?cid={cid}&ccId={ccId}&jobId={itemID}&lang=en_US"
+                )
+            },
+            "company_raw": "$company_raw",
+            "location_raw": {"fallback": [
+                "@requisitionLocations.0.nameCode.shortName",
+                {"join": ["@requisitionLocations.0.address.cityName",
+                          "@requisitionLocations.0.address.countrySubdivisionLevel1.codeValue"]},
+            ]},
+            "description_html": "@requisitionDescription",
+            "requisition_id": "@clientRequisitionID",
+            "employment_type": "@workLevelCode.shortName",
+            "published_at": {"date": "@postDate"}, "published_at_precision": "exact",
+            "locations_extra": {"rest": {"map": "@requisitionLocations", "value": "@nameCode.shortName"}},
+        },
+        "extra": {"itemID": "@itemID", "workLevel": "@workLevelCode.shortName"},
+    },
     "smartrecruiters": {
         "list": {
             "url": "https://api.smartrecruiters.com/v1/companies/{key}/postings",

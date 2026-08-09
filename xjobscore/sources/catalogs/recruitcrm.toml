@@ -1,0 +1,28 @@
+schema_version = 1
+source = "recruitcrm"
+
+# `key` is the `account` slug the public board API expects, e.g.
+# careers.recruitcrm.io/{key}. The employer name is read from the response's
+# own `data.account.title`, so no `feed.config` override is needed here.
+#
+# There is no per-job date field anywhere in this schema (list or detail),
+# so `published_at` stays unmapped for every tenant -- a property of the
+# source, not of an individual feed.
+
+[[feed]]
+key = "Oasis_Protocol_Foundation_jobs"
+company_id = "oasis-protocol-foundation"
+company = "Oasis Protocol Foundation"
+domain = "oasisprotocol.org"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"
+
+[[feed]]
+key = "Talent_R_1_jobs"
+company_id = "talent-r"
+company = "Talent-R"
+domain = "talent-r.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"

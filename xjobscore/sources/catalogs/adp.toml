@@ -1,0 +1,51 @@
+schema_version = 1
+source = "adp"
+
+# The key is `cid/ccId`, ADP Workforce Now's two opaque career-center
+# identifiers. `ccId` is technically optional (a bogus value returns 200
+# with an empty array rather than an error) but every tenant found in the
+# wild emits one, so it stays in the key for clarity.
+#
+# Nothing in the payload names the employer, so `company_raw` is supplied
+# per feed. Each `cid` below is confirmed against the company's own site
+# linking that exact GUID (not merely a title/location guess).
+
+[[feed]]
+key = "d16ba13d-474e-4326-b628-74c87f0b289a/19000101_000001"
+company_id = "look-trailers"
+company = "Look Trailers"
+domain = "looktrailers.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"
+
+[feed.config]
+company_raw = "Look Trailers"
+
+[[feed]]
+# Confirmed via Copyright Clearance Center's own careers page, which links
+# this exact cid: https://www.copyright.com/job-opportunities/
+key = "4d442aa2-f6ae-4be5-8bdd-f5eafb273d07/19000101_000001"
+company_id = "copyright-clearance-center"
+company = "Copyright Clearance Center"
+domain = "copyright.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"
+
+[feed.config]
+company_raw = "Copyright Clearance Center"
+
+[[feed]]
+# Confirmed via Triangle Credit Union's own careers page, which links this
+# exact cid: https://www.trianglecu.org/about-us/careers/
+key = "201ad2e7-321d-48c5-a1b2-1c16d59a7d31/19000101_000001"
+company_id = "triangle-credit-union"
+company = "Triangle Credit Union"
+domain = "trianglecu.org"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"
+
+[feed.config]
+company_raw = "Triangle Credit Union"

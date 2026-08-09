@@ -1,0 +1,18 @@
+schema_version = 1
+source = "gem"
+
+# `key` is the board's vanity path (jobs.gem.com/{key}), not the tracking
+# UUID embedded in the board's own page HTML. Neither the list nor detail
+# response names the employer, so `company_raw` comes from here.
+
+[[feed]]
+key = "gem"
+company_id = "gem"
+company = "Gem"
+domain = "gem.com"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"
+
+[feed.config]
+company_raw = "Gem"

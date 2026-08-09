@@ -148,6 +148,25 @@ CONFIGS: dict[str, dict] = {
             "extra_paths": {"hiring_unit": "author/name"},
         },
     },
+    # Fly.io. `/jobs/feed.xml` is a real Atom feed (root envelope verified
+    # live, no ETag/Last-Modified), currently carrying zero <entry> elements
+    # because Fly.io has no open roles right now -- a valid, non-error state,
+    # not a broken feed. The URL is a static, single-tenant literal like
+    # `unstop`'s, so `key` is inert here; `_atom` falls back to `feed.key`
+    # ("flyio") for `company_raw`, the same trade-off PeopleAdmin already
+    # accepts, since Fly.io names itself nowhere on an entry. No fetch-side
+    # filter is wired: the whole board is Fly.io's own engineering roles by
+    # construction and volume is trivial even when non-empty.
+    "flyio": {
+        "list": {
+            "url": "https://fly.io/jobs/feed.xml",
+            "extract": "xml_items",
+            "path": "{http://www.w3.org/2005/Atom}entry",
+            "id": ("{http://www.w3.org/2005/Atom}id",),
+        },
+        "parser": "atom",
+        "atom": {},
+    },
     # Personio. `/xml` (also `.com`) is a bespoke `<workzag-jobs><position>`
     # schema, not RSS -- no namespace, and none of RSS/Atom's element names
     # (title is `name`, no `link`). `key` is the tenant subdomain.

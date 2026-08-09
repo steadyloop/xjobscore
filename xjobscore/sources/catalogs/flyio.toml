@@ -1,0 +1,21 @@
+schema_version = 1
+source = "flyio"
+
+# `/jobs/feed.xml` is a real Atom feed (root envelope verified live
+# 2026-08-07), currently 0 <entry> elements because Fly.io has no open roles
+# right now -- see fixtures/flyio_empty.atom and
+# test_docxtract_atom.py's empty-envelope test. Schema is real; the board is
+# just empty.
+#
+# No fetch-side filter is applied or planned: the board is Fly.io's own
+# engineering roles by construction (100% CS-relevant) and volume is trivial
+# even when non-empty.
+
+[[feed]]
+key = "flyio"
+company_id = "fly-io"
+company = "Fly.io"
+domain = "fly.io"
+status = "live"
+enabled = true
+validated_at = "2026-08-07"

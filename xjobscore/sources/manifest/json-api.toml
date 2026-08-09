@@ -106,3 +106,33 @@ id = "workday"
 runtime_source = "workday"
 config = "../json-api-configs.py#workday"
 status = "implemented"
+
+[[source]]
+id = "bullhorn"
+runtime_source = "bullhorn"
+config = "../json-api-configs.py#bullhorn"
+status = "implemented"
+
+[[source]]
+id = "recruitcrm"
+runtime_source = "recruitcrm"
+config = "../json-api-configs.py#recruitcrm"
+status = "implemented"
+
+[[source]]
+id = "gem"
+runtime_source = "gem"
+config = "../json-api-configs.py#gem"
+status = "implemented"
+
+[[source]]
+id = "adp"
+runtime_source = "adp"
+config = "../json-api-configs.py#adp"
+status = "implemented"
+
+[[source]]
+id = "usajobs"
+runtime_source = "usajobs"
+config = "../json-api-configs.py#usajobs"
+status = "planned"
