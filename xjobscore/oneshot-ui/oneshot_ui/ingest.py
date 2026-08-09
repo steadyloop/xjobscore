@@ -169,6 +169,8 @@ def _location_compatible(
         "summer_internship",
         "fall_internship",
         "student_researcher",
+        "student_role",
+        "fellowship",
     }
 
 

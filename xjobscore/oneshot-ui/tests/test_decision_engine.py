@@ -54,7 +54,7 @@ from oneshot_ui.taxonomy import (  # noqa: E402
 
 
 def test_taxonomy_is_closed_and_has_stable_slugs() -> None:
-    assert len(PRIMARY_OPPORTUNITY_TYPES) == 6
+    assert len(PRIMARY_OPPORTUNITY_TYPES) == 8
     assert {item.slug for item in PRIMARY_OPPORTUNITY_TYPES} == {
         "spring_internship",
         "spring_coop",
@@ -62,6 +62,8 @@ def test_taxonomy_is_closed_and_has_stable_slugs() -> None:
         "fall_internship",
         "fall_coop",
         "student_researcher",
+        "student_role",
+        "fellowship",
     }
     assert OpportunityType.REVIEW.display_label is None
 
@@ -76,6 +78,8 @@ def test_taxonomy_is_closed_and_has_stable_slugs() -> None:
         ("Software Intern", {"work_term": "Summer 2027"}, OpportunityType.SUMMER_INTERNSHIP),
         ("Software Intern", {"work_term": "September-December"}, OpportunityType.FALL_INTERNSHIP),
         ("Student Researcher, BS/MS", {}, OpportunityType.STUDENT_RESEARCHER),
+        ("Working Student Software Engineer", {}, OpportunityType.STUDENT_ROLE),
+        ("AI Safety Fellowship", {}, OpportunityType.FELLOWSHIP),
     ],
 )
 def test_opportunity_normalization(title: str, kwargs: dict[str, object], expected: OpportunityType) -> None:
@@ -88,7 +92,7 @@ def test_taxonomy_does_not_invent_labels() -> None:
     assert classify_opportunity("Off-Cycle Software Internship").opportunity_type is OpportunityType.REVIEW
     assert classify_opportunity("Year-Round Software Intern").opportunity_type is OpportunityType.REVIEW
     assert classify_opportunity("Summer Engineering Co-op").opportunity_type is OpportunityType.REVIEW
-    assert classify_opportunity("Open Source Fellowship").opportunity_type is OpportunityType.UNCLASSIFIED
+    assert classify_opportunity("Open Source Fellowship").opportunity_type is OpportunityType.FELLOWSHIP
 
 
 def test_icims_portal_url_does_not_create_an_unrelated_api_token_identifier() -> None:

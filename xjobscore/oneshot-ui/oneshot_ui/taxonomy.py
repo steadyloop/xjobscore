@@ -1,6 +1,6 @@
 """Deterministic opportunity-label normalization.
 
-The six primary labels in this module are a closed vocabulary.  ``REVIEW``
+The primary labels in this module are a closed vocabulary.  ``REVIEW``
 and ``UNCLASSIFIED`` are workflow outcomes, not additional work-slot labels.
 No classifier in this module makes a network or model call.
 """
@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-TAXONOMY_VERSION = "opportunity-taxonomy/1.0"
+TAXONOMY_VERSION = "opportunity-taxonomy/1.1"
 
 
 class OpportunityType(str, Enum):
@@ -21,6 +21,8 @@ class OpportunityType(str, Enum):
     FALL_INTERNSHIP = "Fall Internship"
     FALL_COOP = "Fall Co-op"
     STUDENT_RESEARCHER = "Student Researcher"
+    STUDENT_ROLE = "Student Role"
+    FELLOWSHIP = "Fellowship"
 
     # Workflow outcomes.  These must never be rendered as month-table labels.
     UNCLASSIFIED = "unclassified"
@@ -35,6 +37,8 @@ class OpportunityType(str, Enum):
             OpportunityType.FALL_INTERNSHIP: "fall_internship",
             OpportunityType.FALL_COOP: "fall_coop",
             OpportunityType.STUDENT_RESEARCHER: "student_researcher",
+            OpportunityType.STUDENT_ROLE: "student_role",
+            OpportunityType.FELLOWSHIP: "fellowship",
             OpportunityType.UNCLASSIFIED: "unclassified",
             OpportunityType.REVIEW: "review",
         }[self]
@@ -51,6 +55,8 @@ PRIMARY_OPPORTUNITY_TYPES: tuple[OpportunityType, ...] = (
     OpportunityType.FALL_INTERNSHIP,
     OpportunityType.FALL_COOP,
     OpportunityType.STUDENT_RESEARCHER,
+    OpportunityType.STUDENT_ROLE,
+    OpportunityType.FELLOWSHIP,
 )
 
 
@@ -73,8 +79,15 @@ class OpportunityClassification:
 _COOP = re.compile(r"\b(?:co[\s-]?op|cooperative\s+education)\b", re.I)
 _INTERNSHIP = re.compile(r"\bintern(?:ship)?\b", re.I)
 _STUDENT_RESEARCHER = re.compile(r"\bstudent\s+researcher\b", re.I)
+_STUDENT_ROLE = re.compile(
+    r"\b(?:working\s+student|part[\s-]?time\s+student(?:\s+developer)?|"
+    r"student\s+(?:(?:software|data|machine\s+learning|ml|quantitative)\s+)?"
+    r"(?:developer|engineer|analyst|assistant|worker))\b",
+    re.I,
+)
+_FELLOWSHIP = re.compile(r"\bfellow(?:ship)?\b", re.I)
 _FALLBACK = re.compile(
-    r"\b(?:fellow(?:ship)?|extern(?:ship)?|part[\s-]?time\s+student(?:\s+developer)?|"
+    r"\b(?:extern(?:ship)?|"
     r"academic[\s-]?year|contract(?:or)?|open[\s-]?source)\b",
     re.I,
 )
@@ -155,6 +168,20 @@ def classify_opportunity(
             1.0,
         )
 
+    if _FELLOWSHIP.search(primary_text):
+        return OpportunityClassification(
+            OpportunityType.FELLOWSHIP,
+            ("employer wording: fellowship or fellow",),
+            1.0,
+        )
+
+    if _STUDENT_ROLE.search(primary_text):
+        return OpportunityClassification(
+            OpportunityType.STUDENT_ROLE,
+            ("employer wording: student role",),
+            1.0,
+        )
+
     coop = bool(_COOP.search(primary_text))
     internship = bool(_INTERNSHIP.search(primary_text))
     if coop and internship:
@@ -171,7 +198,7 @@ def classify_opportunity(
                 ("student researcher appears only outside the primary role wording",),
                 0.5,
             )
-        reason = "fallback opportunity type is outside the six-label vocabulary" if _FALLBACK.search(all_text) else "no primary opportunity type stated"
+        reason = "fallback opportunity type is outside the primary vocabulary" if _FALLBACK.search(all_text) else "no primary opportunity type stated"
         return OpportunityClassification(OpportunityType.UNCLASSIFIED, (reason,), 0.0)
 
     seasons = _seasons(primary_text)

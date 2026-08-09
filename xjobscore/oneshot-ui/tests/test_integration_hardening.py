@@ -148,9 +148,6 @@ def test_complete_manual_snapshots_unlist_close_and_reopen(tmp_path) -> None:
 
         client.post(f"/api/sources/{reference}/fetch")
         assert client.get(f"/api/jobs/{job_id}").json()["status"] == "unlisted"
-        replay = client.post(f"/api/sources/{reference}/replay")
-        assert replay.status_code == 200
-        assert client.get(f"/api/jobs/{job_id}").json()["status"] == "unlisted"
 
         client.post(f"/api/sources/{reference}/fetch")
         assert client.get(f"/api/jobs/{job_id}").json()["status"] == "closed"
@@ -247,15 +244,9 @@ def test_partial_parser_prefix_never_enters_board(tmp_path) -> None:
         assert result.json()["parser_state"] == "error"
         assert result.json()["ingested"]["postings"] == 0
         assert client.get("/api/jobs").json()["total"] == 0
-        gateway.parser_error = False
-        replayed = client.post(f"/api/sources/{reference}/replay")
-        assert replayed.status_code == 200, replayed.text
-        assert replayed.json()["replayed"] is True
-        assert replayed.json()["ingested"]["postings"] == 1
-        assert client.get("/api/jobs").json()["total"] == 1
 
 
-def test_exact_auto_merge_and_human_merge_are_losslessly_reversible(tmp_path) -> None:
+def test_exact_auto_merge_unifies_source_evidence_without_review_surface(tmp_path) -> None:
     url = "https://jobs.lifecycle.test/shared-role"
     gateway = SequenceGateway(
         {
@@ -274,86 +265,7 @@ def test_exact_auto_merge_and_human_merge_are_losslessly_reversible(tmp_path) ->
         unified = client.get("/api/jobs").json()
         assert unified["total"] == 1
         assert unified["jobs"][0]["source_count"] == 2
-        dedupe = client.get("/api/dedupe").json()["items"]
-        assert len(dedupe) == 1
-        assert dedupe[0]["state"] == "merged"
-        assert dedupe[0]["shared_identifiers"]
-        candidate_id = dedupe[0]["id"]
-
-        reversed_auto = client.post(
-            f"/api/dedupe/{candidate_id}/decision", json={"action": "reverse"}
-        )
-        assert reversed_auto.status_code == 200, reversed_auto.text
-        split_jobs = client.get("/api/jobs").json()["jobs"]
-        assert len(split_jobs) == 2
-
-        original_app_jobs: dict[str, str] = {}
-        for job in split_jobs:
-            application = client.post(
-                f"/api/jobs/{job['id']}/applications",
-                json={"confirmation": "human_confirmed"},
-            ).json()
-            original_app_jobs[application["id"]] = job["id"]
-
-        merged = client.post(
-            f"/api/dedupe/{candidate_id}/decision", json={"action": "merge"}
-        )
-        assert merged.status_code == 200, merged.text
-        assert len({item["job_id"] for item in client.get("/api/applications").json()["applications"]}) == 1
-        survivor = client.get("/api/jobs").json()["jobs"][0]
-        saved = client.post(
-            f"/api/jobs/{survivor['id']}/triage", json={"state": "saved"}
-        )
-        assert saved.status_code == 200
-
-        reversed_human = client.post(
-            f"/api/dedupe/{candidate_id}/decision", json={"action": "reverse"}
-        )
-        assert reversed_human.status_code == 200, reversed_human.text
-        assert client.get(f"/api/jobs/{survivor['id']}").json()["triage_state"] == "saved"
-        restored = {
-            item["id"]: item["job_id"]
-            for item in client.get("/api/applications").json()["applications"]
-        }
-        assert restored == original_app_jobs
-
-        # A durable candidate cannot be reused after its current identity
-        # evidence changes to an unrelated employer with no shared identifier.
-        changed_id = next(job["id"] for job in split_jobs if job["id"] != survivor["id"])
-        connection = sqlite3.connect(tmp_path / "oneshot.sqlite3")
-        try:
-            connection.execute(
-                "INSERT INTO companies(id, display_name, normalized_name, created_at, updated_at) "
-                "VALUES ('changed-company', 'Changed Company', 'changed company', datetime('now'), datetime('now'))"
-            )
-            connection.execute(
-                "UPDATE job_entities SET company_id = 'changed-company' WHERE id = ?",
-                (changed_id,),
-            )
-            connection.execute(
-                "DELETE FROM posting_identifiers WHERE observation_id IN "
-                "(SELECT id FROM posting_observations WHERE job_entity_id = ?)",
-                (changed_id,),
-            )
-            connection.commit()
-        finally:
-            connection.close()
-        stale_merge = client.post(
-            f"/api/dedupe/{candidate_id}/decision", json={"action": "merge"}
-        )
-        assert stale_merge.status_code == 409
-
-    connection = sqlite3.connect(tmp_path / "oneshot.sqlite3")
-    try:
-        assert connection.execute("SELECT COUNT(*) FROM link_evidence").fetchone()[0] == 1
-        assert connection.execute(
-            "SELECT review_state FROM link_evidence"
-        ).fetchone()[0] == "rejected"
-        assert connection.execute(
-            "SELECT COUNT(*) FROM merge_operations WHERE reversed_at IS NOT NULL"
-        ).fetchone()[0] == 2
-    finally:
-        connection.close()
+        assert client.get("/api/dedupe").status_code == 404
 
 
 def test_batch_ingest_failure_does_not_block_later_selected_feed(tmp_path) -> None:

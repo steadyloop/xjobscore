@@ -9,30 +9,36 @@
     "Summer Internship",
     "Fall Co-op",
     "Fall Internship",
+    "Student Role",
+    "Fellowship",
   ];
-  const states = ["all", "needs_classification", ...TYPES.map(slug)];
+  const FILTERS = [
+    { key: "summer_internships", label: "Summer Internships", types: ["summer_internship"] },
+    { key: "spring_coop", label: "Spring Co-op", types: ["spring_internship", "spring_coop"] },
+    { key: "research", label: "Research", types: ["student_researcher"] },
+    { key: "early_career", label: "Early-Career", types: ["student_role"] },
+  ];
+  const filterTypes = value => FILTERS.find(filter => filter.key === value)?.types || [];
+  const states = ["all", ...FILTERS.map(filter => filter.key)];
   const unwrap = value => Array.isArray(value) ? value : (value && (value.items || value.results || value.data || value.jobs || value.sources || value.applications)) || [];
   const getField = (item, names, fallback = "") => { for (const n of names) if (item && item[n] != null && item[n] !== "") return item[n]; return fallback; };
   const jobId = j => getField(j, ["id", "job_id", "ref"]);
   const opportunityType = j => getField(j, ["opportunity_type", "type", "employment_type"], "");
-  const classificationNeeded = j => Boolean(getField(j, ["needs_classification", "unclassified"], false)) || !opportunityType(j);
-  const applicationReady = j => String(getField(j,["eligibility","eligibility_status"],"review")).toLowerCase() === "eligible" && String(getField(j,["status"],"open")).toLowerCase() === "open";
   const normalizeFilters = filters => [...new Set((filters || []).filter(f => states.includes(f)))];
   const matchesFilters = (job, filters) => {
     const active = normalizeFilters(filters);
     if (!active.length || active.includes("all")) return true;
-    return active.some(f => f === "needs_classification" ? classificationNeeded(job) : slug(opportunityType(job)) === f);
+    return active.some(f => filterTypes(f).includes(slug(opportunityType(job))));
   };
   const queryForFilters = filters => {
     const active = normalizeFilters(filters);
-    const parts = active.filter(f => f !== "all" && f !== "needs_classification").map(f => `opportunity_type=${encodeURIComponent(f)}`);
-    if (active.includes("needs_classification")) parts.push("needs_classification=true");
+    const parts = active.flatMap(f => filterTypes(f).map(type => `opportunity_type=${encodeURIComponent(type)}`));
     return parts.join("&");
   };
   const sortJobs = (jobs, sort) => [...(jobs || [])].sort((a, b) => {
-    if (sort === "score") return Number(getField(b,["score","fit_score"],0)) - Number(getField(a,["score","fit_score"],0));
-    if (sort === "deadline") return String(getField(a,["deadline","deadline_at"],"9999")) .localeCompare(String(getField(b,["deadline","deadline_at"],"9999")));
-    return String(getField(b,["published_at","created_at","freshness"],"")) .localeCompare(String(getField(a,["published_at","created_at","freshness"],"")));
+    if (sort === "company") return String(getField(a,["company","company_name"],"")).localeCompare(String(getField(b,["company","company_name"],"")));
+    if (sort === "title") return String(getField(a,["title","job_title"],"")).localeCompare(String(getField(b,["title","job_title"],"")));
+    return String(getField(b,["posted_at","published_at","created_at"],"")) .localeCompare(String(getField(a,["posted_at","published_at","created_at"],"")));
   });
   const duePresentation = (value, now = new Date()) => {
     const raw = String(value || "").trim();
@@ -53,150 +59,190 @@
     if (difference <= 172800000) return { label: "Due tomorrow", tone: "soon" };
     return { label: `Due in ${Math.ceil(difference / 86400000)}d`, tone: difference <= 604800000 ? "upcoming" : "" };
   };
-  const statusClass = value => {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (normalized === "ineligible" || normalized === "blocked") return "blocked";
-    if (normalized === "eligible" || normalized === "pass" || normalized === "passed" || normalized === "ready" || normalized === "good") return "good";
-    if (normalized === "review" || normalized === "needs classification" || normalized === "needs_classification" || normalized === "unknown") return "needs";
-    return "";
+  const relativeTime = (value, now = new Date()) => {
+    if (!value) return "Never polled";
+    const then = new Date(value);
+    if (Number.isNaN(then.getTime())) return "Unknown";
+    const seconds = Math.max(0, Math.floor((now.getTime() - then.getTime()) / 1000));
+    if (seconds < 60) return "Just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
   };
-  const sourceSelectionState = (enabled, available) => {
-    const active = Math.max(0, Number(enabled) || 0), total = Math.max(0, Number(available) || 0);
-    if (total > 0 && active >= total) return { state: "all", aria: "true", next: false };
-    if (active > 0) return { state: "some", aria: "mixed", next: true };
-    return { state: "none", aria: "false", next: true };
+  const sourceBoardLabel = (type, count) => type === "ATS" ? `${Number(count) || 0} board${Number(count) === 1 ? "" : "s"}` : "";
+  const postedPresentation = (value, now = new Date()) => {
+    if (!value) return "Posted date unavailable";
+    const posted = new Date(value);
+    if (Number.isNaN(posted.getTime())) return "Posted date unavailable";
+    const days = Math.max(0, Math.floor((now.getTime() - posted.getTime()) / 86400000));
+    if (days === 0) return "Posted today";
+    if (days === 1) return "Posted yesterday";
+    return `Posted ${days}d ago`;
   };
-  const utils = { TYPES, slug, unwrap, normalizeFilters, matchesFilters, queryForFilters, sortJobs, classificationNeeded, duePresentation, statusClass, applicationReady, sourceSelectionState };
+  const dateOnlyPresentation = value => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00Z` : raw);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(date);
+  };
+  const dateInputValue = value => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const match = raw.match(/^\d{4}-\d{2}-\d{2}/);
+    return match ? match[0] : "";
+  };
+  const utils = { TYPES, FILTERS, slug, unwrap, normalizeFilters, matchesFilters, queryForFilters, sortJobs, duePresentation, relativeTime, sourceBoardLabel, postedPresentation, dateOnlyPresentation, dateInputValue };
   if (typeof module !== "undefined" && module.exports) module.exports = utils;
   root.OneShotUtils = utils;
   if (!root.document) return;
 
   const $ = s => document.querySelector(s);
   const view = $("#view"), modalRoot = $("#modal-root"), flash = $("#flash");
-  const store = { current: "today", data: {}, selected: null, filters: ["all"], sort: "fresh", compact: false, q: "", sourceQ: "", sourceMode: "enabled", expandedSources: new Set(), loaded: new Set(), profile: null };
+  const store = { current: "discover", data: {}, paths: {}, selected: null, filters: [], sort: "fresh", compact: false, q: "", loaded: new Set(), profile: null };
   const esc = value => String(value == null ? "" : value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[c]);
-  const api = async (path, options = {}) => {
-    const request = await fetch(`/api${path}`, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
-    if (!request.ok) { const detail = await request.text().catch(() => ""); throw new Error(detail || `Request failed (${request.status})`); }
-    if (request.status === 204) return null;
-    return request.json().catch(() => null);
+  const api = (path, options = {}) => root.OneShotAPI.request(path, options);
+  const announce = (text, action = null) => {
+    flash.replaceChildren();
+    const message=document.createElement("span");message.textContent=text;flash.appendChild(message);
+    if(action){const button=document.createElement("button");button.type="button";button.textContent=action.label;button.dataset.action=action.action;if(action.id)button.dataset.id=action.id;flash.appendChild(button);}
+    flash.classList.toggle("has-action",Boolean(action));flash.classList.add("show");clearTimeout(announce.timer);announce.timer=setTimeout(()=>{flash.classList.remove("show","has-action");},action?6000:3200);
   };
-  const announce = text => { flash.textContent = text; flash.classList.add("show"); clearTimeout(announce.timer); announce.timer = setTimeout(() => flash.classList.remove("show"), 3200); };
   const errorState = (title, error, retry) => `<div class="state"><h1>${esc(title)}</h1><p>${esc(error.message || error)}</p>${retry ? '<button class="button primary" data-action="retry">Try again</button>' : ""}</div>`;
   const loading = label => view.innerHTML = `<div class="state loading"><i></i><h1>${esc(label || "Loading")}</h1><p>Reading the latest API data.</p></div>`;
   const asList = key => unwrap(store.data[key]);
   const title = j => getField(j,["title","role","job_title"],"Untitled opportunity");
   const company = j => getField(j,["company","company_name","employer"],"Unknown company");
-  const score = j => getField(j,["score","fit_score","match_score"],"—");
-  const eligibility = j => getField(j,["eligibility","eligibility_status","classification"],classificationNeeded(j) ? "Needs classification" : "Not evaluated");
-  const applyReady = applicationReady;
-  const tags = j => (getField(j,["semantic_stack","stack","tags","skills"],[]) || []);
-  const deadline = j => getField(j,["deadline","deadline_at","freshness","published_at"],"No deadline supplied");
-  const evidence = j => getField(j,["source_evidence","evidence","source","source_name"],"Source evidence unavailable");
+  const locationText = j => getField(j,["location_text","location"],"Location not listed");
+  const postedAt = j => getField(j,["posted_at","published_at"],"");
+  const lastSeenAt = j => getField(j,["last_seen_at"],"");
+  const description = j => getField(j,["description","description_text","description_html"],"No description is available yet.");
+  const attributes = j => getField(j,["attributes"],{}) || {};
+  const tags = j => getField(j,["tags","skills"],attributes(j).skills || []) || [];
+  const initials = j => company(j).split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join("").toUpperCase() || "?";
+  const isActive = j => ["active","open"].includes(String(getField(j,["status"],"active")).toLowerCase());
   const safeHref = value => /^https?:\/\//i.test(String(value || "")) ? String(value) : "";
-  const tagsHtml = j => { const values=tags(j); return values.slice(0,3).map(x => {const name=typeof x==="string"?x:(x.technology||x.name||x.label||x.value),level=typeof x==="string"?"":x.level;return `<span class="tag">${esc(name)}${level?` · ${esc(level)}`:""}</span>`;}).join("")+(values.length>3?`<span class="tag">+${values.length-3}</span>`:""); };
+  const tagsHtml = j => { const values=tags(j); return values.slice(0,3).map(x => {const name=typeof x==="string"?x:(x.name||x.label||x.value);return `<span class="tag">${esc(name)}</span>`;}).join("")+(values.length>3?`<span class="tag">+${values.length-3}</span>`:""); };
   function optionFilters() {
-    return `<button class="filter ${store.filters.includes("all") ? "active" : ""}" data-filter="all">All</button><button class="filter needs ${store.filters.includes("needs_classification") ? "active" : ""}" data-filter="needs_classification">Needs classification</button>${TYPES.map(t => `<button class="filter ${store.filters.includes(slug(t)) ? "active" : ""}" data-filter="${slug(t)}">${t}</button>`).join("")}`;
+    return FILTERS.map(filter => `<button class="filter ${store.filters.includes(filter.key) ? "active" : ""}" data-filter="${filter.key}">${filter.label}</button>`).join("");
   }
-  function controls(includeSearch = true) {
-    return `<div class="filterbar">${optionFilters()}<div class="filter-controls">${includeSearch ? `<input class="filter-input" data-search placeholder="Filter results" value="${esc(store.q)}">` : ""}<select data-sort><option value="fresh" ${store.sort === "fresh" ? "selected" : ""}>Freshest</option><option value="score" ${store.sort === "score" ? "selected" : ""}>Best score</option><option value="deadline" ${store.sort === "deadline" ? "selected" : ""}>Deadline</option></select><button class="button" data-action="compact">${store.compact ? "Full view" : "Compact"}</button></div></div>`;
+  function sortOptions() {
+    return `<option value="fresh" ${store.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${store.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${store.sort === "title" ? "selected" : ""}>Role title A–Z</option>`;
   }
+  function controls() {
+    return `<div class="filterbar">${optionFilters()}<div class="filter-controls"><select data-sort>${sortOptions()}</select><button class="button" data-action="compact">${store.compact ? "Full view" : "Compact"}</button></div></div>`;
+  }
+  const mobileMenu = () => '<button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button>';
   function opportunity(j, selected = false, small = false, cue = "") {
-    const id = jobId(j), st = eligibility(j), actionCue = cue || getField(j,["today_reason"],""), ready=applyReady(j);
-    const pipelineLink = /application action/i.test(actionCue) ? '<a class="mini" href="#pipeline" data-view-link="pipeline">Pipeline</a>' : "";
-    return `<article class="opportunity ${selected ? "selected" : ""}" data-job="${esc(id)}"><div class="score">${esc(score(j))}<small>fit</small></div><div><h3>${esc(title(j))} <span>· ${esc(company(j))}</span></h3><div class="meta">${esc(deadline(j))} · ${esc(evidence(j))}</div>${actionCue?`<div class="action-cue">${esc(actionCue)}</div>`:""}${store.compact || small ? "" : `<div class="tags">${tagsHtml(j)}<span class="status ${statusClass(st)}">${esc(st)}</span></div>`}</div><div class="row-actions">${pipelineLink}<button class="mini" data-action="save" data-id="${esc(id)}">Save</button><button class="mini" data-action="queue" data-id="${esc(id)}" ${ready?"":'disabled title="Resolve eligibility before queueing"'}>Queue</button></div></article>`;
+    const id = jobId(j), term=attributes(j).term, workplace=attributes(j).workplace;
+    const facts=[locationText(j),term,workplace].filter(Boolean).join(" · ");
+    const recent=new Date(postedAt(j)).getTime()>Date.now()-3*86400000;
+    return `<article class="opportunity ${selected ? "selected" : ""}" data-job="${esc(id)}" tabindex="0"><div class="job-logo">${esc(initials(j))}</div><div class="opportunity-main"><div class="job-title-line"><h3>${esc(title(j))}</h3>${recent?'<span class="new-badge">New</span>':""}</div><div class="job-company">${esc(company(j))}</div><div class="meta">${esc(facts)}</div>${store.compact || small ? "" : `<div class="tags">${tagsHtml(j)}</div>`}<div class="job-footline"><span>${esc(postedPresentation(postedAt(j)))}</span><span class="job-state ${isActive(j)?"active":"closed"}">${isActive(j)?"Active":"Closed"}</span></div></div></article>`;
   }
   function empty(noun, copy) { return `<div class="empty"><h2>No ${esc(noun)} yet</h2><p>${esc(copy)}</p></div>`; }
   function renderDetail(j) {
-    if (!j) return `<aside class="detail"><div class="section-kicker">Selection</div><h2>Choose an opportunity</h2><p>Inspect eligibility, source evidence, and the next safe action here.</p></aside>`;
-    const id = jobId(j), st = eligibility(j);
-    const reasons=getField(j,["eligibility_reasons"],[]), components=getField(j,["score_components"],[]), route=getField(j,["submission_route"],{}), apply=safeHref(getField(j,["apply_url","posting_url"],""));
-    const observations=getField(j,["observations"],[]),related=getField(j,["related_openings"],[]);
-    const sourceLedger=observations.map(source=>{const href=safeHref(source.apply_url||source.posting_url),state=String(source.status||"unknown"),tone=state==="open"?"good":state==="unlisted"?"needs":state==="closed"?"blocked":"";const facts=[source.authority||"unknown authority",source.requisition_id?`Req ${source.requisition_id}`:"",source.last_seen_at?`Seen ${source.last_seen_at}`:""] .filter(Boolean).join(" · ");return `<div class="source-ledger-row"><div><strong>${esc(source.source)} · ${esc(source.feed_key)}</strong><div class="meta">${esc(facts)}</div></div><div class="source-ledger-actions"><span class="status ${tone}">${esc(state)}</span>${href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">Open source</a>`:""}</div></div>`;}).join("");
-    const ready=applyReady(j),gate=ready?"":'disabled title="Resolve eligibility before entering the application workflow"';
-    return `<aside class="detail"><div class="section-kicker">Opportunity record</div><h2>${esc(title(j))}<span>${esc(company(j))}</span></h2><div class="tags"><span class="status ${statusClass(st)}">${esc(st)}</span><span class="tag">Score ${esc(score(j))}</span></div><section><div class="section-kicker">Eligibility</div><p>${esc(reasons.length?reasons.join(" "):st)}</p></section><section><div class="section-kicker">Score explanation</div><div class="tags">${components.map(c=>`<span class="tag">${esc(c.name)} ${esc(c.points)}/${esc(c.maximum)}</span>`).join("")||'<span class="meta">No score evidence yet</span>'}</div><p>${esc(route.instruction||"Review before taking action.")}</p></section><section><div class="section-kicker">Semantic stack</div><div class="tags">${tagsHtml(j) || '<span class="meta">No stack extracted</span>'}</div></section><section><div class="section-kicker">Deadline & freshness</div><p>${esc(deadline(j))}</p></section><section><div class="section-kicker">Source evidence</div><p>${esc(evidence(j))}</p><div class="source-ledger">${sourceLedger||"No individual source evidence available."}</div></section>${related.length?`<section><div class="section-kicker">Related openings</div>${related.map(item=>`<p>${esc(item.title)} · ${esc(item.opportunity_type)} · score ${esc(item.score)}</p>`).join("")}</section>`:""}<div class="actions">${apply?`<a class="button primary" href="${esc(apply)}" target="_blank" rel="noopener noreferrer">Official apply</a>`:""}<button class="button" data-action="save" data-id="${esc(id)}">Save</button><button class="button" data-action="queue" data-id="${esc(id)}" ${gate}>Queue</button><button class="button" data-action="start-prep" data-id="${esc(id)}" ${gate}>Start prep</button>${classificationNeeded(j)?`<button class="button" data-action="classify" data-id="${esc(id)}">Classify</button>`:""}<button class="button" data-action="record-application" data-id="${esc(id)}" ${gate}>Record submitted</button><button class="button danger" data-action="dismiss" data-id="${esc(id)}">Dismiss</button></div></aside>`;
+    if (!j) return `<aside class="detail"><div class="section-kicker">Selection</div><h2>Choose a job</h2><p>Select a role to review its details and add it to Applications.</p></aside>`;
+    const id=jobId(j),apply=safeHref(getField(j,["apply_url","source_url","posting_url"],"")),facts=[locationText(j),attributes(j).term,attributes(j).workplace].filter(Boolean);
+    return `<aside class="detail"><div class="detail-head-row"><div class="job-logo large">${esc(initials(j))}</div><div><div class="detail-company">${esc(company(j))}</div><div class="meta">${esc(facts.join(" · "))}</div></div><span class="job-state ${isActive(j)?"active":"closed"}">${isActive(j)?"Active":"Closed"}</span></div><h2>${esc(title(j))}</h2><div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(id)}" ${isActive(j)?"":'disabled title="This posting is closed"'}>Add to Applications</button>${apply?`<a class="button" href="${esc(apply)}" target="_blank" rel="noopener noreferrer">Open posting ↗</a>`:""}</div><section><div class="section-kicker">Job details</div><div class="tags detail-tags">${tagsHtml(j)||'<span class="meta">No structured details available</span>'}</div></section><section><div class="section-kicker">Role overview</div><p class="detail-description">${esc(description(j))}</p></section><div class="detail-freshness">${esc(postedPresentation(postedAt(j)))}${lastSeenAt(j)?` · Last confirmed active ${esc(relativeTime(lastSeenAt(j)))}`:""}</div></aside>`;
   }
-  async function load(key, path, force = false) { if (!force && store.loaded.has(key)) return store.data[key]; const data = await api(path); store.data[key] = data; store.loaded.add(key); return data; }
-  function updateCounts() { const map = { today: asList("today").length, discover: asList("jobs").length, saved: asList("saved").length, dedupe: asList("dedupe").length }; Object.entries(map).forEach(([k,v]) => document.querySelectorAll(`[data-count="${k}"]`).forEach(el => el.textContent = v || "")); }
-  async function renderToday() { loading("Loading today’s queue"); try { await load("today", `/today?${queryForFilters(store.filters)}`); const jobs = sortJobs(asList("today").filter(j => matchesFilters(j,store.filters)), store.sort); if(!store.selected || !jobs.some(j=>String(jobId(j))===String(store.selected)))store.selected=jobs[0]&&jobId(jobs[0]); updateCounts(); view.innerHTML = `<header class="page-head"><div><div class="section-kicker">Daily queue</div><h1>Today</h1><p>Small, deliberate next actions—not automatic applications.</p></div><div class="right"><button class="button" data-action="refresh-today">Refresh</button></div></header>${controls(false)}<div class="today-grid"><div class="queue-card">${jobs.length ? jobs.map(j => opportunity(j,String(jobId(j))===String(store.selected),true)).join("") : empty("items in today’s queue","Add approved opportunities from Discover when you are ready.")}</div><aside class="side-note"><h3>Submission stays human-confirmed</h3><p>Queue and save are safe. Preparing or recording an application always ends with your explicit confirmation.</p><button class="button" data-action="submission-help">Review submission flow</button></aside></div>`; } catch (e) { view.innerHTML = errorState("Today couldn’t load",e,true); } }
+  /* A cache entry is keyed by the request it came from, so a changed filter refetches
+     while a local-only action (expanding a group, toggling compact) reuses what we have. */
+  async function load(key, path, identity = path) {
+    if (store.loaded.has(key) && store.paths[key] === identity) return store.data[key];
+    const data = await api(path);
+    store.data[key] = data; store.paths[key] = identity; store.loaded.add(key);
+    return data;
+  }
+  const invalidate = (...keys) => keys.forEach(key => store.loaded.delete(key));
+  /* Blank the view only when there is nothing worth keeping on screen. Painting a
+     placeholder in front of a 2ms refetch is a guaranteed flash, not feedback. */
+  const loadingIfEmpty = (key, label) => { if (store.data[key] === undefined) loading(label); };
+  function updateCounts() { const map = { discover: asList("jobs").length, coverage: asList("coverage").length }; Object.entries(map).forEach(([k,v]) => document.querySelectorAll(`[data-count="${k}"]`).forEach(el => el.textContent = v || "")); }
+  async function discoverResults() {
+    loadingIfEmpty("jobs", "Loading opportunities");
+    const params = new URLSearchParams({ q: store.q, sort: store.sort, limit:"100", offset:"0" });
+    new URLSearchParams(queryForFilters(store.filters)).forEach((value, key) => params.append(key, value));
+    /* compact is presentation-only and the API discards it, so it stays out of the
+       cache identity: toggling the view must not cost a round trip. */
+    const identity = `/jobs?${params}`;
+    await load("jobs", `${identity}&compact=${store.compact}`, identity);
+    const jobs = sortJobs(asList("jobs").filter(j => matchesFilters(j,store.filters)), store.sort);
+    if (!store.selected || !jobs.some(j => String(jobId(j)) === String(store.selected))) store.selected = jobs[0] && jobId(jobs[0]);
+    let selected = jobs.find(j => String(jobId(j)) === String(store.selected));
+    if (selected) { const id = jobId(selected); selected = await load(`job:${id}`, `/jobs/${encodeURIComponent(id)}`); }
+    updateCounts();
+    return { jobs, selected };
+  }
   async function renderDiscover() {
-    loading("Loading opportunities");
     try {
-      const params = new URLSearchParams({ q: store.q, sort: store.sort, compact: String(store.compact), limit:"100", offset:"0" });
-      normalizeFilters(store.filters).forEach(f => { if (f !== "all" && f !== "needs_classification") params.append("opportunity_type",f); });
-      if (normalizeFilters(store.filters).includes("needs_classification")) params.set("needs_classification","true");
-      await load("jobs", `/jobs?${params}`, true);
-      const jobs = sortJobs(asList("jobs").filter(j => matchesFilters(j,store.filters)), store.sort);
-      if (!store.selected || !jobs.some(j => String(jobId(j)) === String(store.selected))) store.selected = jobs[0] && jobId(jobs[0]);
-      let selected = jobs.find(j => String(jobId(j)) === String(store.selected));
-      if (selected) selected = await api(`/jobs/${encodeURIComponent(jobId(selected))}`);
-      updateCounts();
-      view.innerHTML = `<header class="page-head"><div><div class="section-kicker">Opportunity search</div><h1>Discover</h1><p>Evidence-first opportunities from configured sources.</p></div><div class="right"><button class="button" data-action="bulk-save">Save visible</button><button class="button" data-action="bulk-queue">Queue visible</button></div></header>${controls()}<div class="discover-grid"><div class="opportunity-list">${jobs.length ? jobs.map(j => opportunity(j,String(jobId(j)) === String(store.selected))).join("") : empty("matching opportunities","Try another search or clear a classification filter.")}</div>${renderDetail(selected)}</div>`;
+      const { jobs, selected } = await discoverResults();
+      view.innerHTML = `<header class="page-head">${mobileMenu()}<div><div class="section-kicker">Opportunity search</div><h1>Discover</h1><p>Browse active roles and decide what to apply to next.</p></div></header><div class="global-search discover-search"><span>⌕</span><input id="discover-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(store.q)}"><kbd>⌘K</kbd></div>${controls()}<div class="discover-grid"><div class="opportunity-list">${jobs.length ? jobs.map(j => opportunity(j,String(jobId(j)) === String(store.selected))).join("") : empty("matching jobs","Try another search or clear a filter.")}</div>${renderDetail(selected)}</div>`;
     } catch(e) { view.innerHTML = errorState("Discover couldn’t load",e,true); }
   }
-  async function renderSaved() {
-    loading("Loading saved opportunities");
-    try {
-      await load("saved", `/jobs?state=saved&${queryForFilters(store.filters)}`, true);
-      const jobs = sortJobs(asList("saved").filter(j=>matchesFilters(j,store.filters)),store.sort);
-      const changed = jobs.filter(j=>Boolean(j.changed_recently));
-      const unchanged = jobs.filter(j=>!j.changed_recently);
-      updateCounts();
-      view.innerHTML = `<header class="page-head"><div><div class="section-kicker">Your short list</div><h1>Saved</h1><p>Hold good opportunities until you can review them properly.</p></div></header>${controls()}${changed.length?`<section class="saved-review"><header><div><div class="section-kicker">Review changes</div><h2>${changed.length} saved posting${changed.length===1?" has":"s have"} new evidence</h2></div><span class="status needs">Check before applying</span></header><div class="opportunity-list">${changed.map(j=>opportunity(j,false,false,"Posting changed — recheck deadline and requirements")).join("")}</div></section>`:""}<section class="saved-list">${changed.length&&unchanged.length?'<div class="section-kicker">Other saved opportunities</div>':""}<div class="opportunity-list">${unchanged.length ? unchanged.map(j=>opportunity(j)).join("") : changed.length?"":empty("saved opportunities","Save an opportunity in Discover to keep it here.")}</div></section>`;
-    } catch(e) { view.innerHTML=errorState("Saved opportunities couldn’t load",e,true); }
-  }
   async function renderPipeline() {
-    loading("Loading application pipeline");
+    loadingIfEmpty("applications", "Loading applications");
     try {
-      await load("applications",`/applications?${queryForFilters(store.filters)}`,true);
+      await load("applications",`/applications?${queryForFilters(store.filters)}`);
       const apps=asList("applications").filter(a=>matchesFilters(a,store.filters));
       const columns=[{key:"considering",label:"Considering"},{key:"preparing",label:"Preparing"},{key:"submitted",label:"Submitted"},{key:"assessment",label:"Assessment"},{key:"screen",label:"Screen"},{key:"interview",label:"Interview"},{key:"offer",label:"Offer"},{key:"rejected",label:"Rejected"},{key:"withdrawn",label:"Withdrawn"},{key:"no_reply",label:"No reply"}];
-      view.innerHTML=`<header class="page-head"><div><div class="section-kicker">Event-backed record</div><h1>Pipeline</h1><p>Every stage change records an application event.</p></div></header>${controls(false)}<div class="pipeline">${columns.map(column=>{const group=apps.filter(a=>String(getField(a,["stage","state"],"considering")).toLowerCase()===column.key);return `<section class="pipeline-column"><header><span>${column.label}</span><span class="meta">${group.length}</span></header>${group.length?group.map(a=>{const due=duePresentation(a.next_due_at);return `<article class="pipeline-card" data-app="${esc(getField(a,["id","application_id"]))}"><b>${esc(getField(a,["company","company_name"],"Unknown company"))}</b><div>${esc(getField(a,["title","role","job_title"],"Untitled role"))}</div><div class="meta">${esc(getField(a,["next_action"],"No next action"))}</div>${due?`<span class="due-chip ${esc(due.tone)}">${esc(due.label)}</span>`:""}</article>`;}).join(""):""}</section>`}).join("")}</div>`;
-    } catch(e) { view.innerHTML=errorState("Pipeline couldn’t load",e,true); }
+      view.innerHTML=`<header class="page-head">${mobileMenu()}<div><h1>Applications</h1><p>Keep track of every application and what comes next.</p></div><div class="right"><button class="button primary" data-action="add-external">Add application</button></div></header>${controls()}<div class="pipeline">${columns.map(column=>{const group=apps.filter(a=>String(getField(a,["stage","state"],"considering")).toLowerCase()===column.key);return `<section class="pipeline-column"><header><span>${column.label}</span><span class="meta">${group.length}</span></header>${group.length?group.map(a=>{const due=duePresentation(a.next_due_at);return `<article class="pipeline-card" data-app="${esc(getField(a,["id","application_id"]))}"><b>${esc(getField(a,["company","company_name"],"Unknown company"))}</b><div>${esc(getField(a,["title","role","job_title"],"Untitled role"))}</div><div class="meta">${esc(getField(a,["next_action"],"No next action"))}</div>${due?`<span class="due-chip ${esc(due.tone)}">${esc(due.label)}</span>`:""}</article>`;}).join(""):""}</section>`}).join("")}</div>`;
+    } catch(e) { view.innerHTML=errorState("Applications couldn’t load",e,true); }
   }
-  async function renderDedupe() { loading("Loading duplicate review"); try { await load("dedupe","/dedupe",true); const items=asList("dedupe"); updateCounts(); view.innerHTML=`<header class="page-head"><div><div class="section-kicker">Quality gate</div><h1>Dedupe review</h1><p>Resolve possible duplicates before they enter your workflow. Every merge can be reversed.</p></div></header><div class="quality-list">${items.length?items.map(d=>{const id=getField(d,["id","dedupe_id"]), a=getField(d,["candidate","left","job_a"],{}),b=getField(d,["match","right","job_b"],{}),merged=d.state==="merged";return `<article class="quality-card"><header><div><h3>${esc(getField(d,["reason","match_reason"],"Possible duplicate"))}</h3><p>${esc(getField(d,["confidence","similarity"],"Review required"))}</p></div><span class="status ${merged?"good":"needs"}">${merged?"Merged":"Review"}</span></header><div class="comparison"><div><b>${esc(title(a))}</b>${esc(company(a))}</div><div><b>${esc(title(b))}</b>${esc(company(b))}</div></div><div class="modal-actions">${merged?`<button class="button" data-action="dedupe" data-decision="reverse" data-id="${esc(id)}">Undo merge</button>`:`<button class="button" data-action="dedupe" data-decision="keep_both" data-id="${esc(id)}">Keep both</button><button class="button" data-action="dedupe" data-decision="defer" data-id="${esc(id)}">Defer</button><button class="button primary" data-action="dedupe" data-decision="merge" data-id="${esc(id)}">Merge records</button>`}</div></article>`}).join(""):empty("duplicates to review","The API has not flagged any potential duplicates.")}</div>`; } catch(e){view.innerHTML=errorState("Dedupe review couldn’t load",e,true);} }
   const sourceLabel = value => String(value || "source").split(/[_-]/).map(part=>part?part[0].toUpperCase()+part.slice(1):part).join(" ");
-  function coverageFeed(feed) {
-    const ref=getField(feed,["feed_ref","ref","id"]),name=getField(feed,["name","company_name","label"],ref),last=getField(feed,["last_manual_fetch","last_fetch_at","fetched_at"],"Never manually fetched"),selected=Boolean(feed.selected),status=getField(feed,["status"],"never_fetched"),attention=["error","partial","missing_parser","quarantined"].includes(status);
-    return `<article class="source-company ${selected?"enabled":"disabled"}"><label class="fetch-select" title="Select for this manual batch">${selected?`<input type="checkbox" data-feed="${esc(ref)}">`:""}</label><div class="source-company-main"><strong>${esc(name)}</strong><span class="source-token">${esc(feed.key)}</span><div class="source-company-meta"><span class="source-health ${attention?"attention":""}">${esc(status.replaceAll("_"," "))}</span><span>${esc(last==="Never manually fetched"?last:`Fetched ${last}`)}</span></div></div><div class="source-company-actions"><button class="source-switch ${selected?"on":""}" role="switch" aria-checked="${selected}" data-action="source-toggle" data-feed="${esc(ref)}" data-enable="${!selected}"><span></span>${selected?"Enabled":"Disabled"}</button>${last!=="Never manually fetched"?`<button class="button" data-action="replay" data-feed="${esc(ref)}">Replay</button>`:""}<button class="button primary" data-action="fetch" data-feed="${esc(ref)}" ${selected?"":'disabled title="Enable this company before fetching"'}>Fetch now</button></div></article>`;
-  }
-  function coverageVendor(vendor) {
-    const source=vendor.source,expanded=store.expandedSources.has(source)||Boolean(store.sourceQ.trim()),selection=sourceSelectionState(vendor.enabled_count,vendor.available_count),feeds=getField(vendor,["feeds"],[]);
-    return `<section class="source-vendor ${expanded?"expanded":""}"><header><button class="source-expander" data-action="source-group" data-source="${esc(source)}" aria-expanded="${expanded}"><span>${expanded?"▾":"▸"}</span><div><strong>${esc(sourceLabel(source))}</strong><small>${esc(source)} · ${vendor.enabled_count}/${vendor.available_count} enabled${vendor.attention_count?` · ${vendor.attention_count} need attention`:""}</small></div></button><button class="vendor-switch ${selection.state}" role="switch" aria-checked="${selection.aria}" data-action="vendor-toggle" data-source="${esc(source)}" data-enable="${selection.next}"><span></span>${selection.state==="all"?"All enabled":selection.state==="some"?"Some enabled":"Enable all"}</button></header>${expanded?`<div class="source-children">${feeds.map(coverageFeed).join("")}</div>`:""}</section>`;
+  const sourceMark = value => String(value || "?").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?";
+  const countLabel = value => new Intl.NumberFormat().format(Number(value) || 0);
+  function coverageRow(source) {
+    const type=getField(source,["type"],"Other"),boards=sourceBoardLabel(type,source.board_count),health=getField(source,["health"],"Unknown"),healthy=health==="Healthy";
+    return `<div class="coverage-row"><div class="coverage-source"><span class="coverage-icon">${esc(sourceMark(source.source))}</span><div><strong>${esc(sourceLabel(source.source))}</strong><small>${esc([type,boards].filter(Boolean).join(" · "))}</small></div></div><span>${esc(countLabel(source.coverage))} roles</span><span>${esc(relativeTime(source.last_poll_at))}</span><span class="coverage-health ${healthy?"healthy":"attention"}">${esc(health)}</span><span class="coverage-change">+${esc(countLabel(source.added_today))}</span></div>`;
   }
   async function renderCoverage() {
-    loading("Loading source coverage");
+    loadingIfEmpty("coverage", "Loading source coverage");
     try {
-      const params=new URLSearchParams({selection:store.sourceMode,q:store.sourceQ});
-      const data=await load("sourceGroups",`/source-groups?${params}`,true),vendors=getField(data,["vendors"],[]);
-      const modes=[{key:"enabled",label:"Enabled"},{key:"disabled",label:"Disabled"},{key:"all",label:"All available"}];
-      const emptyCopy=store.sourceMode==="enabled"?`<div class="empty"><h2>No enabled companies</h2><p>Choose companies from the catalog before running a manual fetch.</p><button class="button primary" data-action="source-mode" data-mode="all">Manage available sources</button></div>`:empty("matching companies","Try another search or source filter.");
-      view.innerHTML=`<header class="page-head"><div><div class="section-kicker">Manual source control</div><h1>Source coverage</h1><p>${data.total_enabled} of ${data.total_available} catalog companies enabled. No source is polled in the background.</p></div><div class="right"><input class="filter-input" data-source-search placeholder="Find ATS, company, or token" value="${esc(store.sourceQ)}"><button class="button" data-action="batch-fetch">Fetch selected</button></div></header><div class="source-toolbar">${modes.map(mode=>`<button class="filter ${store.sourceMode===mode.key?"active":""}" data-action="source-mode" data-mode="${mode.key}">${mode.label}</button>`).join("")}<span class="meta">${vendors.length} ATS group${vendors.length===1?"":"s"}</span></div><div class="source-groups">${vendors.length?vendors.map(coverageVendor).join(""):emptyCopy}</div>`;
+      const data=await load("coverage","/source-coverage"),sources=getField(data,["sources"],[]);
+      updateCounts();
+      view.innerHTML=`<header class="page-head coverage-page-head">${mobileMenu()}<div><h1>Source coverage</h1><p>See where your opportunities come from and when each source was last updated.</p></div><div class="right coverage-total"><strong>${esc(countLabel(data.total_coverage))}</strong><span>active source postings</span></div></header>${sources.length?`<section class="coverage-table"><div class="coverage-head"><span>Source</span><span>Coverage</span><span>Last poll</span><span>Health</span><span>Changes today</span></div>${sources.map(coverageRow).join("")}</section>`:empty("source coverage","No configured sources are available yet.")}`;
     } catch(e) { view.innerHTML=errorState("Source coverage couldn’t load",e,true); }
   }
-  const renders={today:renderToday,discover:renderDiscover,pipeline:renderPipeline,saved:renderSaved,dedupe:renderDedupe,coverage:renderCoverage};
-  async function navigate(name) { store.current=renders[name]?name:"today"; document.querySelectorAll("[data-view-link]").forEach(a=>a.classList.toggle("active",a.dataset.viewLink===store.current)); history.replaceState(null,"",`#${store.current}`); await renders[store.current](); }
-  function modal(html) { modalRoot.innerHTML=`<div class="modal-shade" data-action="close-modal"><section class="modal" role="dialog" aria-modal="true">${html}</section></div>`; }
-  function captureModal() { modal(`<h2>Capture an opportunity</h2><p>Paste a job URL. We will show the duplicate preview before creating a reviewable record.</p><div class="form-row"><label class="field full">Job URL<input id="capture-url" type="url" placeholder="https://…"></label></div><div class="modal-actions"><button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="capture-submit">Check duplicates</button></div>`); }
-  function capturePreview(url, result) { const matches=unwrap(result); const summary=getField(result,["summary","message"],matches.length?`${matches.length} possible duplicate${matches.length===1?"":"s"} found.`:"No likely duplicate found."); modal(`<h2>Capture review</h2><p>${esc(summary)}</p>${matches.length?`<div class="quality-list">${matches.slice(0,3).map(x=>`<div class="comparison"><div><b>${esc(title(x))}</b>${esc(company(x))}</div><div>${esc(getField(x,["reason","similarity","score"],"Possible match"))}</div></div>`).join("")}</div>`:""}<div class="modal-actions"><button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="capture-confirm" data-url="${esc(url)}">Capture for review</button></div>`); }
-  async function applicationModal(id) { try {const detail=await api(`/jobs/${encodeURIComponent(id)}`),observations=getField(detail,["observations"],[]);modal(`<h2>Record a submitted application</h2><p>This records a human-confirmed submission; it does not submit anything.</p><div class="form-row"><label class="field full">Source used<select id="application-source">${observations.map(source=>`<option value="${esc(source.id)}">${esc(source.source)} · ${esc(source.feed_key)} · ${esc(source.apply_url||source.posting_url)}</option>`).join("")}</select></label><label class="field">Résumé variant<select id="application-resume"><option value="">Use assigned résumé</option><option value="ml-systems">ML systems</option><option value="quant-systems">Quant systems</option><option value="backend-infra">Backend / infrastructure</option></select></label><label class="field">Submission date<input id="submitted-date" type="date"></label><label class="field">Confirmation<select id="submission-confirm"><option value="">Choose…</option><option value="human_confirmed">I submitted this myself</option></select></label><label class="field full">Note<textarea id="submission-note" placeholder="Optional confirmation note"></textarea></label></div><div class="modal-actions"><button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="application-submit" data-id="${esc(id)}">Record submission</button></div>`);}catch(err){announce(err.message||"Application sources could not be loaded.");} }
-  function classificationModal(id) { modal(`<h2>Classify opportunity</h2><p>Use a human correction only when the employer’s work term is clear.</p><div class="form-row"><label class="field">Opportunity type<select id="classification-type">${TYPES.map(label=>`<option value="${slug(label)}">${label}</option>`).join("")}</select></label><label class="field full">Evidence<input id="classification-reason" placeholder="e.g. posting states September–December term"></label></div><div class="modal-actions"><button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="classification-submit" data-id="${esc(id)}">Save classification</button></div>`); }
+  const renders={discover:renderDiscover,pipeline:renderPipeline,coverage:renderCoverage};
+  async function navigate(name) { store.current=renders[name]?name:"discover"; document.querySelectorAll("[data-view-link]").forEach(a=>a.classList.toggle("active",a.dataset.viewLink===store.current)); history.replaceState(null,"",`#${store.current}`); await renders[store.current](); }
+  function modal(html, className = "") { modalRoot.innerHTML=`<div class="modal-shade" data-modal-shade><section class="modal ${esc(className)}" role="dialog" aria-modal="true">${html}</section></div>`; }
+  function externalApplicationModal() { modal(`<h2>Add external opportunity</h2><p>This creates an application tracker entry only. It will not appear in Discover.</p><div class="form-row"><label class="field">Company<input id="external-company" required></label><label class="field">Role title<input id="external-title" required></label><label class="field full">Application URL<input id="external-url" type="url" placeholder="https://…" required></label><label class="field full">Location<input id="external-location" placeholder="Optional"></label><label class="field full">Note<textarea id="external-note" placeholder="Optional"></textarea></label></div><div class="modal-actions"><button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="external-submit">Add to Applications</button></div>`); }
   async function eventModal(id) {
     try {
-      const application=await api(`/applications/${encodeURIComponent(id)}`),events=getField(application,["events"],[]),source=safeHref(application.apply_url_snapshot);
-      const timeline=events.map(item=>`<div class="timeline-row"><span>${esc(getField(item,["occurred_at"],""))}</span><div><strong>${esc(getField(item,["event_type"],"event").replaceAll("_"," "))}</strong><p>${esc(item.note||[item.from_stage,item.to_stage].filter(Boolean).join(" → "))}</p></div></div>`).join("");
-      modal(`<h2>${esc(application.title)}<span>${esc(application.company)}</span></h2><p>Submission evidence and every stage change remain attached to this record.</p><div class="application-facts"><span>Stage <b>${esc(application.stage)}</b></span><span>Résumé <b>${esc(application.resume_variant)}</b></span><span>Submitted <b>${esc(application.submitted_at||"Not yet")}</b></span>${source?`<a href="${esc(source)}" target="_blank" rel="noopener noreferrer">Frozen apply source</a>`:""}</div>${timeline?`<section class="application-timeline"><div class="section-kicker">Event history</div>${timeline}</section>`:""}<section><div class="section-kicker">Record next event</div><p>Use “Record submitted” on the job for submission confirmation.</p><div class="form-row"><label class="field">New stage<select id="event-stage"><option value="">Keep current stage</option><option value="considering">Considering</option><option value="preparing">Preparing</option><option value="assessment">Assessment</option><option value="screen">Screen</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="withdrawn">Withdrawn</option><option value="no_reply">No reply</option></select></label><label class="field">Due date / time<input id="event-due" type="datetime-local"></label><label class="field full">Event note<input id="event-note" placeholder="e.g. recruiter screen booked"></label></div></section><div class="modal-actions"><button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="event-submit" data-id="${esc(id)}">Record event</button></div>`);
-      const stage=$("#event-stage");if(stage&&[...stage.options].some(option=>option.value===application.stage))stage.value=application.stage;
+      const application=await api(`/applications/${encodeURIComponent(id)}`),events=getField(application,["events"],[]),source=safeHref(application.apply_url_snapshot),editable=Boolean(application.external);
+      const stageLabels={considering:"Considering",submitted:"Applied",assessment:"Assessment",interview:"Interview",offer:"Offer",rejected:"Closed / Rejected"};
+      const timeline=[...events].reverse().map((item,index)=>{const stage=getField(item,["to_stage"],"")||(["considering","submitted","assessment","interview","offer","rejected"].includes(item.event_type)?item.event_type:"");const description=stage?`${index===events.length-1?"Added to":"Moved to"} ${stageLabels[stage]||stage}`:(item.note||String(item.event_type||"Event").replaceAll("_"," "));return `<div class="application-history-row"><span>${esc(dateOnlyPresentation(item.occurred_at)||"Date unavailable")}</span><span>${esc(description)}</span></div>`;}).join("");
+      const locked=editable?"":' readonly aria-readonly="true" title="This value comes from the discovered job"';
+      modal(`<div class="application-modal-head"><div><h2>Application</h2><p>Edit details, notes, and your next step.</p></div><button class="modal-close" type="button" data-action="close-modal" aria-label="Close">×</button></div><div class="application-modal-body"><div class="form-row"><label class="field">Company<input id="application-company" value="${esc(application.company)}"${locked}></label><label class="field">Role<input id="application-title" value="${esc(application.title)}"${locked}></label><label class="field">Stage<select id="application-stage"><option value="considering">Considering</option><option value="submitted">Applied</option><option value="assessment">Assessment</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Closed / Rejected</option></select></label><label class="field">Date applied<input id="application-submitted" type="date" value="${esc(dateInputValue(application.submitted_at))}"></label><label class="field full">Posting URL<input id="application-url" type="url" value="${esc(application.apply_url_snapshot||"")}" placeholder="https://…"${locked}></label><label class="field">Next action<input id="application-next-action" value="${esc(application.next_action||"")}" placeholder="e.g. Follow up with recruiter"></label><label class="field">Next action date<input id="application-next-date" type="date" value="${esc(dateInputValue(application.next_due_at))}"></label><label class="field full">Notes<textarea id="application-note" rows="4" placeholder="Recruiter contacts, referrals, interview notes…">${esc(application.note||"")}</textarea></label></div><h3 class="application-history-title">History</h3><div class="application-history">${timeline||'<span class="meta">No history yet.</span>'}</div><div class="application-modal-actions"><button class="button danger" data-action="application-delete" data-id="${esc(id)}">Delete</button><div>${source?`<a class="button" href="${esc(source)}" target="_blank" rel="noopener noreferrer">Open posting ↗</a>`:""}<button class="button" data-action="close-modal">Cancel</button><button class="button primary" data-action="application-save" data-id="${esc(id)}" data-editable="${editable}">Save</button></div></div></div>`,"application-editor");
+      const stage=$("#application-stage");if(stage&&[...stage.options].some(option=>option.value===application.stage))stage.value=application.stage;
     } catch(err) { announce(err.message||"Application history could not be loaded."); }
   }
-  async function triage(id, state) { await api(`/jobs/${encodeURIComponent(id)}/triage`,{method:"POST",body:JSON.stringify({state})}); store.loaded.delete("jobs");store.loaded.delete("today");store.loaded.delete("saved");announce(`Opportunity marked ${state}.`); navigate(store.current); }
-  async function bulk(state) { const visible=asList("jobs").filter(j=>matchesFilters(j,store.filters)),jobs=state==="queued"?visible.filter(applyReady):visible,skipped=visible.length-jobs.length;if(!jobs.length)return announce(state==="queued"&&skipped?"No visible opportunities have cleared the eligibility gate.":"There are no visible opportunities to update."); await Promise.all(jobs.map(j=>api(`/jobs/${encodeURIComponent(jobId(j))}/triage`,{method:"POST",body:JSON.stringify({state})}))); store.loaded.delete("jobs");store.loaded.delete("today");store.loaded.delete("saved");announce(`${jobs.length} opportunities marked ${state}${skipped?`; ${skipped} held for eligibility review`:""}.`);navigate("discover"); }
-  document.addEventListener("click",async e=>{const a=e.target.closest("[data-action]");if(!a)return; const action=a.dataset.action; try { if(action==="menu")return $(".rail").classList.toggle("open");if(action==="capture")return captureModal();if(action==="close-modal")return modalRoot.innerHTML="";if(action==="retry")return navigate(store.current);if(action==="refresh-today"){store.loaded.delete("today");return navigate("today");}if(action==="compact"){store.compact=!store.compact;return navigate(store.current);}if(action==="save"||action==="queue"||action==="dismiss")return triage(a.dataset.id,action==="save"?"saved":action==="queue"?"queued":"dismissed");if(action==="record-application")return applicationModal(a.dataset.id);if(action==="bulk-save")return bulk("saved");if(action==="bulk-queue")return bulk("queued");if(action==="submission-help")return modal(`<h2>Human-confirmed submission</h2><p>OneShot can save and queue opportunities. The application is only recorded after you personally submit it and confirm that action.</p><div class="modal-actions"><button class="button primary" data-action="close-modal">Understood</button></div>`);if(action==="dedupe"){await api(`/dedupe/${encodeURIComponent(a.dataset.id)}/decision`,{method:"POST",body:JSON.stringify({decision:a.dataset.decision})});store.loaded.delete("dedupe");announce("Duplicate decision recorded.");return navigate("dedupe");}if(action==="fetch"){a.disabled=true;a.textContent="Fetching…";const result=await api(`/sources/${encodeURIComponent(a.dataset.feed)}/fetch`,{method:"POST"});store.loaded.delete("sources");const count=getField(result,["item_count"],0), outcome=result.ingestion_error?"captured; board ingest failed":getField(result,["outcome"],"unknown");announce(`Manual fetch ${outcome}: ${count} source item${count===1?"":"s"}.`);return navigate("coverage");}if(action==="batch-fetch"){const refs=[...document.querySelectorAll("[data-feed]:checked")].map(x=>x.dataset.feed);if(!refs.length)return announce("Select one or more configured feeds first.");if(refs.length>25)return announce("Select at most 25 feeds per manual fetch.");a.disabled=true;const result=await api("/sources/fetch",{method:"POST",body:JSON.stringify({feed_refs:refs})});store.loaded.delete("sources");const rows=unwrap(result), failed=rows.filter(x=>x.outcome==="error"||x.ingestion_error).length, items=rows.reduce((sum,x)=>sum+Number(getField(x,["item_count"],0)),0);announce(`${rows.length-failed} fetched, ${failed} failed, ${items} source items.`);return navigate("coverage");}if(action==="capture-submit"){const url=$("#capture-url").value.trim();if(!url)return announce("Enter a job URL first.");const resolved=await api("/capture/resolve",{method:"POST",body:JSON.stringify({url})});return capturePreview(url,resolved);}if(action==="capture-confirm"){await api("/jobs",{method:"POST",body:JSON.stringify({url:a.dataset.url})});modalRoot.innerHTML="";store.loaded.delete("jobs");store.loaded.delete("dedupe");announce("Captured for duplicate and quality review.");return navigate("discover");}if(action==="application-submit"){if(!$("#submission-confirm").value)return announce("Confirm that you submitted it yourself.");const resume=$("#application-resume").value||undefined;await api(`/jobs/${encodeURIComponent(a.dataset.id)}/applications`,{method:"POST",body:JSON.stringify({confirmation:"human_confirmed",submitted_at:$("#submitted-date").value||null,resume_variant:resume,note:$("#submission-note").value,source_observation_id:$("#application-source")?$("#application-source").value:null})});modalRoot.innerHTML="";store.loaded.delete("applications");announce("Human-confirmed application recorded.");return navigate("pipeline");}if(action==="event-submit"){const stage=$("#event-stage").value||null,due=$("#event-due").value||null,eventType=stage&&["assessment","screen","interview","offer","rejected","withdrawn","no_reply"].includes(stage)?stage:stage?"stage_changed":due?"task_added":"note";await api(`/applications/${encodeURIComponent(a.dataset.id)}/events`,{method:"POST",body:JSON.stringify({event_type:eventType,stage,note:$("#event-note").value,due_at:due})});modalRoot.innerHTML="";store.loaded.delete("applications");store.loaded.delete("today");announce("Pipeline event recorded.");return navigate("pipeline");} } catch(err){announce(err.message||"That action could not be completed.");} });
-  document.addEventListener("click",async e=>{const a=e.target.closest("[data-action]");if(!a)return;const action=a.dataset.action;try{if(action==="source-group"){const source=a.dataset.source;if(store.expandedSources.has(source))store.expandedSources.delete(source);else store.expandedSources.add(source);return renderCoverage();}if(action==="source-mode"){store.sourceMode=a.dataset.mode;return renderCoverage();}if(action==="source-toggle"){a.disabled=true;await api(`/sources/${encodeURIComponent(a.dataset.feed)}/selection`,{method:"PUT",body:JSON.stringify({enabled:a.dataset.enable==="true"})});announce(`Company ${a.dataset.enable==="true"?"enabled":"disabled"}.`);return renderCoverage();}if(action==="vendor-toggle"){a.disabled=true;const enabled=a.dataset.enable==="true";const result=await api(`/sources/vendor/${encodeURIComponent(a.dataset.source)}/selection`,{method:"PUT",body:JSON.stringify({enabled})});announce(`${result.affected} ${sourceLabel(a.dataset.source)} companies ${enabled?"enabled":"disabled"}.`);return renderCoverage();}}catch(err){announce(err.message||"Source selection could not be updated.");}});
-  document.addEventListener("click",async e=>{const a=e.target.closest("[data-action]");if(!a)return;try{if(a.dataset.action==="start-prep"){await api(`/jobs/${encodeURIComponent(a.dataset.id)}/applications`,{method:"POST",body:JSON.stringify({stage:"preparing"})});store.loaded.delete("applications");store.loaded.delete("today");announce("Application preparation started.");return navigate("pipeline");}if(a.dataset.action==="replay"){a.disabled=true;const result=await api(`/sources/${encodeURIComponent(a.dataset.feed)}/replay`,{method:"POST"});store.loaded.delete("sources");store.loaded.delete("jobs");const count=getField(result.ingested||{},["postings"],0);announce(`Replayed captured data: ${count} posting${count===1?"":"s"} ingested.`);return navigate("coverage");}if(a.dataset.action==="classify")return classificationModal(a.dataset.id);if(a.dataset.action==="classification-submit"){const rationale=$("#classification-reason").value.trim();if(!rationale)return announce("Add the employer evidence for this correction.");await api(`/jobs/${encodeURIComponent(a.dataset.id)}/classification`,{method:"POST",body:JSON.stringify({opportunity_type:$("#classification-type").value,rationale})});modalRoot.innerHTML="";store.loaded.delete("jobs");store.loaded.delete("today");store.loaded.delete("saved");announce("Human classification recorded.");return navigate(store.current);}}catch(err){announce(err.message||"That local action could not be completed.");}});
-  document.addEventListener("click",e=>{const link=e.target.closest("[data-view-link]");if(link){e.preventDefault();navigate(link.dataset.viewLink);}const row=e.target.closest("[data-job]");if(row&&!e.target.closest("button")){store.selected=row.dataset.job;if(store.current==="discover")navigate("discover");}const app=e.target.closest("[data-app]");if(app)eventModal(app.dataset.app);});
-  document.addEventListener("click",e=>{const f=e.target.closest("[data-filter]");if(!f)return;const value=f.dataset.filter;if(value==="all")store.filters=["all"];else{store.filters=store.filters.filter(x=>x!=="all");store.filters=store.filters.includes(value)?store.filters.filter(x=>x!==value):[...store.filters,value];if(!store.filters.length)store.filters=["all"];}store.loaded.delete("today");navigate(store.current);});
-  document.addEventListener("change",e=>{if(e.target.matches("[data-sort]")){store.sort=e.target.value;navigate(store.current);}});document.addEventListener("input",e=>{if(e.target.matches("[data-search]")){store.q=e.target.value;clearTimeout(store.searchTimer);store.searchTimer=setTimeout(()=>navigate("discover"),250);}if(e.target.matches("[data-source-search]")){store.sourceQ=e.target.value;clearTimeout(store.sourceTimer);store.sourceTimer=setTimeout(()=>navigate("coverage"),250);}});
-  $("#global-search").addEventListener("input",e=>{store.q=e.target.value; if(store.q){clearTimeout(store.searchTimer);store.searchTimer=setTimeout(()=>navigate("discover"),250);}});document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();$("#global-search").focus();return;}if(/input|textarea|select/i.test(document.activeElement.tagName))return;if(e.key.toLowerCase()==="c")return captureModal();if(e.key==="Escape")return modalRoot.innerHTML="";if(!["discover","today"].includes(store.current))return;const rows=[...document.querySelectorAll("[data-job]")];const at=Math.max(0,rows.findIndex(x=>x.dataset.job===String(store.selected)));if(e.key.toLowerCase()==="j"&&rows[at+1]){store.selected=rows[at+1].dataset.job;return navigate(store.current);}if(e.key.toLowerCase()==="k"&&rows[at-1]){store.selected=rows[at-1].dataset.job;return navigate(store.current);}if(e.key==="Enter")return navigate(store.current);if(e.key.toLowerCase()==="s"&&store.selected)return triage(store.selected,"saved");if(e.key.toLowerCase()==="q"&&store.selected){const selected=(store.current==="today"?asList("today"):asList("jobs")).find(j=>String(jobId(j))===String(store.selected));return selected&&applyReady(selected)?triage(store.selected,"queued"):announce("Resolve eligibility before queueing this opportunity.");}if(e.key.toLowerCase()==="x"&&store.selected)return triage(store.selected,"dismissed");});
-  (async()=>{try{await api("/health");const requested=location.hash.slice(1);navigate(renders[requested]?requested:"today");}catch(e){view.innerHTML=errorState("OneShot is unavailable",e,true);}})();
+  async function addToApplications(id) {
+    const result=await root.OneShotAPI.jobs.addToApplications(id);
+    invalidate("applications","jobs",`job:${id}`);store.selected=null;
+    await navigate("discover");
+    announce(result?.already_exists?"This job is already in Applications.":"Added to Applications.",result?.already_exists?null:{label:"Undo",action:"undo-add",id:result.id});
+  }
+  document.addEventListener("click", async e => {
+    const a=e.target.closest("[data-action]");
+    if(!a)return;
+    const action=a.dataset.action;
+    try {
+      if(action==="menu")return $(".rail").classList.toggle("open");
+      if(action==="add-external")return externalApplicationModal();
+      if(action==="close-modal")return modalRoot.innerHTML="";
+      if(action==="retry")return navigate(store.current);
+      if(action==="compact"){store.compact=!store.compact;return navigate(store.current);}
+      if(action==="add-to-applications")return addToApplications(a.dataset.id);
+      if(action==="external-submit"){const company=$("#external-company").value.trim(),title=$("#external-title").value.trim(),url=$("#external-url").value.trim();if(!company||!title||!url)return announce("Company, role title, and application URL are required.");await api("/applications/external",{method:"POST",body:JSON.stringify({company,title,url,location:$("#external-location").value.trim(),note:$("#external-note").value.trim()})});modalRoot.innerHTML="";invalidate("applications");announce("External opportunity added to Applications.");return navigate("pipeline");}
+      if(action==="application-save"){const stage=$("#application-stage").value;let submitted=$("#application-submitted").value||null;if(stage==="submitted"&&!submitted)submitted=new Date().toISOString().slice(0,10);const body={stage,submitted_at:submitted,next_action:$("#application-next-action").value.trim(),next_due_at:$("#application-next-date").value||null,note:$("#application-note").value.trim()};if(a.dataset.editable==="true"){body.company=$("#application-company").value.trim();body.title=$("#application-title").value.trim();body.apply_url_snapshot=$("#application-url").value.trim();if(!body.company||!body.title)return announce("Company and role are required.");}await root.OneShotAPI.applications.update(a.dataset.id,body);modalRoot.innerHTML="";invalidate("applications");announce("Application updated.");return navigate("pipeline");}
+      if(action==="application-delete"){if(!root.confirm("Delete this application? This can't be undone."))return;await root.OneShotAPI.applications.remove(a.dataset.id);modalRoot.innerHTML="";invalidate("applications","jobs");store.selected=null;await navigate("pipeline");return announce("Application deleted.");}
+      if(action==="undo-add"){await root.OneShotAPI.applications.remove(a.dataset.id);invalidate("applications","jobs");store.selected=null;await navigate("discover");return announce("Addition undone.");}
+    } catch(err){announce(err.message||"That action could not be completed.");}
+  });
+  document.addEventListener("click",e=>{const shade=e.target.closest("[data-modal-shade]");if(shade&&e.target===shade)modalRoot.innerHTML="";const link=e.target.closest("[data-view-link]");if(link){e.preventDefault();navigate(link.dataset.viewLink);}const row=e.target.closest("[data-job]");if(row&&!e.target.closest("button")){store.selected=row.dataset.job;if(store.current==="discover")navigate(store.current);}const app=e.target.closest("[data-app]");if(app)eventModal(app.dataset.app);});
+  document.addEventListener("click",e=>{const f=e.target.closest("[data-filter]");if(!f)return;const value=f.dataset.filter;store.filters=store.filters.includes(value)?store.filters.filter(x=>x!==value):[...store.filters,value];navigate(store.current);});
+  document.addEventListener("change",e=>{if(e.target.matches("[data-sort]")){store.sort=e.target.value;navigate(store.current);}});document.addEventListener("input",e=>{if(e.target.matches("[data-search]")){store.q=e.target.value;clearTimeout(store.searchTimer);store.searchTimer=setTimeout(()=>navigate("discover"),250);}});
+  document.addEventListener("keydown",e=>{const discovering=store.current==="discover";if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){const search=$("#discover-search");if(discovering&&search){e.preventDefault();search.focus();}return;}if(/input|textarea|select/i.test(document.activeElement.tagName))return;if(e.key==="Escape")return modalRoot.innerHTML="";if(!discovering)return;const rows=[...document.querySelectorAll("[data-job]")];const at=Math.max(0,rows.findIndex(x=>x.dataset.job===String(store.selected)));if(e.key.toLowerCase()==="j"&&rows[at+1]){store.selected=rows[at+1].dataset.job;return navigate(store.current);}if(e.key.toLowerCase()==="k"&&rows[at-1]){store.selected=rows[at-1].dataset.job;return navigate(store.current);}if(e.key==="Enter")return navigate(store.current);});
+  (async()=>{try{await root.OneShotAPI.health();const requested=location.hash.slice(1);navigate(renders[requested]?requested:"discover");}catch(e){view.innerHTML=errorState("OneShot is unavailable",e,true);}})();
 })(typeof window !== "undefined" ? window : globalThis);

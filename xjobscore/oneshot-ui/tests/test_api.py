@@ -127,6 +127,11 @@ def test_startup_is_offline_and_only_explicit_fetch_ingests(tmp_path) -> None:
             "facts": 0,
         }
         assert client.get("/api/jobs").json()["total"] == 6
+        coverage = client.get("/api/source-coverage").json()
+        assert coverage["total_coverage"] == 6
+        assert coverage["total_added_today"] == 6
+        assert coverage["sources"][0]["last_poll_at"] is not None
+        assert coverage["sources"][0]["health"] == "Healthy"
 
 
 def test_six_filters_multiselect_saved_today_and_unclassified(tmp_path) -> None:
@@ -178,36 +183,6 @@ def test_six_filters_multiselect_saved_today_and_unclassified(tmp_path) -> None:
             "/api/today", params={"opportunity_type": "summer_internship"}
         ).json()
         assert [job["id"] for job in today["items"]] == [summer["id"]]
-
-        captured = client.post(
-            "/api/jobs", json={"url": "https://manual.example.test/jobs/unknown-role"}
-        )
-        assert captured.status_code == 200, captured.text
-        review = client.get("/api/jobs", params={"needs_classification": True}).json()
-        assert review["total"] == 1
-        assert review["jobs"][0]["needs_classification"] is True
-        union = client.get(
-            "/api/jobs",
-            params=[
-                ("opportunity_type", "spring_internship"),
-                ("needs_classification", "true"),
-            ],
-        ).json()
-        assert {job["opportunity_type_slug"] for job in union["jobs"]} == {
-            "spring_internship",
-            "unclassified",
-        }
-        corrected = client.post(
-            f"/api/jobs/{captured.json()['id']}/classification",
-            json={
-                "opportunity_type": "fall_internship",
-                "rationale": "Employer states a September–December internship term.",
-            },
-        )
-        assert corrected.status_code == 200, corrected.text
-        assert corrected.json()["opportunity_type_slug"] == "fall_internship"
-        assert client.get("/api/jobs", params={"needs_classification": True}).json()["total"] == 0
-
 
 def test_application_requires_confirmation_and_preserves_snapshot(tmp_path) -> None:
     client, _ = _client(tmp_path)
@@ -364,6 +339,55 @@ def test_application_requires_confirmation_and_preserves_snapshot(tmp_path) -> N
         assert detail["company"] == job["company"]
         assert detail["title"] == job["title"]
         assert detail["submitted_at"].startswith("2026-08-04")
+
+
+def test_external_application_stays_out_of_discover_and_tracks_events(tmp_path) -> None:
+    client, _ = _client(tmp_path)
+    with client:
+        created = client.post(
+            "/api/applications/external",
+            json={
+                "company": "External Labs",
+                "title": "Systems Internship",
+                "url": "https://external.example/jobs/systems-intern",
+                "location": "Remote",
+                "note": "Found through an alumni referral",
+            },
+        )
+        assert created.status_code == 200, created.text
+        application = created.json()
+        assert application["external"] is True
+        assert application["job_id"] is None
+        assert application["stage"] == "considering"
+        assert application["opportunity_type"] == "External"
+        assert application["location"] == "Remote"
+        assert client.get("/api/jobs").json()["total"] == 0
+        assert client.post("/api/jobs", json={"url": application["apply_url_snapshot"]}).status_code == 405
+
+        listed = client.get("/api/applications").json()["applications"]
+        assert [item["id"] for item in listed] == [application["id"]]
+        assert client.get(
+            "/api/applications", params={"opportunity_type": "summer_internship"}
+        ).json()["applications"] == []
+
+        unconfirmed = client.post(
+            f"/api/applications/{application['id']}/events",
+            json={"stage": "submitted"},
+        )
+        assert unconfirmed.status_code == 422
+        submitted = client.post(
+            f"/api/applications/{application['id']}/events",
+            json={"stage": "submitted", "confirmed": True},
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["stage"] == "submitted"
+        assert submitted.json()["submitted_at"] is not None
+
+        invalid = client.post(
+            "/api/applications/external",
+            json={"company": "Bad", "title": "URL", "url": "not-a-url"},
+        )
+        assert invalid.status_code == 422
 
 
 def test_batch_fetch_is_selected_and_bounded(tmp_path) -> None:

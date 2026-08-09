@@ -9,13 +9,13 @@ import sqlite3
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
+from xjobscore.sources import source_type
 from xjobscore.sources.catalog import feed_ref
 
 from .db import Database
-from .dedupe import DedupeOutcome, build_identifiers, compare_postings, normalize_title, normalize_url
 from .scoring import SCORING_VERSION, ScoreBand, band_for_score, route_for_band
 from .taxonomy import PRIMARY_OPPORTUNITY_TYPES
-from .util import dumps, loads, new_id, normalize_name, public_id, utc_now
+from .util import dumps, loads, new_id, utc_now
 
 
 TYPE_LABELS = {item.slug: item.value for item in PRIMARY_OPPORTUNITY_TYPES}
@@ -99,29 +99,6 @@ class BoardRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    @staticmethod
-    def _restore_job_snapshot(
-        connection: sqlite3.Connection, snapshot: dict[str, Any], now: str
-    ) -> None:
-        if not snapshot or not snapshot.get("id"):
-            return
-        allowed = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(job_entities)").fetchall()
-        } - {"id"}
-        columns = [name for name in snapshot if name in allowed]
-        if not columns:
-            return
-        assignments = ", ".join(f"{name} = ?" for name in columns)
-        connection.execute(
-            f"UPDATE job_entities SET {assignments} WHERE id = ?",
-            (*[snapshot[name] for name in columns], snapshot["id"]),
-        )
-        connection.execute(
-            "UPDATE job_entities SET version = version + 1, updated_at = ? WHERE id = ?",
-            (now, snapshot["id"]),
-        )
-
     async def health(self) -> dict[str, Any]:
         counts = await self.database.fetch_one(
             """
@@ -131,7 +108,6 @@ class BoardRepository:
                   WHERE f.enabled = 1 AND s.enabled = 1) AS enabled_sources,
                 (SELECT COUNT(*) FROM polls) AS manual_fetches,
                 (SELECT COUNT(*) FROM job_entities WHERE status != 'merged') AS jobs,
-                (SELECT COUNT(*) FROM dedupe_candidates WHERE state IN ('pending', 'deferred')) AS dedupe_review,
                 (SELECT COUNT(*) FROM job_applications) AS applications
             """
         )
@@ -674,6 +650,84 @@ class BoardRepository:
             "query": q,
         }
 
+    async def source_coverage(
+        self, rows: Iterable[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        """Build the read-only Source Coverage view from source-level facts."""
+        if rows is None:
+            rows = await self.database.fetch_all(
+                """
+                WITH feed_stats AS (
+                    SELECT
+                        source,
+                        SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS board_count,
+                        SUM(CASE WHEN enabled = 1 AND last_fetched_at IS NOT NULL THEN 1 ELSE 0 END) AS polled_count,
+                        SUM(CASE WHEN enabled = 1 AND health IN (
+                            'partial', 'error', 'missing_parser'
+                        ) THEN 1 ELSE 0 END) AS attention_count,
+                        MAX(CASE WHEN enabled = 1 THEN last_fetched_at END) AS last_poll_at
+                    FROM feeds
+                    GROUP BY source
+                ),
+                posting_stats AS (
+                    SELECT
+                        source,
+                        SUM(CASE WHEN status IN ('open', 'conflicting') THEN 1 ELSE 0 END) AS coverage,
+                        SUM(CASE WHEN date(first_seen_at) = date('now') THEN 1 ELSE 0 END) AS added_today
+                    FROM posting_observations
+                    GROUP BY source
+                )
+                SELECT
+                    f.source,
+                    f.board_count,
+                    f.polled_count,
+                    f.attention_count,
+                    f.last_poll_at,
+                    COALESCE(p.coverage, 0) AS coverage,
+                    COALESCE(p.added_today, 0) AS added_today
+                FROM feed_stats f
+                LEFT JOIN posting_stats p ON p.source = f.source
+                ORDER BY COALESCE(p.coverage, 0) DESC, f.source
+                """
+            )
+
+        items: list[dict[str, Any]] = []
+        for raw in rows:
+            row = dict(raw)
+            board_count = int(row.get("board_count") or 0)
+            polled_count = int(row.get("polled_count") or 0)
+            attention_count = int(row.get("attention_count") or 0)
+            if board_count == 0:
+                health = "Disabled"
+            elif polled_count == 0:
+                health = "Not polled"
+            elif attention_count:
+                health = "Needs attention"
+            elif polled_count < board_count:
+                health = "Partial"
+            else:
+                health = "Healthy"
+            last_poll = row.get("last_poll_at")
+            if isinstance(last_poll, datetime):
+                last_poll = last_poll.isoformat()
+            items.append(
+                {
+                    "source": row["source"],
+                    "type": source_type(str(row["source"])),
+                    "board_count": board_count,
+                    "coverage": int(row.get("coverage") or 0),
+                    "last_poll_at": last_poll,
+                    "health": health,
+                    "added_today": int(row.get("added_today") or 0),
+                }
+            )
+        return {
+            "sources": items,
+            "source_count": len(items),
+            "total_coverage": sum(item["coverage"] for item in items),
+            "total_added_today": sum(item["added_today"] for item in items),
+        }
+
     async def set_source_selection(
         self, feed_reference: str, enabled: bool
     ) -> dict[str, Any] | None:
@@ -733,324 +787,63 @@ class BoardRepository:
             "affected": affected,
         }
 
-    async def list_dedupe(self) -> dict[str, Any]:
-        rows = await self.database.fetch_all(
-            """
-            SELECT d.*, a.company_name AS a_company, a.title AS a_title,
-                   a.location AS a_location, b.company_name AS b_company,
-                   b.title AS b_title, b.location AS b_location
-            FROM dedupe_candidates d
-            JOIN job_entities a ON a.id = d.entity_a_id
-            JOIN job_entities b ON b.id = d.entity_b_id
-            WHERE d.state IN ('pending', 'deferred', 'merged')
-            ORDER BY CASE d.state WHEN 'pending' THEN 1 WHEN 'deferred' THEN 2 ELSE 3 END,
-                     d.confidence DESC, d.created_at
-            """
-        )
-        return {
-            "items": [
-                {
-                    "id": row["id"],
-                    "confidence": row["confidence"],
-                    "reason": "; ".join(loads(row["reasons_json"], [])),
-                    "outcome": row["outcome"],
-                    "state": row["state"],
-                    "algorithm_version": row.get("algorithm_version"),
-                    "shared_identifiers": loads(row.get("shared_identifiers_json"), []),
-                    "candidate": {
-                        "id": row["entity_a_id"], "company": row["a_company"],
-                        "title": row["a_title"], "location": row["a_location"],
-                    },
-                    "match": {
-                        "id": row["entity_b_id"], "company": row["b_company"],
-                        "title": row["b_title"], "location": row["b_location"],
-                    },
-                }
-                for row in rows
-            ]
-        }
-
-    async def decide_dedupe(
-        self, candidate_id: str, action: str, rationale: str = ""
-    ) -> dict[str, Any] | None:
-        aliases = {"keep_both": "keep_separate"}
-        action = aliases.get(action, action)
-        if action not in {"merge", "keep_separate", "defer", "reverse"}:
-            raise ValueError("unknown dedupe decision")
-        now = utc_now()
-
-        def operation(connection: sqlite3.Connection) -> dict[str, Any] | None:
-            candidate = connection.execute(
-                "SELECT * FROM dedupe_candidates WHERE id = ?", (candidate_id,)
-            ).fetchone()
-            if candidate is None:
-                return None
-            if action == "merge":
-                if candidate["state"] not in {"pending", "deferred", "reversed"}:
-                    raise ValueError(
-                        f"candidate cannot be merged from state {candidate['state']!r}"
-                    )
-                entity_rows = connection.execute(
-                    "SELECT * FROM job_entities WHERE id IN (?, ?)",
-                    (candidate["entity_a_id"], candidate["entity_b_id"]),
-                ).fetchall()
-                if len(entity_rows) != 2:
-                    raise ValueError("both merge entities must exist")
-                if any(row["status"] == "merged" for row in entity_rows):
-                    raise ValueError("both merge entities must be live and non-merged")
-
-                # A dedupe candidate is a durable review record, while its
-                # observations can change. Rebuild the current identities before
-                # a human merge so a stale candidate cannot bypass new conflicts.
-                from .ingest import BoardIngestor
-
-                identities_a = BoardIngestor._identity_for_entity(
-                    connection, candidate["entity_a_id"]
-                )
-                identities_b = BoardIngestor._identity_for_entity(
-                    connection, candidate["entity_b_id"]
-                )
-                if not identities_a or not identities_b:
-                    raise ValueError("both merge entities must have current identity evidence")
-                current_comparisons = [
-                    compare_postings(identity_a, identity_b)
-                    for identity_a in identities_a
-                    for identity_b in identities_b
-                ]
-                if any(
-                    comparison.outcome in {DedupeOutcome.NEW, DedupeOutcome.RELATED}
-                    for comparison in current_comparisons
-                ):
-                    raise ValueError(
-                        "candidate evidence changed and no longer supports a merge"
-                    )
-                ranked = sorted(
-                    entity_rows,
-                    key=lambda row: (
-                        int(row["authoritative_open"] or 0),
-                        int(row["status"] in {"open", "conflicting"}),
-                        len(row["description_html"] or ""),
-                        row["last_seen_at"] or "",
-                    ),
-                    reverse=True,
-                )
-                survivor = ranked[0]["id"]
-                absorbed = ranked[1]["id"]
-                before = {
-                    "survivor": dict(ranked[0]),
-                    "absorbed": dict(ranked[1]),
-                }
-                moved = [
-                    row["id"]
-                    for row in connection.execute(
-                        "SELECT id FROM posting_observations WHERE job_entity_id = ?",
-                        (absorbed,),
-                    ).fetchall()
-                ]
-                moved_applications = [
-                    row["id"]
-                    for row in connection.execute(
-                        "SELECT id FROM job_applications WHERE job_entity_id = ?",
-                        (absorbed,),
-                    ).fetchall()
-                ]
-                connection.execute(
-                    "UPDATE posting_observations SET job_entity_id = ? WHERE job_entity_id = ?",
-                    (survivor, absorbed),
-                )
-                connection.execute(
-                    "UPDATE job_entities SET status = 'merged', merged_into_id = ?, updated_at = ? WHERE id = ?",
-                    (survivor, now, absorbed),
-                )
-                connection.execute(
-                    "UPDATE job_applications SET job_entity_id = ? WHERE job_entity_id = ?",
-                    (survivor, absorbed),
-                )
-                connection.execute(
-                    """
-                    INSERT INTO merge_operations(
-                        id, candidate_id, survivor_id, absorbed_id,
-                        moved_observation_ids_json, created_at,
-                        moved_application_ids_json, before_state_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        new_id(), candidate_id, survivor, absorbed, dumps(moved), now,
-                        dumps(moved_applications), dumps(before),
-                    ),
-                )
-                connection.execute(
-                    "UPDATE dedupe_candidates SET state = 'merged', updated_at = ? WHERE id = ?",
-                    (now, candidate_id),
-                )
-                BoardIngestor._refresh_lifecycle_aggregate(connection, survivor, now)
-            elif action == "reverse":
-                merge = connection.execute(
-                    "SELECT * FROM merge_operations WHERE candidate_id = ? AND reversed_at IS NULL ORDER BY created_at DESC LIMIT 1",
-                    (candidate_id,),
-                ).fetchone()
-                if merge is None:
-                    raise ValueError("candidate has no active merge to reverse")
-                moved = loads(merge["moved_observation_ids_json"], [])
-                for observation_id in moved:
-                    connection.execute(
-                        "UPDATE posting_observations SET job_entity_id = ? WHERE id = ?",
-                        (merge["absorbed_id"], observation_id),
-                    )
-                    connection.execute(
-                        """
-                        UPDATE link_evidence SET review_state = 'rejected'
-                        WHERE observation_a_id = ? OR observation_b_id = ?
-                        """,
-                        (observation_id, observation_id),
-                    )
-                moved_applications = loads(merge["moved_application_ids_json"], [])
-                for application_id in moved_applications:
-                    connection.execute(
-                        "UPDATE job_applications SET job_entity_id = ?, updated_at = ? WHERE id = ?",
-                        (merge["absorbed_id"], now, application_id),
-                    )
-                before = loads(merge["before_state_json"], {})
-                # The survivor is editable while merged. Restoring its pre-merge
-                # whole-row snapshot would erase legitimate later human changes.
-                self._restore_job_snapshot(connection, before.get("absorbed", {}), now)
-                from .ingest import BoardIngestor
-
-                BoardIngestor._refresh_lifecycle_aggregate(
-                    connection, merge["survivor_id"], now
-                )
-                BoardIngestor._refresh_lifecycle_aggregate(
-                    connection, merge["absorbed_id"], now
-                )
-                connection.execute(
-                    "UPDATE merge_operations SET reversed_at = ? WHERE id = ?",
-                    (now, merge["id"]),
-                )
-                connection.execute(
-                    "UPDATE dedupe_candidates SET state = 'reversed', updated_at = ? WHERE id = ?",
-                    (now, candidate_id),
-                )
-            else:
-                state = "kept_separate" if action == "keep_separate" else "deferred"
-                connection.execute(
-                    "UPDATE dedupe_candidates SET state = ?, updated_at = ? WHERE id = ?",
-                    (state, now, candidate_id),
-                )
-            connection.execute(
-                "INSERT INTO dedupe_decisions(id, candidate_id, action, rationale, created_at) VALUES (?, ?, ?, ?, ?)",
-                (new_id(), candidate_id, action, rationale, now),
-            )
-            return {"id": candidate_id, "action": action, "updated_at": now}
-
-        return await self.database.transaction(operation)
-
-    async def resolve_capture(self, url: str) -> dict[str, Any]:
-        try:
-            identifiers = build_identifiers(urls=(url,))
-        except ValueError:
-            identifiers = ()
-        matches: dict[str, dict[str, Any]] = {}
-        for identifier in identifiers:
-            rows = await self.database.fetch_all(
-                """
-                SELECT DISTINCT e.*
-                FROM posting_identifiers i
-                JOIN posting_observations o ON o.id = i.observation_id
-                JOIN job_entities e ON e.id = o.job_entity_id
-                WHERE i.namespace = ? AND i.scope = ? AND i.value = ?
-                  AND e.status != 'merged'
-                """,
-                identifier.key,
-            )
-            for row in rows:
-                job = _job(row)
-                job["reason"] = f"Exact {identifier.namespace} identifier"
-                matches[job["id"]] = job
-        return {
-            "summary": (
-                f"{len(matches)} exact board match{'es' if len(matches) != 1 else ''} found."
-                if matches
-                else "No deterministic board match found; capture will remain reviewable."
-            ),
-            "items": list(matches.values()),
-            "exact": bool(matches),
-        }
-
-    async def capture_job(
+    async def create_external_application(
         self,
         *,
+        company: str,
+        title: str,
         url: str,
-        company: str | None = None,
-        title: str | None = None,
-        description: str = "",
         location: str = "",
+        note: str = "",
     ) -> dict[str, Any]:
-        resolved = await self.resolve_capture(url)
-        if resolved["items"]:
-            return resolved["items"][0]
-        parsed = urlsplit(url if "://" in url else f"https://{url}")
-        if not parsed.hostname:
-            raise ValueError("capture URL must be HTTP(S)")
-        normalized_url = normalize_url(url)
-        inferred_company = company or parsed.hostname.split(".")[0].replace("-", " ").title()
-        inferred_title = title or (parsed.path.rstrip("/").split("/")[-1].replace("-", " ").title() or "Captured opportunity")
+        company = company.strip()
+        title = title.strip()
+        url = url.strip()
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("application URL must be HTTP(S)")
+        if not company or not title:
+            raise ValueError("company and title are required")
         now = utc_now()
-        company_id = public_id("company", normalize_name(inferred_company))
-        entity_id = new_id()
-        observation_id = public_id("manual-observation", normalized_url)
-        identifiers = build_identifiers(urls=(normalized_url,))
+        application_id = new_id()
+        next_action = "Review opportunity and plan application."
+        next_due_at = (
+            datetime.now(timezone.utc) + timedelta(hours=24)
+        ).isoformat()
 
         def operation(connection: sqlite3.Connection) -> None:
             connection.execute(
-                "INSERT OR IGNORE INTO companies(id, display_name, normalized_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (company_id, inferred_company, normalize_name(inferred_company), now, now),
-            )
-            connection.execute(
                 """
-                INSERT INTO job_entities(
-                    id, company_id, company_name, title, title_normalized,
-                    opportunity_type, opportunity_confidence, location,
-                    description_html, posting_url, apply_url, first_seen_at,
-                    last_seen_at, status, eligibility, eligibility_reasons_json,
-                    score, score_band, resume_variant, authoritative_open,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'unclassified', 0, ?, ?, ?, ?, ?, ?,
-                          'open', 'review', '["Manual capture requires classification"]',
-                          0, 'log_only', 'backend-infra', 0, ?, ?)
+                INSERT INTO job_applications(
+                    id, job_entity_id, source_observation_id, external, stage,
+                    resume_variant, apply_url_snapshot, company_snapshot,
+                    title_snapshot, location_snapshot, next_action, next_due_at,
+                    note, created_at, updated_at
+                ) VALUES (?, NULL, NULL, 1, 'considering', 'backend-infra',
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    entity_id, company_id, inferred_company, inferred_title,
-                    normalize_title(inferred_title), location or None,
-                    description or None, normalized_url, normalized_url,
-                    now, now, now, now,
+                    application_id, url, company, title, location.strip(),
+                    next_action, next_due_at, note, now, now,
                 ),
             )
             connection.execute(
                 """
-                INSERT INTO posting_observations(
-                    id, source, feed_key, external_id, job_entity_id, company_raw,
-                    title, location, description_html, posting_url, apply_url,
-                    authority, status, content_hash, first_seen_at, last_seen_at
-                ) VALUES (?, 'manual', 'private', ?, ?, ?, ?, ?, ?, ?, ?,
-                          'manual', 'open', ?, ?, ?)
+                INSERT INTO application_events(
+                    id, application_id, event_type, from_stage, to_stage,
+                    occurred_at, due_at, note, data_json
+                ) VALUES (?, ?, 'stage_changed', NULL, 'considering', ?, ?, ?, ?)
                 """,
                 (
-                    observation_id, observation_id, entity_id, inferred_company,
-                    inferred_title, location or None, description or None,
-                    normalized_url, normalized_url, public_id("manual-content", normalized_url, description),
-                    now, now,
+                    new_id(), application_id, now, next_due_at, note,
+                    dumps({"external": True}),
                 ),
             )
-            for identifier in identifiers:
-                connection.execute(
-                    "INSERT INTO posting_identifiers(observation_id, namespace, scope, value, provenance, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (observation_id, identifier.namespace, identifier.scope, identifier.value, "manual", now),
-                )
 
         await self.database.transaction(operation)
-        job = await self.get_job(entity_id)
-        assert job is not None
-        return job
+        result = await self.get_application(application_id)
+        assert result is not None
+        return result
 
     async def create_application(
         self,
@@ -1139,10 +932,12 @@ class BoardRepository:
             company_snapshot = job["company"]
             title_snapshot = job["title"]
             description_snapshot = job["description_html"]
+            location_snapshot = job["location"] or ""
             if source_observation_id is not None:
                 selected = connection.execute(
                     """
-                    SELECT apply_url, posting_url, company_raw, title, description_html
+                    SELECT apply_url, posting_url, company_raw, title,
+                           description_html, location
                     FROM posting_observations
                     WHERE id = ? AND job_entity_id = ?
                     """,
@@ -1154,20 +949,21 @@ class BoardRepository:
                 company_snapshot = selected["company_raw"] or company_snapshot
                 title_snapshot = selected["title"] or title_snapshot
                 description_snapshot = selected["description_html"]
+                location_snapshot = selected["location"] or location_snapshot
             if existing_application is None:
                 connection.execute(
                     """
                     INSERT INTO job_applications(
                         id, job_entity_id, source_observation_id, stage, resume_variant,
                         apply_url_snapshot, company_snapshot, title_snapshot,
-                        description_snapshot, submitted_at, next_action, next_due_at,
-                        note, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        description_snapshot, location_snapshot, submitted_at,
+                        next_action, next_due_at, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         application_id, job_id, source_observation_id, stage, resume,
                         apply_url_snapshot, company_snapshot, title_snapshot,
-                        description_snapshot, submitted, next_action,
+                        description_snapshot, location_snapshot, submitted, next_action,
                         next_due_at, note, now, now,
                     ),
                 )
@@ -1177,7 +973,7 @@ class BoardRepository:
                     UPDATE job_applications SET source_observation_id = ?, stage = ?,
                         resume_variant = ?, apply_url_snapshot = ?,
                         company_snapshot = ?, title_snapshot = ?,
-                        description_snapshot = ?, submitted_at = ?,
+                        description_snapshot = ?, location_snapshot = ?, submitted_at = ?,
                         next_action = ?, next_due_at = ?, note = ?,
                         version = version + 1, updated_at = ?
                     WHERE id = ?
@@ -1185,7 +981,7 @@ class BoardRepository:
                     (
                         source_observation_id, stage, resume, apply_url_snapshot,
                         company_snapshot, title_snapshot, description_snapshot,
-                        submitted, next_action, next_due_at, note, now,
+                        location_snapshot, submitted, next_action, next_due_at, note, now,
                         application_id,
                     ),
                 )
@@ -1232,9 +1028,10 @@ class BoardRepository:
             params = tuple(type_values)
         rows = await self.database.fetch_all(
             f"""
-            SELECT a.*, j.opportunity_type, j.score, j.score_band, j.location
+            SELECT a.*, j.opportunity_type, j.score, j.score_band,
+                   COALESCE(NULLIF(a.location_snapshot, ''), j.location) AS location
             FROM job_applications a
-            JOIN job_entities j ON j.id = a.job_entity_id
+            LEFT JOIN job_entities j ON j.id = a.job_entity_id
             {where}
             ORDER BY
                 CASE a.stage
@@ -1249,16 +1046,18 @@ class BoardRepository:
 
     @staticmethod
     def _application(row: dict[str, Any]) -> dict[str, Any]:
-        slug = row.get("opportunity_type") or "unclassified"
+        external = bool(row.get("external"))
+        slug = row.get("opportunity_type") or ("external" if external else "unclassified")
         return {
             "id": row["id"],
             "job_id": row["job_entity_id"],
+            "external": external,
             "company": row["company_snapshot"],
             "title": row["title_snapshot"],
             "stage": row["stage"],
-            "opportunity_type": TYPE_LABELS.get(slug, ""),
+            "opportunity_type": "External" if external else TYPE_LABELS.get(slug, ""),
             "opportunity_type_slug": slug,
-            "needs_classification": slug in {"unclassified", "review"},
+            "needs_classification": not external and slug in {"unclassified", "review"},
             "location": row.get("location"),
             "score": row.get("score"),
             "score_band": row.get("score_band"),
@@ -1276,8 +1075,9 @@ class BoardRepository:
     async def get_application(self, application_id: str) -> dict[str, Any] | None:
         row = await self.database.fetch_one(
             """
-            SELECT a.*, j.opportunity_type, j.score, j.score_band, j.location
-            FROM job_applications a JOIN job_entities j ON j.id = a.job_entity_id
+            SELECT a.*, j.opportunity_type, j.score, j.score_band,
+                   COALESCE(NULLIF(a.location_snapshot, ''), j.location) AS location
+            FROM job_applications a LEFT JOIN job_entities j ON j.id = a.job_entity_id
             WHERE a.id = ?
             """,
             (application_id,),
@@ -1314,18 +1114,30 @@ class BoardRepository:
         updated_at = utc_now()
 
         def operation(connection: sqlite3.Connection) -> bool:
+            nonlocal stage, event_type
             current = connection.execute(
-                "SELECT stage, submitted_at FROM job_applications WHERE id = ?",
+                "SELECT stage, submitted_at, external FROM job_applications WHERE id = ?",
                 (application_id,),
             ).fetchone()
             if current is None:
                 return False
-            if (
-                stage == "submitted" or event_type == "submitted"
-            ) and current["stage"] != "submitted":
-                raise ValueError(
-                    "use the human-confirmed submission endpoint to record submission"
-                )
+            records_submission = stage == "submitted" or event_type == "submitted"
+            submitted_at = current["submitted_at"]
+            event_due_at = due_at
+            if records_submission and current["stage"] != "submitted":
+                if not current["external"]:
+                    raise ValueError(
+                        "use the job's human-confirmed submission action"
+                    )
+                if not confirmed:
+                    raise ValueError("human submission confirmation is required")
+                stage = "submitted"
+                event_type = "submitted"
+                submitted_at = at
+                if event_due_at is None:
+                    event_due_at = (
+                        datetime.fromisoformat(at) + timedelta(days=14)
+                    ).isoformat()
             downstream = {"assessment", "screen", "interview", "offer", "no_reply"}
             if stage in downstream or event_type in downstream:
                 submission_events = connection.execute(
@@ -1349,13 +1161,21 @@ class BoardRepository:
                 """
                 INSERT INTO application_events(
                     id, application_id, event_type, from_stage, to_stage,
-                    occurred_at, due_at, note
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    occurred_at, due_at, note, data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (new_id(), application_id, event_type, current["stage"], stage, at, due_at, note),
+                (
+                    new_id(), application_id, event_type, current["stage"], stage,
+                    at, event_due_at, note,
+                    dumps({"human_confirmed": records_submission and confirmed}),
+                ),
             )
             effective_stage = stage or str(current["stage"])
-            supplied_due_action = note or f"{(stage or event_type).replace('_', ' ').title()} due"
+            supplied_due_action = note or (
+                "Follow up if no response"
+                if records_submission
+                else f"{(stage or event_type).replace('_', ' ').title()} due"
+            )
             connection.execute(
                 """
                 UPDATE job_applications SET
@@ -1369,23 +1189,25 @@ class BoardRepository:
                         WHEN ? IS NOT NULL THEN ?
                         WHEN ? = 'task_added' THEN ? ELSE next_due_at END,
                     note = CASE WHEN ? != '' THEN ? ELSE note END,
+                    submitted_at = ?,
                     version = version + 1, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     stage,
                     effective_stage,
-                    due_at,
+                    event_due_at,
                     supplied_due_action,
                     event_type,
                     note,
                     effective_stage,
-                    due_at,
-                    due_at,
+                    event_due_at,
+                    event_due_at,
                     event_type,
-                    due_at,
+                    event_due_at,
                     note,
                     note,
+                    submitted_at,
                     updated_at,
                     application_id,
                 ),

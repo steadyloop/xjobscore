@@ -14,11 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from .api_models import (
     ApplicationCreate,
     ApplicationEventCreate,
-    CaptureResolveCommand,
     ClassificationCorrection,
-    DedupeDecisionCommand,
+    ExternalApplicationCreate,
     FetchBatchCommand,
-    ManualCaptureCommand,
     ProfileUpdate,
     SourceSelectionCommand,
     TriageCommand,
@@ -74,7 +72,16 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         db = database or Database(resolved.database_path)
-        adapter_gateway = gateway or AdapterGateway(user_agent=resolved.user_agent)
+        if gateway is not None:
+            adapter_gateway = gateway
+        elif resolved.demo:
+            # Demo mode never opens a socket, so the module is imported only
+            # when the flag is set.
+            from .demo import DemoGateway
+
+            adapter_gateway = DemoGateway()  # type: ignore[assignment]
+        else:
+            adapter_gateway = AdapterGateway(user_agent=resolved.user_agent)
         coordinator = ManualFetchCoordinator(
             db,
             adapter_gateway,
@@ -82,6 +89,10 @@ def create_app(
             max_selection=25,
         )
         await coordinator.initialize()  # catalog metadata only; performs zero fetches
+        if resolved.demo:
+            from .demo import seed_if_empty
+
+            await seed_if_empty(db, coordinator)
         application.state.database = db
         application.state.coordinator = coordinator
         application.state.ingestor = BoardIngestor(db)
@@ -132,21 +143,6 @@ def create_app(
             offset=offset,
         )
 
-    @application.post("/api/jobs")
-    async def capture_job(request: Request, command: ManualCaptureCommand) -> dict[str, Any]:
-        if not command.url:
-            raise HTTPException(status_code=422, detail="url is required")
-        try:
-            return await board(request).capture_job(
-                url=command.url,
-                company=command.company,
-                title=command.title,
-                description=command.description,
-                location=command.location,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
     @application.get("/api/jobs/{job_id}")
     async def job_detail(request: Request, job_id: str) -> dict[str, Any]:
         result = await board(request).get_job(job_id)
@@ -177,14 +173,6 @@ def create_app(
             raise HTTPException(status_code=404, detail="Job not found")
         return result
 
-    @application.post("/api/capture/resolve")
-    async def resolve_capture(
-        request: Request, command: CaptureResolveCommand
-    ) -> dict[str, Any]:
-        if not command.url:
-            raise HTTPException(status_code=422, detail="url is required")
-        return await board(request).resolve_capture(command.url)
-
     @application.get("/api/today")
     async def today(
         request: Request,
@@ -208,6 +196,14 @@ def create_app(
         return await board(request).list_sources(
             q=q, source=source, selection=selection, limit=limit, offset=offset
         )
+
+    @application.get("/api/source-coverage")
+    async def source_coverage(request: Request) -> dict[str, Any]:
+        provider = getattr(
+            request.app.state.coordinator.gateway, "source_coverage_rows", None
+        )
+        rows = await provider() if callable(provider) else None
+        return await board(request).source_coverage(rows)
 
     @application.get("/api/source-groups")
     async def source_groups(
@@ -261,26 +257,6 @@ def create_app(
     async def fetch_source(request: Request, feed_reference: str) -> dict[str, Any]:
         return await run_fetch(request, feed_reference)
 
-    @application.post("/api/sources/{feed_reference}/replay")
-    async def replay_source(request: Request, feed_reference: str) -> dict[str, Any]:
-        try:
-            replayed = await request.app.state.coordinator.replay_latest(feed_reference)
-        except FeedNotFound as exc:
-            raise HTTPException(status_code=404, detail="Feed not found") from exc
-        except LookupError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        try:
-            counts = await request.app.state.ingestor.ingest(replayed)
-            summary = _fetch_summary(replayed, counts)
-        except Exception as exc:
-            summary = _fetch_summary(
-                replayed,
-                IngestCounts(),
-                ingestion_error=f"{type(exc).__name__}: {exc}",
-            )
-        summary["replayed"] = True
-        return summary
-
     @application.post("/api/sources/fetch")
     async def fetch_sources(
         request: Request, command: FetchBatchCommand
@@ -311,24 +287,6 @@ def create_app(
                 )
         return {"results": results, "total": len(results)}
 
-    @application.get("/api/dedupe")
-    async def dedupe(request: Request) -> dict[str, Any]:
-        return await board(request).list_dedupe()
-
-    @application.post("/api/dedupe/{candidate_id}/decision")
-    async def dedupe_decision(
-        request: Request, candidate_id: str, command: DedupeDecisionCommand
-    ) -> dict[str, Any]:
-        try:
-            result = await board(request).decide_dedupe(
-                candidate_id, command.action, command.rationale
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if result is None:
-            raise HTTPException(status_code=404, detail="Dedupe candidate not found")
-        return result
-
     @application.post("/api/jobs/{job_id}/applications")
     async def create_application_record(
         request: Request, job_id: str, command: ApplicationCreate
@@ -347,6 +305,21 @@ def create_app(
         if result is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return result
+
+    @application.post("/api/applications/external")
+    async def create_external_application_record(
+        request: Request, command: ExternalApplicationCreate
+    ) -> dict[str, Any]:
+        try:
+            return await board(request).create_external_application(
+                company=command.company,
+                title=command.title,
+                url=command.url,
+                location=command.location,
+                note=command.note,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @application.get("/api/applications")
     async def applications(

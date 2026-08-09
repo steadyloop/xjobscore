@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 OpportunityType = Literal[
@@ -15,6 +15,8 @@ OpportunityType = Literal[
     "summer_internship",
     "fall_coop",
     "fall_internship",
+    "student_role",
+    "fellowship",
     "unclassified",
 ]
 
@@ -60,6 +62,8 @@ class ClassificationCorrection(BaseModel):
         "summer_internship",
         "fall_coop",
         "fall_internship",
+        "student_role",
+        "fellowship",
     ]
     rationale: str = Field(min_length=1, max_length=2000)
 
@@ -101,23 +105,12 @@ class ApplicationEventCreate(BaseModel):
     confirmed: bool = False
 
 
-class DedupeDecisionCommand(BaseModel):
-    action: Literal["merge", "keep_separate", "keep_both", "defer", "reverse"] = Field(
-        validation_alias=AliasChoices("action", "decision")
-    )
-    rationale: str = Field(default="", max_length=2000)
-
-
-class CaptureResolveCommand(BaseModel):
-    url: str | None = Field(default=None, max_length=4000)
-    company: str | None = Field(default=None, min_length=1, max_length=500)
-    title: str | None = Field(default=None, min_length=1, max_length=1000)
-    description: str = Field(default="", max_length=200_000)
+class ExternalApplicationCreate(BaseModel):
+    company: str = Field(min_length=1, max_length=500)
+    title: str = Field(min_length=1, max_length=1000)
+    url: str = Field(min_length=1, max_length=4000)
     location: str = Field(default="", max_length=1000)
-
-
-class ManualCaptureCommand(CaptureResolveCommand):
-    attach_entity_id: str | None = None
+    note: str = Field(default="", max_length=4000)
 
 
 class ProfileUpdate(BaseModel):

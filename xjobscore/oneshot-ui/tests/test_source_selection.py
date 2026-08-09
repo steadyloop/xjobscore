@@ -126,6 +126,28 @@ def test_sources_default_disabled_and_manual_fetch_requires_selection(tmp_path) 
         assert gateway.fetch_calls == [-301]
 
 
+def test_source_coverage_is_read_only_and_grouped_by_manifest_source(tmp_path) -> None:
+    client, _ = selection_client(tmp_path)
+    with client:
+        coverage = client.get("/api/source-coverage")
+        assert coverage.status_code == 200
+        payload = coverage.json()
+        assert payload["source_count"] == 2
+        assert payload["total_coverage"] == 0
+        rows = {row["source"]: row for row in payload["sources"]}
+        assert rows["greenhouse"] == {
+            "source": "greenhouse",
+            "type": "ATS",
+            "board_count": 1,
+            "coverage": 0,
+            "last_poll_at": None,
+            "health": "Not polled",
+            "added_today": 0,
+        }
+        assert rows["workday"]["type"] == "ATS"
+        assert rows["workday"]["board_count"] == 2
+
+
 def test_vendor_toggle_is_atomic_searchable_and_persistent(tmp_path) -> None:
     gateway = SelectionGateway()
     client, _ = selection_client(tmp_path, gateway)
