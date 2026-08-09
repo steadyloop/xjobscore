@@ -14,8 +14,7 @@ backups/
 /seeds
 /tests
 /viewer
-/xjobscore/cc_ats
-/xjobscore/feed_ats_bind
+# /xjobscore/cc_ats
 xjobscore/sources/SOURCES.md
 xjobscore/discover.log
 xjobscore/.DS_Store
