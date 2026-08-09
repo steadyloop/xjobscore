@@ -1,0 +1,42 @@
+{
+  "message": "",
+  "message_type": "is-success",
+  "data": {
+    "showfirstsetting": 1,
+    "jobspageshowjobid": 0,
+    "company_website": "",
+    "accountid": 6217,
+    "account": {
+      "slug": "Oasis_Protocol_Foundation",
+      "title": "Oasis Protocol Foundation",
+      "accountpage": "Oasis_Protocol_Foundation_jobs",
+      "website": null,
+      "industryid": null,
+      "timezone": 54,
+      "createdon": "2020-10-19T18:36:13.000000Z",
+      "demodata": 1,
+      "updatedon": "2023-03-14T14:47:21.000000Z",
+      "accountid": "Zkx3K2dXUVViK0RtVXBKd2szRU1rQT09",
+      "continent": "NA",
+      "currencyid": 104,
+      "country": "US"
+    },
+    "jobs": [
+      {
+        "slug": "16436639290320017453gNO",
+        "srno": "25",
+        "name": "Community Moderator",
+        "companyname": "",
+        "showcompany": 0,
+        "jobcode": "J82161434",
+        "description": "",
+        "details": null,
+        "detailfilename": null,
+        "city": "",
+        "locality": "",
+        "jdtext": "<h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Note: This is a full-time role that will be paid in USDT cryptocurrency</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Company Description:</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Oasis is the leading privacy-enabled, layer-1 blockchain allowing to build scalable and secure &nbsp; applications.</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Title:</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Community Moderator</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Location:</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Global - Remote</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Role Description:</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">The Oasis Foundation is looking for a Community Moderator to help us grow our ecosystem and generate awareness in a safe and collaborative manner. The ideal candidate will demonstrate passion for the blockchain industry, will have excellent communication skills, and an ability to multi-task while maintaining high standards. This is a full-time, fully-remote role. Compensation will be paid in USDT (cryptocurrency).</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Responsibilities:</b></h3><ul><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Moderate Social Media activity and engagement across all Oasis Social Media Platforms to ensure the spirit of Oasis is being maintained.&nbsp;</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Ensure that posts and activity across the Oasis Social Media Platforms are being maintained and meeting the community demands and standards.</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Respond and answer questions and comments from the community while maintaining professionalism. At the same time, taking action to potential trolls and bad actors to protect Oasis Protocol Foundation brand and reputation.</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Manage bots and automation tools for social media platforms where applicable for growth and statistics.</b></p></li></ul><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Requirements:</b></h3><ul><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Able to work flexible working hours (occasional nights/weekends) as needed to ensure coverage</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">+1 year of experience in the blockchain or technology space&nbsp;</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">+1 year of experience moderating content and ensuring safe community standards</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Ability to multi-task, prioritize and deliver tight deadlines&nbsp;</b></p></li><li dir=\"ltr\" aria-level=\"1\"><p dir=\"ltr\" role=\"presentation\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Strong communication skills</b><br />&nbsp;</p></li></ul><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">We look forward to meeting you!</b></h3><h3 dir=\"ltr\"><b id=\"docs-internal-guid-4c8da392-7fff-ce7f-c1de-914d2e59832c\">Team Oasis</b></h3>"
+      }
+    ]
+  },
+  "status": "success"
+}

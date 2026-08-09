@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic fixture: fly.io/jobs/feed.xml is real (envelope verified live,
+  see flyio_empty.atom) but currently carries zero entry elements because
+  Fly.io has no open roles right now. The two entries below are hand
+  authored to exercise field mapping; they are not a captured response.
+  Root attributes/namespaces match the real envelope exactly; entry shape
+  follows the generic Atom spec (title/link/id/updated/content/author), the
+  same fields docxtract's _atom already reads for PeopleAdmin.
+-->
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Fly Jobs</title>
+  <subtitle>This is the home for current and ongoing job openings at Fly.</subtitle>
+  <id>https://fly.io/jobs/</id>
+  <link href="https://fly.io/jobs/"/>
+  <link href="https://fly.io/jobs/" rel="self"/>
+  <author>
+    <name>Fly</name>
+  </author>
+  <entry>
+    <title>Software Engineer, Platform</title>
+    <link href="https://fly.io/jobs/software-engineer-platform/"/>
+    <id>https://fly.io/jobs/software-engineer-platform/</id>
+    <published>2026-07-15T00:00:00+00:00</published>
+    <updated>2026-07-15T00:00:00+00:00</updated>
+    <content type="html">&lt;p&gt;We're looking for engineers who like operating systems, networking, and Rust.&lt;/p&gt;</content>
+    <author>
+      <name>Fly</name>
+    </author>
+  </entry>
+  <entry>
+    <title>Site Reliability Engineer</title>
+    <link href="https://fly.io/jobs/site-reliability-engineer/"/>
+    <id>https://fly.io/jobs/site-reliability-engineer/</id>
+    <published>2026-07-01T00:00:00+00:00</published>
+    <updated>2026-07-02T00:00:00+00:00</updated>
+    <content type="html">&lt;p&gt;Keep the global Fly.io fleet running.&lt;/p&gt;</content>
+    <author>
+      <name>Fly</name>
+    </author>
+  </entry>
+</feed>

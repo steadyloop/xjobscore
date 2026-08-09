@@ -1,0 +1,35 @@
+[
+  {
+    "data": {
+      "oatsExternalJobPostings": {
+        "jobPostings": [
+          {
+            "id": "T2F0c0pvYlBvc3Q6MTExOTE=",
+            "extId": "4965519002",
+            "title": "Software Engineer",
+            "locations": [
+              {
+                "id": "4514",
+                "name": "San Francisco",
+                "city": "San Francisco",
+                "isoCountry": "USA",
+                "isRemote": false,
+                "extId": "4010840002"
+              }
+            ],
+            "job": {
+              "id": "T2F0c0pvYjoxNjQzMA==",
+              "department": {
+                "id": "3824",
+                "name": "Engineering",
+                "extId": "4022145002"
+              },
+              "locationType": "HYBRID",
+              "employmentType": "FULL_TIME"
+            }
+          }
+        ]
+      }
+    }
+  }
+]

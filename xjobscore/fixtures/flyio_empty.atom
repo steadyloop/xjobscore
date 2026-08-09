@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Fly Jobs</title>
+  <subtitle>This is the home for current and ongoing job openings at Fly.</subtitle>
+  <id>https://fly.io/jobs/</id>
+  <link href="https://fly.io/jobs/"/>
+  <link href="https://fly.io/jobs/" rel="self"/>
+  <author>
+    <name>Fly</name>
+  </author>
+</feed>
