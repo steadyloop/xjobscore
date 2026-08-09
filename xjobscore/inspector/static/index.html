@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xjobscore inspector</title>
+  <link rel="stylesheet" href="/static/app.css?v=33">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-brand"><strong>xjobscore</strong><span class="muted"> / inspector</span></div>
+    <nav class="topnav" aria-label="Inspector views">
+      <button id="tab-inspector" class="topnav-tab active" type="button">Inspector</button>
+      <button id="tab-postings" class="topnav-tab" type="button">Postings</button>
+    </nav>
+    <div class="local"><span class="dot"></span>localhost</div>
+  </header>
+
+  <main>
+    <div id="inspector-workspace" class="workspace">
+      <section class="panel feeds-pane">
+        <div class="panel-head">
+          <div><h1>Registered feeds</h1></div>
+          <div id="message" class="message" hidden></div>
+        </div>
+        <div class="category-bar">
+          <div id="category-tabs" class="category-tabs" role="tablist"></div>
+          <div class="category-actions">
+            <button id="fetch-all" class="fetch-all">Fetch all ATS</button>
+          </div>
+        </div>
+        <div class="feed-search"><input id="feed-search" type="search" placeholder="Search company or token"><span id="feed-search-count" class="muted"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Source</th><th>Last inspector run</th><th>Actions</th></tr></thead>
+            <tbody id="feed-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel inspect-pane">
+        <div class="panel-head viewer-head">
+          <h1 id="result-title">Inspection</h1>
+          <p id="viewer-summary" class="viewer-summary">Select a feed to inspect its latest run.</p>
+        </div>
+        <div class="split">
+          <div><h2>Items <span id="item-count" class="muted"></span></h2><div id="item-list" class="item-list"></div></div>
+          <div><h2 id="detail-title">Content</h2><pre id="item-detail" class="json">Select a source, then an item or envelope.</pre></div>
+        </div>
+      </section>
+    </div>
+
+    <section id="postings-view" class="panel postings-view" hidden>
+      <div class="panel-head postings-head">
+        <div>
+          <h1>Postings</h1>
+          <p class="muted">Read-only view of persisted inspector results.</p>
+        </div>
+        <div id="postings-message" class="message" hidden></div>
+      </div>
+      <div class="postings-controls">
+        <label>ATS
+          <select id="postings-source"></select>
+        </label>
+        <label>Filter
+          <select id="postings-mode">
+            <option value="exclude_full_time">Exclude full-time</option>
+            <option value="intern_explicit">Intern (Explicit)</option>
+            <option value="intern_implicit">Intern (Implicit)</option>
+            <option value="full_time_internship">Full Time – Internship</option>
+            <option value="all">All stored postings</option>
+          </select>
+        </label>
+        <label class="postings-search">Search
+          <input id="postings-search" type="search" placeholder="Search title, location, company, or token">
+        </label>
+        <label class="postings-toggle">
+          <input id="postings-us-only" type="checkbox" checked>
+          <span>US only</span>
+        </label>
+        <button id="postings-refresh" class="secondary" type="button">Refresh</button>
+      </div>
+      <p id="postings-filter-description" class="postings-filter-description"></p>
+      <div class="postings-summary"><strong id="postings-count">Loading…</strong><span id="postings-page" class="muted"></span></div>
+      <div class="postings-split">
+        <div class="postings-table-wrap">
+          <table class="postings-table">
+            <thead><tr><th>Title</th><th>Company / token</th><th>Type</th><th>Location</th><th>URL</th></tr></thead>
+            <tbody id="postings-rows"></tbody>
+          </table>
+        </div>
+        <div class="posting-detail-panel">
+          <h2 id="posting-detail-title">Posting detail</h2>
+          <pre id="posting-detail" class="json">Select a posting to inspect its stored payload.</pre>
+        </div>
+      </div>
+      <div class="postings-pager">
+        <button id="postings-prev" class="secondary" type="button">Previous</button>
+        <button id="postings-next" class="secondary" type="button">Next</button>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js?v=27"></script>
+</body>
+</html>
