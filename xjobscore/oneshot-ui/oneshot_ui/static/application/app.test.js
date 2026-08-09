@@ -53,4 +53,5 @@ test("applications uses the primary workspace navigation structure", () => {
   assert.match(html, /class="sample-switch"/);
   assert.match(styles, /grid-template-columns: 222px minmax\(0, 1fr\)/);
   assert.match(styles, /padding: 22px 12px/);
+  assert.match(html, /navigation\.css\?v=stable-nav-/);
 });

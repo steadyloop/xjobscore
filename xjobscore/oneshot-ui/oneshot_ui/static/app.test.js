@@ -109,6 +109,16 @@ test("Opportunities exposes its action and workspace navigation", () => {
   assert.match(html, /href=\"\/static\/application\/index\.html\"/);
   assert.match(html, /href=\"\/static\/source-coverage\/index\.html\"/);
   assert.match(html, /href=\"\/static\/app\.css\?v=opportunities-/);
+  assert.match(html, /href=\"\/static\/navigation\.css\?v=stable-nav-/);
+});
+
+test("shared navigation keeps active states from changing geometry", () => {
+  const navigation = fs.readFileSync(require.resolve("./navigation.css"), "utf8");
+  assert.match(navigation, /min-height: 38px/);
+  assert.match(navigation, /font: 400 14px\/20px/);
+  assert.match(navigation, /width: 24px/);
+  assert.match(navigation, /a\.active \{[\s\S]*?order: initial/);
+  assert.doesNotMatch(navigation, /a\.active \{\s*order: -1/);
 });
 
 test("Opportunities exposes only its canonical layout", () => {
@@ -125,7 +135,7 @@ test("Opportunities exposes only its canonical layout", () => {
   assert.doesNotMatch(styles, /data-opportunities-layout/);
   assert.match(styles, /\.discover-search-surface \{[^}]*display: flex/);
   assert.match(styles, /\.discover-search-surface \{[^}]*gap: 12px/);
-  assert.match(styles, /\.filter\.active \{[^}]*background: var\(--green-soft\); color: var\(--green\)/);
+  assert.match(styles, /\.filter\.active \{[^}]*border-color: var\(--nav\); background: var\(--nav\); color: white/);
   assert.match(styles, /\.discover-sort select \{[^}]*width: 110px; height: 42px[^}]*font-size: 12px/);
   assert.match(styles, /grid-template-areas: "controls \." "search \." "list detail"/);
 });
