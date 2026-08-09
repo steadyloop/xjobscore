@@ -4,117 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="description" content="A sample-first job discovery workspace with explainable recommendations and source evidence.">
-  <title>Discover (Sample) · OneShot</title>
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./nav.css">
-  <script defer src="../sample-data.js"></script>
-  <script defer src="../api-client.js"></script>
-  <script defer src="./app.js"></script>
+  <meta name="description" content="A standalone concept page for future job-discovery brainstorming.">
+  <title>Discover</title>
+  <link rel="stylesheet" href="/static/discover/stub.css">
 </head>
 <body>
-  <a class="skip-link" href="#workspace">Skip to job discovery</a>
-  <svg class="sprite" aria-hidden="true">
-    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
-    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.4 8.6-2 4.8-4.8 2 2-4.8 4.8-2Z"/></symbol>
-    <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></symbol>
-    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
-    <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 3a9 9 0 0 1 9 9M12 7a5 5 0 0 1 5 5M5.6 5.6a9 9 0 1 0 12.8 12.8"/></symbol>
-    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
-    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4V4Z"/></symbol>
-    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></symbol>
-    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
-    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
-    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M8 4 4 8l4 4M4 8h11a3 3 0 0 1 3 3v1M16 20l4-4-4-4m4 4H9a3 3 0 0 1-3-3v-1"/></symbol>
-  </svg>
-
-  <div class="shell">
-    <aside class="sidebar" aria-label="Primary navigation">
-      <a class="brand" href="/"><span>◌</span>oneshot</a>
-      <nav class="side-nav">
-        <p>Workspace</p>
-        <a href="/#discover"><svg aria-hidden="true"><use href="#i-compass"/></svg>Discover</a>
-        <a class="active" href="./index.html" aria-current="page"><svg aria-hidden="true"><use href="#i-search"/></svg>Discover (Sample)<b id="nav-count">—</b></a>
-        <a href="/#pipeline"><svg aria-hidden="true"><use href="#i-briefcase"/></svg>Applications</a>
-        <a href="/static/application/index.html"><svg aria-hidden="true"><use href="#i-grid"/></svg>Applications (Sample)</a>
-        <p>Quality</p>
-        <a href="/#coverage"><svg aria-hidden="true"><use href="#i-radar"/></svg>Source coverage</a>
-      </nav>
-      <div class="privacy-note"><i></i><div><strong>Sample workspace</strong><span>No employer actions are automated.</span></div></div>
-      <button class="sample-toggle" type="button" data-action="sample-toggle" role="switch" aria-checked="false" aria-label="Turn on sample data"><span>Sample data<small>Off</small></span><i aria-hidden="true"></i></button>
-    </aside>
-
-    <main id="workspace" class="workspace" tabindex="-1">
-      <header class="page-header">
-        <div><p class="eyebrow">Opportunity intelligence</p><h1>Discover (Sample)</h1><p>Find roles worth your time—and understand why before you act.</p></div>
-        <div id="freshness" class="freshness"><span></span>Sample data is off</div>
-      </header>
-
-      <section class="search-surface" aria-label="Search and discovery controls">
-        <label class="search-box"><svg aria-hidden="true"><use href="#i-search"/></svg><span class="sr-only">Search jobs</span><input id="job-search" type="search" placeholder="Search roles, companies, skills, or locations" autocomplete="off"><kbd>⌘ K</kbd></label>
-        <button class="filter-button" type="button" data-action="open-filters"><svg aria-hidden="true"><use href="#i-filter"/></svg>Filters <span id="filter-count" hidden>0</span></button>
-      </section>
-
-      <div class="scope-row">
-        <div class="scope-tabs" role="tablist" aria-label="Opportunity views">
-          <button role="tab" aria-selected="true" data-scope="all">All roles <span data-scope-count="all">0</span></button>
-          <button role="tab" aria-selected="false" data-scope="recommended">Recommended <span data-scope-count="recommended">0</span></button>
-          <button role="tab" aria-selected="false" data-scope="remote">Remote <span data-scope-count="remote">0</span></button>
-          <button role="tab" aria-selected="false" data-scope="saved">Saved <span data-scope-count="saved">0</span></button>
-          <button role="tab" aria-selected="false" data-scope="hidden">Hidden <span data-scope-count="hidden">0</span></button>
-        </div>
-        <div class="scope-actions">
-          <label class="select-wrap"><span class="sr-only">Open saved view</span><select id="saved-view"><option value="">Saved views</option></select></label>
-          <button type="button" class="quiet-button" data-action="save-view">Save view</button>
-        </div>
-      </div>
-
-      <div id="active-filters" class="active-filters" aria-live="polite"></div>
-
-      <section class="results-toolbar" aria-label="Results controls">
-        <div><strong id="result-count">0 roles</strong><span id="result-context">All available opportunities</span></div>
-        <label class="sort-control">Sort <select id="job-sort"><option value="recommended">Recommended</option><option value="newest">Newest</option><option value="deadline">Deadline</option><option value="company">Company A–Z</option></select></label>
-      </section>
-
-      <section class="discovery-layout">
-        <div id="job-results" class="job-results" aria-live="polite"><div class="loading"><i></i><span>Loading sample opportunities…</span></div></div>
-        <aside id="job-detail" class="job-detail" aria-live="polite"></aside>
-      </section>
-    </main>
-  </div>
-
-  <div id="mobile-shade" class="mobile-shade" data-action="close-detail"></div>
-
-  <div id="compare-tray" class="compare-tray" hidden>
-    <div><strong><span id="compare-count">0</span> selected</strong><span>Compare requirements and logistics</span></div>
-    <button type="button" data-action="clear-compare">Clear</button><button type="button" class="primary" data-action="open-compare">Compare</button>
-  </div>
-
-  <dialog id="filter-dialog" class="modal" aria-labelledby="filter-title">
-    <form id="filter-form" method="dialog">
-      <header><div><p class="eyebrow">Refine results</p><h2 id="filter-title">Filters</h2><p>Choose the constraints that meaningfully change your decision.</p></div><button type="button" class="icon-button" data-action="close-filters" aria-label="Close filters"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
-      <div class="filter-groups">
-        <fieldset><legend>Opportunity type</legend><label><input type="checkbox" name="type" value="Summer Internship"> Summer internship</label><label><input type="checkbox" name="type" value="Student Researcher"> Research</label><label><input type="checkbox" name="type" value="Fall Co-op"> Fall co-op</label><label><input type="checkbox" name="type" value="Internship"> Internship</label></fieldset>
-        <fieldset><legend>Workplace</legend><label><input type="checkbox" name="workplace" value="Remote"> Remote</label><label><input type="checkbox" name="workplace" value="Hybrid"> Hybrid</label><label><input type="checkbox" name="workplace" value="On-site"> On-site</label></fieldset>
-        <fieldset><legend>Freshness</legend><label><input type="radio" name="freshness" value="any" checked> Any time</label><label><input type="radio" name="freshness" value="3"> Last 3 days</label><label><input type="radio" name="freshness" value="7"> Last 7 days</label></fieldset>
-        <fieldset><legend>Timing</legend><label><input type="checkbox" name="deadline" value="soon"> Deadline within 7 days</label><label><input type="checkbox" name="changed" value="yes"> Changed recently</label></fieldset>
-      </div>
-      <footer><button type="button" class="button" data-action="reset-filters">Reset</button><button type="submit" class="button primary">Show results</button></footer>
-    </form>
-  </dialog>
-
-  <dialog id="compare-dialog" class="modal compare-modal" aria-labelledby="compare-title">
-    <header><div><p class="eyebrow">Side by side</p><h2 id="compare-title">Compare opportunities</h2></div><button type="button" class="icon-button" data-action="close-compare" aria-label="Close comparison"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
-    <div id="compare-content" class="compare-content"></div>
-  </dialog>
-
-  <dialog id="save-view-dialog" class="modal compact-modal" aria-labelledby="save-view-title">
-    <form id="save-view-form" method="dialog"><header><div><p class="eyebrow">Reusable search</p><h2 id="save-view-title">Save this view</h2><p>Keep this search and its active filters in your browser.</p></div><button type="button" class="icon-button" data-action="close-save-view" aria-label="Close save view"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header><div class="save-view-body"><label>View name<input name="name" required maxlength="80" placeholder="Remote backend internships"></label></div><footer><button type="button" class="button" data-action="close-save-view">Cancel</button><button type="submit" class="button primary">Save view</button></footer></form>
-  </dialog>
-
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <main>
+    <section class="holding-card" aria-labelledby="page-title">
+      <p class="eyebrow">Concept archive</p>
+      <h1 id="page-title">Discover</h1>
+      <p class="summary">This standalone concept is retained as a sandbox for future job-discovery brainstorming and interface experiments.</p>
+    </section>
+  </main>
 </body>
 </html>

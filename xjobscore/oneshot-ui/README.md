@@ -1,78 +1,83 @@
 # oneshot-ui
 
-A local unified, deduplicated job discovery and application board.
+A local job-discovery and application workspace backed directly by the
+project's PostgreSQL `schema.sql`.
+
+See [CLEANUP_AND_ROLLBACK.md](CLEANUP_AND_ROLLBACK.md) for the August 2026
+cleanup record, compatibility changes, validation, and rollback procedures.
+
+OneShot does not harvest or canonicalize postings. The core xjobscore pipeline
+owns `feed`, `schedule`, `raw_posting`, and `job_posting`; this application
+reads those tables and writes `job_application` and `job_application_event`.
+
+## Database
+
+Create the database and apply the root schema:
+
+```bash
+createdb xjobscore
+psql -v ON_ERROR_STOP=1 --dbname=xjobscore --file=../../schema.sql
+```
+
+OneShot uses the schema's fixed local account while the product is single-user:
+
+```text
+00000000-0000-0000-0000-000000000001
+```
+
+Configure one of these DSN variables, in precedence order:
+
+```bash
+export XJOBSCORE_ONESHOT_DSN=postgresql://localhost/xjobscore
+# or XJOBSCORE_DSN
+# or DATABASE_URL
+```
 
 ## Run
 
 ```bash
-.venv/bin/python -m xjobscore.oneshot_ui
+cd xjobscore/oneshot-ui
+../../.venv/bin/python -m oneshot_ui
 ```
 
-```bash
-cd xjobscore/oneshot-ui && ../../.venv/bin/python run.py
+The server starts at <http://127.0.0.1:8766>. Opportunities, Applications,
+and Source Coverage all use the live `/api` transport.
+
+The standalone discovery concept is available at <http://127.0.0.1:8766/discover/>.
+
+## Data contract
+
+`job_posting.attributes` is the versioned enrichment contract consumed by the
+Opportunities UI:
+
+```json
+{
+  "version": 1,
+  "opportunity_type": "summer_internship",
+  "term": "Summer 2027",
+  "workplace": "hybrid",
+  "skills": ["Python", "PostgreSQL"],
+  "deadline_at": "2027-02-01T23:59:59Z",
+  "eligibility": "eligible"
+}
 ```
 
-Starts the FastAPI server on http://127.0.0.1:8766
-
-This mode needs PostgreSQL: the feed catalog lives there, and `AdapterGateway`
-connects to it during startup. The board itself is SQLite (`var/oneshot.sqlite3`).
-
-## Demo mode
-
-Demo mode runs the whole product offline against a seeded database, with no
-Postgres and no vendor requests, so you can see every view populated:
-
-```bash
-XJOBSCORE_ONESHOT_DEMO=1 ../../.venv/bin/python run.py
-```
-
-It swaps in an offline gateway, uses a **separate** database
-(`var/demo.sqlite3` — `var/oneshot.sqlite3` is never touched), and seeds on
-first start.
-
-The corpus is fictional companies on real ATS vendors (Greenhouse, Lever,
-Ashby, Workday, Workable, SmartRecruiters, iCIMS). Most of the seeded state is
-produced by the shipping pipeline rather than written by hand: postings are
-harvested and ingested through `ManualFetchCoordinator` and `BoardIngestor`, so
-classification, stack extraction, eligibility gates, scoring, dedupe and
-lifecycle all really run. A second fetch round revises two postings and drops
-one from a complete/closing feed, which is what produces the "posting changed"
-and "unlisted" states. `oneshot_ui/demo/topup.py` then writes only what the
-pipeline provably cannot emit — the `one_shot` band needs a score of 90 and the
-pipeline's ceiling is 82 — and each block there says which case it is.
-
-### Managing the demo database
-
-Run these from `xjobscore/oneshot-ui/`. Unlike the rest of the repo they do
-**not** need `PYTHONPATH=.` — like `run.py`, the CLI puts the repository root on
-`sys.path` itself:
-
-```bash
-../../.venv/bin/python -m oneshot_ui.demo reset    # rebuild from scratch
-../../.venv/bin/python -m oneshot_ui.demo verify   # audit for unfilled data
-../../.venv/bin/python -m oneshot_ui.demo path     # print the database path
-```
-
-`verify` is the check that keeps demo mode honest: it walks every table and
-fails on any table with no rows, or any column that is NULL in every row.
-Columns that are legitimately empty are listed with a reason in
-`oneshot_ui/demo/audit.py`.
-
-Editing `oneshot_ui/demo/dataset.py` means editing inputs to keyword-sensitive
-gates — a title without a CS/Math family word fails `_role_family` and the
-posting silently becomes ineligible. Re-run `reset` then `verify` after changes.
+Keys other than `version` may be absent while enrichment is pending. PostgreSQL
+enforces their types and allowed enum values.
 
 ## Tests
 
 ```bash
-cd xjobscore/oneshot-ui && PYTHONPATH=.:../.. ../../.venv/bin/pytest
-cd oneshot_ui/static && node --test app.test.js     # frontend utilities
+cd xjobscore/oneshot-ui
+../../.venv/bin/pytest
+cd oneshot_ui/static
+node --test app.test.js application/app.test.js source-coverage/app.test.js
 ```
 
-## Sample data
+The repository integration test is opt-in so the ordinary suite never touches
+a developer database:
 
-Use the **Sample data** switch at the bottom of the application menu to swap
-the browser onto a four-job fictional dataset. The normal views and controls
-continue to run. With the switch off, the frontend API client returns safe
-empty stubs until a database transport is connected. `static/api-client.js`
-defines the routes and the single transport seam that will be wired later.
+```bash
+XJOBSCORE_TEST_DSN=postgresql://localhost/xjobscore_test \
+  ../../.venv/bin/pytest tests/test_postgres_repository.py
+```

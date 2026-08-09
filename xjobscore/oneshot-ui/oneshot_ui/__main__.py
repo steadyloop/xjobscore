@@ -1,7 +1,3 @@
-"""Run the local board with ``python -m oneshot_ui``."""
-
-from __future__ import annotations
-
 import uvicorn
 
 from oneshot_ui.config import load_settings
@@ -19,4 +15,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

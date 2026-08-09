@@ -1,407 +1,196 @@
-from __future__ import annotations
-
-import sqlite3
-from datetime import datetime, timezone
+from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
-from xjobscore.records import Feed, Item, Posting, Record
-from xjobscore.sources.catalog import feed_ref
-
 from oneshot_ui.app import create_app
 from oneshot_ui.config import Settings
-from oneshot_ui.gateway import GatewayResult
 
 
-class FixtureGateway:
-    """A catalog/adapter seam with no network and an observable fetch count."""
-
+class FakeRepository:
     def __init__(self) -> None:
-        self.feed = Feed(
-            id=-91,
-            source="fixture",
-            key="student-board",
-            config={},
-            state={},
-            company_id="example",
-            company_name="Example Labs",
-        )
-        self.fetch_calls = 0
         self.connected = False
+        self.jobs = [
+            {
+                "id": 41,
+                "company": "Example Labs",
+                "title": "Summer Software Engineering Intern",
+                "description": "Build Python services.",
+                "location": "Remote, United States",
+                "apply_url": "https://jobs.example.test/41/apply",
+                "attributes": {
+                    "version": 1,
+                    "opportunity_type": "summer_internship",
+                    "term": "Summer 2027",
+                    "workplace": "remote",
+                    "skills": ["Python", "PostgreSQL"],
+                    "eligibility": "eligible",
+                },
+            }
+        ]
+        self.applications: list[dict] = []
+        self.next_id = 1
 
     async def connect(self) -> None:
         self.connected = True
 
-    async def disconnect(self) -> None:
+    async def close(self) -> None:
         self.connected = False
 
-    async def all_feeds(self) -> list[Feed]:
-        return [self.feed]
+    async def list_jobs(self, **options):
+        application_job_ids = {row["job_id"] for row in self.applications if row["job_id"]}
+        rows = [row for row in self.jobs if row["id"] not in application_job_ids]
+        types = set(options["opportunity_types"])
+        if types:
+            rows = [row for row in rows if row["attributes"]["opportunity_type"] in types]
+        return {"jobs": deepcopy(rows), "total": len(rows), "limit": options["limit"], "offset": options["offset"]}
 
-    async def get_feed(self, feed_id: int) -> Feed | None:
-        return self.feed if feed_id == self.feed.id else None
-
-    async def get_feed_ref(self, reference: str) -> Feed | None:
-        expected = feed_ref(self.feed.source, self.feed.key)
-        return self.feed if reference == expected else None
-
-    async def fetch(self, selected: Feed) -> GatewayResult:
-        assert selected.id == self.feed.id
-        self.fetch_calls += 1
-        postings = tuple(_fixture_postings())
-        record = Record(
-            items=[Item(posting.external_id, {"title": posting.title}) for posting in postings],
-            envelope={"company": "Example Labs"},
-            http_status=200,
-            validators={"etag": '"fixture-v1"'},
-        )
-        return GatewayResult(selected, record, postings, "available")
-
-
-def _fixture_postings() -> list[Posting]:
-    common = {
-        "company_raw": "Example Labs",
-        "location_raw": "Remote, United States",
-        "description_html": (
-            "<h3>Requirements</h3><p>Python and C++ required. "
-            "Currently enrolled in a computer science program.</p>"
-        ),
-        "published_at": datetime(2026, 8, 1, tzinfo=timezone.utc),
-    }
-    rows = (
-        ("spring-intern", "Winter Software Engineering Intern", "https://jobs.example.test/1"),
-        ("spring-coop", "Spring Software Engineering Co-op", "https://jobs.example.test/2"),
-        ("student-research", "Student Researcher", "https://jobs.example.test/3"),
-        ("summer-intern", "Summer Software Engineering Intern", "https://jobs.example.test/4"),
-        ("fall-coop", "Fall Software Engineering Co-op", "https://jobs.example.test/5"),
-        ("fall-intern", "Fall Software Engineering Intern", "https://jobs.example.test/6"),
-    )
-    return [
-        Posting(external_id=external_id, title=title, url_posting=url, apply_url=url, **common)
-        for external_id, title, url in rows
-    ]
-
-
-def _client(tmp_path):
-    gateway = FixtureGateway()
-    application = create_app(
-        Settings(database_path=tmp_path / "oneshot.sqlite3"),
-        gateway=gateway,  # type: ignore[arg-type]
-    )
-    return TestClient(application), gateway
-
-
-def _enable_fixture_source(client: TestClient) -> None:
-    response = client.put(
-        "/api/sources/vendor/fixture/selection", json={"enabled": True}
-    )
-    assert response.status_code == 200, response.text
-
-
-def test_startup_is_offline_and_only_explicit_fetch_ingests(tmp_path) -> None:
-    client, gateway = _client(tmp_path)
-    with client:
-        assert gateway.fetch_calls == 0
-        health = client.get("/api/health").json()
-        sources = client.get("/api/sources").json()
-        assert gateway.fetch_calls == 0
-        assert health["mode"] == "manual_fetch_only"
-        assert health["polling"] is False
-        assert sources["total"] == 1
-        assert "OneShot" in client.get("/").text
-        assert client.get("/static/app.js").status_code == 200
-
-        _enable_fixture_source(client)
-
-        result = client.post(f"/api/sources/{sources['sources'][0]['feed_ref']}/fetch")
-        assert result.status_code == 200, result.text
-        assert gateway.fetch_calls == 1
-        assert result.json()["ingested"] == {
-            "postings": 6,
-            "created_entities": 6,
-            "changed_revisions": 6,
-            "exact_links": 0,
-            "review_candidates": 0,
-            "related_candidates": 0,
-            "labels": 0,
-            "facts": 0,
-        }
-        assert client.get("/api/jobs").json()["total"] == 6
-        coverage = client.get("/api/source-coverage").json()
-        assert coverage["total_coverage"] == 6
-        assert coverage["total_added_today"] == 6
-        assert coverage["sources"][0]["last_poll_at"] is not None
-        assert coverage["sources"][0]["health"] == "Healthy"
-
-
-def test_six_filters_multiselect_saved_today_and_unclassified(tmp_path) -> None:
-    expected = {
-        "spring_internship": "Winter Software Engineering Intern",
-        "spring_coop": "Spring Software Engineering Co-op",
-        "student_researcher": "Student Researcher",
-        "summer_internship": "Summer Software Engineering Intern",
-        "fall_coop": "Fall Software Engineering Co-op",
-        "fall_internship": "Fall Software Engineering Intern",
-    }
-    client, _ = _client(tmp_path)
-    with client:
-        _enable_fixture_source(client)
-        reference = client.get("/api/sources").json()["sources"][0]["feed_ref"]
-        assert client.post(f"/api/sources/{reference}/fetch").status_code == 200
-
-        by_slug: dict[str, dict] = {}
-        for slug, title in expected.items():
-            response = client.get("/api/jobs", params={"opportunity_type": slug})
-            assert response.status_code == 200, response.text
-            jobs = response.json()["jobs"]
-            assert [job["title"] for job in jobs] == [title]
-            assert jobs[0]["opportunity_type_slug"] == slug
-            by_slug[slug] = jobs[0]
-
-        combined = client.get(
-            "/api/jobs",
-            params=[
-                ("opportunity_type", "spring_coop"),
-                ("opportunity_type", "fall_coop"),
-            ],
-        ).json()
-        assert {job["opportunity_type_slug"] for job in combined["jobs"]} == {
-            "spring_coop",
-            "fall_coop",
+    async def source_coverage(self):
+        return {
+            "sources": [{"source": "ashby", "type": "ATS", "board_count": 1, "coverage": 1, "last_poll_at": None, "health": "Not polled", "added_today": 1}],
+            "source_count": 1,
+            "total_coverage": 1,
+            "total_added_today": 1,
         }
 
-        summer = by_slug["summer_internship"]
-        assert client.post(
-            f"/api/jobs/{summer['id']}/triage", json={"state": "saved"}
-        ).status_code == 200
-        saved = client.get(
-            "/api/jobs",
-            params={"state": "saved", "opportunity_type": "summer_internship"},
-        ).json()
-        assert [job["id"] for job in saved["jobs"]] == [summer["id"]]
-        today = client.get(
-            "/api/today", params={"opportunity_type": "summer_internship"}
-        ).json()
-        assert [job["id"] for job in today["items"]] == [summer["id"]]
+    def _new_application(self, *, job_id, company, title, url, location, note, external):
+        application = {
+            "id": self.next_id,
+            "job_id": job_id,
+            "external": external,
+            "company": company,
+            "title": title,
+            "location": location,
+            "stage": "considering",
+            "closed_reason": None,
+            "apply_url_snapshot": url,
+            "submitted_at": None,
+            "next_action": None,
+            "next_due_at": None,
+            "note": note,
+            "events": [],
+        }
+        self.next_id += 1
+        self.applications.append(application)
+        return deepcopy(application)
 
-def test_application_requires_confirmation_and_preserves_snapshot(tmp_path) -> None:
-    client, _ = _client(tmp_path)
-    with client:
-        _enable_fixture_source(client)
-        reference = client.get("/api/sources").json()["sources"][0]["feed_ref"]
-        client.post(f"/api/sources/{reference}/fetch")
-        review_job = client.get(
-            "/api/jobs", params={"opportunity_type": "student_researcher"}
-        ).json()["jobs"][0]
-        job = client.get(
+    async def create_application(self, job_id):
+        job = next((row for row in self.jobs if row["id"] == job_id), None)
+        if job is None:
+            return None
+        existing = next((row for row in self.applications if row["job_id"] == job_id), None)
+        if existing:
+            result = deepcopy(existing)
+            result["already_exists"] = True
+            return result
+        return self._new_application(job_id=job_id, company=job["company"], title=job["title"], url=job["apply_url"], location=job["location"], note="", external=False)
+
+    async def create_external_application(self, **values):
+        return self._new_application(job_id=None, company=values["company"], title=values["title"], url=values["url"], location=values["location"], note=values["note"], external=True)
+
+    async def list_applications(self):
+        return {
+            "applications": [
+                {key: deepcopy(value) for key, value in row.items() if key != "events"}
+                for row in self.applications
+            ]
+        }
+
+    async def get_application(self, application_id):
+        return next((deepcopy(row) for row in self.applications if row["id"] == application_id), None)
+
+    async def update_application(self, application_id, changes):
+        row = next((row for row in self.applications if row["id"] == application_id), None)
+        if row is None:
+            return None
+        if not row["external"] and any(key in changes for key in ("company", "title", "apply_url_snapshot")):
+            raise ValueError("discovered application snapshots cannot be edited")
+        if "company" in changes:
+            row["company"] = changes["company"]
+        if "title" in changes:
+            row["title"] = changes["title"]
+        for key in ("stage", "closed_reason", "apply_url_snapshot", "submitted_at", "next_action", "next_due_at", "note"):
+            if key in changes:
+                row[key] = changes[key]
+        return deepcopy(row)
+
+    async def delete_application(self, application_id):
+        before = len(self.applications)
+        self.applications = [row for row in self.applications if row["id"] != application_id]
+        return len(self.applications) != before
+
+def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
+    repository = FakeRepository()
+    application = create_app(Settings(dsn="injected"), repository=repository)
+    with TestClient(application) as client:
+        assert repository.connected
+        assert client.get("/api/health").json() == {"ok": True}
+        jobs = client.get(
             "/api/jobs", params={"opportunity_type": "summer_internship"}
-        ).json()["jobs"][0]
-        unrelated_observation = client.get(
-            f"/api/jobs/{review_job['id']}"
-        ).json()["observations"][0]["id"]
-
-        saved_review = client.post(
-            f"/api/jobs/{review_job['id']}/triage", json={"state": "saved"}
-        )
-        assert saved_review.status_code == 200
-        blocked_queue = client.post(
-            f"/api/jobs/{review_job['id']}/triage", json={"state": "queued"}
-        )
-        assert blocked_queue.status_code == 422
-        assert client.get(f"/api/jobs/{review_job['id']}").json()["triage_state"] == "saved"
-        review_plan = client.post(
-            f"/api/jobs/{review_job['id']}/applications",
-            json={"stage": "considering"},
-        )
-        assert review_plan.status_code == 200
-        blocked_preparation = client.post(
-            f"/api/jobs/{review_job['id']}/applications",
-            json={"stage": "preparing"},
-        )
-        assert blocked_preparation.status_code == 422
-        ineligible_submission = client.post(
-            f"/api/jobs/{review_job['id']}/applications",
-            json={"confirmation": "human_confirmed"},
-        )
-        assert ineligible_submission.status_code == 422
-
-        closed_job = client.get(
-            "/api/jobs", params={"opportunity_type": "fall_coop"}
-        ).json()["jobs"][0]
-        connection = sqlite3.connect(tmp_path / "oneshot.sqlite3")
-        try:
-            connection.execute(
-                "UPDATE job_entities SET status = 'closed' WHERE id = ?",
-                (closed_job["id"],),
-            )
-            connection.commit()
-        finally:
-            connection.close()
-        closed_submission = client.post(
-            f"/api/jobs/{closed_job['id']}/applications",
-            json={"confirmation": "human_confirmed"},
-        )
-        assert closed_submission.status_code == 422
-
-        missing_confirmation = client.post(
-            f"/api/jobs/{job['id']}/applications", json={"note": "done"}
-        )
-        assert missing_confirmation.status_code == 422
-        preparing = client.post(
-            f"/api/jobs/{job['id']}/applications", json={"stage": "preparing"}
-        )
-        assert preparing.status_code == 200, preparing.text
-        assert preparing.json()["stage"] == "preparing"
-        bypass = client.post(
-            f"/api/applications/{preparing.json()['id']}/events",
-            json={"stage": "submitted", "confirmed": True},
-        )
-        assert bypass.status_code == 422
-        submitted_event_bypass = client.post(
-            f"/api/applications/{preparing.json()['id']}/events",
-            json={"event_type": "submitted", "confirmed": True},
-        )
-        assert submitted_event_bypass.status_code == 422
-        for downstream_stage in ("assessment", "screen", "interview", "offer", "no_reply"):
-            premature = client.post(
-                f"/api/applications/{preparing.json()['id']}/events",
-                json={"stage": downstream_stage, "confirmed": True},
-            )
-            assert premature.status_code == 422
-            premature_event = client.post(
-                f"/api/applications/{preparing.json()['id']}/events",
-                json={"event_type": downstream_stage, "confirmed": True},
-            )
-            assert premature_event.status_code == 422
-        wrong_source = client.post(
-            f"/api/jobs/{job['id']}/applications",
-            json={
-                "confirmation": "human_confirmed",
-                "source_observation_id": unrelated_observation,
-            },
-        )
-        assert wrong_source.status_code == 422
-
-        created = client.post(
-            f"/api/jobs/{job['id']}/applications",
-            json={
-                "confirmation": "human_confirmed",
-                "submitted_at": "2026-08-04",
-                "resume_variant": "ml-systems",
-                "note": "Submitted on the official employer page.",
-            },
-        )
-        assert created.status_code == 200, created.text
-        application = created.json()
-        assert application["id"] == preparing.json()["id"]
-        assert application["stage"] == "submitted"
-        assert application["resume_variant"] == "ml-systems"
-        assert {event["event_type"] for event in application["events"]} == {
-            "stage_changed",
-            "submitted",
-        }
-        selected_source = client.get(f"/api/jobs/{job['id']}").json()["observations"][0]
-        assert application["source_observation_id"] == selected_source["id"]
-        assert application["apply_url_snapshot"] == (
-            selected_source["apply_url"] or selected_source["posting_url"]
-        )
-        pipeline = client.get(
-            "/api/applications", params={"opportunity_type": "summer_internship"}
         ).json()
-        assert [item["id"] for item in pipeline["applications"]] == [application["id"]]
-        assert client.get(
-            "/api/applications", params={"opportunity_type": "fall_coop"}
-        ).json()["applications"] == []
-        assert client.get(
-            "/api/today", params={"opportunity_type": "summer_internship"}
-        ).json()["items"] == []
+        assert jobs["total"] == 1
+        assert jobs["jobs"][0]["attributes"]["skills"] == ["Python", "PostgreSQL"]
+        created = client.post("/api/jobs/41/applications").json()
+        assert created["stage"] == "considering"
+        assert client.post("/api/jobs/41/applications").json()["already_exists"]
 
-        moved = client.post(
-            f"/api/applications/{application['id']}/events",
-            json={
-                "stage": "interview",
-                "note": "Prepare for recruiter interview",
-                "due_at": "2026-08-05T12:00:00Z",
-            },
-        )
-        assert moved.status_code == 200, moved.text
-        assert moved.json()["stage"] == "interview"
-        assert moved.json()["next_due_at"].startswith("2026-08-05T12:00:00")
-        assert moved.json()["next_action"] == "Prepare for recruiter interview"
-        assert len(moved.json()["events"]) == 3
-        due_today = client.get(
-            "/api/today", params={"opportunity_type": "summer_internship"}
-        ).json()["items"]
-        assert [item["id"] for item in due_today] == [job["id"]]
-        assert due_today[0]["today_reason"] == "Application action due"
-
-        detail = client.get(f"/api/applications/{application['id']}").json()
-        assert detail["company"] == job["company"]
-        assert detail["title"] == job["title"]
-        assert detail["submitted_at"].startswith("2026-08-04")
-
-
-def test_external_application_stays_out_of_discover_and_tracks_events(tmp_path) -> None:
-    client, _ = _client(tmp_path)
-    with client:
-        created = client.post(
+        external = client.post(
             "/api/applications/external",
-            json={
-                "company": "External Labs",
-                "title": "Systems Internship",
-                "url": "https://external.example/jobs/systems-intern",
-                "location": "Remote",
-                "note": "Found through an alumni referral",
-            },
-        )
-        assert created.status_code == 200, created.text
-        application = created.json()
-        assert application["external"] is True
-        assert application["job_id"] is None
-        assert application["stage"] == "considering"
-        assert application["opportunity_type"] == "External"
-        assert application["location"] == "Remote"
-        assert client.get("/api/jobs").json()["total"] == 0
-        assert client.post("/api/jobs", json={"url": application["apply_url_snapshot"]}).status_code == 405
-
-        listed = client.get("/api/applications").json()["applications"]
-        assert [item["id"] for item in listed] == [application["id"]]
-        assert client.get(
-            "/api/applications", params={"opportunity_type": "summer_internship"}
-        ).json()["applications"] == []
-
-        unconfirmed = client.post(
-            f"/api/applications/{application['id']}/events",
-            json={"stage": "submitted"},
-        )
-        assert unconfirmed.status_code == 422
-        submitted = client.post(
-            f"/api/applications/{application['id']}/events",
-            json={"stage": "submitted", "confirmed": True},
-        )
-        assert submitted.status_code == 200, submitted.text
-        assert submitted.json()["stage"] == "submitted"
-        assert submitted.json()["submitted_at"] is not None
-
-        invalid = client.post(
-            "/api/applications/external",
-            json={"company": "Bad", "title": "URL", "url": "not-a-url"},
-        )
-        assert invalid.status_code == 422
+            json={"company": "Manual Co", "title": "Engineer", "url": "https://manual.example/job"},
+        ).json()
+        assert external["external"] is True
+        updated = client.patch(
+            f"/api/applications/{external['id']}",
+            json={"stage": "closed", "closed_reason": "withdrawn"},
+        ).json()
+        assert updated["stage"] == "closed"
+        assert updated["closed_reason"] == "withdrawn"
+        assert client.delete(f"/api/applications/{external['id']}").status_code == 204
+        assert client.get("/api/source-coverage").json()["total_coverage"] == 1
+    assert not repository.connected
 
 
-def test_batch_fetch_is_selected_and_bounded(tmp_path) -> None:
-    client, gateway = _client(tmp_path)
-    with client:
-        _enable_fixture_source(client)
-        reference = client.get("/api/sources").json()["sources"][0]["feed_ref"]
-        duplicate_refs = client.post(
-            "/api/sources/fetch", json={"feed_refs": [reference, reference]}
-        )
-        assert duplicate_refs.status_code == 422
-        assert gateway.fetch_calls == 0
+def test_api_rejects_unknown_job_filter_and_invalid_application_mutation() -> None:
+    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    with TestClient(application) as client:
+        assert client.get("/api/jobs", params={"opportunity_type": "made_up"}).status_code == 400
+        created = client.post("/api/jobs/41/applications").json()
+        assert client.patch(
+            f"/api/applications/{created['id']}", json={"company": "Changed"}
+        ).status_code == 422
+        assert client.patch(
+            f"/api/applications/{created['id']}", json={"stage": "closed"}
+        ).status_code == 422
 
-        fetched = client.post("/api/sources/fetch", json={"feed_refs": [reference]})
-        assert fetched.status_code == 200, fetched.text
-        assert fetched.json()["total"] == 1
-        assert gateway.fetch_calls == 1
+
+def test_discover_route_serves_the_standalone_document() -> None:
+    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    with TestClient(application) as client:
+        response = client.get("/discover/")
+
+    assert response.status_code == 200
+    assert 'href="/static/discover/stub.css"' in response.text
+    assert "standalone concept" in response.text
+    assert "oneshot" not in response.text.lower()
+    assert '<a ' not in response.text
+
+
+def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
+    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    paths = (
+        "/",
+        "/static/app.css",
+        "/static/app.js",
+        "/static/api-client.js",
+        "/static/nav-count.js",
+        "/static/sample-data.js",
+        "/static/application/index.html",
+        "/static/application/styles.css",
+        "/static/application/app.js",
+        "/static/source-coverage/index.html",
+        "/static/source-coverage/styles.css",
+        "/static/source-coverage/app.js",
+        "/discover/",
+        "/static/discover/stub.css",
+    )
+    with TestClient(application) as client:
+        assert all(client.get(path).status_code == 200 for path in paths)
