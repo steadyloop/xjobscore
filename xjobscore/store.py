@@ -1,4 +1,5 @@
-"""The only code in the tree that touches the database.
+# store.py
+"""The only code that touches the database.
 
 Every SQL statement in the project lives in this file. Callers pass an open
 asyncpg connection and get records back; nothing outside this module knows a
@@ -42,6 +43,8 @@ __all__ = [
     "set_next_poll",
     "start_run",
     "touch_posting",
+    "upsert_catalog_company",
+    "upsert_catalog_token",
     "upsert_feed",
     "upsert_posting",
 ]
@@ -353,6 +356,80 @@ async def note_unknown_company(conn: Connection, raw: str, source: str) -> None:
         """,
         raw,
         source,
+    )
+
+
+# --------------------------------------------------------------------------
+# catalog -- schema.sql's company/alias/token, written by `run --sync-catalog`
+#
+# These are the schema.sql spelling of a company, distinct from the
+# company_alias/company_new pair above. `catalog_sync` decides what the rows
+# should contain; everything here is mechanics.
+# --------------------------------------------------------------------------
+
+
+async def upsert_catalog_company(
+    conn: Connection, alias_norm: str, name: str, domain: str | None
+) -> int:
+    """Find-or-create one company, keyed by its alias. Returns the company id.
+
+    `alias` is the natural key because `company` has none: `id` is generated
+    and `domain` is NULL for the 2589 catalog entries with no known website.
+
+    A known domain is never overwritten with NULL -- a later catalog pass that
+    lost the domain must not erase a resolved one, and COALESCE is cheaper than
+    reasoning about which pass ran last.
+    """
+    row = await conn.fetchrow(
+        "SELECT company_id FROM alias WHERE alias_norm = $1", alias_norm
+    )
+    if row is not None:
+        company_id = row["company_id"]
+        await conn.execute(
+            "UPDATE company SET name = $2, domain = COALESCE($3, domain) WHERE id = $1",
+            company_id,
+            name,
+            domain,
+        )
+        return company_id
+
+    created = await conn.fetchrow(
+        "INSERT INTO company (name, domain) VALUES ($1, $2) RETURNING id", name, domain
+    )
+    company_id = created["id"]
+    await conn.execute(
+        """
+        INSERT INTO alias (alias_norm, company_id, alias)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (alias_norm) DO NOTHING
+        """,
+        alias_norm,
+        company_id,
+        name,
+    )
+    return company_id
+
+
+async def upsert_catalog_token(
+    conn: Connection, ats: str, token: str, company_id: int, status: str
+) -> None:
+    """Write one endpoint. Re-linking is allowed; re-activating is not.
+
+    `status` is set on insert and never on update, for the same reason
+    `upsert_feed` refuses to overwrite `config`: it is the operator's column.
+    Deactivating a company means flipping its tokens to 'inactive', and a
+    routine catalog re-sync must not undo that.
+    """
+    await conn.execute(
+        """
+        INSERT INTO token (ats, token, company_id, status)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (ats, token) DO UPDATE SET company_id = EXCLUDED.company_id
+        """,
+        ats,
+        token,
+        company_id,
+        status,
     )
 
 
