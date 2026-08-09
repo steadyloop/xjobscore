@@ -40,22 +40,21 @@ CREATE TABLE feed (
 );
 
 -- Schedule. One row per feed; the poller's own state, written every poll.
--- Kept out of `feed` so a catalog sync cannot clobber cadence or validators.
-
 CREATE TABLE schedule (
+    -- Config
     feed_id         bigint PRIMARY KEY REFERENCES feed (id) ON DELETE CASCADE,
-    due_at          timestamptz NOT NULL DEFAULT now(),  -- when the feed is next due; this column is the queue
-    interval_s      integer NOT NULL DEFAULT 900 CHECK (interval_s > 0),        -- current cadence; adaptive backoff reads and writes it
-    lease_until     timestamptz,                         -- claim stamp so a crashed worker's feed gets retried, not lost
+    interval_s      integer NOT NULL DEFAULT 900 CHECK (interval_s > 0),
+    -- Log
     etag            text,                                -- server's version token; 304 upon hit
-    content_hash    text,                                -- hash of listing response; skip parse when nothing moved
+    res_hash        text,                                -- hash of listing response; skip parse when nothing moved
+    strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0),          -- fail strike; drives retry backoff/disable
+    due_at          timestamptz NOT NULL DEFAULT now(),  -- when the feed is next due; this column is the queue
+    hold_until      timestamptz,                         -- claim stamp so a crashed worker's feed gets retried, not lost
+    last_poll_at    timestamptz,
     last_change_at  timestamptz,                         -- last poll hash moved; back off keys on to slow a dormant board
-    strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0),          -- fail strike; drives retry backoff/quarantine
-    quarantined_at  timestamptz                          -- engine-initiated disable, kept out of operator-owned feed.enabled
+    disabled_at     timestamptz                          -- engine-initiated disable, kept out of operator-owned feed.enabled
 );
-
--- The picker's only index: due, not quarantined, oldest first.
-CREATE INDEX schedule_due_idx ON schedule (due_at) WHERE quarantined_at IS NULL;
+CREATE INDEX schedule_due_idx ON schedule (due_at) WHERE disabled_at IS NULL;
 
 -- Bronze
 
@@ -99,7 +98,102 @@ CREATE TABLE job_posting (
     dup_id                   uuid,              -- groups suspected duplicates together
 
     UNIQUE (source, source_key)
+
 );
+
+-- PLANNED (DEDUPPING)
+CREATE TABLE job_posting_dup_group (
+    id UUID PRIMARY KEY,
+    state TEXT NOT NULL CHECK (state IN ('pending', 'confirmed', 'rejected')),
+    representative_posting_id BIGINT,
+    evidence JSONB,
+    algorithm_version TEXT
+);
+
+-- PLANNED (APPLYING)
+CREATE TABLE job_application (
+    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_posting_id     bigint UNIQUE REFERENCES job_posting(id),
+
+    -- Job Specs
+    company_snapshot   text NOT NULL,
+    title_snapshot     text NOT NULL,
+    location_snapshot  text,
+    apply_url_snapshot text,
+    resume_variant     text,
+    
+    -- Updates
+    stage              text NOT NULL DEFAULT 'considering'
+                       CHECK (stage IN (
+                           'considering',
+                           'applied',
+                           'assessment',
+                           'interview',
+                           'offer',
+                           'closed'
+                       )),
+    closed_reason      text
+                       CHECK (closed_reason IN (
+                           'rejected',
+                           'withdrawn',
+                           'no_reply'
+                       )),
+    next_action        text,
+    note               text NOT NULL DEFAULT '',
+
+    submitted_at       timestamptz,
+    updated_at         timestamptz NOT NULL DEFAULT now(),
+    next_due_at        timestamptz,
+    
+    CHECK (stage = 'closed' OR closed_reason IS NULL)
+);
+
+CREATE INDEX job_application_stage_due_idx
+    ON job_application (stage, next_due_at, updated_at DESC);
+
+CREATE TABLE job_application_event (
+    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_application_id bigint NOT NULL REFERENCES job_application(id) ON DELETE CASCADE,
+    event_type         text NOT NULL,
+    to_stage           text CHECK (to_stage IN (
+        'considering',
+        'preparing',
+        'submitted',
+        'assessment',
+        'screen',
+        'interview',
+        'offer',
+        'rejected',
+        'withdrawn',
+        'no_reply'
+    )),
+    occurred_at        timestamptz NOT NULL DEFAULT now(),
+    note               text
+);
+
+CREATE INDEX job_application_event_application_idx
+    ON job_application_event (job_application_id, occurred_at DESC);
+
+-- PLANNED (MULTI-USER)
+
+-- CREATE TABLE user (
+--     id uuid PRIMARY KEY -- ID supplied by authentication provider
+--     profile jsonb NOT NULL DEFAULT '{}'
+-- );
+
+-- CREATE TABLE user_company (
+--     user_id    uuid NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+--     company_id bigint NOT NULL REFERENCES company(id) ON DELETE CASCADE,
+
+--     PRIMARY KEY (user_id, company_id)
+-- );
+
+-- ALTER TABLE job_application
+-- ADD COLUMN user_id uuid NOT NULL REFERENCES user(id);
+
+
+
+-- PLANNED
 
 COMMIT;
 
