@@ -1,0 +1,619 @@
+schema_version = 1
+source = "pinpoint"
+
+# The board never states its own employer -- `company_raw` maps to the bare
+# key (json-api-configs.py:139). Hosting at workwithus.pinpointhq.com rather
+# than a client-named subdomain reads as Pinpoint's own careers page, but
+# that is an inference from the URL shape, not a fact the payload asserts.
+
+[[feed]]
+key = "workwithus"
+enabled = true
+verified = true
+verified_at = "2026-08-06"
+company_id = 1658
+company_name = "Pinpoint"
+domain = "pinpointhq.com"
+
+[[feed]]
+key = "accenture"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "agencyanalytics"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "alcanzaclinical"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "anthesisgroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "armstrongwatson"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "article"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "avaaz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "birchesgroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bmt"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bnc-ox-ac"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bright"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "c10labs"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "calbudgetcenter"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "crcna"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dbrand"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "digitalscience"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dnata"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "eptura"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "esss"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gloryglobal"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gmesupply"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gordonmurraygroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "hollandamericagroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "indrive"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "intermedia"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ipsos"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "iwbi"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "judge-priestley"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "kempinski"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "kenwayconsulting"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "kharon"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "magic"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "mcbains"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "mountainwarehouse"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "nasstar"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "nccgroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "northernbedrockcorps"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "notonthehighstreet"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "nypl"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "oilchange"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "oxfordmetrics"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "porterdodson"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "premierleague"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "priceofoil"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "reconomy"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "roofsbyaspen"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "safetywing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "sandpiperci"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "sans"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "savannainstitute"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "scottishfa"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "seymourhotels"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "skims"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "spektrix"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "stacywitbeck"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "systematica"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "tabby"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "teaching-strategies"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thearchco"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thecfocentre"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thorne"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "togethergroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wearehuman8"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wmhsolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "worldanimalprotection"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "xeneta"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ynab"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""

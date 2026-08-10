@@ -1,0 +1,1442 @@
+schema_version = 1
+source = "zohorecruit"
+
+[[feed]]
+key = "accountingbaba"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "acd-inc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "advanc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "advice"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "africanmanagers"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "agenz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "alfahr"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "allenpeoplesolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "amsco"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ariana"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "astrohire"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "atspartners"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "auray"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "aveni"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "basevision"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "be-consultancy-group"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "be-exec"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bgrh"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bioversityinternational"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bluedotinsights"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bradleydavidassociates"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "brightbiz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "burkhardtandcompany"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "busigence"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bytesource"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "calanais"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cancapital"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "careersinghana"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "careresolution"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "castvillesolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cause-capacity"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ccifv"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cigmotors"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cleanair"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "climateexperts"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cominity"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "creatorscripts"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "crmassistance"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cupagroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "delsys"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dhk"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "drivex"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dymasco"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "e2ecleaning"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ecd"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "effettidigitali"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ekonid"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ellasotconsulting"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "enflux"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "erxgroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "exoscale"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "feathersoft"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "fl3xx"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "foodpairing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "fortevillageresort"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "fusionetcorp"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "fxstaffing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "getdatabees"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "getlaidbeds"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "globalworking"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "glorinz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "goabbeyroad"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gobluegreen"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gosecunda"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "govease"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gtbank"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gtcoplc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "hccm"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "hireseniors"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "houstonjewish"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "humaniaressourceshumaines"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "icea"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "idealgrupa"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "impacttohealth"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "incubxperts"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "indiumsoft"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ins-globalconsulting"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "interlinkmanagementltd"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "internalconsulting"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "intrapreneurs"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ironsidehr"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "islandpezi"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "itadvanced"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "itmagination"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "jemchildcaresolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "kgcrmsolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "kissolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "kn-it"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ks-privatestaff"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "labmindstaffing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "lecolefrancaise"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "longhornenergyandtransportationllc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "maan-ctr"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "machstatz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "manooi"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "marketing-autopilot"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "martide"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "menaalliances"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "mwsb"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "myhredge"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "naturalvert"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "offshore-staffing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "omlafrica"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "orshel"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "outsourcery"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ownthespace"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "p2prh"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "pangaea-inc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "partner-demohdfunaisoken"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "pattentitle"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "peaklandscape"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "perceptive-analytics"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "petitsfreres"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "piedmontglobal"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "pulselive"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "qsourcing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "r-2"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "radiocampusrouen"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "raqmiyat"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "redtech-recruit"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "regulvar"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "renmoney"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "resal"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "retailo"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "rightseat"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "roboyo"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "rossorecruiting"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "royalbasketballschool"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "rutherfordinternational"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "sarasanalytics"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "scaleflex"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "seaplaneasia"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "seasonalnursery"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "shr"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "shugulika"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "soleva"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "sonsetsolutions"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "sorensenstaffing"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "spiible"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "starfx"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "taxconnex"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "teacherproven"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "teamapt"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thehrsource"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thinkbac"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thinkpivot"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "tingz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "tmpmortgages"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "topring"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "uhp"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "unit21"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "upestagio"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "virtualcolleague"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "virtualcoworker"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "weddedwonderland"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wenschalets"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wingmanlog"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "xyntekinc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "yinternational"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "zentechnologies"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""

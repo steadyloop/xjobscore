@@ -1,0 +1,965 @@
+schema_version = 1
+source = "trakstar"
+
+[[feed]]
+key = "aclunc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "adpcandidate"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "aesc"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "airtype"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "aixialgroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "algaworks"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "americanuniversity"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "arpae"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ausdta"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ballotpedia"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "barbariangroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "beblue"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bennington"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "blackshamrock"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "bookmyshow"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "breaksclusive"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "buyagift"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "calwellness79804"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "campspot"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cargoasp"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cashfree"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cdt"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ceros"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "chapin"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "chartcube"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cisdl"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "climateactioncampaign"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cloversearchworks"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "cmed"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "compassworkingcapital"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "crownagentsbank"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "customorthopaedics"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "datatrax"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "democracynow"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dentsu"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "digitalshift"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dockinsbroadcastgroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "dripcapital"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "easebuzz"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "encircleio"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "evidation"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "finario"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "givedirectly"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "glitchtank"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "gonuclei"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "grooveshark"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "healthprize"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "hydeparkvp"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "icgjobs"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "imagicle"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "indusaction"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "innovatemercer"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "intoo"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "invicro"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ipspi"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "linaro"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "linx"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "linxneemuchaordic"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "locatee"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "loginext"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "lyngo"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "mainebhr"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "mobilenations"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "moengage"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "myakosha"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "nedjobs"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "novopay"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "nycpride"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "origineight"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "prisonpolicy"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "promet"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "quantopian"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "quve"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ranker"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "relex"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "reviewsnap"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "rockcontent"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "rollbar"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "scripbox"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "sharechat"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "smartbox"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "stillaguamish"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "strategycorps"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "stratpoint"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "supergeeks"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "tangoanalytics"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "tempero"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "testdouble"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "thepersimmongroup"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "totvs"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "trakstar"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "trustedcompany"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "tubitv"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "unisonriskadvisors"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "vagasdb1"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "vempraglobo"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "verisys"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "veritaspress"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "vinsol"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "voterunlead"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "watttime"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wearebarbarian"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "whatfix101"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wingify"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "wmu"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "xenaccounting"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""
+
+[[feed]]
+key = "ynab"
+enabled = false
+verified = false
+verified_at = ""
+company_id = 0
+company_name = ""
+domain = ""

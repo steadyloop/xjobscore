@@ -1,0 +1,269 @@
+schema_version = 2
+
+# Complete source registry. The array name describes who publishes the endpoint:
+# - [[ats]]: a multi-tenant recruiting-system vendor
+# - [[direct]]: a first-party employer careers source
+# - [[board]]: an independent job, program, or community board
+#
+# ATS tenant feeds live under ats-catalog/. Direct and Board feeds with one
+# endpoint remain inline below.
+
+# ATS sources
+
+[[ats]]
+name = "adp"
+catalog = "ats-catalog/adp.toml"
+
+[[ats]]
+name = "avature"
+catalog = "ats-catalog/avature.toml"
+
+[[ats]]
+name = "ashby"
+catalog = "ats-catalog/ashby.toml"
+
+[[ats]]
+name = "bamboohr"
+catalog = "ats-catalog/bamboohr.toml"
+
+[[ats]]
+name = "breezy"
+catalog = "ats-catalog/breezy.toml"
+
+[[ats]]
+name = "bullhorn"
+catalog = "ats-catalog/bullhorn.toml"
+
+[[ats]]
+name = "comeet"
+catalog = "ats-catalog/comeet.toml"
+
+[[ats]]
+name = "dayforce"
+catalog = "ats-catalog/dayforce.toml"
+
+[[ats]]
+name = "eightfold"
+catalog = "ats-catalog/eightfold.toml"
+
+[[ats]]
+name = "fountain"
+catalog = "ats-catalog/fountain.toml"
+
+[[ats]]
+name = "gem"
+catalog = "ats-catalog/gem.toml"
+
+[[ats]]
+name = "greenhouse"
+catalog = "ats-catalog/greenhouse.toml"
+
+[[ats]]
+name = "homerun"
+catalog = "ats-catalog/homerun.toml"
+
+[[ats]]
+name = "icims"
+catalog = "ats-catalog/icims.toml"
+
+[[ats]]
+name = "jazzhr"
+catalog = "ats-catalog/jazzhr.toml"
+
+[[ats]]
+name = "jobvite"
+catalog = "ats-catalog/jobvite.toml"
+
+[[ats]]
+name = "join"
+catalog = "ats-catalog/join.toml"
+
+[[ats]]
+name = "lever"
+catalog = "ats-catalog/lever.toml"
+
+[[ats]]
+name = "manatal"
+catalog = "ats-catalog/manatal.toml"
+
+[[ats]]
+name = "oleeo"
+catalog = "ats-catalog/oleeo.toml"
+
+[[ats]]
+name = "oracle"
+catalog = "ats-catalog/oracle.toml"
+
+[[ats]]
+name = "peopleadmin"
+catalog = "ats-catalog/peopleadmin.toml"
+
+[[ats]]
+name = "personio"
+catalog = "ats-catalog/personio.toml"
+
+[[ats]]
+name = "paylocity"
+catalog = "ats-catalog/paylocity.toml"
+
+[[ats]]
+name = "pinpoint"
+catalog = "ats-catalog/pinpoint.toml"
+
+[[ats]]
+name = "recruitcrm"
+catalog = "ats-catalog/recruitcrm.toml"
+
+[[ats]]
+name = "recruitee"
+catalog = "ats-catalog/recruitee.toml"
+
+[[ats]]
+name = "rippling"
+catalog = "ats-catalog/rippling.toml"
+
+[[ats]]
+name = "smartrecruiters"
+catalog = "ats-catalog/smartrecruiters.toml"
+
+[[ats]]
+name = "taleo"
+catalog = "ats-catalog/taleo.toml"
+
+[[ats]]
+name = "successfactors"
+catalog = "ats-catalog/successfactors.toml"
+
+[[ats]]
+name = "talentreef"
+catalog = "ats-catalog/talentreef.toml"
+
+[[ats]]
+name = "teamtailor"
+catalog = "ats-catalog/teamtailor.toml"
+
+[[ats]]
+name = "trakstar"
+catalog = "ats-catalog/trakstar.toml"
+
+[[ats]]
+name = "ukg"
+catalog = "ats-catalog/ukg.toml"
+
+[[ats]]
+name = "vincere"
+catalog = "ats-catalog/vincere.toml"
+
+[[ats]]
+name = "workable"
+catalog = "ats-catalog/workable.toml"
+
+[[ats]]
+name = "workday"
+catalog = "ats-catalog/workday.toml"
+
+[[ats]]
+name = "zohorecruit"
+catalog = "ats-catalog/zohorecruit.toml"
+
+# Direct
+
+[[direct]]
+name = "amazon"
+key = "amazon"
+enabled = true
+verified = true
+verified_at = ""
+company_id = 95
+company_name = "Amazon"
+domain = "amazon.jobs"
+
+[[direct]]
+name = "apple"
+key = "apple"
+enabled = true
+verified = true
+verified_at = ""
+company_id = 136
+company_name = "Apple"
+domain = "apple.com"
+
+[[direct]]
+name = "flyio"
+
+# Fly.io's Atom feed is valid but currently has no open-role entries.
+key = "flyio"
+enabled = true
+verified = true
+verified_at = "2026-08-07"
+company_id = 787
+company_name = "Fly.io"
+domain = "fly.io"
+
+[[direct]]
+name = "janestreet"
+key = "janestreet"
+enabled = true
+verified = true
+verified_at = ""
+company_id = 1086
+company_name = "Jane Street"
+domain = "janestreet.com"
+
+# Independent boards and aggregators
+
+[[board]]
+name = "hn"
+key = "hn"
+enabled = true
+verified = true
+verified_at = "2026-08-09"
+company_id = 2492
+company_name = "Hacker News"
+domain = "news.ycombinator.com"
+
+[[board]]
+name = "simplify"
+key = "SimplifyJobs/Summer2027-Internships"
+enabled = true
+verified = true
+verified_at = "2026-08-04"
+company_id = 1988
+company_name = "Simplify Jobs"
+domain = "simplify.jobs"
+
+[[board]]
+name = "unstop"
+
+# One platform-wide opportunity feed, not a per-employer tenant board.
+key = "unstop"
+enabled = true
+verified = true
+verified_at = "2026-08-06"
+company_id = 2319
+company_name = "Unstop"
+domain = "unstop.com"
+
+[[board]]
+name = "usajobs"
+
+# The adapter is implemented, but this feed remains unverified until
+# operator-owned USAJOBS credentials exist. Never commit a personal
+# Authorization-Key or registered-email User-Agent here.
+key = "usajobs"
+enabled = true
+verified = false
+verified_at = "2026-08-07"
+company_id = 2326
+company_name = "USAJOBS"
+domain = "usajobs.gov"
+
+[[board]]
+name = "workatastartup"
+key = "workatastartup"
+enabled = true
+verified = false
+verified_at = ""
+company_id = 2463
+company_name = "Y Combinator"
+domain = "workatastartup.com"

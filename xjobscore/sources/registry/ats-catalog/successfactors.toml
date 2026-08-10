@@ -1,0 +1,25 @@
+schema_version = 1
+source = "successfactors"
+
+# `key` is the career-site host, not a company slug: SuccessFactors tenants are
+# reached by their own domain, so there is no board token to carry. The adapter
+# templates https://{key}/sitemap.xml, which serves the whole board as RSS.
+# `domain` stays the employer's corporate domain for company resolution.
+
+[[feed]]
+key = "jobs.sap.com"
+enabled = true
+verified = true
+verified_at = "2026-08-06T09:02:05-0700"
+company_id = 1900
+company_name = "SAP"
+domain = "sap.com"
+
+[[feed]]
+key = "jobs.bayer.com"
+enabled = true
+verified = true
+verified_at = "2026-08-06T09:02:05-0700"
+company_id = 247
+company_name = "Bayer"
+domain = "bayer.com"
