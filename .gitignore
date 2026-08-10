@@ -1,14 +1,9 @@
 .env
 .venv/
-raw/
-__pycache__/
 *.pyc
+__pycache__/
 .pytest_cache/
 uv.lock
-notebooks/samples/
-work/
-backups/
-/docs
 /postings
 /prototypes
 /seeds
@@ -20,3 +15,4 @@ xjobscore/discover.log
 xjobscore/.DS_Store
 .DS_Store
 /tech-debt
+/xjobscore/cc_ats
