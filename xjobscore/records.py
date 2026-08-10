@@ -98,7 +98,7 @@ class Feed:
     next_poll_at: datetime | None = None
     # Inspector-only display metadata. Harvesters deliberately ignore it;
     # the company label is resolved from feed_ats/company when available.
-    company_id: str | None = None
+    company_id: int | None = None
     company_name: str | None = None
 
 
