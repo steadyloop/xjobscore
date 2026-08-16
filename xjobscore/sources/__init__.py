@@ -21,13 +21,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from importlib import import_module
-from pathlib import Path
-import tomllib
 
 from xjobscore.net import Net
 from xjobscore.records import Canonical, Feed, Item, Record
-from xjobscore.sources.catalog import CatalogEntry, entries as catalog_entries, feeds as catalog_feeds
+from xjobscore.sources import avature, dayforce, hn, join, taleo, zohorecruit
 from xjobscore.sources.planned import janestreet, workatastartup
+from xjobscore.sources.registry.loader import source_types
 
 # A hyphenated filename cannot be imported with Python's ``import`` syntax.
 # Keep the public adapter labels literal while exposing ordinary local aliases.
@@ -35,8 +34,7 @@ json_api = import_module(".json-api", __name__)
 docxtract = import_module(".docxtract", __name__)
 
 __all__ = [
-    "PARSERS", "SOURCES", "CatalogEntry", "Harvest", "Parse", "UnknownSource",
-    "catalog_entries", "catalog_feeds", "docxtract", "get", "json_api", "parser",
+    "PARSERS", "SOURCES", "Harvest", "Parse", "UnknownSource", "docxtract", "get", "json_api", "parser",
     "source_type",
 ]
 
@@ -62,8 +60,14 @@ class UnknownSource(KeyError):
 # UnknownSource an unregistered name raises here.
 SOURCES: dict[str, Harvest] = {
     **{name: json_api.harvester(name) for name in json_api.SPECS},
+    "avature": avature.harvest,
+    "dayforce": dayforce.harvest,
+    "hn": hn.harvest,
+    "join": join.harvest,
     "janestreet": janestreet.harvest,
+    "taleo": taleo.harvest,
     "workatastartup": workatastartup.harvest,
+    "zohorecruit": zohorecruit.harvest,
     **{name: docxtract.harvester(name) for name in docxtract.SPECS},
 }
 
@@ -72,40 +76,22 @@ SOURCES: dict[str, Harvest] = {
 # yet) without every existing SOURCES lookup growing a tuple-unpack.
 PARSERS: dict[str, Parse] = {
     **{name: json_api.parser(name) for name in json_api.SPECS},
+    "avature": avature.parse,
+    "dayforce": dayforce.parse,
+    "hn": hn.parse,
+    "join": join.parse,
     "janestreet": janestreet.parse,
+    "taleo": taleo.parse,
+    "zohorecruit": zohorecruit.parse,
     **{name: docxtract.parser(name) for name in docxtract.SPECS},
 }
 
 
-def _source_types() -> dict[str, str]:
-    """Read source taxonomy from the existing adapter manifests."""
-    types: dict[str, str] = {}
-    manifest_dir = Path(__file__).with_name("manifest")
-    for path in sorted(manifest_dir.glob("*.toml")):
-        with path.open("rb") as handle:
-            manifest = tomllib.load(handle)
-        default_type = manifest.get("type")
-        runtime_source = manifest.get("runtime_source")
-        legacy_source = manifest.get("legacy_runtime_source")
-        if isinstance(default_type, str) and isinstance(runtime_source, str):
-            types[runtime_source] = default_type
-            if isinstance(legacy_source, str):
-                types[legacy_source] = default_type
-        for entry in manifest.get("source", []):
-            if not isinstance(entry, dict):
-                continue
-            source = entry.get("runtime_source", runtime_source)
-            source_type = entry.get("type", default_type)
-            if isinstance(source, str) and isinstance(source_type, str):
-                types[source] = source_type
-    return types
-
-
-SOURCE_TYPES = _source_types()
+SOURCE_TYPES = source_types()
 
 
 def source_type(source: str) -> str:
-    """Stable source taxonomy declared in ``sources/manifest/*.toml``."""
+    """Stable source taxonomy declared in ``sources/registry/feeds.toml``."""
     return SOURCE_TYPES.get(source, "Other")
 
 

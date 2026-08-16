@@ -1,14 +1,13 @@
-"""Jane Street -- bespoke JSON, two endpoints that disagree in shape.
+"""Jane Street -- bespoke JSON from the employer's current-role feed.
 
-    https://www.janestreet.com/jobs/main.json           (full roles)
-    https://www.janestreet.com/jobs/internships.json     (summary + status only)
+    https://www.janestreet.com/jobs/main.json
 
 Payload sample: notebooks/nATS-payloads.md#3-bespoke-quant-career-sites.
 
 - main.json is the source of truth: id, city, availability, overview (HTML).
-  internships.json has no `id` -- use it only to read `status`
-  ("closed"/etc.), matched against main.json by position/team, and never as a
-  primary listing.
+  Jane Street's open-roles page treats its separate internships.json payload
+  as a closed-listing archive: matching rows are discarded in favor of the
+  open main.json role. It must not be joined onto main.json as status data.
 - Titles can carry Unicode homoglyphs (Lisu U+A4DF/U+A4E1/U+A4E3 standing in
   for M/L/R, e.g. "ꓟachine ꓡearning ꓣesearcher"). Store `title` verbatim --
   TR39 confusables folding is title_normalized's job downstream, not this
@@ -21,58 +20,22 @@ Payload sample: notebooks/nATS-payloads.md#3-bespoke-quant-career-sites.
 
 from __future__ import annotations
 
-from xjobscore.net import Net, NetError, validators
+from xjobscore.net import Net, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 
 MAIN = "https://www.janestreet.com/jobs/main.json"
-INTERNSHIPS = "https://www.janestreet.com/jobs/internships.json"
 
 
 async def harvest(feed: Feed, net: Net) -> Record:
     main_url = feed.config.get("main_url", MAIN)
-    r = await net.get(main_url, state=feed.state)
+    r = await net.get(main_url, etag=feed.etag)
     if r.not_modified:
-        # Nothing changed on main.json -- skip internships.json too, since its
-        # only job is enriching entries that didn't change either.
-        return Record(http_status=304, validators=validators(r))
+        return Record(http_status=304, etag=etag(r))
 
     main_jobs = r.json()
     items = [Item(external_id=str(job["id"]), payload=job) for job in main_jobs]
 
-    # internships.json is a secondary, best-effort enrichment source (status
-    # only, no `id`) -- its failure must not sink an otherwise-good main.json
-    # poll. It carries no conditional-GET state of its own here since the
-    # engine only tracks one validators dict per feed, keyed off main.json.
-    internships_url = feed.config.get("internships_url", INTERNSHIPS)
-    internships: list = []
-    try:
-        internships_r = await net.get(internships_url)
-        if not internships_r.not_modified:
-            internships = internships_r.json()
-    except NetError:
-        internships = []
-
-    envelope = {"internships": internships}
-    return Record(items=items, envelope=envelope, http_status=r.status, validators=validators(r))
-
-
-def _internship_key(entry: dict) -> tuple:
-    """Best available correlation key between main.json and internships.json.
-
-    internships.json has no `id`, so entries must be matched by content.
-    Inspecting the real fixtures: both files share `position` and `team`, but
-    `position` alone collides -- the sample internships.json has two
-    "Hardware Engineer (FPGA/ASIC)" rows under the same `team` that differ
-    only by city (main.json's `city` vs internships.json's `location`, same
-    value domain e.g. "NYC"/"LDN"). So the key is the triple
-    (position, team, city-or-location) -- the narrowest one available that
-    still uses only fields actually present in both payloads.
-    """
-    return (
-        entry.get("position"),
-        entry.get("team"),
-        entry.get("city") or entry.get("location"),
-    )
+    return Record(items=items, http_status=r.status, etag=etag(r))
 
 
 def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
@@ -89,17 +52,6 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     # -- not a clean employment_type taxonomy value, and the Posting field is
     # documented as "raw string, unmapped" anyway, so pass it through as-is.
     employment_type = job.get("availability")
-
-    # internships.json only ever backfills `status` for entries that actually
-    # have an internship-track counterpart there. Absence must never imply
-    # closure, so source_active stays None unless a match with a "closed"
-    # status was found.
-    source_active = None
-    internships = envelope.get("internships") or []
-    lookup = {_internship_key(entry): entry for entry in internships}
-    matched = lookup.get(_internship_key(job))
-    if matched is not None and matched.get("status") == "closed":
-        source_active = False
 
     # min_salary / max_salary sometimes arrive as the literal string "None"
     # (not JSON null, not a number). Store exactly what was received --
@@ -128,7 +80,7 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         published_at_precision="unknown",
         source_updated_at=None,
         deadline_at=None,
-        source_active=source_active,
+        source_active=None,
         locations_extra=[],
         content_sections=[],
         source_extra=source_extra,

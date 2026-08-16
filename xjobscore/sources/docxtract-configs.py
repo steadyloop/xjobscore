@@ -14,6 +14,51 @@ CONFIGS: dict[str, dict] = {
         "list": {"url": "{key}", "extract": "jsonld"},
         "parser": "schemaorg",
     },
+    # Homerun publishes the complete board as a public Atom feed. Unlike the
+    # lean Atom core, Homerun puts the full job body in <description> and adds
+    # unqualified-in-practice extension fields inside the Atom namespace.
+    "homerun": {
+        "list": {
+            "url": "https://feed.homerun.co/{key}",
+            "extract": "xml_items",
+            "path": "{http://www.w3.org/2005/Atom}entry",
+            "id": ("{http://www.w3.org/2005/Atom}id",),
+        },
+        "parser": "atom",
+        "atom": {
+            "company_path": "author/name",
+            "description_path": "description",
+            "location_path": "location",
+            "employment_type_path": "type",
+            "extra_paths": {
+                "department": "department",
+                "salary_indication": "salary_indication",
+                "updated": "updated",
+            },
+        },
+    },
+    # Trakstar Hire (formerly Recruiterbox) exposes a whole-board RSS feed.
+    # The job extensions use the historical Recruiterbox namespace.
+    "trakstar": {
+        "list": {
+            "url": "https://{key}.hire.trakstar.com/jobfeeds/{key}",
+            "extract": "xml_items",
+            "path": "channel/item",
+            "id": ("guid", "link"),
+        },
+        "parser": "rss",
+        "rss": {
+            "namespace": "https://recruiterbox.com/rss/job/",
+            "location_path": "locationCity",
+            "employment_type_path": "positionType",
+            "extra_paths": {
+                "location_state": "locationState",
+                "location_country": "locationCountry",
+                "close_date": "closeDte",
+                "team": "team",
+            },
+        },
+    },
     "jobvite": {
         "list": {
             "url": "https://jobs.jobvite.com/{key}/jobs",
@@ -22,6 +67,13 @@ CONFIGS: dict[str, dict] = {
         },
         "detail": {"extract": "jsonld", "id": "discovered"},
         "parser": "schemaorg",
+        # jobs.jobvite.com has no bulk feed -- every path (sitemap.xml,
+        # jobs.json, ...) 200s the same SPA shell, so full posting data only
+        # exists per detail page. Verified tolerant of concurrent requests
+        # (8 at once: all 200 in <300ms, no throttling from Cloudflare), so
+        # this trades the default 1-req/s-per-host pacing for up to 5
+        # in-flight detail fetches at once.
+        "detail_concurrency": 5,
         "posting_url": "https://jobs.jobvite.com/{key}/job/{id}",
         "apply_url": True,
         "requisition_id": True,
@@ -105,6 +157,11 @@ CONFIGS: dict[str, dict] = {
             "pattern": r"/careers/job/(?P<id>\d+)/",
         },
         "detail": {"extract": "jsonld", "id": "discovered"},
+        # Measured on zealhr (10 postings, 11 requests): width 1 12.1s, 2 5.0s,
+        # 4 4.6s, 8 4.4s, all clean 200s. Past 2 the curve flattens -- 4 and 8
+        # buy 0.6s between them while looking progressively more like a crawler,
+        # which is the same call jobvite's note records.
+        "detail_concurrency": 2,
         "parser": "schemaorg",
         "posting_url": "https://{key}.vincere.io/careers/job/{id}",
     },
@@ -120,6 +177,12 @@ CONFIGS: dict[str, dict] = {
             "pattern": r"/apply/jobs/details/(?P<id>[A-Za-z0-9]+)",
         },
         "detail": {"extract": "jsonld", "id": "discovered"},
+        # Measured on dtexsystems (7 postings, 9 requests): width 1 10.5s,
+        # 2 9.0s, 4 4.4s, 8 6.9s, all clean 200s. Noisy -- 8 came back slower
+        # than 4, which on a 9-request sample means the differences past 4 are
+        # not resolvable rather than that 8 is worse. 4 is the fastest reading
+        # and matches the ceiling used elsewhere in this tree.
+        "detail_concurrency": 4,
         "parser": "schemaorg",
     },
     # PeopleAdmin. `.json` 406s and the plain HTML search page has no
@@ -147,6 +210,27 @@ CONFIGS: dict[str, dict] = {
         "atom": {
             "extra_paths": {"hiring_unit": "author/name"},
         },
+    },
+    # Oleeo (formerly WCN). Public boards live on *.tal.net and expose one
+    # whole-board Atom feed. The vacancy number varies by tenant, so board 1
+    # is the default while catalog rows for other boards provide feed.config
+    # `url`, which _list_url already treats as the sanctioned endpoint override.
+    #
+    # Only feeds whose entries use <content type="text"> are supported here.
+    # Oleeo also emits type="xhtml" on some tenants; that payload lives below
+    # an XHTML <div>, while the unchanged Atom parser deliberately reads only
+    # content.text. Do not catalog an XHTML tenant as live until the parser
+    # explicitly supports that shape. These feeds are unpaginated, may be
+    # vendor-capped, and expose no useful validators, so use an hourly cadence.
+    "oleeo": {
+        "list": {
+            "url": "https://{key}.tal.net/candidate/jobboard/vacancy/1/feed",
+            "extract": "xml_items",
+            "path": "{http://www.w3.org/2005/Atom}entry",
+            "id": ("{http://www.w3.org/2005/Atom}id",),
+        },
+        "parser": "atom",
+        "atom": {},
     },
     # Fly.io. `/jobs/feed.xml` is a real Atom feed (root envelope verified
     # live, no ETag/Last-Modified), currently carrying zero <entry> elements

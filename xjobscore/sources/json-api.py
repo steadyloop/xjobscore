@@ -7,14 +7,18 @@ and field extraction.  Raw items remain the complete vendor payload.
 
 from __future__ import annotations
 
+import asyncio
 import html
+import math
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from importlib import import_module
 from typing import Any
 
-from xjobscore.net import Net, NetError, validators
+from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 CONFIGS = import_module(".json-api-configs", __package__).CONFIGS
 
@@ -23,6 +27,24 @@ REGISTRY = CONFIGS
 ADAPTERS = CONFIGS
 
 _TOKEN = re.compile(r"{([^}]+)}")
+
+
+@dataclass(frozen=True, slots=True)
+class JsonApiHarvestOptions:
+    """One-run overrides used by the inspector without changing production.
+
+    The registered harvester still accepts only ``(feed, net)``. Inspector
+    calls may opt into faster pagination/detail fan-out and supply the latest
+    full detail items for revision-checked reuse.
+    """
+
+    page_step: int | None = None
+    page_concurrency: int | None = None
+    detail_concurrency: int | None = None
+    revision_fields: tuple[str, ...] = ()
+    list_revision_fields: tuple[str, ...] = ()
+    detail_revision_fields: tuple[str, ...] = ()
+    prior_items: Mapping[str, Item] | None = None
 
 
 def _dig(value: Any, path: str | None) -> Any:
@@ -67,7 +89,11 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
         return _format(spec["template"], payload, context)
     if "date" in spec:
         value = _value(spec["date"], payload, context)
-        return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+        if not value:
+            return None
+        if spec.get("fmt"):
+            return datetime.strptime(value, spec["fmt"])
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
     if "epoch_ms" in spec:
         value = _value(spec["epoch_ms"], payload, context)
         return datetime.fromtimestamp(value / 1000, tz=timezone.utc) if value else None
@@ -129,7 +155,9 @@ def _render(value: Any, context: dict[str, Any]) -> Any:
     return _value(value, None, context)
 
 
-async def _request(request: dict, feed: Feed, net: Net, context: dict[str, Any], *, first: bool):
+async def _request(
+    request: dict, feed: Feed, net: Net, context: dict[str, Any], *, first: bool, concurrency: int = 1
+):
     settings = getattr(feed, "config", None) or {}
     template = settings.get("url", request["url"]) if request.get("url_override", True) else request["url"]
     url = _format(template, None, context)
@@ -137,15 +165,18 @@ async def _request(request: dict, feed: Feed, net: Net, context: dict[str, Any],
     # through _render for: $-prefixed values pull from feed.config (an API
     # key, a contact email), same as `params` and `body` do.
     headers = _render(request["headers"], context) if request.get("headers") else None
+    # Passed through only when raised above the default so a fake net without
+    # the kwarg keeps working, same as docxtract.
+    extra = {"concurrency": concurrency} if concurrency > 1 else {}
     if request.get("method", "GET") == "POST":
-        return await net.post(url, json=_render(request.get("body", {}), context), headers=headers)
-    kwargs: dict[str, Any] = {}
+        return await net.post(url, json=_render(request.get("body", {}), context), headers=headers, **extra)
+    kwargs: dict[str, Any] = {**extra}
     if request.get("params"):
         kwargs["params"] = _render(request["params"], context)
     if headers:
         kwargs["headers"] = headers
     if first and request.get("conditional", True):
-        kwargs["state"] = feed.state
+        kwargs["etag"] = feed.etag
     return await net.get(url, **kwargs)
 
 
@@ -170,6 +201,12 @@ def _record_items(config: dict, rows: list[dict], context: dict[str, Any]) -> li
     ]
 
 
+def _revision(payload: dict, fields: tuple[str, ...]) -> tuple[Any, ...] | None:
+    """Return a complete revision tuple; an absent component is never reusable."""
+    values = tuple(_dig(payload, field) for field in fields)
+    return None if not fields or any(value in (None, "") for value in values) else values
+
+
 def _more(page: list[dict], rows: list[dict], page_config: dict, context: dict[str, Any]) -> bool:
     total = context.get("total")
     if total is not None:
@@ -178,11 +215,304 @@ def _more(page: list[dict], rows: list[dict], page_config: dict, context: dict[s
     return len(page) >= size if size else bool(page)
 
 
-async def harvest(name: str, feed: Feed, net: Net) -> Record:
+def _parallel_eligible(page_config: dict, context: dict[str, Any]) -> bool:
+    """Fan-out needs a known integer total, a numeric cursor, and fixed integer
+    `step` *and* `size`.
+
+    The two are different quantities and only coincide for offset-style boards:
+    `step` advances the cursor, `size` is how many items a page carries. A
+    page-number board (apple: step 1, size 20) needs both to compute how many
+    requests are outstanding, so a config missing either stays sequential.
+    """
+    step, size = page_config.get("step"), page_config.get("size")
+    return (
+        isinstance(context.get("total"), int)
+        and isinstance(step, int) and step > 0
+        and isinstance(size, int) and size > 0
+        and isinstance(context.get("cursor"), int)
+    )
+
+
+async def _paginate_parallel(
+    list_config: dict, feed: Feed, net: Net, context: dict[str, Any], page_config: dict,
+    rows: list[dict], *, concurrency: int
+) -> tuple[str, int | None, list[dict]]:
+    """Fetch every remaining page at once, bounded by Net's semaphore.
+
+    Extends `rows` in place, in page order. Returns (outcome, last_status,
+    last_page): outcome is "done", "capped" (`max` bit with more remaining),
+    or "error" (a page failed; rows holds the contiguous prefix of successes).
+
+    How many pages remain is a question about items per page (`size`); where
+    each one starts is a question about the cursor (`step`). They are equal for
+    an offset board and wildly different for a page-number one, so counting off
+    `step` would ask apple for 4,564 pages instead of 229.
+    """
+    total, step, start = context["total"], page_config["step"], context["cursor"]
+    n_more = math.ceil(max(0, total - len(rows)) / page_config["size"])
+    max_pages = page_config.get("max")
+    capped = max_pages is not None and n_more > max_pages - 1
+    if capped:
+        n_more = max_pages - 1
+    offsets = [start + step * (i + 1) for i in range(n_more)]
+    results = await asyncio.gather(
+        *(
+            _request(list_config, feed, net, {**context, "cursor": offset},
+                     first=False, concurrency=concurrency)
+            for offset in offsets
+        ),
+        return_exceptions=True,
+    )
+    last_status: int | None = None
+    page = rows
+    # gather preserves argument order, so this walk is offset order. Bodies
+    # are only parsed up to the first failure; a .json() error propagates the
+    # same way it does from the sequential loop.
+    for result in results:
+        if isinstance(result, NetError):
+            return "error", last_status, page
+        if isinstance(result, BaseException):
+            raise result
+        last_status = result.status
+        page = _items(result.json(), list_config)
+        rows.extend(page)
+    return ("capped" if capped and bool(page) and len(rows) < total else "done"), last_status, page
+
+
+def _facet_dimensions(body: dict, partition: dict) -> list[tuple[str, list[tuple[str, int]]]]:
+    """Flatten Workday-style nested facets into usable partition dimensions."""
+    root = _dig(body, partition.get("facets", "facets"))
+    dimensions: list[tuple[str, list[tuple[str, int]]]] = []
+
+    def walk(nodes: Any) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            values = node.get("values")
+            usable = [
+                (str(value["id"]), int(value["count"]))
+                for value in values or []
+                if isinstance(value, dict)
+                and value.get("id") not in (None, "")
+                and isinstance(value.get("count"), int)
+                and value["count"] > 0
+            ]
+            parameter = node.get("facetParameter")
+            if parameter and usable:
+                dimensions.append((str(parameter), usable))
+            walk(values)
+
+    walk(root)
+    return dimensions
+
+
+def _facet_groups(
+    values: list[tuple[str, int]], window: int
+) -> list[tuple[list[str], int]] | None:
+    """First-fit-decreasing bins, returned in stable vendor facet order."""
+    if not values:
+        return None
+    indexed = [(index, value_id, count) for index, (value_id, count) in enumerate(values)]
+    bins: list[list[tuple[int, str, int]]] = []
+    totals: list[int] = []
+    for entry in sorted(indexed, key=lambda row: (-row[2], row[0])):
+        if entry[2] >= window:
+            bins.append([entry])
+            totals.append(entry[2])
+            continue
+        for index, total in enumerate(totals):
+            if total < window and total + entry[2] <= window:
+                bins[index].append(entry)
+                totals[index] += entry[2]
+                break
+        else:
+            bins.append([entry])
+            totals.append(entry[2])
+    packed = sorted(
+        ((sorted(group), total) for group, total in zip(bins, totals)),
+        key=lambda pair: pair[0][0][0],
+    )
+    return [([value_id for _, value_id, _ in group], total) for group, total in packed]
+
+
+async def _complete_list_query(
+    list_config: dict,
+    feed: Feed,
+    net: Net,
+    context: dict[str, Any],
+    page_config: dict,
+    response: Any,
+    body: dict,
+    *,
+    concurrency: int,
+) -> tuple[list[dict], int, bool]:
+    """Finish one already-started list query and retain its stable page order."""
+    rows = _items(body, list_config)
+    page = rows
+    query_context = dict(context)
+    if page_config.get("total"):
+        query_context["total"] = _value(page_config["total"], body, query_context)
+    last_status = response.status
+    pages = 1
+    if (
+        concurrency > 1
+        and _parallel_eligible(page_config, query_context)
+        and _more(page, rows, page_config, query_context)
+    ):
+        outcome, parallel_status, _ = await _paginate_parallel(
+            list_config, feed, net, query_context, page_config, rows, concurrency=concurrency
+        )
+        return rows, parallel_status or last_status, outcome != "done"
+    while _more(page, rows, page_config, query_context):
+        if pages >= page_config.get("max", float("inf")):
+            return rows, last_status, True
+        step = (
+            len(page)
+            if page_config.get("step") == "count"
+            else page_config.get("step", page_config.get("size", 1))
+        )
+        query_context["cursor"] += step
+        try:
+            response = await _request(
+                list_config, feed, net, query_context, first=False, concurrency=concurrency
+            )
+        except NetError:
+            return rows, last_status, True
+        last_status = response.status
+        page = _items(response.json(), list_config)
+        rows.extend(page)
+        pages += 1
+    return rows, last_status, False
+
+
+async def _partition_capped_list(
+    list_config: dict,
+    feed: Feed,
+    net: Net,
+    context: dict[str, Any],
+    page_config: dict,
+    body: dict,
+    partition: dict,
+    *,
+    concurrency: int,
+    used: frozenset[str] = frozenset(),
+) -> tuple[list[dict], int | None, bool, int]:
+    """Split a capped Workday result window into facet-complete queries."""
+    window = int(partition["window"])
+    reported_total = _value(page_config.get("total"), body, context)
+    candidates: list[tuple[int, int, str, list[tuple[list[str], int]]]] = []
+    for parameter, values in _facet_dimensions(body, partition):
+        if parameter in used or sum(count for _, count in values) < int(reported_total or 0):
+            continue
+        groups = _facet_groups(values, window)
+        if groups:
+            candidates.append((len(groups), sum(count for _, count in values), parameter, groups))
+    if not candidates:
+        return [], None, True, 0
+    _, _, parameter, groups = min(candidates, key=lambda row: (row[0], row[1], row[2]))
+
+    async def branch(value_ids: list[str], expected: int) -> tuple[list[dict], int, bool, int]:
+        applied = {key: list(value) for key, value in context.get("appliedFacets", {}).items()}
+        applied[parameter] = value_ids
+        branch_context = {
+            **context,
+            "cursor": page_config.get("start", 0),
+            "appliedFacets": applied,
+        }
+        try:
+            response = await _request(
+                list_config, feed, net, branch_context, first=False, concurrency=concurrency
+            )
+        except NetError:
+            return [], 0, True, 1
+        branch_body = response.json()
+        actual = _value(page_config.get("total"), branch_body, branch_context)
+
+        # A grouped facet whose total differs from the sum of its members is
+        # overlapping. Individual values are still exhaustive and dedupe later.
+        if len(value_ids) > 1 and actual != expected:
+            value_counts = dict(
+                next(values for name, values in _facet_dimensions(body, partition) if name == parameter)
+            )
+            pieces = await asyncio.gather(
+                *(branch([value_id], value_counts[value_id]) for value_id in value_ids)
+            )
+            return _merge_partition_results(pieces, list_config, context, extra_queries=1)
+
+        if isinstance(actual, int) and actual >= window and actual != expected:
+            nested_rows, nested_status, truncated, count = await _partition_capped_list(
+                list_config,
+                feed,
+                net,
+                branch_context,
+                page_config,
+                branch_body,
+                partition,
+                concurrency=concurrency,
+                used=used | {parameter},
+            )
+            return nested_rows, nested_status or response.status, truncated, count + 1
+        rows, status, truncated = await _complete_list_query(
+            list_config,
+            feed,
+            net,
+            branch_context,
+            page_config,
+            response,
+            branch_body,
+            concurrency=concurrency,
+        )
+        return rows, status, truncated, 1
+
+    return _merge_partition_results(
+        await asyncio.gather(*(branch(value_ids, expected) for value_ids, expected in groups)),
+        list_config,
+        context,
+    )
+
+
+def _merge_partition_results(
+    results: Any,
+    list_config: dict,
+    context: dict[str, Any],
+    *,
+    extra_queries: int = 0,
+) -> tuple[list[dict], int | None, bool, int]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+    status: int | None = None
+    truncated = False
+    query_count = extra_queries
+    for part_rows, part_status, part_truncated, part_count in results:
+        status = part_status or status
+        truncated = truncated or part_truncated
+        query_count += part_count
+        for row in part_rows:
+            external_id = _item_id(list_config["id"], row, context)
+            if external_id is None or external_id in seen:
+                continue
+            seen.add(external_id)
+            rows.append(row)
+    return rows, status, truncated, query_count
+
+
+async def harvest(
+    name: str,
+    feed: Feed,
+    net: Net,
+    *,
+    options: JsonApiHarvestOptions | None = None,
+) -> Record:
     config = CONFIGS[name]
     list_config = config["list"]
     settings = getattr(feed, "config", None) or {}
-    context = {"key": feed.key, "cursor": (list_config.get("page") or {}).get("start", 0)}
+    context = {
+        "key": feed.key,
+        "cursor": (list_config.get("page") or {}).get("start", 0),
+        "appliedFacets": {},
+    }
     key_parts = config.get("key_parts", ())
     context.update(zip(key_parts, feed.key.split("/", len(key_parts) - 1)))
     context.update(settings)
@@ -192,9 +522,9 @@ async def harvest(name: str, feed: Feed, net: Net) -> Record:
         if list_config.get("catch_first_error"):
             return Record(truncated=True)
         raise
-    first_status, first_validators = response.status, validators(response)
+    first_status, first_etag = response.status, etag(response)
     if response.not_modified:
-        return Record(http_status=304, validators=first_validators)
+        return Record(http_status=304, etag=first_etag)
 
     body = response.json()
     rows = _items(body, list_config)
@@ -205,16 +535,81 @@ async def harvest(name: str, feed: Feed, net: Net) -> Record:
         if (resolved := _value(value, body, context)) is not None
     }
     page_config = list_config.get("page")
+    if page_config and options is not None:
+        page_config = dict(page_config)
+        if options.page_step is not None:
+            page_config["step"] = options.page_step
+        if options.page_concurrency is not None:
+            page_config["concurrency"] = options.page_concurrency
     if page_config and page_config.get("total"):
         context["total"] = _value(page_config["total"], body, context)
     last_status = response.status
+    partition_count = 0
+    result_window_truncated = False
     pages = 1
+    # A `page.max` cap bites here (parallel) or in the sequential loop below --
+    # either way the rows already fetched are complete, real rows, so unlike
+    # the partition/error paths they still deserve a detail fetch. Threaded
+    # into every return below instead of returning early, so a capped list
+    # never silently ships without descriptions (see `_finish`).
+    pagination_truncated = False
+    concurrency = page_config.get("concurrency", 1) if page_config else 1
+    partition = list_config.get("partition")
+    if (
+        page_config
+        and partition
+        and isinstance(context.get("total"), int)
+        and context["total"] >= int(partition["window"])
+    ):
+        result_window_truncated = True
+        rows, partition_status, list_truncated, partition_count = await _partition_capped_list(
+            list_config,
+            feed,
+            net,
+            context,
+            page_config,
+            body,
+            partition,
+            concurrency=concurrency,
+        )
+        if partition_status is not None:
+            last_status = partition_status
+        if list_truncated:
+            partial_items = _record_items(config, rows, context) if "detail" not in config else []
+            return Record(
+                items=partial_items,
+                envelope=context["envelope"],
+                truncated=True,
+                http_status=first_status,
+                etag=first_etag,
+                enumerated_item_count=len(rows),
+                partition_count=partition_count,
+                result_window_truncated=True,
+            )
+        page = []
+    elif (
+        page_config and concurrency > 1
+        and _parallel_eligible(page_config, context)
+        and _more(page, rows, page_config, context)
+    ):
+        outcome, parallel_status, page = await _paginate_parallel(
+            list_config, feed, net, context, page_config, rows, concurrency=concurrency
+        )
+        if parallel_status is not None:
+            last_status = parallel_status
+        if outcome == "error":
+            return Record(
+                items=_record_items(config, rows, context) if "detail" not in config else [],
+                envelope=context["envelope"], truncated=True, http_status=first_status, etag=first_etag,
+                enumerated_item_count=len(rows),
+            )
+        if outcome == "capped":
+            pagination_truncated = True
+        page = []
     while page_config and _more(page, rows, page_config, context):
         if pages >= page_config.get("max", float("inf")):
-            return Record(
-                items=_record_items(config, rows, context), envelope=context["envelope"], truncated=True,
-                http_status=first_status, validators=first_validators,
-            )
+            pagination_truncated = True
+            break
         step = len(page) if page_config.get("step") == "count" else page_config.get("step", page_config.get("size", 1))
         context["cursor"] += step
         try:
@@ -222,7 +617,8 @@ async def harvest(name: str, feed: Feed, net: Net) -> Record:
         except NetError:
             return Record(
                 items=_record_items(config, rows, context) if "detail" not in config else [],
-                envelope=context["envelope"], truncated=True, http_status=first_status, validators=first_validators,
+                envelope=context["envelope"], truncated=True, http_status=first_status, etag=first_etag,
+                enumerated_item_count=len(rows),
             )
         last_status = response.status
         body = response.json()
@@ -232,10 +628,24 @@ async def harvest(name: str, feed: Feed, net: Net) -> Record:
 
     detail = config.get("detail")
     if not detail:
-        return Record(items=_record_items(config, rows, context), envelope=context["envelope"], http_status=last_status if config.get("last_status") else first_status, validators=first_validators)
+        return Record(
+            items=_record_items(config, rows, context),
+            envelope=context["envelope"],
+            truncated=pagination_truncated,
+            http_status=last_status if config.get("last_status") else first_status,
+            etag=first_etag,
+            enumerated_item_count=len(rows),
+            partition_count=partition_count,
+            result_window_truncated=result_window_truncated,
+        )
+    if options is not None and options.detail_concurrency is not None:
+        detail = {**detail, "concurrency": options.detail_concurrency}
 
     items: list[Item] = []
+    reused_item_count = 0
+    detail_fetched_count = 0
     seen: set[str] = set()
+    pending: list[tuple[str, dict]] = []
     for row in rows:
         detail_id = _item_id(detail.get("id", list_config["id"]), row, context)
         dedupe = _item_id(detail.get("dedupe"), row, context) if detail.get("dedupe") else detail_id
@@ -243,19 +653,164 @@ async def harvest(name: str, feed: Feed, net: Net) -> Record:
             continue
         if dedupe:
             seen.add(dedupe)
-        detail_context = {**context, "id": detail_id}
-        try:
-            detail_response = await _request(detail, feed, net, detail_context, first=False)
-        except NetError:
-            return Record(items=items, envelope=context["envelope"], truncated=True, http_status=last_status if config.get("last_status") else first_status, validators=first_validators)
-        payload = _dig(detail_response.json(), detail.get("payload"))
-        if not isinstance(payload, dict):
-            continue
-        if detail.get("merge"):
-            payload = {**row, **payload}
-        external_id = _item_id(detail.get("item_id", list_config["id"]), payload, detail_context) or detail_id
-        items.append(Item(external_id=external_id, payload=payload))
-    return Record(items=items, envelope=context["envelope"], http_status=last_status if config.get("last_status") else first_status, validators=first_validators)
+        pending.append((detail_id, row))
+
+    # `max` is to the detail leg what `page.max` is to the list: a ceiling on
+    # what one poll will spend. A detail board pays one request per row, so
+    # without it the only bound is the vendor's row count. Reports `truncated`
+    # when it bites, exactly as the list cap does, so the shortfall is never
+    # silent.
+    detail_max = detail.get("max")
+    detail_capped = detail_max is not None and len(pending) > detail_max
+    if detail_capped:
+        pending = pending[:detail_max]
+
+    # A detail request that exhausts its retries costs us that row, not the
+    # run: the fan-out has already issued and paid for every sibling request,
+    # so returning early here discarded work already done -- one 429 on a
+    # 781-row Workday board threw away 400 successfully fetched postings and
+    # reported `partial`. Skip the row, flag `truncated`, keep the rest, as
+    # avature.py and taleo.py already do on the same failure.
+    detail_failed = False
+
+    def _finish(*, truncated: bool = False) -> Record:
+        truncated = truncated or detail_capped or pagination_truncated or detail_failed
+        return Record(
+            items=items, envelope=context["envelope"], truncated=truncated,
+            http_status=last_status if config.get("last_status") else first_status, etag=first_etag,
+            reused_item_count=reused_item_count,
+            enumerated_item_count=len(rows),
+            partition_count=partition_count,
+            detail_fetched_count=detail_fetched_count,
+            result_window_truncated=result_window_truncated,
+        )
+
+    batch = detail.get("batch")
+    if not batch:
+        prior_items = options.prior_items if options is not None else None
+        revision_fields = options.revision_fields if options is not None else ()
+        list_revision_fields = (
+            (options.list_revision_fields or revision_fields) if options is not None else ()
+        )
+        detail_revision_fields = (
+            (options.detail_revision_fields or revision_fields) if options is not None else ()
+        )
+        cached: dict[int, Item] = {}
+        misses: list[tuple[int, str, dict]] = []
+        for index, (detail_id, row) in enumerate(pending):
+            prior = prior_items.get(detail_id) if prior_items is not None else None
+            row_revision = _revision(row, list_revision_fields)
+            prior_revision = (
+                _revision(prior.payload, detail_revision_fields)
+                if prior is not None and isinstance(prior.payload, dict)
+                else None
+            )
+            if row_revision is not None and row_revision == prior_revision:
+                cached[index] = prior
+            else:
+                misses.append((index, detail_id, row))
+
+        concurrency = detail.get("concurrency", 1)
+        if concurrency > 1:
+            # One request per pending row, bounded by Net's per-host
+            # semaphore. Unlike the serial path, every request is issued even
+            # if an early one fails -- same trade-off as _paginate_parallel.
+            results = await asyncio.gather(
+                *(
+                    _request(detail, feed, net, {**context, "id": detail_id},
+                             first=False, concurrency=concurrency)
+                    for _, detail_id, _ in misses
+                ),
+                return_exceptions=True,
+            )
+            detail_fetched_count += len(misses)
+            fetched = {index: result for (index, _, _), result in zip(misses, results)}
+        else:
+            fetched = None
+        for index, (detail_id, row) in enumerate(pending):
+            prior = cached.get(index)
+            if prior is not None:
+                items.append(prior)
+                reused_item_count += 1
+                continue
+            detail_context = {**context, "id": detail_id}
+            if fetched is None:
+                try:
+                    detail_response = await _request(detail, feed, net, detail_context, first=False)
+                    detail_fetched_count += 1
+                except NetError:
+                    detail_failed = True
+                    continue
+            else:
+                result = fetched[index]
+                if isinstance(result, NetError):
+                    detail_failed = True
+                    continue
+                if isinstance(result, BaseException):
+                    raise result
+                detail_response = result
+            payload = _dig(detail_response.json(), detail.get("payload"))
+            if not isinstance(payload, dict):
+                continue
+            if detail.get("merge"):
+                payload = {**row, **payload}
+            external_id = _item_id(detail.get("item_id", list_config["id"]), payload, detail_context) or detail_id
+            items.append(Item(external_id=external_id, payload=payload))
+        return _finish()
+
+    # Batched: one request covers `batch` rows, ids joined by "," into {id}.
+    # The response's item order is not trusted -- each returned entry is
+    # matched back to its row by `match`/`id`, not by position.
+    match_spec = detail.get("match", detail.get("id", list_config["id"]))
+    chunks = [pending[start : start + batch] for start in range(0, len(pending), batch)]
+    chunk_contexts = [
+        {**context, "id": ",".join(detail_id for detail_id, _ in chunk)} for chunk in chunks
+    ]
+    concurrency = detail.get("concurrency", 1)
+    if concurrency > 1:
+        # Chunks fetched together, bounded by Net's per-host semaphore.
+        # Unlike the serial path, every chunk is requested even if an early
+        # one fails -- same trade-off as the per-item fan-out above.
+        results = await asyncio.gather(
+            *(
+                _request(detail, feed, net, chunk_context, first=False, concurrency=concurrency)
+                for chunk_context in chunk_contexts
+            ),
+            return_exceptions=True,
+        )
+        detail_fetched_count += len(chunk_contexts)
+    else:
+        results = None
+    for index, (chunk, detail_context) in enumerate(zip(chunks, chunk_contexts)):
+        if results is None:
+            try:
+                detail_response = await _request(detail, feed, net, detail_context, first=False)
+                detail_fetched_count += 1
+            except NetError:
+                detail_failed = True
+                continue
+        else:
+            result = results[index]
+            if isinstance(result, NetError):
+                detail_failed = True
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            detail_response = result
+        returned = _dig(detail_response.json(), detail.get("payload"))
+        by_id = (
+            {_item_id(match_spec, entry, detail_context): entry for entry in returned if isinstance(entry, dict)}
+            if isinstance(returned, list) else {}
+        )
+        for detail_id, row in chunk:
+            payload = by_id.get(detail_id)
+            if not isinstance(payload, dict):
+                continue
+            if detail.get("merge"):
+                payload = {**row, **payload}
+            external_id = _item_id(detail.get("item_id", list_config["id"]), payload, detail_context) or detail_id
+            items.append(Item(external_id=external_id, payload=payload))
+    return _finish()
 
 
 def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:

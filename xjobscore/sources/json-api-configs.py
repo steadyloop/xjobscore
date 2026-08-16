@@ -80,7 +80,10 @@ SIMPLE: dict[str, dict] = {
     "icims": {
         "list": {
             "url": "https://careers.{key}.com/api/jobs?page={cursor}", "items": "jobs", "unwrap": "data", "id": "@req_id",
-            "page": {"start": 1, "size": 10, "step": 1},
+            # `total` duplicates the envelope's own totalCount field so
+            # _parallel_eligible can see an integer bound; page.size=10 is
+            # the vendor's own page width, unverified as raisable.
+            "page": {"start": 1, "size": 10, "step": 1, "total": "@totalCount", "concurrency": 4},
         },
         "envelope": {"totalCount": "@totalCount"},
         "fields": {
@@ -185,17 +188,22 @@ SIMPLE: dict[str, dict] = {
     # ISO-parseable; `updated_at` and the registration window are, so those carry
     # the timestamps.
     #
-    # `total` reports a flat 10,000 over exactly 200 pages on every query -- an
-    # API ceiling, not the corpus size. Results come back newest-first (page 1 is
-    # today, page 200 is roughly eight months back), so capping at 20 pages keeps
-    # the newest 1,000 and still overlaps several days of postings between polls.
-    # Without the cap a single poll walks all 200 pages.
+    # `total` reports a flat 10,000 -- an API ceiling, not the corpus size.
+    # Results come back newest-first, so five 200-row pages keep the newest
+    # 1,000 and still overlap several days of postings between polls. Live
+    # probes measured a 200-row response at ~4s and pages 2-5 together at ~4s
+    # with width 4 (all 200, no retries); one 1,000-row response took ~20.5s.
+    # The bounded fan-out therefore keeps the same window in roughly two round
+    # trips instead of 20 serial requests.
     "unstop": {
         "list": {
             "url": "https://unstop.com/api/public/opportunity/search-result",
-            "params": {"opportunity": "internships", "page": "$cursor", "per_page": 50},
+            "params": {"opportunity": "internships", "page": "$cursor", "per_page": 200},
             "items": "data.data", "id": "@id",
-            "page": {"total": "@data.total", "start": 1, "size": 50, "step": 1, "max": 20},
+            "page": {
+                "total": "@data.total", "start": 1, "size": 200, "step": 1,
+                "max": 5, "concurrency": 4,
+            },
         },
         "fields": {
             "title": "@title", "url_posting": "@seo_url", "apply_url": "@short_url",
@@ -225,22 +233,29 @@ SIMPLE: dict[str, dict] = {
     #     `url` is empty on about a third of documents and relative on the rest;
     #     the canonical form apply.jobappnetwork.com/clients/{c}/posting/{j}/en is
     #     what those relative paths redirect to, and it is derivable for every row.
-    #   `max` caps the sweep at the newest 5,000. No result-window limit was
-    #     observed (from=10001 still answers), so the cap is a cost decision, not
-    #     a server one: an exhaustive pass is ~1,970 requests. The engine reports
-    #     `truncated` when it bites, so the shortfall is never silent.
+    #   `max` caps the sweep at the newest 5,000: five pages of 1,000, the first
+    #     paced normally and the remaining four in flight at once (`concurrency`),
+    #     so the whole sweep is a couple of round trips instead of 50 throttled
+    #     ones. No result-window limit was observed (from=10001 still answers)
+    #     and size=1000 answers in ~2.3s, so both the cap and the burst are
+    #     cost/politeness decisions, not server ones: an exhaustive pass would
+    #     be ~197 requests. The engine reports `truncated` when the cap bites,
+    #     so the shortfall is never silent.
     "talentreef": {
         "list": {
             "method": "POST",
             "url": "https://prod-kong.internal.talentreef.com/apply/proxy-es/search-en-us/posting/_search",
             "body": {
-                "size": 100,
+                "size": 1000,
                 "from": "$cursor",
                 "query": {"match_all": {}},
-                "sort": [{"createdDate": "desc"}],
+                # createdDate is day-precision, so ties are page-order-unstable
+                # without the jobId tiebreaker: a 5,000-row sweep came back
+                # with 77 duplicate ids before it was added.
+                "sort": [{"createdDate": "desc"}, {"jobId": "desc"}],
             },
             "items": "hits.hits", "unwrap": "_source", "id": "@jobId",
-            "page": {"total": "@hits.total", "size": 100, "step": 100, "max": 50},
+            "page": {"total": "@hits.total", "size": 1000, "step": 1000, "max": 5, "concurrency": 4},
         },
         "fields": {
             "title": "@title",
@@ -308,11 +323,17 @@ SIMPLE: dict[str, dict] = {
                     "isOpen,isPublic,isDeleted,salary,salaryUnit,payRate,benefits,yearsRequired,"
                     "travelRequirements,willRelocate"
                 ),
-                "where": "isOpen=true", "start": "$cursor", "count": 100,
+                # 500 is the vendor's own clamp, not a guess: doc/integration-plan.md:221
+                # records that a larger `count` is silently reduced to 500 with a
+                # `messages` warning. Descriptions are inline here (no detail leg),
+                # so page size is the whole cost -- 5x fewer requests for the same
+                # rows beats any amount of fan-out. `max` drops 50 -> 10 to hold the
+                # sweep at the same ~5,000-row ceiling it had at count=100.
+                "where": "isOpen=true", "start": "$cursor", "count": 500,
                 "orderBy": "-dateLastPublished", "showTotalMatched": "true",
             },
             "items": "data", "id": "@id",
-            "page": {"start": 0, "size": 100, "step": 100, "total": "@total", "max": 50},
+            "page": {"start": 0, "size": 500, "step": 500, "total": "@total", "max": 10},
         },
         "fields": {
             "title": "@title",
@@ -364,6 +385,42 @@ SIMPLE: dict[str, dict] = {
             "requisition_id": {"fallback": ["@jobcode"]},
         },
         "extra": {"srno": "@srno", "accountpage": "$envelope.account.accountpage"},
+    },
+    # Fountain's directory endpoint is a complete, paginated list, but each
+    # row is only a pointer into an HTML application flow. The JSON has no
+    # description or date field, so deliberately leave both unmapped: these
+    # records cannot be scored and the feed must remain unverified/disabled in
+    # the catalog until a reusable HTML detail reader exists.
+    #
+    # Account, brand and country are distinct route parts. In particular,
+    # brand often differs from account and country is uppercase ISO-2. The
+    # application route uses `to_param`, not the UUID in `id`.
+    "fountain": {
+        "key_parts": ("account", "brand", "country"),
+        "list": {
+            "url": "https://web.fountain.com/c/{account}/{brand}/{country}.json",
+            "url_override": False,
+            "params": {"page": "$cursor"},
+            "items": "openings", "id": "@id",
+            "page": {
+                "start": 1, "size": 25, "step": 1,
+                "total": "@pagination.total_count", "max": 40,
+            },
+        },
+        "fields": {
+            "title": "@title",
+            "url_posting": {"template": "https://web.fountain.com/{account}/apply/{to_param}?brand_id=all"},
+            "apply_url": {"template": "https://web.fountain.com/{account}/apply/{to_param}?brand_id=all"},
+            "company_raw": "$company_raw",
+            "location_raw": {"fallback": ["@location_address", "@location_name"]},
+            "employment_type": "@job_type",
+        },
+        "extra": {
+            "to_param": "@to_param", "location_name": "@location_name",
+            "location_address": "@location_address", "location_state_code": "@location_state_code",
+            "additional_job_types": "@additional_job_types",
+            "amazon_afp_job_types": "@amazon_afp_job_types",
+        },
     },
     "ukg": {
         "key_parts": ("host", "companyCode", "boardGuid"),
@@ -431,7 +488,7 @@ SIMPLE: dict[str, dict] = {
     # platform-wide feed (no tenant in the key, same shape as unstop/bullhorn).
     # Unauthenticated GET returns 401; needs a free Authorization-Key (minted
     # against one registered email) plus a User-Agent set to that same email
-    # -- see catalogs/usajobs.toml for why that pair must never be committed.
+    # -- see registry/feeds.toml for why that pair must never be committed.
     #
     # JobCategoryCode is the highest-value fetch-side filter in this tree: it
     # turns an all-department federal board into an IT/CS/Math-only fetch at
@@ -515,7 +572,8 @@ COMPANY_JSON: dict[str, dict] = {
             "location_raw": "@normalized_location",
             "description_html": "@description",
             "requisition_id": "@id_icims",
-            "published_at": {"date": "@posted_date"},
+            # posted_date is rendered, not ISO: "August 13, 2026".
+            "published_at": {"date": "@posted_date", "fmt": "%B %d, %Y"},
             "published_at_precision": "date",
         },
         "extra": {
@@ -539,7 +597,22 @@ COMPANY_JSON: dict[str, dict] = {
             },
             "items": "res.searchResults",
             "id": "@positionId",
-            "page": {"total": "@res.totalRecords", "start": 1, "size": 20, "step": 1, "max": 400},
+            # A page-number cursor, not an offset: `step` is 1 (page 1, 2, 3...)
+            # while `size` is the 20 rows Apple serves per page -- the body has
+            # no page-size parameter, so 20 is the server's, not ours.
+            #
+            # The USA filter alone returns ~4,580 postings, so an exhaustive
+            # sweep is ~230 pages. Sequentially that cost 230.5s, of which only
+            # 44.1s was HTTP (~192ms/page): the other 81% was the 1s/host
+            # min-interval in Net. Pages 2+ fan out, which skips that throttle.
+            #
+            # Width 2, not the 4 talentreef and oracle use: at 4 Apple answered
+            # 2 of 228 pages with 429 (13.1s wall, retries absorbing them). At
+            # 2 the same 228-page sweep took 21.1s with a clean 200 on every
+            # page. So the extra width buys 8s in exchange for provoking the
+            # board -- this ceiling is Apple's, not a politeness choice.
+            "page": {"total": "@res.totalRecords", "start": 1, "size": 20, "step": 1,
+                     "max": 400, "concurrency": 2},
         },
         "fields": {
             "title": "@postingTitle",
@@ -553,44 +626,6 @@ COMPANY_JSON: dict[str, dict] = {
             "published_at_precision": "exact",
         },
         "extra": {"team": "@team"},
-    },
-    "tesla": {
-        "list": {"url": "https://www.tesla.com/cua-api/apps/careers/state", "items": "listings", "id": "@id"},
-        "envelope": {"lookup": "@lookup"},
-        "fields": {
-            "title": "@t",
-            "url_posting": {"template": "https://www.tesla.com/careers/search/job/{id}"},
-            "company_raw": "Tesla",
-            "location_raw": {"lookup": ["$envelope.lookup.locations", "@l"]},
-            "employment_type": {"lookup": ["$envelope.lookup.types", "@type"]},
-            "workplace_type_raw": {"lookup": ["$envelope.lookup.departments", "@d"]},
-        },
-        "extra": {"department": {"lookup": ["$envelope.lookup.departments", "@d"]}},
-    },
-    "uber": {
-        "list": {
-            "method": "POST",
-            "url": "https://www.uber.com/api/loadSearchJobsResults",
-            "body": {
-                "limit": 50,
-                "page": "$cursor",
-                "params": {"location": [], "team": []},
-                "query": "",
-            },
-            "items": "data.results",
-            "id": "@id",
-            "page": {"total": "@data.totalResults", "start": 0, "size": 50, "step": 1, "max": 50},
-        },
-        "fields": {
-            "title": "@title",
-            "url_posting": "@url",
-            "company_raw": "Uber",
-            "location_raw": {"join": ["@location.city", "@location.country"]},
-            "description_html": "@description",
-            "published_at": {"date": "@creationDate"},
-            "published_at_precision": "exact",
-        },
-        "extra": {"department": "@department", "region": "@location.region"},
     },
 }
 DETAIL_A: dict[str, dict] = {
@@ -608,7 +643,38 @@ DETAIL_A: dict[str, dict] = {
             },
             "items": "data.positions",
             "id": "@id",
-            "page": {"total": "@data.count", "size": 10, "step": 10},
+            # 10 rows/page is the server's, not ours: `pcsx/search` takes no
+            # size parameter. A `num=50` param is documented for Eightfold's
+            # sibling SmartApply endpoint (doc/source-list-opus-audit.md:227)
+            # and probed here against microsoft -- it changed nothing, 10 rows
+            # with it and 10 without, so that lever does not exist on this path.
+            # Fan-out is therefore the only one.
+            #
+            # The earlier "flat past 2" reading came from a 4-page probe, too
+            # small to show scaling. On whole boards it scales cleanly:
+            # ford (59 requests)     width 2 24.3s, 4 11.8s, 8 5.5s, 16 2.9s
+            # qualcomm (196 requests) width 2 28.0s, 8 6.7s, 16 3.5s, 32 2.7s
+            # Item counts identical at every width; returns flatten past 16.
+            #
+            # 8 and not 16, and emphatically not 32: sweeping to 32 drew a
+            # sustained 405 on our httpx client across five of six tenants --
+            # including ones never probed -- while curl from the same host and
+            # UA still got 200. It cleared on its own, but tenants share edge
+            # infrastructure, so the ceiling is Eightfold's and it is enforced
+            # vendor-wide, not per tenant. `Net._host_semaphores` is keyed by
+            # netloc, so this cap is per tenant: `run.cycle` gathers a batch of
+            # feeds, and all six boards polling at once is 6x this number in
+            # flight against one backend. 8 is verified for a single board;
+            # raising it further needs a vendor-wide cap first.
+            #
+            # `max` exists because this config had none -- at 10 rows/page an
+            # unexpectedly large tenant walked unbounded. 500 pages = 5,000 rows,
+            # chosen so it does not bite a real board: Microsoft reports
+            # `data.count` 2,000 and a 200-page cap truncated it exactly, which
+            # is the mistake this value avoids. The engine reports `truncated`
+            # if it ever does bite, so a short sweep is never silent.
+            "page": {"total": "@data.count", "size": 10, "step": 10,
+                     "max": 500, "concurrency": 8},
         },
         "fields": {
             "title": "@name",
@@ -640,6 +706,17 @@ DETAIL_A: dict[str, dict] = {
             "url_override": False,
             "id": "@id",
             "payload": "result.jobOpening",
+            # The list carries no description, so it is one GET per posting and
+            # the run is ~1s x N of our own throttle. Measured on datapelago
+            # (14 postings, 15 requests): width 1 14.3s, 2 5.0s, 4 4.5s, 8 1.3s,
+            # every width clean -- no 429, no retry, no Retry-After.
+            #
+            # 4, not the 8 the probe liked best: 15 requests is too thin a
+            # sample to rank widths, and BambooHR publishes no rate limit. What
+            # the probe does establish is tolerance, and 4 is the ceiling the
+            # rest of this tree settled on against vendors that do publish one.
+            # Revisit with a large tenant if 8 is ever worth the argument.
+            "concurrency": 4,
         },
         "fields": {
             "title": "@jobOpeningName",
@@ -669,18 +746,37 @@ DETAIL_A: dict[str, dict] = {
         # A supplied feed config host/site wins over this slash-separated key.
         "key_parts": ("host", "site"),
         "list": {
+            # limit/offset must live inside the finder value -- a top-level
+            # query param binds to the outer (always 1-item) collection and
+            # is silently ignored by the finder. 200 is the server-side cap;
+            # larger values are clamped, not rejected.
+            # No facetsList: we only read requisitionList + TotalJobsCount,
+            # and skipping facet computation shaves a little server time.
             "url": (
                 "https://{host}.oraclecloud.com/hcmRestApi/resources/latest/"
                 "recruitingCEJobRequisitions?onlyData=true&finder=findReqs;siteNumber={site},"
-                "facetsList=LOCATIONS;WORK_LOCATIONS;WORKPLACE_TYPES;TITLES;CATEGORIES;"
-                "ORGANIZATIONS;POSTING_DATES;FLEX_FIELDS,limit=25,sortBy=POSTING_DATES_DESC&"
-                "expand=requisitionList"
+                "limit=200,offset={cursor},"
+                "sortBy=POSTING_DATES_DESC&expand=requisitionList"
             ),
             "items": "items.0.requisitionList",
             "id": "@Id",
             "url_override": False,
+            # Top-level "hasMore" describes the outer 1-item collection, not
+            # the board, so pagination is driven off TotalJobsCount instead.
+            # Each page is ~4.5s of server think time. Original measurement
+            # found "mild queueing at 6"; re-probed at 5, 6, and 8 (10+ live
+            # runs, cummins/963 items and mayo/1366 items): zero retries,
+            # zero 429s at any width, and 5-vs-8 A/B runs interleaved with no
+            # reproducible per-request slowdown, so that queueing point did
+            # not reproduce. Left at 8 -- widest measured, still error-free.
+            "page": {"total": "@items.0.TotalJobsCount", "size": 200, "step": 200, "max": 30, "concurrency": 8},
         },
         "detail": {
+            # Ids are comma-joined into one quoted finder value -- {id} here
+            # is the whole batch, not a single Id. Verified against Oracle's
+            # own career site up to ~360 ids/request; 200 keeps responses to
+            # a few MB. Response items are matched back to list rows by Id
+            # ("match"), since batch order is not guaranteed.
             "url": (
                 "https://{host}.oraclecloud.com/hcmRestApi/resources/latest/"
                 "recruitingCEJobRequisitionDetails?expand=all&onlyData=true&"
@@ -688,7 +784,13 @@ DETAIL_A: dict[str, dict] = {
             ),
             "id": "@Id",
             "url_override": False,
-            "payload": "items.0",
+            "batch": 200,
+            # ~11s of server think time per 200-id batch dominates the poll;
+            # same measured parallelism headroom as the list pages -- see the
+            # width-8 re-probe note there.
+            "concurrency": 8,
+            "match": "@Id",
+            "payload": "items",
             "merge": True,
         },
         "envelope": {"TotalJobsCount": "@items.0.TotalJobsCount"},
@@ -731,6 +833,13 @@ DETAIL_A: dict[str, dict] = {
             "url_override": False,
             "id": {"fallback": ["@uuid", "@id"]},
             "dedupe": {"fallback": ["@uuid", "@id"]},
+            # List rows carry no description, so it is one GET per posting; the
+            # whole run was our own 1s/host throttle. Measured on
+            # heads-up-technologies (21 postings, 22 requests): width 1 21.2s,
+            # 2 1.9s, 4 1.2s, 8 0.9s, all clean. Same reasoning as bamboohr --
+            # 22 requests establishes tolerance, not the best width, so take the
+            # house ceiling rather than the probe's favourite.
+            "concurrency": 4,
         },
         "fields": {
             "title": "@name",
@@ -811,6 +920,10 @@ DETAIL_B: dict[str, dict] = {
                 "variables": {"boardId": "$key", "extId": "$id"},
             }],
             "id": "@extId", "payload": "0.data.oatsExternalJobPosting", "item_id": "@extId",
+            # No cap declared elsewhere in this file goes over 5; gem's own
+            # boards are small (largest measured: 109 postings), so this
+            # stays inside every other vendor's precedent.
+            "concurrency": 4,
         },
         "fields": {
             "title": "@title",
@@ -863,6 +976,14 @@ DETAIL_B: dict[str, dict] = {
             ),
             "url_override": False,
             "id": "@itemID", "item_id": "@itemID",
+            # One GET per requisition, so a run is ~1s x N of our own throttle.
+            # Measured on a 6-requisition tenant (7 requests): width 1 6.4s,
+            # 2 0.9s, 4 0.7s, 8 0.6s, all clean 200s. The board is too small to
+            # separate 2 from 8 -- what it shows is that ADP tolerates the
+            # fan-out, and 4 is this tree's ceiling for a vendor that publishes
+            # no limit. Note `$top` is hard-capped at 20 (integration-plan.md:118),
+            # so the list leg cannot be made cheaper; only this one can.
+            "concurrency": 4,
         },
         "fields": {
             "title": "@requisitionTitle",
@@ -902,6 +1023,12 @@ DETAIL_B: dict[str, dict] = {
             "id": "@id",
             "dedupe": "@id",
             "item_id": "@id",
+            # Descriptions live only in the detail payload, so it's one
+            # request per posting. SmartRecruiters documents 10 req/s and 8
+            # concurrent requests (429 on excess); 4 stays inside both, and
+            # every feed shares one per-host semaphore in Net, so this is the
+            # vendor-wide cap.
+            "concurrency": 4,
         },
         "fields": {
             "title": "@name",
@@ -944,7 +1071,7 @@ DETAIL_B: dict[str, dict] = {
             "url": "https://{tenant}.{wd_host}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs",
             "url_override": False,
             "body": {
-                "appliedFacets": {},
+                "appliedFacets": "$appliedFacets",
                 "limit": 20,
                 "offset": "$cursor",
                 "searchText": "",
@@ -952,7 +1079,38 @@ DETAIL_B: dict[str, dict] = {
             "items": "jobPostings",
             "id": "@externalPath",
             "catch_first_error": True,
-            "page": {"total": "@total", "size": 20, "step": 20},
+            # Workday clamps an unfiltered query at 2,000 even when its facet
+            # counts prove the board is larger. Partitioning splits that
+            # window by the smallest non-overlapping facet grouping.
+            "partition": {"window": 2000, "facets": "facets"},
+            "page": {
+                "total": "@total", "size": 20, "step": 20,
+                # Was 32, justified by NVIDIA (100 pages, 4.9s, 0 retries).
+                # That probe -- like Argonne's on the detail leg below -- was a
+                # single tenant small enough to finish inside the burst
+                # allowance, so it never met the sustained limiter. Accenture
+                # (15,361 postings, ~16,800 requests) did: 996 retries and 79.9
+                # minutes, and workday is the only source in the catalog that
+                # has ever retried at all.
+                #
+                # Matched to the detail leg deliberately. `_host_semaphores` is
+                # keyed by (host, width), so 32 and 16 took *separate*
+                # semaphores and a tenant could carry 48 in flight; one width
+                # collapses both legs onto one and makes the number honest.
+                # The vendor-wide cap in net.py bounds the fleet on top of
+                # this, since 77 tenant hostnames each got their own cap.
+                #
+                # Measured on adobe (821 requests, past the ~400 burst
+                # allowance), same feed all three times:
+                #   32/16  163.1s  36 retries  376 rows  truncated
+                #   10/10   87.9s  22 retries  781 rows  complete
+                #    6/6   161.5s  15 retries  380 rows  truncated
+                # Dropping to 6 barely moved the 429s but halved throughput:
+                # the retries track total volume against Workday's sustained
+                # limiter, not how wide we go, so narrowing just takes longer
+                # to arrive at the same wall. 10 is the measured optimum.
+                "concurrency": 10,
+            },
         },
         "detail": {
             "url": "https://{tenant}.{wd_host}.myworkdayjobs.com/wday/cxs/{tenant}/{site}{id}",
@@ -960,6 +1118,12 @@ DETAIL_B: dict[str, dict] = {
             "id": "@externalPath",
             "dedupe": "@externalPath",
             "item_id": {"fallback": ["@jobPostingInfo.jobReqId", "@jobPostingInfo.jobPostingId"]},
+            # Descriptions live only here, so it is one GET per posting, and on
+            # a large tenant this leg is ~91% of the run. Argonne's 93-row run
+            # at page=32/detail=16 took 3.11s over 98 clean requests, but 98
+            # requests never leaves the burst allowance -- see the page leg.
+            # Held equal to it so both share one per-host semaphore.
+            "concurrency": 10,
         },
         "last_status": True,
         "fields": {

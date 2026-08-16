@@ -8,6 +8,7 @@ boards.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ from typing import Any
 from urllib.parse import urljoin
 import xml.etree.ElementTree as ET
 
-from xjobscore.net import Net, NetError, validators
+from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 CONFIGS = import_module(".docxtract-configs", __package__).CONFIGS
 
@@ -173,30 +174,55 @@ def _links(text: str, base_url: str, spec: dict, feed: Feed) -> list[tuple[str, 
 async def harvest(name: str, feed: Feed, net: Net) -> Record:
     config = CONFIGS[name]
     list_spec = config["list"]
-    response = await net.get(_list_url(config, feed), state=feed.state)
+    response = await net.get(_list_url(config, feed), etag=feed.etag)
     if response.not_modified:
-        return Record(http_status=304, validators=validators(response))
+        return Record(http_status=304, etag=etag(response))
 
     if list_spec["extract"] == "jsonld":
         items = [Item(external_id=_external_id(job), payload=job) for job in _jsonld(response.text)]
-        return Record(items=items, http_status=response.status, validators=validators(response))
+        return Record(items=items, http_status=response.status, etag=etag(response))
     if list_spec["extract"] == "xml_items":
-        return Record(items=_xml_items(response.text, list_spec), http_status=response.status, validators=validators(response))
+        return Record(items=_xml_items(response.text, list_spec), http_status=response.status, etag=etag(response))
     if list_spec["extract"] == "json_items":
-        return Record(items=_json_items(response.json(), list_spec), http_status=response.status, validators=validators(response))
+        return Record(items=_json_items(response.json(), list_spec), http_status=response.status, etag=etag(response))
     if list_spec["extract"] != "html_links":
         raise ValueError(f"unsupported web-board extractor: {list_spec['extract']}")
 
+    links = _links(response.text, response.url, list_spec, feed)
+    # `detail_max` is the ceiling on what one poll spends here, the counterpart
+    # of json-api's `page.max`/`detail.max`. This shape has no pagination to
+    # bound it, so without a cap the only limit is how many links the board
+    # printed. Sets `truncated`, so a capped poll never reads as a complete one.
+    detail_max = config.get("detail_max")
+    links_capped = detail_max is not None and len(links) > detail_max
+    if links_capped:
+        links = links[:detail_max]
+    # A board that only links to detail pages pays one request per item; the
+    # rest of Net's sources get everything in the one list request. Most
+    # tenants are small enough that 1-request-per-second is fine, but a board
+    # this shape can raise `detail_concurrency` in its config (see jobvite) to
+    # fetch several detail pages at once instead of paying it sequentially.
+    # `concurrency` is only passed through when raised above the default so a
+    # fake Net exposing just `get(url, *, params, headers, etag)` -- the
+    # documented contract -- still works unmodified.
+    concurrency = config.get("detail_concurrency", 1)
+    get = (lambda url: net.get(url, concurrency=concurrency)) if concurrency > 1 else net.get
+    results = await asyncio.gather(
+        *(get(url) for _, url in links),
+        return_exceptions=True,
+    )
     items: list[Item] = []
-    for external_id, url in _links(response.text, response.url, list_spec, feed):
-        try:
-            detail = await net.get(url)
-        except NetError:
-            return Record(items=items, truncated=True, http_status=response.status, validators=validators(response))
-        for job in _jsonld(detail.text):
+    truncated = links_capped
+    for (external_id, _url), result in zip(links, results):
+        if isinstance(result, NetError):
+            truncated = True
+            continue
+        if isinstance(result, BaseException):
+            raise result
+        for job in _jsonld(result.text):
             item_id = external_id if config["detail"].get("id") == "discovered" else _external_id(job)
             items.append(Item(external_id=item_id, payload=job))
-    return Record(items=items, http_status=response.status, validators=validators(response))
+    return Record(items=items, truncated=truncated, http_status=response.status, etag=etag(response))
 
 
 def _parse_date(value: object) -> tuple[datetime | None, str]:
@@ -297,6 +323,11 @@ def _rss(config: dict, feed: Feed, item: Item) -> Posting:
         company_raw=company_raw,
         location_raw=locations[0] if locations else None,
         description_html=description_html,
+        employment_type=(
+            _text(element.find(qualified(path)))
+            if (path := rss.get("employment_type_path"))
+            else None
+        ),
         workplace_type_raw=_text(element.find("remoteStatus")),
         published_at=published_at,
         published_at_precision="exact" if published_at else "unknown",
@@ -333,14 +364,28 @@ def _atom(config: dict, feed: Feed, item: Item) -> Posting:
     company_raw = feed.key
     if (path := atom.get("company_path")):
         company_raw = _text(element.find(qualified(path))) or feed.key
+    description_path = atom.get("description_path", "content")
+    locations = []
+    if (location_path := atom.get("location_path")):
+        locations = [
+            value
+            for location_element in element.findall(qualified(location_path))
+            if (value := _text(location_element))
+        ]
+    employment_type = None
+    if (employment_type_path := atom.get("employment_type_path")):
+        employment_type = _text(element.find(qualified(employment_type_path)))
     return Posting(
         external_id=item.external_id,
         title=_text(element.find(qualified("title"))) or "",
         url_posting=url_posting,
         company_raw=company_raw,
-        description_html=_text(element.find(qualified("content"))),
+        location_raw=locations[0] if locations else None,
+        description_html=_text(element.find(qualified(description_path))),
+        employment_type=employment_type,
         published_at=published_at,
         published_at_precision="exact" if published_at else "unknown",
+        locations_extra=locations[1:],
         source_extra=extras,
     )
 
