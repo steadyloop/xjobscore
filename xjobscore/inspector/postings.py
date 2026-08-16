@@ -1,316 +1,222 @@
-"""Read-only posting queries over the inspector SQLite store."""
+"""Read-only queries over ``public.job_posting`` for the Postings page.
+
+Telemetry-style: every function borrows the pipeline pool (see
+``PolicyStore.pool_or_none``) and opens nothing of its own. Hand labels live
+in the inspector's schema (``persistence.ResultStore.posting_labels``) and
+arrive here as a pre-fetched dict -- passed into SQL as parallel arrays
+rather than joined across schemas, because the two stores' DSNs can in
+principle point at different databases.
+
+The SQL itself follows the telemetry precedent: exercised against a real
+database by hand (see the verification notes in the repo plan); unit tests
+cover validation, shaping, and the parameters handed to the pool.
+"""
 
 from __future__ import annotations
 
 import json
-import re
-import sqlite3
-from pathlib import Path
+import secrets
 from typing import Any
 
-INTERNSHIP_SIGNAL_RE = re.compile(
-    r"(?<![a-z])(intern(?:ship)?s?|co[- ]?ops?|fellow(?:ship)?s?|extern(?:ship)?s?)(?![a-z])",
-    re.IGNORECASE,
-)
-US_COUNTRY_VALUES = {"us", "usa", "unitedstates", "unitedstatesofamerica"}
-US_LOCATION_RE = re.compile(
-    r"\b(?:united states(?: of america)?|u\.?s\.?a?\.?|usa|"
-    r"san francisco|new york(?: city)?|nyc|austin|boston|chicago|"
-    r"dallas|seattle|palo alto|mountain view|los angeles|san mateo|"
-    r"san carlos|atlanta|oxnard|denver|washington(?:,? d\.?c\.?)?|"
-    r"san diego|berkeley|sunnyvale|philadelphia|houston|miami)\b",
-    re.IGNORECASE,
-)
-FOREIGN_LOCATION_RE = re.compile(
-    r"\b(?:canada|mexico|brazil|argentina|chile|colombia|peru|"
-    r"united kingdom|uk|england|scotland|wales|ireland|france|germany|"
-    r"netherlands|belgium|spain|portugal|italy|switzerland|austria|"
-    r"poland|ukraine|czechia|denmark|sweden|norway|finland|iceland|"
-    r"estonia|latvia|lithuania|romania|hungary|croatia|bulgaria|greece|"
-    r"turkey|israel|india|pakistan|bangladesh|singapore|malaysia|"
-    r"indonesia|thailand|vietnam|philippines|china|japan|south korea|"
-    r"korea|taiwan|australia|new zealand|south africa|egypt|nigeria|"
-    r"kenya|ghana|europe|emea|apac|apj|latam|asia pacific|middle east|"
-    r"london|berlin|munich|paris|amsterdam|dublin|lisbon|madrid|barcelona|"
-    r"zurich|stockholm|copenhagen|oslo|warsaw|kyiv|lviv|prague|vienna|"
-    r"bucharest|sofia|tallinn|riga|vilnius|belgrade|zagreb|helsinki|"
-    r"brussels|toronto|vancouver|montreal|calgary|ottawa|mexico city|"
-    r"sao paulo|rio de janeiro|buenos aires|bogota|lima|santiago|"
-    r"bengaluru|bangalore|hyderabad|mumbai|new delhi|gurgaon|noida|"
-    r"chennai|pune|tokyo|osaka|seoul|taipei|hong kong|shanghai|beijing|"
-    r"dubai|abu dhabi|tel aviv|jerusalem|auckland|melbourne|sydney|"
-    r"perth|brisbane|cape town|johannesburg|manila|jakarta|bangkok|"
-    r"ho chi minh|hanoi)\b",
-    re.IGNORECASE,
+LABELS = ("relevant", "irrelevant", "unsure")
+LABEL_STATES = ("all", "unlabeled", "labeled") + LABELS
+ORDERS = ("newest", "company", "random")
+STATUSES = ("all", "active", "closed")
+
+# POSIX character classes, not \b: PostgreSQL ARE word boundaries ([[:<:]])
+# read poorly and \b means backspace inside a bracket expression.
+INTERN_TITLE_SQL_RE = (
+    r"(^|[^a-z])(intern(ship)?s?|co[- ]?ops?"
+    r"|fellow(ship)?s?|extern(ship)?s?)([^a-z]|$)"
 )
 
+_LABEL_PREDICATES = {
+    "all": "TRUE",
+    "unlabeled": "l.label IS NULL",
+    "labeled": "l.label IS NOT NULL",
+    **{value: f"l.label = '{value}'" for value in LABELS},
+}
+_ORDER_CLAUSES = {
+    "newest": "p.first_seen_at DESC, p.id DESC",
+    "company": "c.name, p.first_seen_at DESC, p.id DESC",
+    # Stable for a fixed seed, so pagination never repeats or skips a row.
+    "random": "md5($9::text || p.id::text), p.id",
+}
 
-def _connect(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    return connection
+_SELECT = """
+WITH lab AS (
+    SELECT unnest($1::text[]) AS source,
+           unnest($2::text[]) AS source_key,
+           unnest($3::text[]) AS label
+)
+SELECT p.id, p.source, p.source_key, c.name AS company, p.title,
+       p.location_text, p.source_url, p.apply_url, p.posted_at, p.status,
+       p.first_seen_at, p.last_seen_at, p.attributes, p.dup_group_id,
+       (p.description IS NOT NULL) AS has_description,
+       count(*) OVER () AS total
+FROM job_posting AS p
+JOIN company AS c ON c.id = p.company_id
+LEFT JOIN lab AS l
+  ON l.source = p.source AND l.source_key = p.source_key
+WHERE ($4::text IS NULL OR split_part(p.source, ':', 1) = $4)
+  AND ($5::text IS NULL OR p.status = $5)
+  AND ($6::text = '' OR p.title ILIKE '%' || $6 || '%'
+       OR c.name ILIKE '%' || $6 || '%'
+       OR p.location_text ILIKE '%' || $6 || '%'
+       OR p.source ILIKE '%' || $6 || '%')
+  AND (NOT $7::bool OR p.title ~* $8)
+  -- $9 is the shuffle seed; referenced here so the parameter list is stable
+  -- across every order mode (asyncpg rejects unused arguments).
+  AND ($9::text = $9::text)
+  AND {label_predicate}
+ORDER BY {order_clause}
+LIMIT $10 OFFSET $11
+"""
 
-
-def _dig(value: Any, *parts: str) -> Any:
-    for part in parts:
-        if isinstance(value, dict):
-            value = value.get(part)
-        else:
-            return None
-    return value
-
-
-def _first(payload: dict[str, Any], *paths: tuple[str, ...]) -> Any:
-    for path in paths:
-        value = _dig(payload, *path)
-        if value not in (None, "", []):
-            return value
-    return None
-
-
-def _string(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    if isinstance(value, (int, float)):
-        return str(value)
-    return None
-
-
-def _location(payload: dict[str, Any]) -> str | None:
-    value = _first(
-        payload,
-        ("location",),
-        ("location", "name"),
-        ("categories", "location"),
-        ("city",),
-    )
-    if isinstance(value, dict):
-        return _string(
-            _first(value, ("name",), ("city",), ("label",), ("fullLocation",))
-        )
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value if item not in (None, "")) or None
-    return _string(value)
-
-
-def summarize_payload(payload: Any) -> dict[str, Any]:
-    payload = payload if isinstance(payload, dict) else {}
-    title = _string(
-        _first(
-            payload,
-            ("title",), ("jobTitle",), ("job_title",), ("positionTitle",),
-            ("postingTitle",), ("name",), ("text",),
-        )
-    ) or "Untitled job"
-    employment_type = _string(
-        _first(
-            payload,
-            ("employmentType",), ("employment_type",),
-            ("categories", "commitment"), ("type", "name"),
-        )
-    )
-    url = _string(
-        _first(
-            payload,
-            ("jobUrl",), ("url",), ("hostedUrl",), ("absolute_url",),
-            ("postingUrl",), ("externalUrl",), ("applyUrl",),
-        )
-    )
-    return {
-        "title": title,
-        "location": _location(payload),
-        "employment_type": employment_type,
-        "url": url,
-        "listed": payload.get("isListed") if isinstance(payload.get("isListed"), bool) else None,
-    }
+_DETAIL = """
+SELECT p.id, p.source, p.source_key, c.name AS company, p.title,
+       p.description, p.location_text, p.source_url, p.apply_url,
+       p.posted_at, p.status, p.first_seen_at, p.last_seen_at,
+       p.attributes, p.content_hash, p.raw_id, p.dup_group_id
+FROM job_posting AS p
+JOIN company AS c ON c.id = p.company_id
+WHERE p.id = $1
+"""
 
 
-def _normalized_employment_type(summary: dict[str, Any]) -> str:
-    return re.sub(r"[^a-z]", "", (summary["employment_type"] or "").lower())
+def _validate(name: str, value: str, allowed: tuple[str, ...]) -> None:
+    if value not in allowed:
+        raise ValueError(f"unknown {name}: {value!r} (expected one of {allowed})")
 
 
-def _address_country(address: Any) -> str | None:
-    if not isinstance(address, dict):
-        return None
-    postal_address = address.get("postalAddress")
-    if isinstance(postal_address, dict):
-        address = postal_address
-    return _string(address.get("addressCountry"))
+def _attributes(value: Any) -> dict[str, Any]:
+    # The pipeline pool installs a jsonb codec, so this normally arrives
+    # decoded; be defensive because tests hand in plain fakes.
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
 
 
-def _location_text(payload: dict[str, Any]) -> str:
-    values: list[str] = []
-    location = payload.get("location")
-    if isinstance(location, str):
-        values.append(location)
-    elif isinstance(location, list):
-        values.extend(str(item) for item in location if item not in (None, ""))
-    for secondary in payload.get("secondaryLocations") or []:
-        if isinstance(secondary, dict) and secondary.get("location"):
-            values.append(str(secondary["location"]))
-    return " | ".join(values)
+def _iso(value: Any) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
-def _is_explicitly_foreign(payload: dict[str, Any]) -> bool:
-    countries = [_address_country(payload.get("address"))]
-    for location in payload.get("secondaryLocations") or []:
-        if isinstance(location, dict):
-            countries.append(_address_country(location.get("address")))
-    normalized = {
-        re.sub(r"[^a-z]", "", country.lower())
-        for country in countries
-        if country
-    }
-    if normalized.intersection(US_COUNTRY_VALUES):
-        return False
-    location_text = _location_text(payload)
-    if US_LOCATION_RE.search(location_text):
-        return False
-    if normalized:
-        return True
-    return bool(FOREIGN_LOCATION_RE.search(location_text))
+def _merge_label(
+    row: dict[str, Any], labels: dict[tuple[str, str], dict[str, Any]]
+) -> dict[str, Any]:
+    entry = labels.get((row["source"], row["source_key"]))
+    row["label"] = entry["label"] if entry else None
+    row["note"] = entry["note"] if entry else None
+    row["labeled_at"] = entry["labeled_at"] if entry else None
+    return row
 
 
-def _has_internship_signal(summary: dict[str, Any], payload: dict[str, Any]) -> bool:
-    description = _string(
-        _first(payload, ("descriptionPlain",), ("descriptionHtml",))
-    ) or ""
-    return bool(INTERNSHIP_SIGNAL_RE.search(summary["title"])) or bool(
-        INTERNSHIP_SIGNAL_RE.search(description)
-    )
+def _shape(record: Any, labels: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    row = dict(record)
+    row.pop("total", None)
+    for field in ("posted_at", "first_seen_at", "last_seen_at"):
+        row[field] = _iso(row.get(field))
+    row["attributes"] = _attributes(row.get("attributes"))
+    dup = row.get("dup_group_id")
+    row["dup_group_id"] = str(dup) if dup is not None else None
+    return _merge_label(row, labels)
 
 
-def _matches(
-    summary: dict[str, Any], payload: dict[str, Any], mode: str, *, us_only: bool
-) -> bool:
-    if summary["listed"] is False:
-        return False
-    if us_only and _is_explicitly_foreign(payload):
-        return False
-    if mode == "all":
-        return True
-    employment = _normalized_employment_type(summary)
-    if mode == "intern_explicit":
-        return employment == "intern"
-    if mode == "intern_implicit":
-        return employment not in {"intern", "fulltime"} and _has_internship_signal(
-            summary, payload
-        )
-    if mode == "full_time_internship":
-        return employment == "fulltime" and _has_internship_signal(summary, payload)
-    if mode == "exclude_full_time":
-        return employment != "fulltime"
-    raise ValueError(f"unknown posting filter mode: {mode}")
+def label_counts(labels: dict[tuple[str, str], dict[str, Any]]) -> dict[str, int]:
+    counts = {value: 0 for value in LABELS}
+    for entry in labels.values():
+        if entry["label"] in counts:
+            counts[entry["label"]] += 1
+    counts["total"] = len(labels)
+    return counts
 
 
-def _searchable(summary: dict[str, Any], source: str, key: str, query: str) -> bool:
-    if not query:
-        return True
-    haystack = " ".join(
-        value or ""
-        for value in (source, key, summary["title"], summary["location"], summary["employment_type"])
-    ).lower()
-    return query.lower() in haystack
-
-
-def query(
-    path: Path,
+async def query(
+    pool,
+    labels: dict[tuple[str, str], dict[str, Any]],
     *,
     source: str | None = None,
+    status: str = "active",
+    label_state: str = "all",
     search: str = "",
-    mode: str = "exclude_full_time",
-    us_only: bool = True,
+    intern_signal: bool = False,
+    order: str = "newest",
+    seed: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """Return compact filtered rows from the latest persisted run per feed."""
-    limit = max(1, min(limit, 500))
+    """Return one page of job_posting rows with label state merged in."""
+    _validate("status", status, STATUSES)
+    _validate("label_state", label_state, LABEL_STATES)
+    _validate("order", order, ORDERS)
+    limit = max(1, min(limit, 200))
     offset = max(0, offset)
-    with _connect(path) as connection:
-        source_rows = connection.execute(
-            "SELECT DISTINCT source FROM inspector_run ORDER BY source"
-        ).fetchall()
-        sources = [row["source"] for row in source_rows]
-        if source == "*":
-            source = None
-        elif source is None:
-            source = "ashby" if "ashby" in sources else None
-        rows = connection.execute(
-            """
-            WITH latest_runs AS (
-                SELECT r.*,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY r.source, r.feed_id
-                           ORDER BY r.finished_at DESC, r.result_id DESC
-                       ) AS row_number
-                FROM inspector_run AS r
-                WHERE (? IS NULL OR r.source = ?)
-            )
-            SELECT r.result_id, r.source, r.feed_key, r.finished_at,
-                   i.item_index, i.external_id, i.payload_json
-            FROM latest_runs AS r
-            JOIN inspector_item AS i ON i.result_id = r.result_id
-            WHERE r.row_number = 1
-              AND r.status IN ('ok', 'partial')
-            ORDER BY r.finished_at DESC, r.source, r.feed_key, i.item_index
-            """,
-            (source, source),
-        ).fetchall()
+    if order == "random" and not seed:
+        seed = secrets.token_hex(4)
 
-    matched: list[dict[str, Any]] = []
-    for row in rows:
-        try:
-            payload = json.loads(row["payload_json"])
-        except (TypeError, json.JSONDecodeError):
-            payload = {}
-        summary = summarize_payload(payload)
-        if not _matches(summary, payload, mode, us_only=us_only) or not _searchable(summary, row["source"], row["feed_key"], search.strip()):
-            continue
-        matched.append(
-            {
-                "result_id": row["result_id"],
-                "source": row["source"],
-                "feed_key": row["feed_key"],
-                "finished_at": row["finished_at"],
-                "item_index": row["item_index"],
-                "external_id": row["external_id"],
-                **summary,
-            }
+    keys = sorted(labels)
+    sql = _SELECT.format(
+        label_predicate=_LABEL_PREDICATES[label_state],
+        order_clause=_ORDER_CLAUSES[order],
+    )
+    async with pool.acquire() as conn:
+        sources = [
+            row["vendor"]
+            for row in await conn.fetch(
+                "SELECT DISTINCT split_part(source, ':', 1) AS vendor"
+                " FROM job_posting ORDER BY 1"
+            )
+        ]
+        records = await conn.fetch(
+            sql,
+            [key[0] for key in keys],
+            [key[1] for key in keys],
+            [labels[key]["label"] for key in keys],
+            source,
+            None if status == "all" else status,
+            search.strip(),
+            intern_signal,
+            INTERN_TITLE_SQL_RE,
+            seed,
+            limit,
+            offset,
         )
     return {
-        "source": source,
         "sources": sources,
-        "mode": mode,
-        "us_only": us_only,
-        "search": search,
-        "total": len(matched),
+        "filters": {
+            "source": source,
+            "status": status,
+            "label_state": label_state,
+            "search": search.strip(),
+            "intern_signal": intern_signal,
+            "order": order,
+            "seed": seed,
+        },
+        "total": records[0]["total"] if records else 0,
         "offset": offset,
         "limit": limit,
-        "rows": matched[offset : offset + limit],
+        "label_counts": label_counts(labels),
+        "rows": [_shape(record, labels) for record in records],
     }
 
 
-def detail(path: Path, result_id: str, item_index: int) -> dict[str, Any] | None:
-    """Read one stored payload without opening the database for writing."""
-    with _connect(path) as connection:
-        row = connection.execute(
-            """
-            SELECT r.source, r.feed_key, r.finished_at, i.external_id,
-                   i.kind, i.payload_json, i.raw_document_json
-            FROM inspector_run AS r
-            JOIN inspector_item AS i ON i.result_id = r.result_id
-            WHERE r.result_id = ? AND i.item_index = ?
-            """,
-            (result_id, item_index),
-        ).fetchone()
-    if row is None:
+async def detail(
+    pool,
+    labels: dict[tuple[str, str], dict[str, Any]],
+    posting_id: int,
+) -> dict[str, Any] | None:
+    """One full job_posting row, description included; None when unknown."""
+    async with pool.acquire() as conn:
+        record = await conn.fetchrow(_DETAIL, posting_id)
+    if record is None:
         return None
-    return {
-        "source": row["source"],
-        "feed_key": row["feed_key"],
-        "finished_at": row["finished_at"],
-        "external_id": row["external_id"],
-        "kind": row["kind"],
-        "payload": json.loads(row["payload_json"]),
-        "raw_document": json.loads(row["raw_document_json"]),
-    }
+    row = dict(record)
+    for field in ("posted_at", "first_seen_at", "last_seen_at"):
+        row[field] = _iso(row.get(field))
+    row["attributes"] = _attributes(row.get("attributes"))
+    dup = row.get("dup_group_id")
+    row["dup_group_id"] = str(dup) if dup is not None else None
+    return _merge_label(row, labels)

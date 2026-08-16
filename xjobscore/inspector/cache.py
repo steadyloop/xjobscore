@@ -23,13 +23,21 @@ class RunSnapshot:
     item_count: int
     raw_size_bytes: int
     truncated: bool
-    force_full: bool
     error_class: str | None
     error_detail: str | None
     items: tuple[dict[str, Any], ...]
     envelope: Any
     size_bytes: int
     network: dict[str, Any] = field(default_factory=dict)
+    trigger: str = "manual"  # 'manual' | 'scheduled'
+    # Parse previews are derived on demand when a parsed pane is viewed
+    # (service._with_parse); fetch and scheduled runs never populate these.
+    parse_status: str | None = None  # None (not derived) | 'ok' | 'no_parser' | 'skipped'
+    parse_summary: dict[str, Any] | None = None
+    parse_items: tuple[dict[str, Any], ...] = ()
+    # The scheduler's conditional-request validator. Deliberately excluded
+    # from summary/API payloads, matching network.py's validator masking.
+    response_etag: str | None = None
 
     @property
     def summary(self) -> dict[str, Any]:
@@ -49,11 +57,12 @@ class RunSnapshot:
             "item_count": self.item_count,
             "raw_size_bytes": self.raw_size_bytes,
             "truncated": self.truncated,
-            "force_full": self.force_full,
             "error_class": self.error_class,
             "error_detail": self.error_detail,
             "size_bytes": self.size_bytes,
             "network": self.network.get("summary", {}),
+            "trigger": self.trigger,
+            "parse": {"status": self.parse_status, "summary": self.parse_summary},
         }
 
     def item_summary(self, index: int) -> dict[str, Any]:

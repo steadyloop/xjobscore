@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Postings (Old) · xjobscore inspector</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body>
+  <header id="topnav"></header>
+  <main class="page">
+    <div class="page-header">
+      <select id="source-select" title="Source"></select>
+      <select id="mode-select" title="Employment-type filter">
+        <option value="exclude_full_time">Exclude full-time</option>
+        <option value="all">All</option>
+        <option value="intern_explicit">Interns (explicit)</option>
+        <option value="intern_implicit">Interns (implicit)</option>
+        <option value="full_time_internship">Full-time internships</option>
+      </select>
+      <label class="secondary" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="us-only" checked> US only
+      </label>
+      <input type="search" id="posting-search" placeholder="Search title, company, location…" autocomplete="off" style="flex:1;max-width:360px">
+      <div class="grow"></div>
+      <div class="pager">
+        <button class="btn small" type="button" id="prev-btn">‹</button>
+        <span id="page-info"></span>
+        <button class="btn small" type="button" id="next-btn">›</button>
+      </div>
+    </div>
+
+    <div class="split" style="grid-template-columns: 1fr minmax(320px, 480px)">
+      <section class="card">
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Title</th><th>Company / token</th><th>Type</th><th>Location</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="postings-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="postings-empty" hidden>No postings match.</div>
+      </section>
+      <section class="card">
+        <header><h2 id="detail-title">Payload</h2></header>
+        <pre class="json-pane" id="posting-json" style="border:none;max-height:75vh">Select a posting.</pre>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/static/postings-old/app.js"></script>
+</body>
+</html>

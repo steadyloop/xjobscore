@@ -1,0 +1,1246 @@
+/* Reusable component styles: cards, tables, chips, tabs, controls, JSON. */
+
+/* Cards -------------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.card > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.card > header .grow {
+  flex: 1;
+}
+
+.card .body {
+  padding: var(--space-4);
+}
+
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+}
+
+.stat {
+  min-width: 72px;
+}
+
+.stat .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.stat .value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .value small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+/* Tables ------------------------------------------------------------------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.data th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+table.data td {
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--grid);
+  vertical-align: middle;
+}
+
+table.data tr:last-child td {
+  border-bottom: none;
+}
+
+table.data tbody tr.row-link {
+  cursor: pointer;
+}
+
+table.data tbody tr.row-link:hover {
+  background: var(--surface-2);
+}
+
+table.data tr.group-row td {
+  background: var(--surface-2);
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+table.data td.num,
+table.data th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chips & badges ----------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.chip[data-status="ok"] .dot { background: var(--ok); }
+.chip[data-status="not_modified"] .dot { background: var(--accent); }
+.chip[data-status="partial"] .dot { background: var(--warn); }
+.chip[data-status="error"] .dot { background: var(--err); }
+.chip[data-status="never"] .dot { background: var(--text-muted); }
+
+.chip.action {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.chip.action:hover {
+  background: var(--surface-2);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.badge[data-kind="resolved"] { color: var(--ok-text); }
+.badge[data-kind="fallback"] { color: var(--accent); }
+.badge[data-kind="would_park"] { color: var(--serious); }
+.badge[data-kind="error"] { color: var(--err); }
+
+/* Category pills ----------------------------------------------------------- */
+
+.pills {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.pill {
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.pill:hover {
+  background: var(--surface-2);
+}
+
+.pill[aria-pressed="true"] {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+/* Tabs --------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+  padding: 0 var(--space-4);
+}
+
+.tab {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 10px 12px;
+  margin-bottom: -1px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.tab .count {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Controls ----------------------------------------------------------------- */
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.btn:hover {
+  background: var(--surface-2);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+input[type="search"],
+input[type="text"],
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+}
+
+input[type="search"]:focus-visible,
+select:focus-visible,
+.btn:focus-visible,
+.tab:focus-visible,
+.pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Toggle switch ------------------------------------------------------------ */
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 18px;
+  flex: none;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.switch .track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  transition: background 0.12s ease;
+  pointer-events: none;
+}
+
+.switch .track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(11, 11, 11, 0.25);
+  transition: transform 0.12s ease;
+}
+
+.switch input:checked + .track {
+  background: var(--ok);
+}
+
+.switch input:checked + .track::after {
+  transform: translateX(12px);
+}
+
+.switch input:disabled {
+  cursor: not-allowed;
+}
+
+.switch input:disabled + .track {
+  opacity: 0.4;
+}
+
+/* JSON viewer -------------------------------------------------------------- */
+
+.json-pane {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  overflow: auto;
+  max-height: 70vh;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.xml-pane .xml-tag {
+  color: var(--accent);
+}
+
+.xml-pane .xml-attr {
+  color: var(--text-secondary);
+}
+
+.xml-pane .xml-attr-val,
+.xml-pane .xml-text {
+  color: var(--text);
+}
+
+.xml-pane .xml-punct {
+  color: var(--text-muted);
+}
+
+/* Split panes -------------------------------------------------------------- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.item-list {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* Item picker as a dense grid of tiny numbered squares (GitHub contribution-
+   graph style) instead of full-width title rows — the title/company text is
+   still available as a native tooltip. */
+.item-list.item-list-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 2px;
+  padding: 6px;
+  max-height: 60px;
+  overflow-y: auto;
+  margin-bottom: var(--space-3);
+}
+
+.item-list .item.item-compact {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  justify-content: center;
+  border: none;
+  border-radius: 3px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 8px;
+  line-height: 1;
+  overflow: hidden;
+}
+
+.item-list .item.item-compact:hover {
+  background: var(--accent-soft);
+}
+
+.item-list .item.item-compact .title {
+  flex: none;
+}
+
+.item-list .item.item-compact[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.item-list .item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 7px var(--space-3);
+  border-bottom: 1px solid var(--grid);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.item-list .item:hover {
+  background: var(--surface-2);
+}
+
+.item-list .item[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.item-list .item .title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-list .item .context {
+  color: var(--text-muted);
+  font-size: 12px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Canonical cards (parsed tab) --------------------------------------------- */
+
+.canonical {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.canonical > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.canonical .fields {
+  padding: var(--space-2) var(--space-3);
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-4);
+  font-size: 13px;
+}
+
+.canonical .fields dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.canonical .fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Stage breakdown ---------------------------------------------------------- */
+
+.stage-bar {
+  width: 100%;
+  height: 14px;
+  display: block;
+}
+
+.stage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.stage-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stage-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--viz-series);
+}
+
+/* Network latency chart ----------------------------------------------------- */
+
+.latency-chart {
+  width: 100%;
+  max-width: 720px;
+  display: block;
+}
+
+.latency-chart .point circle {
+  transition: r 80ms ease-out;
+}
+
+.latency-chart .point:hover circle,
+.latency-chart .point:focus-visible circle {
+  r: 5;
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+
+.latency-chart .point:focus {
+  outline: none;
+}
+
+.latency-chart .point:focus-visible circle {
+  stroke: var(--text);
+}
+
+.request-detail {
+  font-size: 12px;
+}
+
+.request-detail table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.request-detail td {
+  padding: 2px var(--space-2);
+  vertical-align: top;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.request-detail td:first-child {
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-family: var(--font-ui);
+}
+
+.request-detail .hl {
+  color: var(--serious);
+  font-weight: 600;
+}
+
+/* Spark container ---------------------------------------------------------- */
+
+.spark {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Items view: item picker strip on top (item-list-compact, capped to two
+   lines), raw payload | parsed canonicals below it, side by side. */
+
+.split-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .split-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.split-2 .json-pane {
+  max-height: 66vh;
+}
+
+/* Grid children default to min-width:auto, which sizes to the widest
+   unbroken line in the JSON pre — a long payload line then blows the
+   1fr track (and the whole page) out horizontally. Clamp it so the
+   pane scrolls internally instead. */
+.split-2 > div {
+  min-width: 0;
+}
+
+/* JSON tree (Raw pane): collapsible view typeset exactly like the Parsed
+   pane's .canonical .fields grid — muted key column, plain value column. */
+
+.json-tree {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  font-size: 13px;
+  max-height: 66vh;
+  overflow: auto;
+}
+
+.json-tree .leaf {
+  display: contents;
+}
+
+.json-tree .key {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.json-tree .leaf .key {
+  padding-left: 14px;
+}
+
+.json-tree .val {
+  overflow-wrap: anywhere;
+}
+
+.json-tree details {
+  grid-column: 1 / -1;
+}
+
+.json-tree summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.json-tree summary::-webkit-details-marker {
+  display: none;
+}
+
+.json-tree summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 14px;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.json-tree details[open] > summary::before {
+  content: "▾";
+}
+
+.json-tree summary:hover .key {
+  color: var(--text);
+}
+
+.json-tree .count {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.json-tree .children {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-4);
+  margin-left: 5px;
+  padding-left: 12px;
+  border-left: 1px solid var(--grid);
+}
+
+/* Master-detail (Feeds page) ----------------------------------------------- */
+
+.master {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.master.split-open {
+  grid-template-columns: minmax(320px, var(--list-width, 420px)) 8px 1fr;
+  gap: var(--space-3);
+}
+
+/* The detail panel reuses the generic .card .body padding (16px) meant for
+   roomier single-column cards — tighten it here so the split payload panes
+   get the width instead of empty margin. */
+.master.split-open .detail-pane .body {
+  padding: var(--space-3) var(--space-2);
+}
+
+/* Drag handle between the list and the payload panel — lets the list give
+   up (or claim back) horizontal space for inspecting wide payloads. */
+.split-handle {
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.split-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.split-handle:hover::after,
+.split-handle.dragging::after {
+  background: var(--accent);
+}
+
+.split-handle[hidden] {
+  display: none;
+}
+
+/* With the panel open the list densifies; every column stays visible. */
+.master.split-open .feeds-card table.data {
+  font-size: 12px;
+}
+
+.master.split-open .feeds-card table.data td {
+  padding: 3px 6px;
+}
+
+.master.split-open .feeds-card table.data th {
+  padding: 6px;
+  font-size: 10px;
+}
+
+.master.split-open .feeds-card .mono {
+  font-size: 10px;
+}
+
+.master.split-open .feeds-card .feed-cell {
+  max-width: 170px;
+}
+
+.master.split-open .feeds-card .feed-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.master.split-open .feeds-card select {
+  padding: 1px 4px;
+  font-size: 11px;
+}
+
+.master.split-open .feeds-card .chip {
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.master.split-open .feeds-card .btn.small {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+table.data tbody tr[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+/* Flat single-feed sources (Direct/Board) read as top level, like groups. */
+table.data tbody tr.flat-source:not([aria-selected="true"]) {
+  background: var(--surface-2);
+}
+
+table.data tbody tr.flat-source .feed-name {
+  font-weight: 600;
+}
+
+.detail-pane {
+  position: sticky;
+  top: 64px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.detail-pane[hidden] {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .master.split-open {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-pane {
+    position: static;
+    max-height: none;
+  }
+}
+
+/* Pager -------------------------------------------------------------------- */
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Scheduler page -------------------------------------------------------------
+   Everything here is namespaced .sched-*. The detail pane's element ids and the
+   .detail-pane / .feeds-card classes are shared with the Feeds page, so an
+   unscoped rule for "the pane" would silently restyle that page's inspector. */
+
+/* The Feeds page opens the drawer wide to inspect payloads. The scheduler's
+   drawer is a handful of stats and a tier control — it should stay a fixed
+   sidebar, like the ops prototype, while the table keeps the room. */
+.sched-master.split-open {
+  grid-template-columns: minmax(0, 1fr) 8px minmax(320px, var(--detail-width, 380px));
+}
+
+.sched-master.split-open .feeds-card table.data {
+  font-size: 13px;
+}
+
+.sched-master.split-open .feeds-card table.data td {
+  padding: 6px var(--space-3);
+}
+
+.sched-master.split-open .feeds-card table.data th {
+  padding: var(--space-2) var(--space-3);
+  font-size: 11px;
+}
+
+.sched-master.split-open .feeds-card .mono {
+  font-size: 12px;
+}
+
+.sched-master.split-open .feeds-card .feed-cell {
+  max-width: none;
+}
+
+.sched-master.split-open .feeds-card select {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.sched-master.split-open .feeds-card .chip {
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.sched-master.split-open .detail-pane .body {
+  padding: var(--space-4);
+}
+
+.sched-pane h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sched-pane h3:first-of-type {
+  margin-top: var(--space-3);
+}
+
+.sched-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  align-items: baseline;
+}
+
+.sched-kv dt {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sched-kv dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.sched-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+
+.sched-events li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--grid);
+}
+
+.sched-events li:last-child {
+  border-bottom: none;
+}
+
+.sched-events time {
+  flex: none;
+  width: 72px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cadence recommendation, shown only when it disagrees with interval_s. */
+.sched-rec {
+  margin-left: var(--space-1);
+  white-space: nowrap;
+}
+
+/* Read-only cadence chip. The control that changes it lives in the detail
+   pane; the table is for comparing feeds, not editing them. */
+.sched-tier {
+  display: inline-block;
+  min-width: 34px;
+  text-align: center;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Segmented tier picker. */
+.sched-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.sched-seg button {
+  appearance: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sched-seg button:last-child {
+  border-right: none;
+}
+
+.sched-seg button:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.sched-seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.sched-seg button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sched-chart-cap {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sched-note {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Value and its delta/sparkline share a baseline inside a stat tile. */
+.sched-stat-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sched-stat-row .spark {
+  flex: none;
+}
+
+.sched-delta-good {
+  font-size: 12px;
+  color: var(--ok-text);
+  padding-bottom: 3px;
+}
+
+/* ---- Postings labeling queue (.plist-*) --------------------------------
+   Namespaced like .sched-* above: these are the /postings page's overrides
+   and never leak into Feeds or Scheduler. */
+
+.plist {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  max-height: calc(100vh - 220px);
+  outline: none;
+}
+
+.plist-entry {
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--grid);
+  cursor: pointer;
+  user-select: none;
+}
+
+.plist-entry:hover {
+  background: var(--surface-2);
+}
+
+.plist-entry[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.plist-entry[data-pending] {
+  opacity: 0.55;
+}
+
+.plist-entry[data-save-failed] {
+  box-shadow: inset 2px 0 0 var(--err);
+}
+
+.plist-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.plist-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plist-line2 {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Triage label chip. Colors ride the shared status tokens so both themes
+   already work: relevant=ok, irrelevant=muted, unsure=warn. */
+.plist-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.plist-label[data-label="relevant"] {
+  color: var(--ok-text);
+}
+
+.plist-label[data-label="irrelevant"] {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.plist-label[data-label="unsure"] {
+  color: var(--warn);
+}
+
+.plist-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.plist-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  overflow-y: auto;
+}
+
+.plist-detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.plist-detail-head h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.plist-links {
+  display: flex;
+  gap: var(--space-3);
+  font-size: 13px;
+}
+
+.plist-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+  font-size: 12px;
+}
+
+.plist-fields dt {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  align-self: baseline;
+}
+
+.plist-fields dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.plist-attrs:empty {
+  display: none;
+}
+
+.plist-note-label {
+  font-size: 11px;
+}
+
+.plist-note {
+  font: inherit;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  resize: vertical;
+}
+
+.plist-desc {
+  white-space: pre-wrap;
+  max-width: 70ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#key-help {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  min-width: 280px;
+}
+
+#key-help::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+#key-help h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+}
+
+.plist-keys {
+  border-collapse: collapse;
+  margin-bottom: var(--space-3);
+}
+
+.plist-keys td {
+  padding: 2px var(--space-3) 2px 0;
+  font-size: 13px;
+}
+
+.plist-keys kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}

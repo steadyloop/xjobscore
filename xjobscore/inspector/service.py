@@ -28,9 +28,15 @@ SOURCE_CATEGORIES = ("all", "ATS", "Direct", "Board", "Other")
 # sources a user can select or fetch directly.
 HIDDEN_SOURCES = frozenset({"jsonld"})
 SMARTRECRUITERS_HOST = "api.smartrecruiters.com"
-SMARTRECRUITERS_CONCURRENCY = 8
-WORKDAY_PAGE_CONCURRENCY = 32
-WORKDAY_DETAIL_CONCURRENCY = 16
+
+
+def _detail_concurrency(source: str) -> int:
+    """The source's own configured detail width.
+
+    Read from the config rather than restated here: a second copy of a width
+    is how the inspector drifted into measuring 8 while production ran 4.
+    """
+    return json_api.CONFIGS[source].get("detail", {}).get("concurrency", 1)
 
 
 def display_source(source: str) -> str:
@@ -48,12 +54,61 @@ class InspectorService:
         self.user_agent = user_agent
         self.result_store = result_store
         self._locks: dict[int, Any] = {}
+        # Single-slot parse cache: (result_id, outcome) for the feed pane being
+        # viewed. Parse previews are recomputed on demand, so retaining more
+        # than the current pane trades memory for nothing.
+        self._parse_slot: tuple[str, dict[str, Any]] | None = None
+        # Every SmartRecruiters feed shares one host, but InspectorService
+        # builds a fresh InspectorNet per feed, so Net's own per-host semaphore
+        # would hand each concurrent fetch its own allowance. Width comes from
+        # the config so this stays a binding, not a second opinion.
         self._shared_host_semaphores = {
-            SMARTRECRUITERS_HOST: asyncio.Semaphore(SMARTRECRUITERS_CONCURRENCY)
+            SMARTRECRUITERS_HOST: asyncio.Semaphore(_detail_concurrency("smartrecruiters"))
         }
+        # Rate-limit adaptation outlives the per-fetch InspectorNet: a host
+        # that 429ed a minute ago is still throttled for the next run.
+        self._shared_host_paces: dict[str, Any] = {}
+        # Net._VENDOR_CAPS semaphores, keyed by suffix. Process-scoped for the
+        # same reason as _shared_host_semaphores: InspectorService builds a
+        # fresh InspectorNet per feed, so a vendor-wide cap (e.g. Workday's
+        # myworkdayjobs.com, spanning many tenant hostnames) only binds if
+        # concurrent fetches of that vendor share one semaphore instance.
+        self._shared_vendor_semaphores: dict[str, Any] = {}
 
     async def get_result(self, feed_id: int) -> RunSnapshot | None:
-        return await self.result_store.load_feed(feed_id)
+        snapshot = await self.result_store.load_feed(feed_id)
+        if snapshot is None:
+            return None
+        feed = await self.db.get_feed(feed_id)
+        return await self._with_parse(snapshot, feed)
+
+    async def _with_parse(
+        self, snapshot: RunSnapshot, feed: Feed | None
+    ) -> RunSnapshot:
+        """Derive the parse preview from the staged payload, caching in memory."""
+        if feed is None:
+            return snapshot
+        slot = self._parse_slot
+        outcome = slot[1] if slot is not None and slot[0] == snapshot.result_id else None
+        if outcome is None:
+            staged_items = tuple(
+                Item(
+                    external_id=item["external_id"],
+                    payload=item["payload"],
+                    kind=item["kind"],
+                )
+                for item in snapshot.items
+            )
+            outcome = await asyncio.to_thread(
+                self._parse_with_alias_scope, feed, staged_items, snapshot.envelope
+            )
+            self._parse_slot = (snapshot.result_id, outcome)
+        return replace(
+            snapshot,
+            parse_status=outcome["status"],
+            parse_summary=outcome["summary"],
+            parse_items=tuple(outcome["items"]),
+        )
 
     async def _feed_for_ref(self, ref: str) -> Feed | None:
         get_feed_ref = getattr(self.db, "get_feed_ref", None)
@@ -72,19 +127,22 @@ class InspectorService:
         self,
         ref: str,
         *,
-        force_full: bool = True,
         trigger: str = "manual",
         etag: str | None = None,
     ) -> RunSnapshot:
         feed = await self._feed_for_ref(ref)
         if feed is None:
             raise KeyError(ref)
-        return await self.fetch_once(
-            feed.id, force_full=force_full, trigger=trigger, etag=etag
-        )
+        return await self.fetch_once(feed.id, trigger=trigger, etag=etag)
 
     async def get_result_ref(self, ref: str) -> RunSnapshot | None:
-        return await self.result_store.load_ref(ref)
+        feed = await self._feed_for_ref(ref)
+        if feed is None:
+            return None
+        snapshot = await self.result_store.load_ref(feed.source, feed.key)
+        if snapshot is None:
+            return None
+        return await self._with_parse(snapshot, feed)
 
     async def source_groups(self) -> list[dict[str, Any]]:
         return await self.result_store.summary_groups()
@@ -114,13 +172,11 @@ class InspectorService:
     def _parse_with_alias_scope(
         self, feed: Feed, items: Sequence[Item], envelope: dict
     ) -> dict[str, Any]:
-        """Run parse_record with one alias-lookup connection for the pass.
+        """Run parse_record with one memoized alias lookup for the pass.
 
-        Called via asyncio.to_thread, so this whole call -- including every
-        alias_lookup_scope lookup parse_record triggers -- runs start to
-        finish on one worker thread. That is what makes it safe for
-        alias_lookup_scope to hand out a callable backed by a raw sqlite3
-        connection: the connection never crosses threads.
+        Called via asyncio.to_thread, so the lookups cannot await. The store
+        resolves them from an in-memory registry index rather than the
+        connection pool for exactly that reason.
         """
         with self.result_store.alias_lookup_scope() as resolve_alias:
             return parsing.parse_record(feed, items, envelope, resolve_alias)
@@ -140,7 +196,6 @@ class InspectorService:
         self,
         feed_id: int,
         *,
-        force_full: bool = True,
         trigger: str = "manual",
         etag: str | None = None,
     ) -> RunSnapshot:
@@ -164,28 +219,26 @@ class InspectorService:
             raw_size_bytes = 0
             network = telemetry([])
             net: InspectorNet | None = None
-            parse_outcome: dict[str, Any] | None = None
             response_etag: str | None = None
             reused_item_count = 0
             record: Record | None = None
 
-            # A copied feed means force-full never mutates the real ETag, and
-            # this process never calls the scheduler's poll path. SmartRecruiters
-            # additionally requires a complete local payload before any validator
-            # is safe to send.
-            ref = feed_ref(feed.source, feed.key)
+            # A copied feed means this process never mutates the real ETag or
+            # calls the scheduler's poll path. SmartRecruiters additionally
+            # requires a complete local payload before any validator is safe
+            # to send.
             stored = (
-                await self.result_store.load_ref(ref)
-                if not force_full and feed.source == "smartrecruiters"
+                await self.result_store.load_ref(feed.source, feed.key)
+                if feed.source == "smartrecruiters"
                 else None
             )
             workday_stored_items = (
-                await self.result_store.load_latest_items_ref(ref)
-                if not force_full and feed.source == "workday"
+                await self.result_store.load_latest_items_ref(feed.source, feed.key)
+                if feed.source == "workday"
                 else ()
             )
             validator = etag
-            if not force_full and feed.source == "smartrecruiters":
+            if feed.source == "smartrecruiters":
                 # A partial SmartRecruiters run may contain a useful prefix for
                 # revision reuse, but it cannot satisfy a whole-list 304. Only
                 # send a validator when the stored snapshot is complete.
@@ -199,25 +252,28 @@ class InspectorService:
                     validator = stored.response_etag or validator or feed.etag
                 else:
                     validator = None
-            elif validator is None and not force_full:
+            elif validator is None:
                 # Only offer a validator we can honor: a 304 returns no body, so
                 # revalidating is worth it only while the run that carries the
                 # matching payload is still the one holding item detail.
-                stored_etag, stored_items = await self.result_store.latest_validator(ref)
+                stored_etag, stored_items = await self.result_store.latest_validator(
+                    feed.source, feed.key
+                )
                 validator = stored_etag if stored_items else None
                 if validator is None:
                     validator = feed.etag
             fetch_feed = replace(
-                feed, etag=validator if validator is not None else (None if force_full else feed.etag)
+                feed, etag=validator if validator is not None else feed.etag
             )
             try:
-                if feed.source == "workday" and (host := self._workday_host(feed)):
-                    self._shared_host_semaphores.setdefault(
-                        host, asyncio.Semaphore(WORKDAY_PAGE_CONCURRENCY)
-                    )
+                # Workday needs no per-tenant entry here: Net's vendor cap
+                # covers myworkdayjobs.com across every tenant hostname, which
+                # is what this bespoke semaphore was approximating.
                 net = InspectorNet(
                     user_agent=self.user_agent,
                     shared_host_semaphores=self._shared_host_semaphores,
+                    shared_host_paces=self._shared_host_paces,
+                    shared_vendor_semaphores=self._shared_vendor_semaphores,
                 )
                 async with net:
                     if feed.source in {"smartrecruiters", "workday"}:
@@ -247,10 +303,17 @@ class InspectorService:
                             )
                             else None
                         )
+                        # Deliberately no page_concurrency/detail_concurrency
+                        # here: widths belong to the config, so the inspector
+                        # measures exactly what a production poll runs. It used
+                        # to force 32/16 for workday and 8/8 for
+                        # smartrecruiters, which silently overrode the config
+                        # and made every stored measurement describe a width
+                        # production never used. Only revision reuse -- which
+                        # needs the stored payload the inspector alone has --
+                        # is passed.
                         harvest_options = (
                             json_api.JsonApiHarvestOptions(
-                                page_concurrency=WORKDAY_PAGE_CONCURRENCY,
-                                detail_concurrency=WORKDAY_DETAIL_CONCURRENCY,
                                 list_revision_fields=("title", "bulletFields.0"),
                                 detail_revision_fields=(
                                     "jobPostingInfo.title",
@@ -261,8 +324,6 @@ class InspectorService:
                             if feed.source == "workday"
                             else json_api.JsonApiHarvestOptions(
                                 page_step=100,
-                                page_concurrency=SMARTRECRUITERS_CONCURRENCY,
-                                detail_concurrency=SMARTRECRUITERS_CONCURRENCY,
                                 revision_fields=("jobAdId", "releasedDate"),
                                 prior_items=prior_items,
                             )
@@ -316,25 +377,15 @@ class InspectorService:
                     # forward keeps the run displayable and its detail rows from
                     # being trimmed away behind an empty run.
                     if stored is None:
-                        stored = await self.result_store.load_ref(ref)
-                    if stored is not None and stored.items:
+                        stored = await self.result_store.load_ref(feed.source, feed.key)
+                    if stored is not None:
                         items = list(stored.items)
                         envelope = stored.envelope
                         raw_size_bytes = stored.raw_size_bytes
                         reused_item_count = len(items)
-                        parse_outcome = {
-                            "status": stored.parse_status,
-                            "summary": stored.parse_summary,
-                            "items": list(stored.parse_items),
-                        }
                     # A 304 usually omits the validator that produced it.
                     response_etag = response_etag or validator
                     stages.record("hydrate")
-                if status in ("ok", "partial"):
-                    parse_outcome = await asyncio.to_thread(
-                        self._parse_with_alias_scope, feed, record.items, record.envelope
-                    )
-                stages.record("parse")
             except Exception as exc:  # Inspector must return a useful result for failures.
                 if net is not None:
                     network = telemetry(net.events)
@@ -372,7 +423,6 @@ class InspectorService:
                 item_count=len(items),
                 raw_size_bytes=raw_size_bytes,
                 truncated=truncated,
-                force_full=force_full,
                 error_class=error_class,
                 error_detail=error_detail,
                 items=tuple(items),
@@ -380,9 +430,6 @@ class InspectorService:
                 size_bytes=size_bytes,
                 network=network,
                 trigger=trigger,
-                parse_status=parse_outcome["status"] if parse_outcome else "skipped",
-                parse_summary=parse_outcome["summary"] if parse_outcome else None,
-                parse_items=tuple(parse_outcome["items"]) if parse_outcome else (),
                 response_etag=response_etag,
             )
             await self.result_store.save(snapshot)
@@ -413,11 +460,19 @@ class InspectorService:
                 "company_description": descriptions.get(feed.company_id),
                 "configured": True,
                 "enabled": feed.enabled,
+                "complete": False,
+                "closes": False,
+                "credentialed": False,
+                "cadence_s": None,
+                "next_poll_at": None,
                 "source_registered": feed.source in sources.SOURCES,
                 "parser_registered": feed.source in sources.PARSERS,
                 "last_result": (
                     {k: v for k, v in summaries.get(feed.id, {}).items()
-                     if k in ("status", "item_count", "elapsed_ms", "finished_at", "error_class", "error_detail")}
+                     if k in (
+                         "result_id", "status", "item_count", "elapsed_ms",
+                         "finished_at", "error_class", "error_detail",
+                     )}
                     if summaries.get(feed.id)
                     else None
                 ),
@@ -439,6 +494,11 @@ class InspectorService:
                 "company_description": None,
                 "configured": False,
                 "enabled": False,
+                "complete": False,
+                "closes": False,
+                "credentialed": False,
+                "cadence_s": None,
+                "next_poll_at": None,
                 "source_registered": True,
                 "parser_registered": source in sources.PARSERS,
                 "last_result": None,

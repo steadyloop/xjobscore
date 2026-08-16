@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -9,7 +10,14 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from xjobscore.net import RETRYABLE_STATUS, Net, NetError, Response
+from xjobscore.net import (
+    RETRYABLE_STATUS,
+    Net,
+    NetError,
+    Response,
+    _HostPace,
+    _retry_after_seconds,
+)
 
 
 _VALIDATOR_HEADERS = {"etag", "last-modified"}
@@ -111,6 +119,9 @@ def summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "response_bytes": response_bytes,
         "final_status": statuses[-1] if statuses else None,
         "error_count": len(errors),
+        # Time actually spent waiting on HTTP. Subtracting this from the run's
+        # elapsed_ms is what separates "the board was slow" from "we were slow".
+        "elapsed_ms": round(sum(float(event.get("elapsed_ms", 0) or 0) for event in events), 1),
     }
 
 
@@ -118,26 +129,114 @@ def telemetry(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {"summary": summarize_events(events), "requests": events}
 
 
+class StageTimer:
+    """Wall-clock breakdown of one fetch, recorded in order.
+
+    The stages partition the same window ``RunSnapshot.elapsed_ms`` measures,
+    so they sum to it. Persistence is deliberately outside that window and so
+    is not a stage.
+    """
+
+    def __init__(self) -> None:
+        self._stages: list[dict[str, Any]] = []
+        self._mark = time.monotonic()
+
+    def record(self, name: str) -> None:
+        now = time.monotonic()
+        self._stages.append({"name": name, "elapsed_ms": round((now - self._mark) * 1000, 1)})
+        self._mark = now
+
+    def stages(self) -> list[dict[str, Any]]:
+        return list(self._stages)
+
+
 class InspectorNet(Net):
     """The production Net policy with request observations attached."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        shared_host_semaphores: dict[str, asyncio.Semaphore] | None = None,
+        shared_host_paces: dict[str, _HostPace] | None = None,
+        shared_vendor_semaphores: dict[str, asyncio.Semaphore] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.events: list[dict[str, Any]] = []
         self._request_number = 0
+        # InspectorService creates a fresh HTTP client per feed. This registry
+        # is process-scoped so concurrent manual/scheduled runs still obey a
+        # vendor-wide cap rather than each receiving the full allowance.
+        self._shared_host_semaphores = (
+            shared_host_semaphores if shared_host_semaphores is not None else {}
+        )
+        # Same reasoning for pacing: a 429 cooldown learned during one run
+        # should still be respected by the next run against the same host.
+        if shared_host_paces is not None:
+            self._host_paces = shared_host_paces
+        # Same reasoning again for Net._vendor_semaphores: InspectorService
+        # builds a fresh InspectorNet per feed, so without a shared dict here
+        # a vendor cap (e.g. myworkdayjobs.com) would reset to empty on every
+        # fetch and never actually bind across concurrent feeds of the same
+        # vendor -- see InspectorService.__init__.
+        if shared_vendor_semaphores is not None:
+            self._vendor_semaphores = shared_vendor_semaphores
 
-    async def _request(self, method: str, url: str, **kwargs: Any) -> Response:
+    async def _request(self, method: str, url: str, *, concurrency: int = 1, **kwargs: Any) -> Response:
         if self._client is None:
             raise RuntimeError("Net must be used as an async context manager")
+        host = urlsplit(url).netloc
+        # Vendor cap first (Net._vendor_semaphore), exact-host shared cap
+        # second -- the same vendor -> host order Net._request uses, and
+        # distinct semaphores (different key spaces: suffix vs. exact host),
+        # so this never re-acquires the same lock twice for one request.
+        vendor = self._vendor_semaphore(host)
+        shared = self._shared_host_semaphores.get(host)
+        if vendor is None:
+            if shared is not None:
+                async with shared:
+                    return await self._request_with_local_limit(
+                        method, url, host, concurrency=concurrency, **kwargs
+                    )
+            return await self._request_with_local_limit(
+                method, url, host, concurrency=concurrency, **kwargs
+            )
+        async with vendor:
+            if shared is not None:
+                async with shared:
+                    return await self._request_with_local_limit(
+                        method, url, host, concurrency=concurrency, **kwargs
+                    )
+            return await self._request_with_local_limit(
+                method, url, host, concurrency=concurrency, **kwargs
+            )
 
+    async def _request_with_local_limit(
+        self, method: str, url: str, host: str, *, concurrency: int, **kwargs: Any
+    ) -> Response:
+        if concurrency > 1:
+            semaphore = self._host_semaphores.setdefault(
+                (host, concurrency), asyncio.Semaphore(concurrency)
+            )
+            async with semaphore:
+                return await self._request_one(method, url, host, throttled=False, **kwargs)
+        return await self._request_one(method, url, host, throttled=True, **kwargs)
+
+    async def _request_one(
+        self, method: str, url: str, host: str, *, throttled: bool, **kwargs: Any
+    ) -> Response:
+        pace = self._host_paces.setdefault(host, _HostPace())
         self._request_number += 1
         request_id = self._request_number
         params = kwargs.get("params")
         headers = kwargs.get("headers") or {}
-        host = urlsplit(url).netloc
         attempt = 0
         while True:
-            await self._throttle(host)
+            # A concurrency-capped host is paced by its semaphore, held for
+            # this whole call including retries -- see Net._request_one.
+            if throttled:
+                await self._throttle(host)
+            paced_s = await pace.reserve()
             started = time.monotonic()
             try:
                 response = await self._client.request(method, url, **kwargs)
@@ -157,6 +256,7 @@ class InspectorNet(Net):
                         "conditional_headers": _conditional_headers(headers),
                         "response_headers": {},
                         "error": {"class": type(exc).__name__},
+                        **({"paced_ms": round(paced_s * 1000, 1)} if paced_s else {}),
                     }
                 )
                 if attempt >= self._max_retries:
@@ -176,15 +276,23 @@ class InspectorNet(Net):
                 elapsed_ms=elapsed_ms,
                 attempt=attempt + 1,
             )
+            if paced_s:
+                event["paced_ms"] = round(paced_s * 1000, 1)
             self.events.append(event)
 
             if response.status_code == 304 or response.status_code < 400:
+                pace.succeeded()
                 return Response(
                     url=str(response.url),
                     status=response.status_code,
                     headers={k.lower(): v for k, v in response.headers.items()},
                     body=response.content,
                 )
+
+            if response.status_code == 429:
+                # Host-wide: the next reserve() waits the cooldown out, and so
+                # does every sibling slot, instead of each sleeping alone.
+                pace.throttled(_retry_after_seconds(response.headers.get("retry-after")))
 
             if response.status_code not in RETRYABLE_STATUS or attempt >= self._max_retries:
                 raise NetError(
@@ -193,5 +301,6 @@ class InspectorNet(Net):
                     status=response.status_code,
                 )
 
-            await self._sleep_before_retry(attempt, response.headers.get("retry-after"))
+            if response.status_code != 429:
+                await self._sleep_before_retry(attempt, response.headers.get("retry-after"))
             attempt += 1

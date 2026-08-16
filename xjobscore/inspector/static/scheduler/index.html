@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scheduler · xjobscore inspector</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body>
+  <header id="topnav"></header>
+  <main class="page">
+    <div class="banner" id="degraded-banner" hidden>
+      PostgreSQL is unreachable — every production column below reads "—" and
+      the interval control is disabled.
+    </div>
+    <div class="banner" id="telemetry-banner" hidden>
+      No poll observations yet — λ, New/7 d, and the request tiles are unknown, not zero.
+    </div>
+    <div class="banner" id="paused-banner" hidden>
+      The scheduler is paused — production is not polling any feed. Resume to continue.
+    </div>
+    <div class="banner" id="runner-missing-banner" hidden>
+      The scheduler is set to run, but no inspector process is currently supervising it —
+      polling will not happen until one is.
+    </div>
+
+    <section class="card">
+      <header><h1>Production poll telemetry</h1></header>
+      <div class="stat-row" id="sched-stats"></div>
+    </section>
+
+    <div class="page-header">
+      <input type="search" id="search" placeholder="Search source, key, or company…" autocomplete="off">
+      <select id="filter-platform" aria-label="Filter by platform">
+        <option value="">All platforms</option>
+      </select>
+      <select id="filter-interval" aria-label="Filter by tier">
+        <option value="">All tiers</option>
+      </select>
+      <select id="filter-status" aria-label="Filter by status">
+        <option value="">All statuses</option>
+      </select>
+      <div class="grow"></div>
+      <button class="btn" type="button" id="run-toggle"
+              title="Pause or resume the production polling loop">
+        …
+      </button>
+      <button class="btn" type="button" id="fetch-all"
+              title="Fetch every visible feed live through the production pipeline, paced by each vendor's rate budget; click again to stop">
+        Fetch all feeds
+      </button>
+      <span class="secondary" id="row-count"></span>
+    </div>
+
+    <div class="master sched-master" id="master">
+      <section class="card feeds-card">
+        <div class="table-wrap">
+          <table class="data" id="sched-table">
+            <thead>
+              <tr>
+                <th>Feed</th>
+                <th>Platform</th>
+                <th>Tier</th>
+                <th class="num">λ / day</th>
+                <th class="num">New 7 d</th>
+                <th class="num">Last poll</th>
+                <th class="num">p95 latency</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="sched-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="sched-empty" hidden>No feeds match the current filters.</div>
+      </section>
+
+      <div class="split-handle" id="split-handle" hidden></div>
+      <aside class="card detail-pane sched-pane" id="detail-pane" hidden></aside>
+    </div>
+
+  </main>
+  <script type="module" src="/static/scheduler/app.js"></script>
+</body>
+</html>
