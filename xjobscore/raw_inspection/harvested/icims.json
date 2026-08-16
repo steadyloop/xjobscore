@@ -1,5 +1,0 @@
-{
-  "ok": false,
-  "skipped": "catalogs/icims.toml declares the source but carries zero [[feed]] entries",
-  "source": "icims"
-}
