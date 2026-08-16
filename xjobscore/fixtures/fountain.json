@@ -1,0 +1,86 @@
+{
+  "openings": [
+    {
+      "id": "9c922b84-dbce-4f0e-80eb-de0324eccb91",
+      "to_param": "financial-planning-and-analysis-fp-g-analyst",
+      "title": "Financial Planning and Analysis (FP&A)",
+      "location_name": "US",
+      "location_address": null,
+      "location_state_code": null,
+      "additional_job_types": false,
+      "amazon_afp_job_types": false,
+      "job_type": null
+    },
+    {
+      "id": "f2c3dd82-04b2-43ba-a7d1-df23a50fe9bc",
+      "to_param": "manager-operations",
+      "title": "Manager, Operations",
+      "location_name": "US",
+      "location_address": null,
+      "location_state_code": null,
+      "additional_job_types": false,
+      "amazon_afp_job_types": false,
+      "job_type": null
+    },
+    {
+      "id": "d639cdb2-1e7a-435e-ae8f-3808e149c1da",
+      "to_param": "us-senior-ai-engineer-64e00ffb-f5b4-47c5-b34d-933c441032df",
+      "title": "Senior AI Engineer",
+      "location_name": "US",
+      "location_address": null,
+      "location_state_code": null,
+      "additional_job_types": false,
+      "amazon_afp_job_types": false,
+      "job_type": null
+    },
+    {
+      "id": "07bae673-5e30-493e-859f-904d58dba9a4",
+      "to_param": "technical-lead",
+      "title": "Senior Software Engineer",
+      "location_name": "US",
+      "location_address": null,
+      "location_state_code": null,
+      "additional_job_types": false,
+      "amazon_afp_job_types": false,
+      "job_type": "permanent"
+    },
+    {
+      "id": "a6f73ae5-75e8-4116-a349-ffa403952153",
+      "to_param": "us-staff-accountant-ar",
+      "title": "Staff Accountant - AR",
+      "location_name": "US",
+      "location_address": null,
+      "location_state_code": null,
+      "additional_job_types": false,
+      "amazon_afp_job_types": false,
+      "job_type": null
+    },
+    {
+      "id": "d0b68e6d-9c65-4570-ba29-211a9c549abb",
+      "to_param": "vp-finance",
+      "title": "VP, Finance/Controller",
+      "location_name": "US",
+      "location_address": null,
+      "location_state_code": null,
+      "additional_job_types": false,
+      "amazon_afp_job_types": false,
+      "job_type": null
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "next_page": null,
+    "per_page": 25,
+    "total_count": 6,
+    "total_pages": 1
+  },
+  "positions": [
+    {"id": "2a6b05a2-c013-4bfb-aa0d-4a6246b87ea0", "name": "Financial Planning and Analysis (FP&G) Analyst"},
+    {"id": "4d1fcc31-24d2-41b1-b42f-f727343fc8b1", "name": "Manager, Operations"},
+    {"id": "ac71a62e-47b2-44f4-9e29-03cb1e7585d4", "name": "Senior AI Engineer"},
+    {"id": "c1c8a018-3aeb-4702-9084-55df9f5aeb35", "name": "Senior Software Engineer"},
+    {"id": "0a14d04f-7c48-4f84-9435-3ce420765de3", "name": "Staff Accountant - AR"},
+    {"id": "b1e1557c-528e-47aa-aa12-509f2a799144", "name": "VP, Finance"}
+  ],
+  "state_codes": []
+}

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://environmentagencyjobs.tal.net/vx/mobile-0/appcentre-1/brand-2/candidate/jobboard/vacancy/1/feed</id>
+  <link rel="self" href="https://environmentagencyjobs.tal.net/vx/mobile-0/appcentre-1/brand-2/candidate/jobboard/vacancy/1/feed" type="application/atom+xml"/>
+  <title>External Opportunities</title>
+  <author>
+    <name>Environment Agency Jobs</name>
+  </author>
+  <updated>2026-08-09T20:28:43Z</updated>
+  <entry xml:base="https://environmentagencyjobs.tal.net/vx/mobile-0/appcentre-1/brand-0/candidate/so/pm/1/pl/1/opp/35799-Commercial-Business-Relationship-Manager-35799/en-GB">
+    <id>https://environmentagencyjobs.tal.net/vx/mobile-0/appcentre-1/brand-0/candidate/so/pm/1/pl/1/opp/35799-Commercial-Business-Relationship-Manager-35799/en-GB</id>
+    <link rel="alternate" href="https://environmentagencyjobs.tal.net/vx/mobile-0/appcentre-1/brand-0/candidate/so/pm/1/pl/1/opp/35799-Commercial-Business-Relationship-Manager-35799/en-GB?instant=apply" type="text/html"/>
+    <title>Commercial Business Relationship Manager - 35799</title>
+    <updated>2026-08-06T23:00:06Z</updated>
+    <published>2026-08-06T23:00:06Z</published>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">Title:Commercial Business Relationship Manager - 35799<br/>
+Vacancy Id:35799<br/>
+Role Type:Commercial<br/>
+Salary Range:50,001 - 60,000 <br/>
+Location:Leeds ,Newcastle <br/>
+Closing Date:17 Sep 2026 23:55 BST<br/>
+</div>
+    </content>
+  </entry>
+</feed>

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://asp.tal.net/vx/mobile-0/appcentre-13/candidate/jobboard/vacancy/14/feed</id>
+  <link rel="self" href="https://asp.tal.net/vx/mobile-0/appcentre-13/candidate/jobboard/vacancy/14/feed" type="application/atom+xml"/>
+  <title>Current vacancies</title>
+  <author>
+    <name>Avon and Somerset Police</name>
+  </author>
+  <updated>2026-08-09T20:20:03Z</updated>
+  <link rel="alternate" href="https://asp.tal.net/vx/mobile-0/appcentre-13/candidate/jobboard/vacancy/14" type="text/html"/>
+  <entry xml:base="https://asp.tal.net/vx/mobile-0/appcentre-External/brand-0/candidate/so/pm/6/pl/24/opp/8084-D-Supt-Regional-Head-of-HUMINT-Transferee/en-GB">
+    <id>https://asp.tal.net/vx/mobile-0/appcentre-External/brand-0/candidate/so/pm/6/pl/24/opp/8084-D-Supt-Regional-Head-of-HUMINT-Transferee/en-GB</id>
+    <link rel="alternate" href="https://asp.tal.net/vx/mobile-0/appcentre-External/brand-0/candidate/so/pm/6/pl/24/opp/8084-D-Supt-Regional-Head-of-HUMINT-Transferee/en-GB?instant=apply" type="text/html"/>
+    <title>D/Supt Regional Head of HUMINT - Transferee</title>
+    <updated>2026-08-07T07:00:00Z</updated>
+    <published>2026-08-07T07:00:00Z</published>
+    <content type="text">ID:8084&lt;br /&gt;
+Title:D/Supt Regional Head of HUMINT - Transferee&lt;br /&gt;
+Location:Other&lt;br /&gt;
+Salary:£84,177- £99,015&lt;br /&gt;
+Live Date:7 Aug 2026 07:00 BST&lt;br /&gt;
+Closing Date:4 Sep 2026 12:00 BST&lt;br /&gt;
+Posting Closing Date:4 Sep 2026 12:00 BST&lt;br /&gt;
+Role Type:Transferee Campaign&lt;br /&gt;
+Job Advert Description:There is a rare and exciting opportunity for an experienced Detective Superintendent to join the South West Counter Terrorism Policing Unit (CTPSW).&lt;br&gt;As a member of the CTPSW Senior Leadership Team this role will provide a unique opportunity to work at ...&lt;br /&gt;
+</content>
+  </entry>
+  <entry xml:base="https://asp.tal.net/vx/mobile-0/appcentre-External/brand-0/candidate/so/pm/6/pl/24/opp/7959-Technical-Support-Co-ordinator/en-GB">
+    <id>https://asp.tal.net/vx/mobile-0/appcentre-External/brand-0/candidate/so/pm/6/pl/24/opp/7959-Technical-Support-Co-ordinator/en-GB</id>
+    <link rel="alternate" href="https://asp.tal.net/vx/mobile-0/appcentre-External/brand-0/candidate/so/pm/6/pl/24/opp/7959-Technical-Support-Co-ordinator/en-GB?instant=apply" type="text/html"/>
+    <title>Technical Support Co-ordinator</title>
+    <updated>2026-08-06T15:00:00Z</updated>
+    <published>2026-08-06T15:00:00Z</published>
+    <content type="text">ID:7959&lt;br /&gt;
+Title:Technical Support Co-ordinator&lt;br /&gt;
+Location:Portishead, Police Headquarters, Valley Road, Portishead- BS20 8QJ&lt;br /&gt;
+Salary:£33,603 - £35,772&lt;br /&gt;
+Live Date:25 Jun 2026 16:00 BST&lt;br /&gt;
+Closing Date:17 Aug 2026 12:00 BST&lt;br /&gt;
+Posting Closing Date:17 Aug 2026 12:00 BST&lt;br /&gt;
+Role Type:Police Staff&lt;br /&gt;
+Job Advert Description:Avon and Somerset Police are looking for a Technical Support Co-ordinator to join our busy and friendly IT team.&amp;#160;&lt;br&gt;The Applications Delivery area comprises of people-focused, technical specialists whose passion is maintaining robust, highly available bu...&lt;br /&gt;
+</content>
+  </entry>
+</feed>
