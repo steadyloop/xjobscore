@@ -61,6 +61,6 @@ test("source coverage is the canonical read-only page", () => {
   assert.match(page, /<title>Source coverage · OneShot<\/title>/);
   assert.match(page, /id="coverage-content"/);
   assert.doesNotMatch(page, /type="search"|<select|data-filter|data-sort/);
-  assert.match(mainNavigation, /href="\/static\/source-coverage\/index\.html"/);
+  assert.match(mainNavigation, /href="\/source-coverage\/"/);
   assert.match(page, /navigation\.css\?v=stable-nav-/);
 });

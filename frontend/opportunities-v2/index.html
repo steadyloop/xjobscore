@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>OneShot</title>
-  <link rel="stylesheet" href="/static/app.css?v=opportunities-canonical-20260810">
-  <link rel="stylesheet" href="/static/navigation.css?v=stable-nav-20260810">
-  <script defer src="/static/sample-data.js?v=resume-sample-20260810"></script>
-  <script defer src="/static/api-client.js?v=resume-sample-20260810"></script>
-  <script defer src="/static/nav-count.js?v=opportunity-count-20260809"></script>
-  <script defer src="/static/app.js?v=nav-rename-20260810"></script>
+  <title>Opportunities V2 · OneShot</title>
+  <link rel="stylesheet" href="/static/opportunities-v2/styles.css?v=opportunities-v2-20260816">
+  <link rel="stylesheet" href="/static/navigation.css?v=stable-nav-20260816">
+  <script defer src="/static/sample-data.js?v=visitor-local-20260816"></script>
+  <script defer src="/static/api-client.js?v=visitor-local-20260816"></script>
+  <script defer src="/static/nav-count.js?v=visitor-local-20260816"></script>
+  <script defer src="/static/opportunities-v2/app.js?v=visitor-local-20260816"></script>
 </head>
 <body>
   <svg width="0" height="0" aria-hidden="true" style="position:absolute">
@@ -22,24 +22,19 @@
   </svg>
   <div class="shell">
     <aside class="sidebar" aria-label="Primary navigation">
-      <a class="brand" href="/"><span class="brand-mark">◌</span>oneshot</a>
+      <a class="brand" href="/"><img class="brand-mark" src="/static/brand-mark.svg?v=20260813" alt="" width="32" height="32"><span class="brand-word">OneShot</span><span class="brand-sub">Application Pipeline</span></a>
       <nav class="side-nav">
         <a class="active" href="/" aria-current="page"><svg class="nav-icon" aria-hidden="true"><use href="#i-compass"/></svg>Opportunities <b data-opportunity-count>—</b></a>
-        <a href="/static/application/index.html"><svg class="nav-icon" aria-hidden="true"><use href="#i-pipeline"/></svg>Applications</a>
+        <a href="/application/"><svg class="nav-icon" aria-hidden="true"><use href="#i-pipeline"/></svg>Applications</a>
         <a href="/resume/"><svg class="nav-icon" aria-hidden="true"><use href="#i-doc"/></svg>Resume</a>
         <p>System</p>
-        <a href="/static/source-coverage/index.html"><svg class="nav-icon" aria-hidden="true"><use href="#i-radar"/></svg>Source coverage</a>
+        <a href="/source-coverage/"><svg class="nav-icon" aria-hidden="true"><use href="#i-radar"/></svg>Source coverage</a>
       </nav>
-      <button class="sample-toggle" type="button" data-action="sample-toggle" role="switch" aria-checked="false" aria-label="Turn on sample data">
-        <span class="sample-toggle-copy">Sample data<small>Off</small></span>
-        <span class="sample-switch" aria-hidden="true"><i></i></span>
-      </button>
     </aside>
-
     <main class="main">
       <div id="flash" class="flash" role="status" aria-live="polite"></div>
-      <section id="view" class="view discover-view" aria-live="polite">
-        <div class="state loading"><i></i><h1>Loading your workspace</h1><p>Reading the latest API data.</p></div>
+      <section id="view" class="view opportunities-v2-view" aria-live="polite">
+        <div class="state loading"><i></i><h1>Loading redesigned Opportunities</h1><p>Reading the latest API data.</p></div>
       </section>
     </main>
   </div>

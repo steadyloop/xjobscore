@@ -1,0 +1,63 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Version-control and local tooling metadata
+.git
+.gitignore
+.github
+.codex
+.agents
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tox
+
+# Frontend/development dependencies and generated output
+node_modules
+frontend/node_modules
+dist
+build
+*.egg-info
+.coverage
+.coverage.*
+coverage
+htmlcov
+.parcel-cache
+.vite
+
+# Tests and test artifacts (not needed by the production image)
+tests
+test
+**/tests
+**/test
+playwright-report
+test-results
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+
+# Editor and OS junk
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation and large development-only exports
+*.log
+*.tmp
+*.bak

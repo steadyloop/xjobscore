@@ -36,18 +36,30 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-lineca
 .skip-link:focus { transform: none; }
 
 .shell { min-height: 100vh; display: grid; grid-template-columns: 222px minmax(0, 1fr); }
-.sample-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; border: 1px solid rgb(255 255 255 / 16%); border-radius: 8px; background: rgb(255 255 255 / 6%); padding: 8px 10px; color: rgb(255 255 255 / 78%); text-align: left; }
-.sample-toggle:hover, .sample-toggle:focus-visible { border-color: var(--lime); color: white; outline: none; }
-.sample-toggle-copy { display: grid; gap: 1px; font-size: 11px; font-weight: 700; }
-.sample-toggle-copy small { color: rgb(255 255 255 / 42%); font: 9px var(--mono); text-transform: uppercase; }
-.sample-switch { position: relative; width: 30px; height: 17px; flex: 0 0 30px; border-radius: 99px; background: rgb(255 255 255 / 18%); }
-.sample-switch i { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: rgb(255 255 255 / 72%); transition: transform .18s ease, background .18s ease; }
-.sample-toggle.active .sample-switch { background: var(--lime); }
-.sample-toggle.active .sample-switch i { transform: translateX(13px); background: #15251e; }
-.sample-toggle.active .sample-toggle-copy small { color: var(--lime); }
+/* The sample-data switch sits in the page header now, beside the Typst badge,
+   not in the sidebar. It takes .button's height and radius so the header reads
+   as one row of controls, and turns amber when on — this is the page's "what
+   you are looking at is not real" indicator as much as it is a switch, and
+   amber says that where the brand lime would just say "active". The same rules
+   live in application/styles.css and app.css; the three sheets are hand-copied,
+   and app.css restates them in its own palette's token names. */
+.sample-toggle { min-height: 38px; display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); padding: 6px 12px; color: var(--ink); text-align: left; }
+.sample-toggle:hover, .sample-toggle:focus-visible { border-color: var(--ink); outline: none; }
+.sample-toggle-copy { display: grid; gap: 1px; font-size: 12px; font-weight: 700; line-height: 1.15; }
+.sample-toggle-copy small { color: var(--subtle); font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.sample-switch { position: relative; width: 32px; height: 18px; flex: 0 0 32px; border-radius: 99px; background: var(--line-strong); transition: background .18s ease; }
+.sample-switch i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgb(24 33 27 / 25%); transition: transform .18s ease; }
+.sample-toggle.active { border-color: #e2c48a; background: var(--amber-soft); color: var(--amber); }
+.sample-toggle.active .sample-switch { background: var(--amber); }
+.sample-toggle.active .sample-switch i { transform: translateX(14px); }
+.sample-toggle.active .sample-toggle-copy small { color: var(--amber); }
 
 .workspace { min-width: 0; width: 100%; max-width: 1660px; margin: 0 auto; padding: 34px 36px 60px; }
 .workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+/* Holds the Typst badge and the sample-data switch on one baseline. Both are
+   conditional — the badge is hidden unless Typst is missing, the switch unless
+   you are a guest — so this often collapses to nothing at all. */
+.workspace-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .eyebrow { margin: 0 0 6px; color: var(--green); font: 750 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .workspace-header h1 { margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: -.045em; }
 .typst-badge { border: 1px solid #e7c4be; border-radius: 8px; background: var(--red-soft); padding: 7px 11px; color: var(--red); font-size: 12px; font-weight: 650; }

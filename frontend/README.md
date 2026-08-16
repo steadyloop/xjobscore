@@ -29,21 +29,115 @@ cd frontend && node --test
 
 ## Sample data
 
-`sample-data.js` is a complete in-browser fake of the API, toggled from the
-sidebar. With it on, every page works with no server and no database — useful
-for design work and for previewing a deploy before a backend exists.
+`sample-data.js` is a complete in-browser fake of the API. With it on, a page
+works with no server and no database — useful for design work and for previewing
+a deploy before a backend exists. `transport()` short-circuits to the fake before
+`fetch` is reached, so nothing in sample mode reaches the network.
+
+**The switch is per page, and three pages have one:** Opportunities,
+Applications, and Resume. Source coverage is the one page without, because it is
+a read-only report on the harvest itself and a demo mode there would only hide
+what the page exists to show. It does not even load `sample-data.js`.
+
+**It lives in the page it applies to**, never in the sidebar. The sidebar moves
+you between pages; this changes what one page is showing, so it belongs next to
+that page's own controls. It borrows the height and radius of the control beside
+it so the header reads as a single row, and turns amber when on, since a page
+rendering fixtures needs to say so — the brand lime would only have read as
+"active".
+
+**Where exactly depends on the shell.** Applications and Resume hand-write the
+button into `.workspace-actions` inside a static `workspace-header`, beside "Add
+application" and the Typst badge respectively. Opportunities has no static
+header — `app.js` renders the whole page, `<h1>` included, into `#view` once the
+API answers — so its switch is emitted by `sampleToggle()` in `app.js` into
+`.discover-page-head`.
+
+That difference has two consequences:
+
+- The button appears *after* `sample-data.js` has run its one-shot `syncToggle()`,
+  so it would be stuck reading "Off" on a page already serving fixtures. The
+  module therefore exports that function as `sync()`, and every write to `#view`
+  goes through `paint()` in `app.js`, which calls it. One write to `view.innerHTML`
+  in the whole file, and a test pins that.
+- `errorState()` carries a second copy. Turning fixtures on with no backend is
+  half of what the feature is for, and the switch would be missing exactly when
+  it is wanted if it only existed on the success path. `.discover-page-head`
+  gives that head the same row as the loaded page; the switch is pushed right
+  with `margin-left: auto` rather than the flex parent's `space-between`, because
+  the error head has no title beside it.
+
+`PAGES` in `sample-data.js` maps a pathname to a storage key
+(`oneshot.sample-data.enabled.opportunities`, `…​.application`, `…​.resume`), so
+Applications can run on fixtures while Opportunities shows the real feed, or any
+other combination. Every caller is unchanged by this: a page only ever requests
+its own data, so "is sample mode on" and "is it on for this page" are the same
+question at the two places that ask — `transport()` in `api-client.js` and the
+private `api()` in `resume/app.js`.
+
+The fixture *store* stays shared (one `oneshot.sample-data.state.v6` key), since
+an application created from a sample job has to be the same record on every page.
+It is seeded once, on the first switch turned on, and not re-seeded afterwards —
+re-seeding on every flip would discard the other page's edits.
+
+**The switch is guest-only.** It ships hidden (`navigation.css`) and `nav-count.js`
+adds `is-guest` to `<body>` once `/api/auth/me` reports nobody is signed in, so a
+signed-in user never sees it blink into view. If a session does turn up while a
+switch is on — you signed in from another tab — `disableAll()` clears every
+switch and the page reloads if it was this page's.
+
+## Sign-in
+
+Jobs and source coverage stay server-backed while signed out. Applications and
+the resume studio use `oneshot.visitor-data.state.v1` in `localStorage`, seeded
+blank and separate from sample fixtures. Clearing site data removes that
+workspace, and it does not synchronize across browsers. Signing in swaps private
+CRUD to the account-scoped PostgreSQL API; the browser-local workspace is kept
+but is not merged automatically.
+
+`sample-data.js` owns both in-browser transports because they implement the same
+request contract, but sample and visitor state use different keys. Sample mode
+still shows its rich fixture workspace; switching it off returns to the visitor's
+blank/edited local workspace. Browser-local resumes can run content and coverage
+checks, but PDF and `.typ` export require sign-in because rendering is server-side.
+
+The 401 → `/login/` handlers cover a signed-in session expiring between the
+shared identity probe and a private request. Anonymous private requests are
+routed locally and never receive that 401.
+
+`nav-count.js` builds the account chip in the sidebar footer on all four shells:
+avatar, name, email, and a `⋯` menu holding the full address and Sign out. Signed
+out it renders the same box as a "Guest / Browser-local · Sign in" link, so nothing
+shifts when you sign in. Google's `picture_url` layers over initials drawn
+underneath, so a blocked or missing photo degrades instead of leaving a grey disc.
+
+The chip is also what holds the foot of the sidebar down, via `margin-top: auto`
+in `navigation.css`. That used to be the sample switch's job — the chip merely
+sat beneath it — and moved here when the switch left the sidebar, so the sidebar
+is now navigation and identity, nothing else.
+
+It is built in JS, not markup, because the four sidebars are hand-copied and not
+byte-identical — one code path beats four edits. The identity probe must **not**
+redirect on 401: that is the normal browser-local guest state.
+
+`login/` deliberately loads none of the shared scripts, so nothing on it can 401
+and bounce it back to itself.
 
 ## Not yet standalone
 
 This directory is now separately deployable in *layout* only. Hosting it on its
-own still needs three things:
+own still needs:
 
 1. **A configurable API base URL.** `api-client.js` and `resume/app.js` both
    hardcode a same-origin `/api` prefix.
-2. **CORS on the API.** The FastAPI app sends no CORS headers, so a browser on a
-   different origin is refused before the request is even made.
-3. **Auth.** The API has none and assumes a single local user. Putting it on the
-   public internet without auth exposes read and write access to anyone.
+2. **CORS on the API,** with `allow_credentials` and explicit origins — the
+   session cookie is same-origin today, and a cross-origin client would need
+   `credentials: "include"` on every call plus `SameSite=None` on the cookie.
 
-Page links also assume the API's URL space (`/static/application/index.html`,
-`/resume/`) and would be rewritten to plain paths under a static host.
+Page links also assume the API's URL space and would be rewritten to plain paths
+under a static host. Every page shell has one canonical URL — `/`, the temporary
+`/opportunities-v2/` comparison preview, `/application/`, `/source-coverage/`,
+`/resume/`, `/login/`, `/discover/` — served by a route in
+`oneshot_ui/app.py`; the `/static` mount answers on the same files, so a shell must
+reference its assets by absolute `/static/...` path rather than `./` or `../`,
+which resolve differently at the two depths.

@@ -6,12 +6,12 @@
   <meta name="color-scheme" content="light">
   <meta name="description" content="The OneShot resume studio.">
   <title>Resume · OneShot</title>
-  <link rel="stylesheet" href="/static/resume/styles.css?v=resume-20260810">
-  <link rel="stylesheet" href="/static/navigation.css?v=stable-nav-20260813">
-  <script defer src="/static/sample-data.js?v=resume-sample-20260810"></script>
-  <script defer src="/static/api-client.js?v=resume-sample-20260810"></script>
-  <script defer src="/static/nav-count.js?v=opportunity-count-20260809"></script>
-  <script defer src="/static/resume/app.js?v=resume-sample-20260810"></script>
+  <link rel="stylesheet" href="/static/resume/styles.css?v=sample-in-page-20260816">
+  <link rel="stylesheet" href="/static/navigation.css?v=stable-nav-20260816">
+  <script defer src="/static/sample-data.js?v=visitor-local-20260816"></script>
+  <script defer src="/static/api-client.js?v=visitor-local-20260816"></script>
+  <script defer src="/static/nav-count.js?v=visitor-local-20260816"></script>
+  <script defer src="/static/resume/app.js?v=visitor-local-20260816"></script>
 </head>
 <body>
   <a class="skip-link" href="#workspace">Skip to resume studio</a>
@@ -33,21 +33,23 @@
       <a class="brand" href="/"><img class="brand-mark" src="/static/brand-mark.svg?v=20260813" alt="" width="32" height="32"><span class="brand-word">OneShot</span><span class="brand-sub">Application Pipeline</span></a>
       <nav class="side-nav">
         <a href="/"><svg class="nav-icon" aria-hidden="true"><use href="#icon-compass"/></svg>Opportunities <b data-opportunity-count>—</b></a>
-        <a href="/static/application/index.html"><svg class="nav-icon" aria-hidden="true"><use href="#icon-pipeline"/></svg>Applications</a>
+        <a href="/application/"><svg class="nav-icon" aria-hidden="true"><use href="#icon-pipeline"/></svg>Applications</a>
         <a class="active" href="/resume/" aria-current="page"><svg class="nav-icon" aria-hidden="true"><use href="#icon-doc"/></svg>Resume</a>
         <p>System</p>
-        <a href="/static/source-coverage/index.html"><svg class="nav-icon" aria-hidden="true"><use href="#icon-radar"/></svg>Source coverage</a>
+        <a href="/source-coverage/"><svg class="nav-icon" aria-hidden="true"><use href="#icon-radar"/></svg>Source coverage</a>
       </nav>
-      <button class="sample-toggle" type="button" data-action="sample-toggle" role="switch" aria-checked="false" aria-label="Turn on sample data">
-        <span class="sample-toggle-copy">Sample data<small>Off</small></span>
-        <span class="sample-switch" aria-hidden="true"><i></i></span>
-      </button>
     </aside>
 
     <main id="workspace" class="workspace" tabindex="-1">
       <header class="workspace-header">
         <div><p class="eyebrow">Resume studio</p><h1>Resume</h1></div>
-        <span id="typst-badge" class="typst-badge" hidden>Typst not installed — PDF export disabled</span>
+        <div class="workspace-actions">
+          <span id="typst-badge" class="typst-badge" hidden>Typst not installed — PDF export disabled</span>
+          <button class="sample-toggle" type="button" data-action="sample-toggle" role="switch" aria-checked="false" aria-label="Turn on sample data">
+            <span class="sample-toggle-copy">Sample data<small>Off</small></span>
+            <span class="sample-switch" aria-hidden="true"><i></i></span>
+          </button>
+        </div>
       </header>
 
       <section class="control-surface" aria-label="Resume studio views">

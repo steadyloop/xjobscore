@@ -15,12 +15,36 @@
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
-  const transport = () => root.OneShotSampleData?.isEnabled?.()
-    ? root.OneShotSampleData.request
-    : remoteTransport;
+  async function transport(path, options = {}, privateData = false) {
+    if (root.OneShotSampleData?.isEnabled?.()) {
+      return root.OneShotSampleData.request(path, options);
+    }
+    if (privateData && root.OneShotVisitorData && await root.OneShotVisitorData.isLocal()) {
+      return root.OneShotVisitorData.request(path, options);
+    }
+    return remoteTransport(path, options);
+  }
 
-  async function request(path, options = {}) {
-    const response = await transport()(path, options);
+  const LOGIN_PATH = "/login/";
+
+  // A 401 means the session expired or was never established. Send the browser
+  // to the login page rather than surfacing "Not authenticated" as a toast that
+  // disappears after three seconds and explains nothing.
+  //
+  // The returned promise never settles, on purpose: navigation is already under
+  // way, and resolving or rejecting here would let the caller's catch block
+  // paint an error over a page that is about to be replaced.
+  function redirectToLogin() {
+    if (root.location && root.location.pathname !== LOGIN_PATH) {
+      root.location.assign(LOGIN_PATH);
+    }
+    return new Promise(() => {});
+  }
+
+  async function request(path, options = {}, privateData = false) {
+    const response = await transport(path, options, privateData);
+    // Sample-data mode short-circuits before fetch, so it never yields a 401.
+    if (response.status === 401) return redirectToLogin();
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.detail || `Request failed (${response.status})`);
@@ -40,15 +64,25 @@
   root.OneShotAPI = {
     health: () => request(ROUTES.health),
     jobs: {
-      list: filters => request(`${ROUTES.jobs}${query(filters)}`),
-      addToApplications: id => request(ROUTES.addToApplications(id), { method: "POST" }),
+      list: async filters => {
+        const values = { ...(filters || {}) };
+        if (!root.OneShotSampleData?.isEnabled?.() && root.OneShotVisitorData
+            && await root.OneShotVisitorData.isLocal()) {
+          values.exclude_job_id = root.OneShotVisitorData.applicationJobIds();
+        }
+        return request(`${ROUTES.jobs}${query(values)}`);
+      },
+      addToApplications: (id, job) => {
+        if (!root.OneShotSampleData?.isEnabled?.()) root.OneShotVisitorData?.rememberJob(job);
+        return request(ROUTES.addToApplications(id), { method: "POST" }, true);
+      },
     },
     applications: {
-      list: () => request(ROUTES.applications),
-      get: id => request(ROUTES.application(id)),
-      createExternal: body => request(ROUTES.externalApplications, { method: "POST", body: JSON.stringify(body) }),
-      update: (id, body) => request(ROUTES.application(id), { method: "PATCH", body: JSON.stringify(body) }),
-      remove: id => request(ROUTES.application(id), { method: "DELETE" }),
+      list: () => request(ROUTES.applications, {}, true),
+      get: id => request(ROUTES.application(id), {}, true),
+      createExternal: body => request(ROUTES.externalApplications, { method: "POST", body: JSON.stringify(body) }, true),
+      update: (id, body) => request(ROUTES.application(id), { method: "PATCH", body: JSON.stringify(body) }, true),
+      remove: id => request(ROUTES.application(id), { method: "DELETE" }, true),
     },
     sources: { coverage: () => request(ROUTES.sourceCoverage) },
   };

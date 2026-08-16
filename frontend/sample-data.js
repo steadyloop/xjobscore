@@ -1,14 +1,25 @@
 (function (root) {
   "use strict";
 
+  // A per-page suffix is appended: "…enabled.application", "…enabled.resume".
+  // The bare key is a v1 leftover and is never read; clearing it is not worth a
+  // migration, since an unread key changes nothing.
   const ENABLED_KEY = "oneshot.sample-data.enabled";
   const STATE_KEY = "oneshot.sample-data.state.v6";
+  const VISITOR_STATE_KEY = "oneshot.visitor-data.state.v1";
+  // Mirrors oneshot_ui/repository.py's DEFAULT_OPPORTUNITY_TYPES: the live API
+  // reads no opportunity_type filter as this classified scope, not as
+  // "everything" — the unclassified pool is reachable only by naming it.
+  const DEFAULT_OPPORTUNITY_TYPES = [
+    "spring_internship", "spring_coop", "summer_internship", "fall_internship",
+    "fall_coop", "student_researcher", "student_role", "fellowship",
+  ];
   const clone = value => JSON.parse(JSON.stringify(value));
   const isoIn = (days = 0, hours = 0) => new Date(Date.now() + days * 86400000 + hours * 3600000).toISOString();
   const dateIn = (days = 0) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
   const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  // Mirrors oneshot_ui/resume_store.py's _TECH_VOCABULARY — kept in sync by hand.
+  // Mirrors oneshot_ui/resume_workspace.py's TECH_VOCABULARY — kept in sync by hand.
   const TECH_VOCABULARY = [
     "Python", "C", "C++", "C#", "Java", "JavaScript", "TypeScript", "Go", "Rust",
     "Kotlin", "Swift", "Scala", "R", "Julia", "MATLAB", "SQL", "Bash", "OCaml",
@@ -447,6 +458,27 @@
     };
   }
 
+  function createVisitorState() {
+    return {
+      jobs: [],
+      applications: [],
+      nextApplicationId: 1,
+      applicationIdPrefix: "visitor-app",
+      resume: {
+        profile: { full_name: "", email: "", phone: "", location: "", links: [] },
+        entries: [],
+        skills: [],
+        targetJobs: [],
+        resumes: [],
+        nextEntryId: 1,
+        nextBulletId: 1,
+        nextSkillId: 1,
+        nextTargetJobId: 1,
+        nextResumeId: 1,
+      },
+    };
+  }
+
   function createState() {
     const jobs = [
       {
@@ -455,9 +487,13 @@
         title: "Student Researcher, Distributed Training",
         location: "Remote, United States",
         posted_at: isoIn(0, -2),
+        first_seen_at: isoIn(0, -2),
         last_seen_at: isoIn(0, -1),
+        status: "active",
+        source: "greenhouse:northwind-robotics",
+        source_url: "https://example.com/jobs/sample-research",
         description: "Research sharded optimizer state and fault-tolerant training for multi-node machine-learning workloads. You will prototype ideas, evaluate them on production-scale clusters, and present results to the research systems team.",
-        attributes: { version: 1, opportunity_type: "student_researcher", term: "Spring 2027", workplace: "remote", skills: ["JAX", "Python", "Ray"], eligibility: "eligible" },
+        attributes: { version: 1, opportunity_type: "student_researcher", term: "Spring 2027", workplace: "remote", skills: ["JAX", "Python", "Ray"], deadline_at: dateIn(18), eligibility: "eligible" },
         apply_url: "https://example.com/apply/sample-research",
       },
       {
@@ -466,7 +502,11 @@
         title: "Summer Quant Systems Intern",
         location: "New York, NY",
         posted_at: isoIn(-1),
+        first_seen_at: isoIn(-1),
         last_seen_at: isoIn(0, -3),
+        status: "active",
+        source: "lever:vantage-quant",
+        source_url: "https://example.com/jobs/sample-quant",
         description: "Build research infrastructure used to test and deploy systematic trading strategies. Projects include low-latency data processing, simulation tooling, and production monitoring.",
         attributes: { version: 1, opportunity_type: "summer_internship", term: "Summer 2027", workplace: "on_site", skills: ["Python", "C++", "Linux"], eligibility: "eligible" },
         apply_url: "https://example.com/apply/sample-quant",
@@ -477,7 +517,11 @@
         title: "Software Engineering Intern",
         location: "San Diego, CA",
         posted_at: isoIn(-2),
+        first_seen_at: isoIn(-2),
         last_seen_at: isoIn(0, -4),
+        status: "active",
+        source: "ashby:halcyon-systems",
+        source_url: "https://example.com/jobs/sample-software",
         description: "Join the platform team building services for fleet operations. You will own a scoped backend project, write production code, and work with engineers across infrastructure and product.",
         attributes: { version: 1, opportunity_type: "summer_internship", workplace: "hybrid", skills: ["Go", "Kubernetes", "PostgreSQL"], eligibility: "review" },
         apply_url: "https://example.com/apply/sample-software",
@@ -488,7 +532,11 @@
         title: "Fall Embedded Software Co-op",
         location: "Austin, TX",
         posted_at: isoIn(-3),
+        first_seen_at: isoIn(-3),
         last_seen_at: isoIn(-1),
+        status: "active",
+        source: "workday:cobalt-foundry",
+        source_url: "https://example.com/jobs/sample-embedded",
         description: "Develop firmware and systems software for industrial control hardware. The role includes driver development, hardware bring-up, automated testing, and debugging real-time systems.",
         attributes: { version: 1, opportunity_type: "fall_coop", term: "Fall 2027", workplace: "on_site", skills: ["C++", "RTOS", "Linux"], eligibility: "eligible" },
         apply_url: "https://example.com/apply/sample-embedded",
@@ -499,7 +547,11 @@
         title: "Backend Platform Intern",
         location: "Boston, MA",
         posted_at: isoIn(-4),
+        first_seen_at: isoIn(-4),
         last_seen_at: isoIn(0, -5),
+        status: "active",
+        source: "smartrecruiters:arbor-signal",
+        source_url: "https://example.com/jobs/sample-platform",
         description: "Build internal APIs and data services for a growing observability platform. You will ship a production project with the infrastructure team.",
         attributes: { version: 1, opportunity_type: "summer_internship", term: "Summer 2027", workplace: "hybrid", skills: ["TypeScript", "PostgreSQL", "AWS"], eligibility: "eligible" },
         apply_url: "https://example.com/apply/sample-platform",
@@ -510,10 +562,32 @@
         title: "Machine Learning Research Intern",
         location: "Cambridge, MA",
         posted_at: isoIn(-5),
+        first_seen_at: isoIn(-5),
         last_seen_at: isoIn(0, -6),
+        status: "active",
+        source: "icims:kepler-bio",
+        source_url: "https://example.com/jobs/sample-ml-research",
         description: "Develop evaluation methods for biological foundation models and collaborate with research scientists on reproducible experiments.",
         attributes: { version: 1, opportunity_type: "student_researcher", term: "Spring 2027", workplace: "on_site", skills: ["Python", "PyTorch", "Transformers"], eligibility: "eligible" },
         apply_url: "https://example.com/apply/sample-ml-research",
+      },
+      {
+        // Deliberately outside DEFAULT_OPPORTUNITY_TYPES so the "Needs review"
+        // tab has something to show in sample mode, mirroring the live pool of
+        // postings the classifier hasn't sorted yet.
+        id: "sample-unclassified",
+        company: "Bellwether Analytics",
+        title: "Senior Data Platform Manager",
+        location: "New York, NY",
+        posted_at: isoIn(-6),
+        first_seen_at: isoIn(-6),
+        last_seen_at: isoIn(0, -7),
+        status: "active",
+        source: "greenhouse:bellwether-analytics",
+        source_url: "https://example.com/jobs/sample-unclassified",
+        description: "4+ years of experience leading data platform initiatives across engineering and product.",
+        attributes: { version: 1, opportunity_type: "unclassified", workplace: "hybrid", skills: ["SQL", "Spark"], eligibility: "review" },
+        apply_url: "https://example.com/apply/sample-unclassified",
       },
     ];
 
@@ -601,7 +675,7 @@
 
   function applicationFromJob(state, job) {
     return {
-      id: `sample-app-${state.nextApplicationId++}`,
+      id: `${state.applicationIdPrefix || "sample-app"}-${state.nextApplicationId++}`,
       job_id: job.id,
       company: job.company,
       title: job.title,
@@ -629,11 +703,12 @@
     }
     if (method === "GET" && path === "/jobs") {
       const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
-      const types = url.searchParams.getAll("opportunity_type");
+      const requested = url.searchParams.getAll("opportunity_type");
+      const types = requested.length ? requested : DEFAULT_OPPORTUNITY_TYPES;
       const applicationJobIds = new Set(state.applications.map(application => application.job_id).filter(Boolean));
       const filtered = state.jobs.filter(job => {
         const searchable = `${job.title} ${job.company} ${job.location} ${job.attributes.skills.join(" ")}`.toLowerCase();
-        return !applicationJobIds.has(job.id) && (!q || searchable.includes(q)) && (!types.length || types.includes(job.attributes.opportunity_type));
+        return !applicationJobIds.has(job.id) && (!q || searchable.includes(q)) && types.includes(job.attributes.opportunity_type);
       });
       const sort = url.searchParams.get("sort") || "fresh";
       filtered.sort((a, b) => sort === "company"
@@ -641,7 +716,10 @@
         : sort === "title"
           ? a.title.localeCompare(b.title)
           : b.posted_at.localeCompare(a.posted_at));
-      return jsonResponse({ jobs: clone(filtered), total: filtered.length, limit: 100, offset: 0 });
+      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
+      const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+      const page = filtered.slice(offset, offset + limit);
+      return jsonResponse({ jobs: clone(page), total: filtered.length, limit, offset });
     }
 
     const addMatch = path.match(/^\/jobs\/([^/]+)\/applications$/);
@@ -658,7 +736,7 @@
     if (method === "POST" && path === "/applications/external") {
       const body = parseBody(options);
       const application = {
-        id: `sample-app-${state.nextApplicationId++}`,
+        id: `${state.applicationIdPrefix || "sample-app"}-${state.nextApplicationId++}`,
         company: body.company,
         title: body.title,
         stage: "considering",
@@ -855,7 +933,11 @@
     if (method === "DELETE" && targetJobMatch) {
       const index = resumeState.targetJobs.findIndex(row => String(row.id) === targetJobMatch[1]);
       if (index < 0) return jsonResponse({ detail: "Target job not found" }, 404);
+      const deletedId = resumeState.targetJobs[index].id;
       resumeState.targetJobs.splice(index, 1);
+      resumeState.resumes.forEach(record => {
+        if (record.target_job_id === deletedId) record.target_job_id = null;
+      });
       return new Response(null, { status: 204 });
     }
 
@@ -918,16 +1000,70 @@
       return new Response(null, { status: 204 });
     }
 
-    if (path.startsWith("/resume/resumes/") && (path.endsWith("/check") || path.endsWith("/source") || path.endsWith("/pdf"))) {
-      return jsonResponse({ detail: "Sample data has no Typst renderer — turn off sample data to check or export a real resume." }, 501);
+    const checkMatch = path.match(/^\/resume\/resumes\/(\d+)\/check$/);
+    if (method === "GET" && checkMatch) {
+      const record = resumeState.resumes.find(row => String(row.id) === checkMatch[1]);
+      if (!record) return jsonResponse({ detail: "Resume not found" }, 404);
+      const bulletById = new Map(resumeState.entries.flatMap(entry => entry.bullets).map(bullet => [bullet.id, bullet]));
+      const selected = (record.selection?.entries || []).flatMap(entry =>
+        (entry.bullets || []).map(pick => pick.text_override || bulletById.get(pick.bullet_id)?.text).filter(Boolean));
+      const problems = [];
+      if (!resumeState.profile.email) problems.push({ level: "error", message: "Profile has no email address." });
+      if (!record.availability_line) problems.push({ level: "warn", message: "No availability line (e.g. 'Available for Spring 2027 co-op') — recruiters filter on legible availability." });
+      if (!selected.length) problems.push({ level: "error", message: "No bullets selected." });
+      selected.forEach(text => {
+        if (!/\d/.test(text)) problems.push({ level: "info", message: `No metric in: "${text.slice(0, 70)}…" — quantify if honestly possible.` });
+      });
+      return jsonResponse({
+        problems,
+        page_count: null,
+        typst_available: false,
+        compile_error: "Browser-local resumes require sign-in for Typst export.",
+      });
+    }
+
+    if (path.startsWith("/resume/resumes/") && (path.endsWith("/source") || path.endsWith("/pdf"))) {
+      return jsonResponse({ detail: "Sign in to export this browser-local resume." }, 501);
     }
 
     return jsonResponse({ detail: `No sample response for ${method} ${path}` }, 404);
   }
 
   let state;
+  let visitorState;
+  let accountPromise;
   const storageAvailable = () => Boolean(root.localStorage);
-  const isEnabled = () => storageAvailable() && root.localStorage.getItem(ENABLED_KEY) === "1";
+
+  // Which page you are on decides which switch you are flipping. Source coverage
+  // is the one page left without one: it is a read-only report on the harvest
+  // itself, and a demo mode there would only hide the thing the page exists to
+  // show.
+  //
+  // Scoping by pathname rather than by an argument is what keeps every caller
+  // unchanged — a page only ever requests its own data, so "is sample mode on"
+  // and "is sample mode on for this page" are the same question at every call
+  // site (api-client.js's transport, resume/app.js's private api()).
+  const PAGES = Object.freeze({
+    "/": "opportunities",
+    "/opportunities-v2/": "opportunities-v2",
+    "/application/": "application",
+    "/resume/": "resume",
+  });
+
+  // Every shell answers on two URLs — the canonical /application/ the nav links
+  // to, and /static/application/index.html from the StaticFiles mount. Both are
+  // the same page, so both have to resolve to the same switch, or the mount
+  // path would show a switch that silently stores nothing.
+  const scopeOf = path => PAGES[String(path || "").replace(/^\/static/, "").replace(/index\.html$/, "")];
+  const enabledKey = () => {
+    const scope = scopeOf(root.location?.pathname);
+    return scope ? `${ENABLED_KEY}.${scope}` : null;
+  };
+
+  const isEnabled = () => {
+    const key = enabledKey();
+    return Boolean(key) && storageAvailable() && root.localStorage.getItem(key) === "1";
+  };
   const save = () => { if (storageAvailable()) root.localStorage.setItem(STATE_KEY, JSON.stringify(state)); };
   const loadState = () => {
     if (state) return state;
@@ -936,15 +1072,75 @@
     return state;
   };
   const setEnabled = value => {
-    if (!storageAvailable()) return;
-    root.localStorage.setItem(ENABLED_KEY, value ? "1" : "0");
-    if (value) { state = createState(); save(); }
+    const key = enabledKey();
+    if (!key || !storageAvailable()) return;
+    root.localStorage.setItem(key, value ? "1" : "0");
+    // The fixture store stays shared across pages — an application created from
+    // a sample job has to be the same record on both. So seed it only when
+    // there is nothing stored; re-seeding on every flip would throw away the
+    // edits made on the other page, which now has its own independent switch.
+    if (value && !root.localStorage.getItem(STATE_KEY)) { state = createState(); save(); }
+  };
+
+  // Called when the account chip resolves to a real session: sample data is a
+  // guest affordance, and a flag left on from browsing signed out would show a
+  // signed-in user fixtures in place of their own workspace, with no visible
+  // switch to explain it. Returns whether *this* page was the one affected, so
+  // the caller can reload only when the page in front of you is now wrong.
+  const disableAll = () => {
+    if (!storageAvailable()) return false;
+    const wasOn = isEnabled();
+    Object.values(PAGES).forEach(scope => root.localStorage.removeItem(`${ENABLED_KEY}.${scope}`));
+    return wasOn;
   };
   const request = async (path, options = {}) => {
     const result = await handle(path, options, loadState());
     if (String(options.method || "GET").toUpperCase() !== "GET") save();
     return result;
   };
+
+  const loadVisitorState = () => {
+    if (visitorState) return visitorState;
+    try { visitorState = JSON.parse(root.localStorage.getItem(VISITOR_STATE_KEY)) || createVisitorState(); }
+    catch (_) { visitorState = createVisitorState(); }
+    return visitorState;
+  };
+  const saveVisitorState = () => {
+    if (!storageAvailable()) return;
+    try { root.localStorage.setItem(VISITOR_STATE_KEY, JSON.stringify(visitorState)); }
+    catch (_) { /* The in-memory workspace still works for this page load. */ }
+  };
+  const visitorRequest = async (path, options = {}) => {
+    const result = await handle(path, options, loadVisitorState());
+    if (String(options.method || "GET").toUpperCase() !== "GET") saveVisitorState();
+    return result;
+  };
+  const account = async () => {
+    if (!accountPromise) {
+      accountPromise = (async () => {
+        const response = await root.fetch("/api/auth/me");
+        if (response.status === 401) return null;
+        if (!response.ok) throw new Error(`Identity check failed (${response.status})`);
+        return response.json();
+      })();
+    }
+    return accountPromise;
+  };
+  const isLocal = async () => (await account()) === null;
+  const rememberJob = job => {
+    if (!job) return;
+    const visitor = loadVisitorState();
+    const index = visitor.jobs.findIndex(row => String(row.id) === String(job.id));
+    if (index >= 0) visitor.jobs[index] = clone(job);
+    else visitor.jobs.push(clone(job));
+  };
+  const applicationJobIds = () => loadVisitorState().applications
+    .map(application => application.job_id)
+    .filter(id => id != null);
+  // Called once below for the shells that write their switch into the HTML, and
+  // again by any page that paints one later — Opportunities renders its whole
+  // header from app.js, so its button does not exist yet when this file runs and
+  // would otherwise be stuck reading "Off" while sample mode was on.
   const syncToggle = () => {
     const toggle = root.document?.querySelector('[data-action="sample-toggle"]');
     if (!toggle) return;
@@ -956,13 +1152,23 @@
     if (status) status.textContent = active ? "On" : "Off";
   };
 
-  if (typeof module !== "undefined" && module.exports) module.exports = { createState, handle };
-  root.OneShotSampleData = { request, isEnabled };
+  if (typeof module !== "undefined" && module.exports) module.exports = { createState, createVisitorState, handle, PAGES };
+  root.OneShotSampleData = { request, isEnabled, disableAll, sync: syncToggle };
+  root.OneShotVisitorData = {
+    account,
+    isLocal,
+    request: visitorRequest,
+    rememberJob,
+    applicationJobIds,
+  };
   if (!root.document || !storageAvailable()) return;
 
   root.document.addEventListener("click", event => {
     const toggle = event.target.closest('[data-action="sample-toggle"]');
-    if (!toggle) return;
+    // A switch on a page with no scope stores nothing, so reloading would only
+    // look like a failure. Only the three scoped pages carry one today, so this
+    // is a guard against a stray copy, not a live case.
+    if (!toggle || !enabledKey()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     setEnabled(!isEnabled());

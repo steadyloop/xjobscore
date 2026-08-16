@@ -60,9 +60,21 @@
       ...options,
       body: options.body ? JSON.stringify(options.body) : undefined,
     };
-    const response = sampleModeOn()
-      ? await window.OneShotSampleData.request(`/resume${path}`, init)
-      : await fetch(`/api/resume${path}`, init);
+    let response;
+    if (sampleModeOn()) {
+      response = await window.OneShotSampleData.request(`/resume${path}`, init);
+    } else if (window.OneShotVisitorData && await window.OneShotVisitorData.isLocal()) {
+      response = await window.OneShotVisitorData.request(`/resume${path}`, init);
+    } else {
+      response = await fetch(`/api/resume${path}`, init);
+    }
+    // The studio has its own transport, so the 401 handling in api-client.js
+    // does not cover it. Same contract: navigate, and never settle, so no toast
+    // paints over the page on its way out.
+    if (response.status === 401) {
+      if (window.location.pathname !== "/login/") window.location.assign("/login/");
+      return new Promise(() => {});
+    }
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -83,9 +95,15 @@
     state.resumes = resumes.resumes;
     state.typstAvailable = resumes.typst_available;
     if (state.resumeId === null && state.resumes.length) state.resumeId = state.resumes[0].id;
-    // In sample mode the export buttons open a pre-rendered file, so the
-    // "Typst not installed" warning would be misleading.
-    document.getElementById("typst-badge").hidden = state.typstAvailable || sampleModeOn();
+    // Sample mode has a pre-rendered file. Browser-local resumes deliberately
+    // never upload their content, so server-side Typst export requires sign-in.
+    const badge = document.getElementById("typst-badge");
+    const browserLocal = !sampleModeOn() && window.OneShotVisitorData
+      && await window.OneShotVisitorData.isLocal();
+    badge.hidden = state.typstAvailable || sampleModeOn();
+    badge.textContent = browserLocal
+      ? "Saved in this browser — sign in for PDF export"
+      : "Typst not installed — PDF export disabled";
   }
 
   const currentResume = () => state.resumes.find((r) => r.id === state.resumeId) || null;
@@ -257,6 +275,7 @@
         ${esc(skill.name)}</label>`).join("");
       return rows ? `<h4>${SKILL_TITLES[category]}</h4>${rows}` : "";
     }).join("");
+    const canExport = state.typstAvailable || sampleModeOn();
 
     view.innerHTML = `
       <div class="builder-grid">
@@ -278,8 +297,8 @@
           <div class="builder-actions">
             <button class="button primary" data-action="save-resume"><svg aria-hidden="true"><use href="#icon-check"/></svg>Save selection</button>
             <button class="button" data-action="check-resume">Run checks</button>
-            <button class="button" data-action="download-typ"><svg aria-hidden="true"><use href="#icon-download"/></svg>.typ source</button>
-            <button class="button" data-action="open-pdf" ${state.typstAvailable || sampleModeOn() ? "" : "disabled title='typst not installed'"}>Open PDF</button>
+            <button class="button" data-action="download-typ" ${canExport ? "" : "disabled title='Sign in to export browser-local resumes'"}><svg aria-hidden="true"><use href="#icon-download"/></svg>.typ source</button>
+            <button class="button" data-action="open-pdf" ${canExport ? "" : "disabled title='Sign in to export browser-local resumes'"}>Open PDF</button>
           </div>
           ${entryPicks || '<p class="empty">The content bank is empty — add entries first.</p>'}
         </div>
