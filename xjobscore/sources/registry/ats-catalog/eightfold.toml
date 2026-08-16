@@ -6,7 +6,6 @@ source = "eightfold"
 # per-board setting because it is not derivable from every employer name.
 
 key = "microsoft"
-enabled = true
 verified = true
 verified_at = "2026-08-04"
 company_id = 1350
@@ -20,640 +19,72 @@ company_raw = "Microsoft"
 query = ""
 
 [[feed]]
-key = "aexp-sandbox.eightfold.ai/aexp-sandbox.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "ford"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3149
+company_name = "Ford"
+domain = "ford.com"
+
+[feed.config]
+host = "ford.eightfold.ai"
+domain = "ford.com"
+company_raw = "Ford"
+query = ""
+
+[[feed]]
+key = "lamresearch"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3250
+company_name = "Lam Research"
+domain = "lamresearch.com"
+
+[feed.config]
+host = "lamresearch.eightfold.ai"
+domain = "lamresearch.com"
+company_raw = "Lam Research"
+query = ""
+
+[[feed]]
+key = "morganstanley"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2727
+company_name = "Morgan Stanley"
+domain = "morganstanley.com"
+
+[feed.config]
+host = "morganstanley.eightfold.ai"
+domain = "morganstanley.com"
+company_raw = "Morgan Stanley"
+query = ""
+
+[[feed]]
+key = "qualcomm"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2775
+company_name = "Qualcomm"
+domain = "qualcomm.com"
+
+[feed.config]
+host = "qualcomm.eightfold.ai"
+domain = "qualcomm.com"
+company_raw = "Qualcomm"
+query = ""
+
+[[feed]]
+key = "slb"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3480
+company_name = "SLB"
+domain = "slb.com"
+
+[feed.config]
+host = "slb.eightfold.ai"
+domain = "slb.com"
+company_raw = "SLB"
+query = ""
 
-[[feed]]
-key = "aexp.eightfold.ai/aexp.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "albemarle.eightfold.ai/albemarle.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "alnylam.eightfold.ai/alnylam.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "amdocs.eightfold.ai/amdocs.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/eaton.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/eightfold.ai"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/fortive.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/houstonisd.org"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/hp-dev-sandbox.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/kdrp.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/micron.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/qualcomm.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/tailoredbrands-sandbox.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/tailoredbrands.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "app.eightfold.ai/volkscience.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "astrazeneca.eightfold.ai/astrazeneca.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "atb.eightfold.ai/atb.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "bayer.eightfold.ai/bayer.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "bnymellon.eightfold.ai/bnymellon.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "bostonscientific.eightfold.ai/bostonscientific.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "box.eightfold.ai/box.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "britishcouncil.eightfold.ai/britishcouncil.org"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "chevron.eightfold.ai/chevron.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "citigroup-qa-sandbox.eightfold.ai/citigroup-qa-sandbox.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "climate.eightfold.ai/climate.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "coca-colafemsa.eightfold.ai/coca-colafemsa.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "costar.eightfold.ai/costar.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "dsm.eightfold.ai/dsm.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "eaton.eightfold.ai/eaton.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "elcompanies.eightfold.ai/elcompanies.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "employee.eightfold.ai/eightfold.ai"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "employee.eightfold.ai/volkscience.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "etihad.eightfold.ai/etihad.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "fortive.eightfold.ai/fortive.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "hasbro.eightfold.ai/hasbro.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "hp-sandbox.eightfold.ai/hp-sandbox.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "hsbc.eightfold.ai/hsbc.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "kroger.eightfold.ai/kroger.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "lamresearch.eightfold.ai/lamresearch.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "libertymutual.eightfold.ai/libertymutual.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "medtronic.eightfold.ai/medtronic.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "mercadolibre.eightfold.ai/merc"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "mercadolibre.eightfold.ai/mercadolibre.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "micron.eightfold.ai/micron.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "microsoftai.eightfold.ai/microsoftai.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "mlp.eightfold.ai/mlp.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "mm-group.eightfold.ai/mm-group.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "morganstanley.eightfold.ai/morganstanley.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "netapp.eightfold.ai/netapp.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "noom.eightfold.ai/noom.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "nttdata.eightfold.ai/nttdata.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "nutanix.eightfold.ai/nutanix.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "paypal.eightfold.ai/paypal.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "plexus.eightfold.ai/plexus.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "prudential.eightfold.ai/prudential.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "ptc.eightfold.ai/ptc.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "qualcomm.eightfold.ai/qualcomm.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "ralliant.eightfold.ai/ralliant.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "slb.eightfold.ai/slb.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "starbucks.eightfold.ai/starbucks.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "stmicroelectronics.eightfold.ai/stmicroelectronics.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "symetra.eightfold.ai/symetra.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "teladochealth.eightfold.ai/teladochealth.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "trimble.eightfold.ai/trimble.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "trinet.eightfold.ai/trinet.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "ukg.eightfold.ai/ukg.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "vale.eightfold.ai/vale.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "vialto.eightfold.ai/vialto.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "zebra.eightfold.ai/zebra.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "zillowgroup.eightfold.ai/zillowgroup.com"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""

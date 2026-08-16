@@ -7,7 +7,6 @@ source = "peopleadmin"
 
 [[feed]]
 key = "marshall"
-enabled = true
 verified = true
 verified_at = "2026-08-06"
 company_id = 1298

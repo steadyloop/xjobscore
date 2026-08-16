@@ -3,7 +3,6 @@ source = "lever"
 
 [[feed]]
 key = "palantir"
-enabled = true
 verified = true
 verified_at = "2026-07-31T18:09:19-0700"
 company_id = 1581
@@ -12,7 +11,6 @@ domain = "palantir.com"
 
 [[feed]]
 key = "shieldai"
-enabled = true
 verified = true
 verified_at = "2026-07-31T18:09:23-0700"
 company_id = 1966
@@ -20,784 +18,146 @@ company_name = "Shield AI"
 domain = "shield.ai"
 
 [[feed]]
-key = "Expana"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "aave"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "aavelabs"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "abzena"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "amicustherapeutics"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
 key = "amo"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "asobostudio"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "avara"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "bdo"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "blackshark"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "byborgenterprises"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "cambridgequantum"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "cirrus"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "coinspaid"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "controlai"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "coretechsecurity"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "corti"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "creatio"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "csmcy"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "diabolocom"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "dnl"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "easol"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "efficioconsulting"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "elasticpath"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "eneba"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "everseen"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "flaconi"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "frontier"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "genomines"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "grape-health"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "hkr"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "imgarena"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "infermedica"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "infinitygroup"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "innogames"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "instadeep"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "ivcevidensia"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "jacquemus"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "kaiko"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "karllagerfeld"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "kto"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "kwalee"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "lionbridge"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "lovehoneygroup"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "markt-pilot"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "masteos"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "matterlabs"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+verified = true
+verified_at = "2026-08-12"
+company_id = 104
+company_name = "amo"
+domain = "amo.co"
 
 [[feed]]
 key = "mobileye"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "numan"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "objectway"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "olx"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "oni"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "opencast"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "optotune"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "orasio"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "paydock"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "payu"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "peppy"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "pnlfin"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "prima"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "prosus"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "quadcode"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "quanticdream"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "quantinuum"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "refugeerights"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "seb"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "silverfin"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "sportalliance"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+verified = true
+verified_at = "2026-08-12"
+company_id = 3309
+company_name = "Mobileye"
+domain = "mobileye.com"
 
 [[feed]]
 key = "stellar"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+verified = true
+verified_at = "2026-08-12"
+company_id = 2093
+company_name = "stellar"
+domain = "stellar.org"
 
 [[feed]]
-key = "supercharge"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "ambergroup"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2508
+company_name = "Amber Group"
+domain = "ambergroup.io"
 
 [[feed]]
-key = "swave"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "anchorage"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4214
+company_name = "Anchorage Digital"
+domain = "anchorage.com"
 
 [[feed]]
-key = "threecolts"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "belvederetrading"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2536
+company_name = "Belvedere Trading"
+domain = "belvederetrading.com"
 
 [[feed]]
-key = "tomtom"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "cfsenergy"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4217
+company_name = "Commonwealth Fusion Systems"
+domain = "cfs.energy"
 
 [[feed]]
-key = "tradelink"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "gmo"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4185
+company_name = "GMO"
+domain = "gmo.com"
 
 [[feed]]
-key = "tsugu"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "hap-capital"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3183
+company_name = "Hap Capital"
+domain = "hap-capital.com"
 
 [[feed]]
-key = "tuumplatform"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "ion"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4189
+company_name = "ION Group"
+domain = "iongroup.com"
 
 [[feed]]
-key = "uberall"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "metlife"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4192
+company_name = "MetLife"
+domain = "metlife.com"
 
 [[feed]]
-key = "unzer"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "spotify"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2834
+company_name = "Spotify"
+domain = "spotify.com"
 
 [[feed]]
-key = "visionrt"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "valkyrietrading"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2876
+company_name = "Valkyrie Trading"
+domain = "valkyrietrading.com"
 
 [[feed]]
-key = "volkswagen-groupservices"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "veeva"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3819
+company_name = "Veeva Systems"
+domain = "veeva.com"
 
 [[feed]]
-key = "vwds"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "wintermute-trading"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2901
+company_name = "Wintermute"
+domain = "wintermute.com"
 
 [[feed]]
-key = "vwgds"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "woven-by-toyota"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3607
+company_name = "Woven by Toyota"
+domain = "woven.toyota"
 
 [[feed]]
-key = "westernacher"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "zilliz"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2911
+company_name = "Zilliz"
+domain = "zilliz.com"
 
 [[feed]]
-key = "wypoon"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
+key = "zoox"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2914
+company_name = "Zoox"
+domain = "zoox.com"
 
-[[feed]]
-key = "xentral"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "xm"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "yokoy"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""

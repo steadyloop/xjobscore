@@ -1,53 +1,18 @@
 schema_version = 1
 source = "bullhorn"
 
-# The key is `swimlane/corpToken`. A corpToken answers on exactly one numbered
-# cluster (public-rest{swimlane}.bullhornstaffing.com) with no cross-cluster
-# fallback, so the swimlane is load-bearing, same shape as UKG's host.
-#
-# Neither tenant is named structurally in the JobBoardPost schema, so
-# `company_raw` is supplied here even though both self-identify in
-# `publicDescription` prose. `board_url` is likewise supplied because the
-# payload carries no canonical posting URL, only a numeric `id` --
-# verified against ESS Clinical's actual Bullhorn Career Portal source
-# (github.com/bullhorn/career-portal): its job-detail route resolver queries
-# `JobBoardPost?where=(id=${id})` with the bare route param, so `{id}` here
-# is exactly the JobBoardPost `id` this config already has.
-
 [[feed]]
 key = "44/CJAT1S"
-enabled = true
 verified = true
 verified_at = "2026-08-07"
 company_id = 695
 company_name = "ESS Clinical"
 domain = "essclinical.com"
 
-[feed.config]
-company_raw = "ESS Clinical"
-board_url = "https://essclinical.com/wp-content/plugins/bullhorn-oscp/#/jobs/"
-
-# Innova Solutions (34/2WXP1S, ~1,020 open reqs, self-identified in
-# `publicDescription`: "A client of Innova Solutions is immediately
-# hiring...") is deliberately left `planned`, not `live`. Its public board is
-# not the Bullhorn Career Portal widget -- it runs on a separate platform
-# (WorkLlama, jobsusa.innovasolutions.com) that re-mints its own 7-digit
-# requisition ids on ingest (e.g. a job Bullhorn calls `4774` is
-# `.../job/database-operations-engineer-in-austin-tx-7203006` there). There
-# is no deterministic way to derive that id from JobBoardPost's `id`, so
-# templating `url_posting` the way ESS Clinical's row does would produce a
-# link to nothing. Promote to `live` only if a real cross-reference turns up;
-# matching by title/location against the WorkLlama board is too fragile to
-# trust unattended.
-
 [[feed]]
 key = "34/2WXP1S"
-enabled = true
 verified = false
 verified_at = "2026-08-07"
 company_id = 1059
 company_name = "Innova Solutions"
 domain = "innovasolutions.com"
-
-[feed.config]
-company_raw = "Innova Solutions"
