@@ -11,6 +11,13 @@ dependencies = [
     "uvicorn>=0.52.0",
 ]
 
+[project.scripts]
+keyscan = "xjobscore.keyscan:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
@@ -23,19 +30,22 @@ dev = [
 [tool.setuptools]
 packages = [
     "xjobscore",
-    "xjobscore.raw_inspection",
+    "xjobscore.inspector",
+    "xjobscore.keyscan",
     "xjobscore.sources",
     "xjobscore.sources.planned",
-    "xjobscore.tokscan",
+    "xjobscore.sources.registry",
+    "xjobscore.sources.unified_v2",
 ]
 
-# manifest/*.toml is globbed at import time by sources._source_types(); omitting
-# it makes source_type() silently empty on an installed (non-editable) copy.
+# Registry TOML is package data consumed by sources.registry.loader.
 [tool.setuptools.package-data]
 xjobscore = [
     "fixtures/*.json",
-    "sources/catalogs/*.toml",
-    "sources/manifest/*.toml",
+    "registry/*.toml",
+    "sources/registry/*.toml",
+    "sources/registry/ats-catalog/*.toml",
+    "inspector/static/**/*",
 ]
 
 [tool.pytest.ini_options]
