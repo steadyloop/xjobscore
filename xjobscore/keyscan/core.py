@@ -429,14 +429,14 @@ class Keyscan:
                 lines.extend((
                     "[[feed]]",
                     f"key = {_toml_string(token)}",
-                    f"company_id = {company_id}",
-                    f"company_name = {_toml_string(company)}",
-                    f"domain = {_toml_string(domain)}",
                     # The registry no longer carries an enabled flag, so a token we
                     # cannot actually run is exported unverified: loader.feeds()
                     # skips it exactly as the old enabled = false did.
                     f"verified = {'true' if runnable else 'false'}",
                     f"verified_at = {_toml_string(validated_at)}",
+                    f"company_id = {company_id}",
+                    f"company_name = {_toml_string(company)}",
+                    f"domain = {_toml_string(domain)}",
                 ))
                 if config:
                     lines.append("[feed.config]")
@@ -575,12 +575,12 @@ class Keyscan:
         lines = [
             "[[feed]]",
             f"key = {_toml_string(token)}",
-            f"company_id = {company_id}",
-            f"company_name = {_toml_string(company)}",
-            f"domain = {_toml_string(domain)}",
             # See export_catalog: unverified stands in for the retired enabled flag.
             f"verified = {'true' if runnable else 'false'}",
             f"verified_at = {_toml_string(validated_at)}",
+            f"company_id = {company_id}",
+            f"company_name = {_toml_string(company)}",
+            f"domain = {_toml_string(domain)}",
         ]
         if config:
             lines.append("")

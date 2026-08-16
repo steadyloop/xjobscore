@@ -309,6 +309,61 @@ def test_default_catalog_export_appends_only_registry_valid_feeds(tmp_path: Path
     assert "# operator-owned entry" in existing.read_text()
 
 
+def test_every_catalog_writer_emits_the_canonical_field_order(tmp_path: Path, monkeypatch):
+    """All three writers agree with the registry's canonical field order.
+
+    Keyscan appends straight into sources/registry/ats-catalog/*.toml, so a
+    writer that orders fields its own way silently fails the registry's
+    canonical-order test -- and only for the feeds keyscan added. The order is
+    duplicated from sources/tests/test_registry_loader.py::_FEED_FIELD_ORDER
+    rather than imported, so keyscan keeps no dependency on the core package.
+    """
+    canonical = ("key", "verified", "verified_at", "company_id", "company_name", "domain")
+
+    registry_catalog = tmp_path / "registry" / "ats-catalog"
+    registry_catalog.mkdir(parents=True)
+    (registry_catalog / "greenhouse.toml").write_text(
+        'schema_version = 1\nsource = "greenhouse"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(keyscan_core, "REGISTRY_CATALOG_DIR", registry_catalog)
+
+    scan = Keyscan(tmp_path / "work")
+    scan._new_run(["company", "commoncrawl"], 6)
+    resolved = scan._record_candidate(
+        "greenhouse", "resolved-board", "company",
+        "https://boards.greenhouse.io/resolved-board",
+        company_id=649, company_name="Egnyte",
+    )
+    unresolved = scan._record_candidate(
+        "greenhouse", "unbound-board", "commoncrawl",
+        "https://boards.greenhouse.io/unbound-board",
+    )
+    scan._set_validation(resolved, "live", 3, {"responses": []})
+    scan._set_validation(unresolved, "live", 2, {"responses": []})
+    scan._finish("cancelled")
+
+    # 1. standalone export writes whole catalogs
+    standalone = tmp_path / "catalogs"
+    scan.export_catalog(standalone)
+    feed = tomllib.loads((standalone / "greenhouse.toml").read_text())["feed"][0]
+    assert tuple(key for key in feed if key != "config") == canonical
+
+    # 2. registry append of a company-resolved candidate
+    scan.export_catalog()
+    appended = tomllib.loads((registry_catalog / "greenhouse.toml").read_text())["feed"]
+    assert [row["key"] for row in appended] == ["resolved-board"]
+    assert tuple(key for key in appended[0] if key != "config") == canonical
+
+    # 3. registry append of an unresolved discovery placeholder
+    scan.export_catalog(candidates=True)
+    placeholder = next(
+        row
+        for row in tomllib.loads((registry_catalog / "greenhouse.toml").read_text())["feed"]
+        if row["key"] == "unbound-board"
+    )
+    assert tuple(key for key in placeholder if key != "config") == canonical
+
+
 def test_candidate_catalog_export_appends_disabled_unresolved_tokens(tmp_path: Path, monkeypatch):
     registry_catalog = tmp_path / "registry" / "ats-catalog"
     registry_catalog.mkdir(parents=True)
