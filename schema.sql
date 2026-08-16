@@ -34,11 +34,22 @@ CREATE TABLE token (
 
 -- USERS --
 CREATE TABLE account (
-    id uuid PRIMARY KEY, -- ID supplied by authentication provider
-    profile jsonb NOT NULL DEFAULT '{}'
+    id          uuid PRIMARY KEY,   -- minted here, not by the provider: a Google
+                                    -- `sub` is a numeric string, not a uuid
+    profile     jsonb NOT NULL DEFAULT '{}',
+    -- Identity, as returned by Google OIDC. NULL on the local sentinel account
+    -- below, which predates authentication and belongs to no person.
+    email       text UNIQUE,
+    google_sub  text UNIQUE,        -- OIDC subject; stable across email changes
+    name        text NOT NULL DEFAULT '',
+    picture_url text NOT NULL DEFAULT '',
+    created_at  timestamptz NOT NULL DEFAULT now()
 );
--- OneShot is single-user until authentication is introduced. Application
--- writes use this stable identity instead of inventing an account per process.
+-- Nobody's login: email and google_sub stay NULL, so no Google identity can ever
+-- resolve to it. It survives as the default account_id of a PostgresRepository
+-- or PostgresResumeStore constructed without one — a code path the API no longer
+-- takes, but which tests use and which needs a real row to satisfy the foreign
+-- keys. Nothing DEFAULTs to it any more: an unscoped write now fails outright.
 INSERT INTO account (id)
 VALUES ('00000000-0000-0000-0000-000000000001');
 
@@ -52,9 +63,10 @@ CREATE TABLE account_company (
 -- FEEDS --
 CREATE TABLE feed (
     id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- change source to name later
     source   text NOT NULL,      -- ashby, greenhouse, workable, etc.
     key      text NOT NULL,      -- openai, anthropic, janestreet, etc.
-    enabled  boolean NOT NULL DEFAULT true,
+    enabled  boolean NOT NULL DEFAULT true, -- polling queue
 
     UNIQUE (source, key)
 );
@@ -64,17 +76,128 @@ CREATE TABLE schedule (
     -- Config
     feed_id         bigint PRIMARY KEY REFERENCES feed (id) ON DELETE CASCADE,
     interval_s      integer NOT NULL DEFAULT 900 CHECK (interval_s > 0),
-    -- Log
-    etag            text,                                -- server's version token; 304 upon hit
-    res_hash        text,                                -- hash of listing response; skip parse when nothing moved
-    strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0),          -- fail strike; drives retry backoff/disable
+
+    -- Queue
     due_at          timestamptz NOT NULL DEFAULT now(),  -- when the feed is next due; this column is the queue
     hold_until      timestamptz,                         -- claim stamp so a crashed worker's feed gets retried, not lost
-    last_poll_at    timestamptz,
+
+    -- Optimization
+    etag            text,                                -- server's version token; 304 upon hit
+    res_hash        text,                                -- hash of listing response; skip parse when nothing moved
     last_change_at  timestamptz,                         -- last poll hash moved; back off keys on to slow a dormant board
-    disabled_at     timestamptz                          -- engine-initiated disable, kept out of operator-owned feed.enabled
+
+    -- Health
+    strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0),          -- fail strike; drives retry backoff/disable
+    last_poll_at    timestamptz,
+    paused_at       timestamptz                          -- operator hold; the feed stays enabled and stays visible, but is never claimed
+
+    -- Potential fields
+    -- last_modified — add later if you meet a server that has no ETag. Trivial migration.
+    -- cursor — only needed for incremental pagination; skip until an adapter demands it.
+    -- last_change_at — adaptive backoff for dormant boards is an optimization, not MVP.
+    -- status, last_success_at, consecutive_failures — redundant with paused_at, last_poll_at + last_error, and strikes respectively.
 );
-CREATE INDEX schedule_due_idx ON schedule (due_at) WHERE disabled_at IS NULL;
+CREATE INDEX schedule_due_idx ON schedule (due_at) WHERE paused_at IS NULL;
+
+-- One row per poll, append-only. Never updated or deleted: this is the history
+-- the arrival-rate estimator, the replay simulator, and the feed sparkline read.
+CREATE TABLE poll_observation (
+    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    feed_id      bigint NOT NULL REFERENCES feed (id) ON DELETE CASCADE,
+    polled_at    timestamptz NOT NULL DEFAULT now(),
+    -- Matches work.Outcome. No 'rate_limited': net.py absorbs 429s internally.
+    status       text NOT NULL
+        CHECK (status IN ('ok', 'not_modified', 'partial', 'error')),
+    new_postings integer NOT NULL DEFAULT 0 CHECK (new_postings >= 0)  -- postings not seen before this poll
+);
+CREATE INDEX poll_observation_feed_idx ON poll_observation (feed_id, polled_at DESC);
+
+-- Global run/pause for the polling loop the inspector supervises in-process.
+-- Single row by construction: the CHECK keeps `id` true, so there is exactly
+-- one switch and no way to address a second one by mistake.
+--
+-- Persistent rather than in-process because both restart defaults are wrong
+-- otherwise. Resuming automatically would undo a deliberate pause the moment
+-- the process bounced; pausing automatically would silently stop a pipeline
+-- nobody asked to stop. The flag outliving the process is what makes the
+-- restart a non-event.
+--
+-- `running` defaults to false: a database brought up to this schema polls
+-- nothing until an operator says so, which matters when `feed.enabled` covers
+-- thousands of rows.
+CREATE TABLE scheduler_control (
+    id         boolean PRIMARY KEY DEFAULT true CHECK (id),
+    running    boolean NOT NULL DEFAULT false,
+    changed_at timestamptz NOT NULL DEFAULT now(),
+    note       text
+);
+INSERT INTO scheduler_control (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+-- Deferred: adaptive polling. Intervals stay operator-set until poll_observation
+-- holds enough history to estimate an arrival rate from.
+--
+-- schedule.interval_auto        boolean          -- false = operator pinned interval_s; scheduler leaves it alone
+-- schedule.decayed_arrivals     double precision -- EWMA posting count, decayed as of estimator_updated_at
+-- schedule.estimator_updated_at timestamptz      -- when decayed_arrivals was last decayed
+--
+-- CREATE TABLE vendor (   -- one row per ATS; learned limits survive restarts
+--     name          text PRIMARY KEY,
+--     rate_rps      double precision NOT NULL, -- halved on 429, crept up on success
+--     blocked_until timestamptz                -- Retry-After; no polls until it passes
+-- );
+
+-- STAGING - For Inspector UI Feeds
+CREATE TABLE fetched_feed (
+    source      text NOT NULL,
+    feed_key    text NOT NULL,
+    -- Written for every attempt; an error or 304 stages no items. 'partial' = fetch did not finish.
+    status      text NOT NULL
+        CHECK (status IN ('ok', 'not_modified', 'partial', 'error')),
+    http_status integer,
+    -- Response-root facts no item carries (Workable's company name); parse() takes it as an argument.
+    envelope    jsonb NOT NULL DEFAULT '{}',
+    -- Request waterfall, timings, byte counts; the only place per-fetch request count is visible.
+    network     jsonb NOT NULL DEFAULT '{}',
+    fetched_at  timestamptz NOT NULL DEFAULT now(),
+    -- Carried into schedule.etag / schedule.res_hash on promotion; first real poll costs a 304.
+    etag        text,
+    res_hash    text,
+
+    -- NEW: what the inspector UI reads off a staged fetch, stored rather than derived.
+    result_id      text NOT NULL UNIQUE,  -- keys /api/postings/{result_id}/items/{i}
+    feed_id        bigint NOT NULL,
+    run_trigger    text NOT NULL DEFAULT 'manual',
+    started_at     timestamptz NOT NULL,
+    elapsed_ms     double precision NOT NULL,
+    item_count     integer NOT NULL,
+    raw_size_bytes bigint NOT NULL,       -- bytes on the wire
+    size_bytes     bigint NOT NULL,       -- bytes stored
+    truncated      boolean NOT NULL DEFAULT false,
+    error_class    text,
+    error_detail   text,
+
+    PRIMARY KEY (source, feed_key)
+);
+
+-- What fetch returned (verbatim/ordered).
+-- Keying by position allows harvests that emits same id twice (something parse() can't repair.)
+CREATE TABLE fetched_feed_posting (
+    source       text NOT NULL,
+    feed_key     text NOT NULL,
+    item_index   integer NOT NULL,  -- position in the response
+    external_id  text NOT NULL,     -- becomes raw_posting.source_key
+    kind         text NOT NULL CHECK (kind IN ('json', 'xml', 'html', 'mime')),
+    -- Decoded, because parse() consumes it; non-json kinds land as a JSON string scalar.
+    payload      jsonb NOT NULL,
+    -- NEW: bronze-shaped wrapper the item pane renders; payload and envelope injected at display.
+    raw_document jsonb NOT NULL,
+    -- Reserved for detail reuse; see raw_posting.item_version. Nothing writes or reads it yet.
+    item_version text,
+
+    PRIMARY KEY (source, feed_key, item_index),
+    FOREIGN KEY (source, feed_key)
+        REFERENCES fetched_feed (source, feed_key) ON DELETE CASCADE
+);
 
 -- JOB POSTING - BRONZE
 CREATE TABLE raw_posting (
@@ -84,9 +207,14 @@ CREATE TABLE raw_posting (
     data         jsonb NOT NULL,  -- source specific posting object
     data_hash    text NOT NULL,  -- hash of data to avoid identical versions
     fetched_at   timestamptz NOT NULL DEFAULT now(),
-
+    item_version text,        -- not NULL for two-phase (list req + detail req/job) sources only.
+                              -- whatever list offers: updated-at, revision number, hash of list row
+                              -- equal to stored value means skip detail request.
     UNIQUE (source, source_key, data_hash)
 );
+-- Resolves "current payload per posting" for detail reuse; off until a reader needs it:
+-- CREATE INDEX raw_posting_current_idx
+--     ON raw_posting (source, source_key, fetched_at DESC);
 
 -- JOB POSTING - SILVER
 CREATE TABLE job_posting (
@@ -171,6 +299,16 @@ CREATE TABLE job_posting (
 COMMENT ON COLUMN job_posting.attributes IS
     'OneShot enrichment v1: version, opportunity_type, term, workplace, skills, deadline_at, eligibility';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
+-- OneShot Opportunities filters this scalar on every list/count request. The
+-- general jsonb GIN index above does not accelerate the ->> equality form.
+CREATE INDEX job_posting_opportunity_type_active_idx
+    ON job_posting ((attributes ->> 'opportunity_type'))
+    WHERE status = 'active';
+-- Supports the default "Newest first" page without sorting the entire active
+-- opportunity pool before applying LIMIT.
+CREATE INDEX job_posting_fresh_active_idx
+    ON job_posting ((COALESCE(posted_at, first_seen_at)) DESC, id DESC)
+    WHERE status = 'active';
 
 -- DEDUP
 CREATE TABLE job_posting_dup_group (
@@ -188,9 +326,10 @@ ALTER TABLE job_posting
 -- APPLICATION TRACKER
 CREATE TABLE job_application (
     id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    account_id         uuid NOT NULL
-        DEFAULT '00000000-0000-0000-0000-000000000001'
-        REFERENCES account(id),
+    -- No DEFAULT, deliberately: every writer supplies an account. A DEFAULT here
+    -- would turn a query that forgot to scope into a silent write against the
+    -- shared sentinel row, which is how one user ends up seeing another's data.
+    account_id         uuid NOT NULL REFERENCES account(id),
     job_posting_id     bigint REFERENCES job_posting(id),
     -- Job Specs
     company_snapshot   text NOT NULL,
@@ -247,32 +386,58 @@ CREATE TABLE job_application_event (
 CREATE INDEX job_application_event_application_idx
     ON job_application_event (job_application_id, occurred_at DESC);
 
+-- RESUME STUDIO
+-- The small, account-owned content bank is loaded and saved as one workspace.
+-- Entries contain their bullets; every entry, bullet, and skill carries a stable
+-- integer `id` allocated from next_item_id so existing API selections remain
+-- valid without a table for each content type.
+CREATE TABLE resume_workspace (
+    account_id   uuid PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
+    profile      jsonb NOT NULL DEFAULT '{}'
+        CHECK (jsonb_typeof(profile) = 'object'),
+    entries      jsonb NOT NULL DEFAULT '[]'
+        CHECK (jsonb_typeof(entries) = 'array'),
+    skills       jsonb NOT NULL DEFAULT '[]'
+        CHECK (jsonb_typeof(skills) = 'array'),
+    next_item_id bigint NOT NULL DEFAULT 1 CHECK (next_item_id > 0),
+    updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE resume_target (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    account_id  uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    company     text NOT NULL,
+    title       text NOT NULL,
+    url         text NOT NULL DEFAULT '',
+    jd_text     text NOT NULL DEFAULT '',
+    date_posted text NOT NULL DEFAULT '',
+    note        text NOT NULL DEFAULT '',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+
+    UNIQUE (account_id, id)
+);
+CREATE INDEX resume_target_account_idx
+    ON resume_target (account_id, created_at DESC, id DESC);
+
+CREATE TABLE resume_document (
+    id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    account_id        uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    target_job_id     bigint,
+    name              text NOT NULL,
+    variant           text NOT NULL DEFAULT 'swe'
+        CHECK (variant IN ('mlsys', 'swe', 'quant')),
+    availability_line text NOT NULL DEFAULT '',
+    education_note    text NOT NULL DEFAULT '',
+    selection         jsonb NOT NULL DEFAULT '{}'
+        CHECK (jsonb_typeof(selection) = 'object'),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now(),
+
+    FOREIGN KEY (account_id, target_job_id)
+        REFERENCES resume_target(account_id, id)
+        ON DELETE SET NULL (target_job_id)
+);
+CREATE INDEX resume_document_account_updated_idx
+    ON resume_document (account_id, updated_at DESC, id DESC);
+
 COMMIT;
-
--- ---------------------------------------------------------------------------
--- Deferred fields. Not created; recorded so the reason survives the decision.
--- Each was considered and cut because nothing reads it today.
--- ---------------------------------------------------------------------------
-
--- Feed
-    -- complete: operator's claim that one response is the whole listing; needed the day reconcile.py is written, inert until then.
-    -- closes: permission for absence-from-listing to close a posting; pointless without `complete`, and dangerous without both.
-    -- credentialed: marks a feed whose failures are expected on token expiry; no credentialed feed exists in a 2639-entry public catalog yet.
-    -- priority: tier for the picker's LIMIT, so a watchlist company is fetched before the long tail when the budget is short.
-    -- jitter_s: per-feed phase offset; only worth a column if one random() at schedule time proves insufficient to break lockstep.
-    -- last_ok_at: last successful poll; `strikes = 0` answers "is it healthy" without it, so it waits for a poll_run table to denormalize from.
-    -- items_last / postings_last: harvested vs parsed counts, the cheapest detector for a silent parse failure (Oracle drops 100% and says nothing).
-    -- quarantine_reason: the text behind `schedule.quarantined_at`; the timestamp alone says a feed was benched, not why.
-    -- (consecutive_failures, last_change_at, quarantined_at now live in `schedule` as strikes / last_change_at / quarantined_at.)
-    -- validated_at: catalog's record of when the endpoint last answered; currently dropped at sync because it describes the feed, not the company.
-    -- first_seen_at / discovered_by: provenance for feeds created by a Target rather than the catalog; Target.reason already carries the value.
-    -- company_id: direct FK to company, bypassing the alias/token path; a second resolution path is drift until there's a reason for it.
-    -- notes: operator memo ("403s from residential IPs") that otherwise lives only in someone's memory.
-
--- Source
-    -- class: 'ats' | 'board' | 'aggregator'; the field that makes "poll every aggregator hourly" expressible in SQL rather than in Python.
-    -- cadence_s: per-vendor default cadence, so retuning Ashby is one row instead of 2591.
-    -- enabled: vendor-wide kill switch; only earns its place once UPDATE feed ... WHERE source=... is too coarse.
-    -- adapter: 'json-api' | 'docxtract' | 'custom'; already in sources/manifest/*.toml and not queried from SQL.
-    -- status: implementation state of the adapter itself, which is a property of the code and belongs with the code.
-    -- host / max_concurrency / min_interval_ms: per-host politeness budget, needed only if net.py's single global token bucket stops being enough.
