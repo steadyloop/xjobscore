@@ -8,8 +8,8 @@ const { opportunityTotal } = require("./nav-count.js");
 
 test("visible filters map to PostgreSQL opportunity types", () => {
   assert.deepEqual(
-    opportunityTypes(["spring_coop", "summer_internships", "fall", "research", "early_career", "fellowships", "review"]),
-    ["spring_internship", "spring_coop", "summer_internship", "fall_internship", "fall_coop", "student_researcher", "student_role", "fellowship", "unclassified", "review"],
+    opportunityTypes(["internships", "early_career", "working_student", "research", "review"]),
+    ["summer_internship", "student_role", "spring_coop", "student_researcher", "fellowship", "review"],
   );
   assert.deepEqual(opportunityTypes([]), [], "no tab active defers to the API's default scope");
 });
