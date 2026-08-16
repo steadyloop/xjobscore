@@ -11,7 +11,6 @@ source = "recruitcrm"
 
 [[feed]]
 key = "Oasis_Protocol_Foundation_jobs"
-enabled = true
 verified = true
 verified_at = "2026-08-07"
 company_id = 1500
@@ -20,36 +19,8 @@ domain = "oasisprotocol.org"
 
 [[feed]]
 key = "Talent_R_1_jobs"
-enabled = true
 verified = true
 verified_at = "2026-08-07"
 company_id = 2155
 company_name = "Talent-R"
 domain = "talent-r.com"
-
-[[feed]]
-key = "17829617619150132400PgA"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "17792741600350132400FKI"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""
-
-[[feed]]
-key = "17796914676680132399oJi"
-enabled = false
-verified = false
-verified_at = ""
-company_id = 0
-company_name = ""
-domain = ""

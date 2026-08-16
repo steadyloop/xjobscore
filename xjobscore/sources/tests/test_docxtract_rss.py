@@ -16,7 +16,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import docxtract
 
 
-FIXTURES = Path(__file__).parents[1] / "fixtures"
+FIXTURES = Path(__file__).parents[2] / "fixtures"
 
 
 class FixtureNet:
@@ -26,13 +26,13 @@ class FixtureNet:
         self.response = Response(url=url, status=200, headers={}, body=body)
         self.get_calls: list[dict] = []
 
-    async def get(self, url, *, params=None, headers=None, state=None):
-        self.get_calls.append({"url": url, "params": params, "state": state})
+    async def get(self, url, *, params=None, headers=None, etag=None):
+        self.get_calls.append({"url": url, "params": params, "etag": etag})
         return self.response
 
 
 def feed_for(key: str, source: str = "successfactors") -> Feed:
-    return Feed(id=1, source=source, key=key, config={}, state={})
+    return Feed(id=1, source=source, key=key, config={})
 
 
 def successfactors_net() -> FixtureNet:

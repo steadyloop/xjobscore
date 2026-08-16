@@ -23,8 +23,8 @@ class FixtureNet:
         self.get_calls: list[dict] = []
         self.post_calls: list[dict] = []
 
-    async def get(self, url, *, params=None, headers=None, state=None):
-        self.get_calls.append({"url": url, "params": params, "headers": headers, "state": state})
+    async def get(self, url, *, params=None, headers=None, etag=None):
+        self.get_calls.append({"url": url, "params": params, "headers": headers, "etag": etag})
         return self.response
 
     async def post(self, url, *, json=None, headers=None):
@@ -34,7 +34,7 @@ class FixtureNet:
 
 async def test_get_request_sends_headers_resolved_from_feed_config():
     net = FixtureNet({"items": []})
-    feed = Feed(id=1, source="x", key="acme", config={"api_key": "secret-123"}, state={})
+    feed = Feed(id=1, source="x", key="acme", config={"api_key": "secret-123"})
     request = {
         "url": "https://api.example.com/jobs",
         "headers": {"Authorization-Key": "$api_key", "User-Agent": "xjobscore (ops@example.com)"},
@@ -50,7 +50,7 @@ async def test_get_request_sends_headers_resolved_from_feed_config():
 
 async def test_post_request_sends_headers_too():
     net = FixtureNet({"items": []})
-    feed = Feed(id=1, source="x", key="acme", config={}, state={})
+    feed = Feed(id=1, source="x", key="acme", config={})
     request = {"method": "POST", "url": "https://api.example.com/jobs", "body": {}, "headers": {"X-Token": "fixed"}}
 
     await json_api._request(request, feed, net, {"key": feed.key}, first=True)
@@ -61,7 +61,7 @@ async def test_post_request_sends_headers_too():
 async def test_no_headers_key_means_no_headers_kwarg_reaches_net():
     """Every existing config omits `headers` -- must stay a no-op for them."""
     net = FixtureNet({"items": []})
-    feed = Feed(id=1, source="x", key="acme", config={}, state={})
+    feed = Feed(id=1, source="x", key="acme", config={})
     request = {"url": "https://api.example.com/jobs"}
 
     await json_api._request(request, feed, net, {"key": feed.key}, first=True)

@@ -17,7 +17,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import docxtract
 
 
-FIXTURES = Path(__file__).parents[1] / "fixtures"
+FIXTURES = Path(__file__).parents[2] / "fixtures"
 
 
 class LinkFixtureNet:
@@ -28,15 +28,17 @@ class LinkFixtureNet:
         self.detail_response = Response(url="https://fixture.invalid/detail", status=200, headers={}, body=detail_body)
         self.get_calls: list[dict] = []
 
-    async def get(self, url, *, params=None, headers=None, state=None):
-        self.get_calls.append({"url": url, "params": params, "state": state})
+    # vincere and jazzhr both declare detail_concurrency now, so the fake has
+    # to accept what the real Net accepts.
+    async def get(self, url, *, params=None, headers=None, etag=None, concurrency=1):
+        self.get_calls.append({"url": url, "params": params, "etag": etag})
         if len(self.get_calls) == 1:
             return self.list_response
         return self.detail_response
 
 
 def feed_for(key: str, source: str) -> Feed:
-    return Feed(id=1, source=source, key=key, config={}, state={})
+    return Feed(id=1, source=source, key=key, config={})
 
 
 def vincere_net() -> LinkFixtureNet:

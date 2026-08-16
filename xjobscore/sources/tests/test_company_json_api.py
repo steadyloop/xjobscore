@@ -11,7 +11,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import json_api
 
 
-FIXTURES = Path(__file__).parents[1] / "fixtures"
+FIXTURES = Path(__file__).parents[2] / "fixtures"
 
 
 class FixtureNet:
@@ -25,11 +25,13 @@ class FixtureNet:
         self.get_calls: list[dict] = []
         self.post_calls: list[dict] = []
 
-    async def get(self, url, *, params=None, headers=None, state=None):
-        self.get_calls.append({"url": url, "params": params, "headers": headers, "state": state})
+    # `concurrency` is only passed through when a config raises it above 1, but
+    # accepting it keeps a fanned-out source (apple) usable here.
+    async def get(self, url, *, params=None, headers=None, etag=None, concurrency=1):
+        self.get_calls.append({"url": url, "params": params, "headers": headers, "etag": etag})
         return self.response
 
-    async def post(self, url, *, json=None, headers=None):
+    async def post(self, url, *, json=None, headers=None, concurrency=1):
         self.post_calls.append({"url": url, "json": json, "headers": headers})
         return self.response
 
@@ -39,7 +41,7 @@ def fixture(name: str) -> dict:
 
 
 def feed_for(name: str) -> Feed:
-    return Feed(id=1, source=name, key=name, config={}, state={})
+    return Feed(id=1, source=name, key=name, config={})
 
 
 def with_total(name: str, total: int) -> dict:
@@ -48,8 +50,6 @@ def with_total(name: str, total: int) -> dict:
         payload["hits"] = total
     elif name == "apple":
         payload["res"]["totalRecords"] = total
-    elif name == "uber":
-        payload["data"]["totalResults"] = total
     return payload
 
 
@@ -58,12 +58,10 @@ def with_total(name: str, total: int) -> dict:
     [
         ("amazon", "Software Development Engineer", "https://www.amazon.jobs/jobs/2345678/software-development-engineer"),
         ("apple", "Machine Learning Engineer - Siri", "https://jobs.apple.com/en-us/details/200500123/machine-learning-engineer-siri"),
-        ("tesla", "Vehicle Software Engineer", "https://www.tesla.com/careers/search/job/210987"),
-        ("uber", "Backend Engineer, Core Services", "https://www.uber.com/global/en/careers/list/112233/"),
     ],
 )
 async def test_fixture_contracts_produce_postings(name, expected_title, expected_url):
-    net = FixtureNet(with_total(name, 1) if name != "tesla" else fixture(name))
+    net = FixtureNet(with_total(name, 1))
     feed = feed_for(name)
 
     record = await json_api.harvest(name, feed, net)
@@ -78,12 +76,6 @@ async def test_fixture_contracts_produce_postings(name, expected_title, expected
 
 
 async def test_fixture_contracts_preserve_provider_specific_fields():
-    tesla_feed = feed_for("tesla")
-    tesla_record = await json_api.harvest("tesla", tesla_feed, FixtureNet(fixture("tesla")))
-    tesla_posting = json_api.parse("tesla", tesla_feed, tesla_record.items[0], tesla_record.envelope)[0]
-    assert tesla_posting.location_raw == "Palo Alto, California"
-    assert tesla_posting.employment_type == "Full-time"
-
     apple_feed = feed_for("apple")
     apple_record = await json_api.harvest("apple", apple_feed, FixtureNet(with_total("apple", 1)))
     apple_posting = json_api.parse("apple", apple_feed, apple_record.items[0], apple_record.envelope)[0]
@@ -117,17 +109,11 @@ async def test_requests_include_provider_query_and_configured_pagination_keys():
         "locations": ["postLocation-USA"],
     }
 
-    uber_net = FixtureNet(with_total("uber", 1))
-    await json_api.harvest("uber", feed_for("uber"), uber_net)
-    assert uber_net.post_calls[0]["json"]["page"] == 0
-
-
 @pytest.mark.parametrize(
     ("name", "request_kind", "field", "first", "second"),
     [
         ("amazon", "get_calls", "offset", 0, 100),
         ("apple", "post_calls", "page", 1, 2),
-        ("uber", "post_calls", "page", 0, 1),
     ],
 )
 async def test_pagination_advances_the_configured_parameter(name, request_kind, field, first, second):

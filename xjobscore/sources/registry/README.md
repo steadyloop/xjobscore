@@ -21,9 +21,11 @@ file. A Direct source is exactly one feed, so its feed fields are flattened into
 the `[[direct]]` declaration. A Board source is also exactly one feed and uses
 the same flattened layout in its `[[board]]` declaration.
 
-An ATS declaration contains only `name` and `catalog`; enablement belongs to
-each tenant feed in that catalog. Direct and Board declarations contain `name`
-plus the standard feed fields, including one operational `enabled` flag.
+An ATS declaration contains only `name` and `catalog`. Direct and Board
+declarations contain `name` plus the standard feed fields. The registry carries
+no `enabled` flag: it decides which feeds *exist*, while whether a feed is
+polled is operator state in PostgreSQL's `feed.enabled`, owned by the inspector.
+A registry sync seeds that column on first insert and never overwrites it after.
 Adapter selection and source-spec registration are owned by runtime code, so
 `feeds.toml` does not duplicate adapter names or config-file pointers. Optional
 per-feed configuration remains operational: use
@@ -32,10 +34,10 @@ inside an ATS catalog.
 
 `loader.py` is the shared validated interface. Use `companies()` for canonical
 company identity, `source_types()` for taxonomy, `entries()` for all feed
-metadata, or `feeds()` for enabled verified feeds. Every feed must reference a
+metadata, or `feeds()` for verified feeds. Every feed must reference a
 known company ID; consumers should not parse the TOML directly.
 
-Every feed lists its endpoint identity and controls first (`key`, `enabled`),
+Every feed lists its endpoint identity first (`key`),
 then verification metadata (`verified`, `verified_at`), then resolved company
 metadata (`company_id`, `company_name`, `domain`). `verified_at` is an empty
 string when no historical verification timestamp was recorded. Adapter-only
@@ -51,13 +53,12 @@ company_name = "Example"  # human-readable company identity
 domain = "example.com"
 verified = true            # endpoint verification state
 verified_at = "2026-08-10"
-enabled = true             # operator-owned runtime control
 
 [feed.config]              # optional adapter-specific settings come last
 ```
 
-Tokscan may also append unresolved discovery candidates to ATS catalogs. They
-use the complete canonical field sequence with `enabled = false`, `verified =
+Keyscan may also append unresolved discovery candidates to ATS catalogs. They
+use the complete canonical field sequence with `verified =
 false`, `verified_at = ""`, `company_id = 0`, `company_name = ""`, and
 `domain = ""`. The loader intentionally ignores these zero-valued candidate rows until
 they have been resolved to a canonical company.

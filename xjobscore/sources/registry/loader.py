@@ -17,7 +17,7 @@ __all__ = [
 REGISTRY_DIR = Path(__file__).parent
 _SOURCE_TABLES = {"ats": "ATS", "direct": "Direct", "board": "Board"}
 _FEED_FIELDS = {
-    "key", "company_id", "company_name", "domain", "verified", "verified_at", "enabled", "config"
+    "key", "company_id", "company_name", "domain", "verified", "verified_at", "config"
 }
 _SOURCE_FIELDS = {
     "ats": {"name", "catalog"},
@@ -51,7 +51,6 @@ class Entry:
     domain: str
     verified: bool
     verified_at: str
-    enabled: bool
     config: dict
 
 
@@ -152,12 +151,37 @@ def companies(registry_dir: Path = REGISTRY_DIR) -> tuple[Company, ...]:
     return tuple(sorted(result, key=lambda company: company.id))
 
 
+def _excluded_company_ids(registry_dir: Path) -> set[int]:
+    """Return archived company IDs whose catalog feeds are intentionally inactive.
+
+    Catalogs remain source inventories, so moving a company out of the active
+    registry must not require destructively deleting every feed that points at
+    it.  The exclusion archive is optional for fixture registries.
+    """
+    path = registry_dir.resolve() / "excluded-companies.toml"
+    if not path.exists():
+        return set()
+    document = _read(path)
+    if document.get("schema_version") != 2 or set(document) - {"schema_version", "company"}:
+        raise RegistryError(f"{path}: invalid excluded companies document")
+    rows = document.get("company")
+    if not isinstance(rows, list):
+        raise RegistryError(f"{path}: company must be an array of tables")
+    result: set[int] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RegistryError(f"{path}: invalid company entry")
+        company_id = _positive_integer(row, "id", path)
+        if company_id in result:
+            raise RegistryError(f"{path}: duplicate company id {company_id!r}")
+        result.add(company_id)
+    return result
+
+
 def _entry(source: str, row: object, path: Path) -> Entry | None:
     if not isinstance(row, dict):
         raise RegistryError(f"{path}: each feed entry must be a table")
-    fields = {
-        "key", "company_id", "company_name", "domain", "verified", "verified_at", "enabled", "config"
-    }
+    fields = _FEED_FIELDS
     unknown = set(row) - fields
     if unknown:
         raise RegistryError(f"{path}: unknown feed field {sorted(unknown)[0]!r}")
@@ -165,7 +189,6 @@ def _entry(source: str, row: object, path: Path) -> Entry | None:
     if set(row) == candidate_fields:
         if (
             isinstance(row["key"], str) and row["key"]
-            and row["enabled"] is False
             and row["verified"] is False
             and row["verified_at"] == ""
             and row["company_id"] == 0
@@ -183,9 +206,6 @@ def _entry(source: str, row: object, path: Path) -> Entry | None:
     verified_at = row.get("verified_at")
     if not isinstance(verified_at, str):
         raise RegistryError(f"{path}: verified_at must be a string")
-    enabled = row.get("enabled")
-    if not isinstance(enabled, bool):
-        raise RegistryError(f"{path}: enabled must be a boolean")
     config = row.get("config", {})
     if not isinstance(config, dict):
         raise RegistryError(f"{path}: config must be a TOML table")
@@ -197,7 +217,6 @@ def _entry(source: str, row: object, path: Path) -> Entry | None:
         domain=_text(row, "domain", path),
         verified=verified,
         verified_at=verified_at,
-        enabled=enabled,
         config=config,
     )
 
@@ -241,6 +260,12 @@ def entries(registry_dir: Path = REGISTRY_DIR) -> tuple[Entry, ...]:
     """Return every validated feed, sorted by source and key."""
     registry_dir, feeds_path, source_rows = _source_rows(registry_dir)
     company_ids = {company.id for company in companies(registry_dir)}
+    excluded_company_ids = _excluded_company_ids(registry_dir)
+    overlap = company_ids & excluded_company_ids
+    if overlap:
+        raise RegistryError(
+            f"{registry_dir}: company id {min(overlap)!r} is both active and excluded"
+        )
     result: list[Entry] = []
     feed_ids: set[tuple[str, str]] = set()
     referenced_catalogs: set[Path] = set()
@@ -277,6 +302,8 @@ def entries(registry_dir: Path = REGISTRY_DIR) -> tuple[Entry, ...]:
             entry = _entry(source, feed_row, path)
             if entry is None:
                 continue
+            if entry.company_id in excluded_company_ids:
+                continue
             if entry.company_id not in company_ids:
                 raise RegistryError(f"{path}: unknown company_id {entry.company_id!r}")
             identity = (source, entry.key)
@@ -304,7 +331,12 @@ def feed_ref(source: str, key: str) -> str:
 
 
 def feeds(registry_dir: Path = REGISTRY_DIR) -> tuple[Feed, ...]:
-    """Materialize enabled live entries as transient feeds."""
+    """Materialize verified live entries as transient feeds.
+
+    Whether a feed is polled is operator state owned by PostgreSQL's
+    ``feed.enabled`` (set from the inspector); the registry only decides
+    which feeds exist.
+    """
     types = source_types(registry_dir)
     return tuple(
         Feed(
@@ -313,5 +345,5 @@ def feeds(registry_dir: Path = REGISTRY_DIR) -> tuple[Feed, ...]:
             source_type=types.get(entry.source, "Other"),
         )
         for entry in entries(registry_dir)
-        if entry.verified and entry.enabled
+        if entry.verified
     )

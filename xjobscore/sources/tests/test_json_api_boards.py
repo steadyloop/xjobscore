@@ -23,7 +23,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import json_api
 
 
-FIXTURES = Path(__file__).parents[1] / "fixtures"
+FIXTURES = Path(__file__).parents[2] / "fixtures"
 
 
 class FixtureNet:
@@ -37,8 +37,11 @@ class FixtureNet:
         self.get_calls: list[dict] = []
         self.post_calls: list[dict] = []
 
-    async def get(self, url, *, params=None, headers=None, state=None):
-        self.get_calls.append({"url": url, "params": params, "headers": headers, "state": state})
+    async def get(self, url, *, params=None, headers=None, etag=None, concurrency=1):
+        self.get_calls.append({
+            "url": url, "params": params, "headers": headers, "etag": etag,
+            "concurrency": concurrency,
+        })
         return self.response
 
     async def post(self, url, *, json=None, headers=None):
@@ -65,7 +68,7 @@ def fixture(name: str) -> dict:
 
 
 def feed_for(name: str) -> Feed:
-    return Feed(id=1, source=name, key=KEYS[name], config=FEED_CONFIG.get(name, {}), state={})
+    return Feed(id=1, source=name, key=KEYS[name], config=FEED_CONFIG.get(name, {}))
 
 
 async def harvest_one(name: str) -> tuple[FixtureNet, object]:
@@ -138,8 +141,10 @@ async def test_talentreef_unwraps_elasticsearch_source_and_types_its_ids():
     net, posting = await harvest_one("talentreef")
 
     body = net.post_calls[0]["json"]
-    assert body["from"] == 0 and body["size"] == 100
-    assert body["sort"] == [{"createdDate": "desc"}]
+    assert body["from"] == 0 and body["size"] == 1000
+    assert body["sort"] == [{"createdDate": "desc"}, {"jobId": "desc"}]
+    # fixture total is 1, so the configured fan-out never fires.
+    assert len(net.post_calls) == 1
     # positionId is a JSON number on the wire; Posting types it as text.
     assert posting.requisition_id == "52359"
     assert posting.published_at is not None
@@ -178,13 +183,26 @@ async def test_ukg_description_is_only_the_teaser_the_list_returns():
     ("name", "params"),
     [
         ("manatal", {"page": 1, "page_size": 50}),
-        ("unstop", {"opportunity": "internships", "page": 1, "per_page": 50}),
+        ("unstop", {"opportunity": "internships", "page": 1, "per_page": 200}),
     ],
 )
 async def test_paginated_boards_start_on_the_configured_first_page(name, params):
     net, _ = await harvest_one(name)
 
     assert net.get_calls[0]["params"] == params
+
+
+async def test_unstop_keeps_its_1000_item_cap_in_five_concurrent_pages():
+    payload = fixture("unstop")
+    payload["data"]["total"] = 10_000
+    net = FixtureNet(payload)
+
+    record = await json_api.harvest("unstop", feed_for("unstop"), net)
+
+    assert record.truncated is True
+    assert [call["params"]["page"] for call in net.get_calls] == [1, 2, 3, 4, 5]
+    assert [call["params"]["per_page"] for call in net.get_calls] == [200] * 5
+    assert [call["concurrency"] for call in net.get_calls] == [1, 4, 4, 4, 4]
 
 
 @pytest.mark.parametrize(

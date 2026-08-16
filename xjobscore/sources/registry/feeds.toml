@@ -171,7 +171,6 @@ catalog = "ats-catalog/zohorecruit.toml"
 [[direct]]
 name = "amazon"
 key = "amazon"
-enabled = true
 verified = true
 verified_at = ""
 company_id = 95
@@ -181,7 +180,6 @@ domain = "amazon.jobs"
 [[direct]]
 name = "apple"
 key = "apple"
-enabled = true
 verified = true
 verified_at = ""
 company_id = 136
@@ -193,7 +191,6 @@ name = "flyio"
 
 # Fly.io's Atom feed is valid but currently has no open-role entries.
 key = "flyio"
-enabled = true
 verified = true
 verified_at = "2026-08-07"
 company_id = 787
@@ -203,7 +200,6 @@ domain = "fly.io"
 [[direct]]
 name = "janestreet"
 key = "janestreet"
-enabled = true
 verified = true
 verified_at = ""
 company_id = 1086
@@ -215,17 +211,15 @@ domain = "janestreet.com"
 [[board]]
 name = "hn"
 key = "hn"
-enabled = true
 verified = true
 verified_at = "2026-08-09"
-company_id = 2492
+company_id = 2463
 company_name = "Hacker News"
 domain = "news.ycombinator.com"
 
 [[board]]
 name = "simplify"
 key = "SimplifyJobs/Summer2027-Internships"
-enabled = true
 verified = true
 verified_at = "2026-08-04"
 company_id = 1988
@@ -237,7 +231,6 @@ name = "unstop"
 
 # One platform-wide opportunity feed, not a per-employer tenant board.
 key = "unstop"
-enabled = true
 verified = true
 verified_at = "2026-08-06"
 company_id = 2319
@@ -251,7 +244,6 @@ name = "usajobs"
 # operator-owned USAJOBS credentials exist. Never commit a personal
 # Authorization-Key or registered-email User-Agent here.
 key = "usajobs"
-enabled = true
 verified = false
 verified_at = "2026-08-07"
 company_id = 2326
@@ -261,7 +253,6 @@ domain = "usajobs.gov"
 [[board]]
 name = "workatastartup"
 key = "workatastartup"
-enabled = true
 verified = false
 verified_at = ""
 company_id = 2463

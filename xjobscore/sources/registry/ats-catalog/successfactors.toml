@@ -8,7 +8,6 @@ source = "successfactors"
 
 [[feed]]
 key = "jobs.sap.com"
-enabled = true
 verified = true
 verified_at = "2026-08-06T09:02:05-0700"
 company_id = 1900
@@ -17,9 +16,41 @@ domain = "sap.com"
 
 [[feed]]
 key = "jobs.bayer.com"
-enabled = true
 verified = true
 verified_at = "2026-08-06T09:02:05-0700"
 company_id = 247
 company_name = "Bayer"
 domain = "bayer.com"
+
+[[feed]]
+key = "jobs.deere.com"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3232
+company_name = "John Deere"
+domain = "deere.com"
+
+[[feed]]
+key = "jobs.exxonmobil.com"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3130
+company_name = "ExxonMobil"
+domain = "exxonmobil.com"
+
+[[feed]]
+key = "jobs.nexteraenergy.com"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4195
+company_name = "NextEra Energy"
+domain = "nexteraenergy.com"
+
+[[feed]]
+key = "jobs.ornl.gov"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2750
+company_name = "Oak Ridge National Laboratory"
+domain = "ornl.gov"
+
