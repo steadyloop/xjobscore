@@ -17,6 +17,7 @@ async def test_schema_sql_repository_round_trip() -> None:
     await repository.connect()
     pool = repository._ready()
     source = "oneshot_repository_test"
+    posting_source = f"{source}:board"
     try:
         company_id = await pool.fetchval(
             "INSERT INTO company(name, domain) VALUES ('Repository Test', 'repository.test') RETURNING id"
@@ -26,7 +27,7 @@ async def test_schema_sql_repository_round_trip() -> None:
             INSERT INTO raw_posting(source, source_key, data, data_hash)
             VALUES ($1, 'raw-1', '{}', 'raw-hash') RETURNING id
             """,
-            source,
+            posting_source,
         )
         job_id = await pool.fetchval(
             """
@@ -40,7 +41,7 @@ async def test_schema_sql_repository_round_trip() -> None:
                 $4::jsonb
             ) RETURNING id
             """,
-            source,
+            posting_source,
             company_id,
             raw_id,
             '{"version":1,"opportunity_type":"summer_internship","term":"Summer 2027","workplace":"remote","skills":["Python","PostgreSQL"],"eligibility":"eligible"}',
@@ -52,6 +53,8 @@ async def test_schema_sql_repository_round_trip() -> None:
 
         jobs = await repository.list_jobs(opportunity_types=["summer_internship"])
         assert jobs["total"] == 1
+        assert jobs["jobs"][0]["source"] == posting_source
+        assert jobs["jobs"][0]["source_url"] == "https://repository.test/job"
         assert jobs["jobs"][0]["attributes"]["workplace"] == "remote"
         application = await repository.create_application(job_id)
         assert application is not None
@@ -82,7 +85,7 @@ async def test_schema_sql_repository_round_trip() -> None:
             locals().get("job_id", -1),
         )
         await pool.execute("DELETE FROM feed WHERE source = $1", source)
-        await pool.execute("DELETE FROM job_posting WHERE source = $1", source)
-        await pool.execute("DELETE FROM raw_posting WHERE source = $1", source)
+        await pool.execute("DELETE FROM job_posting WHERE source = $1", posting_source)
+        await pool.execute("DELETE FROM raw_posting WHERE source = $1", posting_source)
         await pool.execute("DELETE FROM company WHERE domain = 'repository.test'")
         await repository.close()

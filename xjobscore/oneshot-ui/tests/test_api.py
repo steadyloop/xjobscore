@@ -1,9 +1,28 @@
+import asyncio
 from copy import deepcopy
+from uuid import UUID
 
 from fastapi.testclient import TestClient
+import pytest
 
 from oneshot_ui.app import create_app
+from oneshot_ui.auth import session_account
 from oneshot_ui.config import Settings
+from oneshot_ui.repository import PostgresRepository, _ilike_pattern
+
+TEST_ACCOUNT_ID = UUID("00000000-0000-0000-0000-0000000000aa")
+
+
+def signed_in_app(**kwargs):
+    """An app whose routes see a signed-in account.
+
+    Overriding the dependency rather than forging a session cookie keeps these
+    tests about the API contract: the sign-in flow itself is covered separately
+    in test_auth.py.
+    """
+    application = create_app(Settings(dsn="injected"), **kwargs)
+    application.dependency_overrides[session_account] = lambda: TEST_ACCOUNT_ID
+    return application
 
 
 class FakeRepository:
@@ -12,6 +31,8 @@ class FakeRepository:
         self.jobs = [
             {
                 "id": 41,
+                "source": "greenhouse:example-labs",
+                "source_url": "https://jobs.example.test/41",
                 "company": "Example Labs",
                 "title": "Summer Software Engineering Intern",
                 "description": "Build Python services.",
@@ -35,6 +56,12 @@ class FakeRepository:
 
     async def close(self) -> None:
         self.connected = False
+
+    def for_account(self, account_id):
+        # Account scoping lives in SQL, which this fake does not have. The real
+        # isolation guarantee is asserted against PostgreSQL in
+        # test_postgres_repository.py.
+        return self
 
     async def list_jobs(self, **options):
         application_job_ids = {row["job_id"] for row in self.applications if row["job_id"]}
@@ -118,9 +145,96 @@ class FakeRepository:
         self.applications = [row for row in self.applications if row["id"] != application_id]
         return len(self.applications) != before
 
+
+def test_job_response_exposes_provenance_without_internal_trace_fields() -> None:
+    result = PostgresRepository._job({
+        "id": 41,
+        "source": "greenhouse:example-labs",
+        "source_url": "https://jobs.example.test/41",
+        "company_name": "Example Labs",
+        "title": "Summer Software Engineering Intern",
+        "description": "Build Python services.",
+        "location_text": "Remote, United States",
+        "apply_url": "https://jobs.example.test/41/apply",
+        "posted_at": None,
+        "first_seen_at": None,
+        "last_seen_at": None,
+        "status": "active",
+        "attributes": {"version": 1},
+        "content_hash": "internal-hash",
+        "raw_id": 99,
+        "source_key": "internal-key",
+    })
+
+    assert result["source"] == "greenhouse:example-labs"
+    assert result["source_url"] == "https://jobs.example.test/41"
+    assert not ({"content_hash", "raw_id", "source_key"} & result.keys())
+
+
+@pytest.mark.asyncio
+async def test_job_count_does_not_block_the_visible_page() -> None:
+    """The count and page reads must occupy independent pool connections.
+
+    The count deliberately waits until the page query starts. A sequential
+    implementation deadlocks and hits the timeout; the concurrent repository
+    returns immediately with the existing API shape.
+    """
+
+    class GatedPool:
+        def __init__(self) -> None:
+            self.page_started = asyncio.Event()
+            self.count_args = ()
+            self.page_args = ()
+
+        async def fetchval(self, query, *args):
+            self.count_args = args
+            await self.page_started.wait()
+            return 1
+
+        async def fetch(self, query, *args):
+            self.page_args = args
+            self.page_started.set()
+            return [
+                {
+                    "id": 41,
+                    "source": "greenhouse:example-labs",
+                    "source_url": "https://jobs.example.test/41",
+                    "company_name": "Example Labs",
+                    "title": "Summer Software Engineering Intern",
+                    "description": "Build Python services.",
+                    "location_text": "Remote, United States",
+                    "apply_url": "https://jobs.example.test/41/apply",
+                    "posted_at": None,
+                    "first_seen_at": None,
+                    "last_seen_at": None,
+                    "status": "active",
+                    "attributes": {
+                        "version": 1,
+                        "opportunity_type": "summer_internship",
+                    },
+                }
+            ]
+
+    pool = GatedPool()
+    repository = PostgresRepository("injected", pool=pool)
+
+    result = await asyncio.wait_for(
+        repository.list_jobs(
+            opportunity_types=["summer_internship"], exclude_job_ids=[99], limit=25, offset=50
+        ),
+        timeout=1,
+    )
+
+    assert result["total"] == 1
+    assert result["jobs"][0]["id"] == 41
+    # COUNT sees only account + filters; LIMIT/OFFSET belong only to the page.
+    assert len(pool.count_args) == 3
+    assert pool.count_args[2] == [99]
+    assert pool.page_args[-2:] == (25, 50)
+
 def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
     repository = FakeRepository()
-    application = create_app(Settings(dsn="injected"), repository=repository)
+    application = signed_in_app(repository=repository)
     with TestClient(application) as client:
         assert repository.connected
         assert client.get("/api/health").json() == {"ok": True}
@@ -149,8 +263,32 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
     assert not repository.connected
 
 
+def test_jobs_default_scope_excludes_the_unclassified_pool() -> None:
+    repository = FakeRepository()
+    repository.jobs.append(
+        {
+            "id": 77,
+            "company": "Example Labs",
+            "title": "Senior Quantitative Analyst",
+            "description": "4+ years of experience.",
+            "location": "New York",
+            "apply_url": "https://jobs.example.test/77/apply",
+            "attributes": {"version": 1, "opportunity_type": "unclassified"},
+        }
+    )
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        default = client.get("/api/jobs").json()
+        assert [job["id"] for job in default["jobs"]] == [41]
+        review = client.get(
+            "/api/jobs",
+            params=[("opportunity_type", "unclassified"), ("opportunity_type", "review")],
+        ).json()
+        assert [job["id"] for job in review["jobs"]] == [77]
+
+
 def test_api_rejects_unknown_job_filter_and_invalid_application_mutation() -> None:
-    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    application = signed_in_app(repository=FakeRepository())
     with TestClient(application) as client:
         assert client.get("/api/jobs", params={"opportunity_type": "made_up"}).status_code == 400
         created = client.post("/api/jobs/41/applications").json()
@@ -174,7 +312,51 @@ def test_discover_route_serves_the_standalone_document() -> None:
     assert '<a ' not in response.text
 
 
+def test_opportunities_v2_route_serves_an_independent_preview() -> None:
+    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    with TestClient(application) as client:
+        response = client.get("/opportunities-v2/")
+
+    assert response.status_code == 200
+    assert 'href="/static/opportunities-v2/styles.css?v=' in response.text
+    assert 'src="/static/opportunities-v2/app.js?v=' in response.text
+    assert 'href="/"' in response.text
+
+
+def test_page_shells_reference_assets_by_absolute_path() -> None:
+    """A page shell served at a clean URL cannot use relative asset refs.
+
+    Every shell is reachable at two depths -- /application/ and
+    /static/application/index.html -- so "../navigation.css" resolves to
+    /navigation.css under the first and /static/navigation.css under the
+    second. Only one of those is served, so a relative ref silently breaks
+    the canonical URL while the /static/ one keeps working.
+    """
+    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    with TestClient(application) as client:
+        for path in ("/", "/opportunities-v2/", "/application/", "/source-coverage/", "/resume/", "/login/"):
+            text = client.get(path).text
+            for ref in ('src="./', 'src="../', 'href="./', 'href="../'):
+                assert ref not in text, f"{path} uses a relative asset ref {ref!r}"
+
+
+def test_clean_page_urls_serve_the_same_shell_as_the_static_mount() -> None:
+    application = create_app(Settings(dsn="injected"), repository=FakeRepository())
+    with TestClient(application) as client:
+        for clean, mounted in (
+            ("/opportunities-v2/", "/static/opportunities-v2/index.html"),
+            ("/application/", "/static/application/index.html"),
+            ("/source-coverage/", "/static/source-coverage/index.html"),
+        ):
+            assert client.get(clean).text == client.get(mounted).text
+            # The nav must point at the canonical URL, not the mount path.
+            assert mounted not in client.get("/").text
+
+
 def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
+    # No dependency override and no cookie: the page shells and their assets are
+    # public by design, as is everything they call. If this ever 401s or 302s,
+    # that decision has been reversed by accident.
     application = create_app(Settings(dsn="injected"), repository=FakeRepository())
     paths = (
         "/",
@@ -183,14 +365,48 @@ def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
         "/static/api-client.js",
         "/static/nav-count.js",
         "/static/sample-data.js",
+        "/static/navigation.css",
+        "/static/brand-mark.svg",
+        "/opportunities-v2/",
+        "/static/opportunities-v2/index.html",
+        "/static/opportunities-v2/styles.css",
+        "/static/opportunities-v2/app.js",
+        "/application/",
         "/static/application/index.html",
         "/static/application/styles.css",
         "/static/application/app.js",
+        "/source-coverage/",
         "/static/source-coverage/index.html",
         "/static/source-coverage/styles.css",
         "/static/source-coverage/app.js",
+        "/resume/",
+        "/static/resume/styles.css",
+        "/static/resume/app.js",
+        "/login/",
+        "/static/login/styles.css",
         "/discover/",
         "/static/discover/stub.css",
     )
     with TestClient(application) as client:
-        assert all(client.get(path).status_code == 200 for path in paths)
+        # One assertion per path: `all(...)` inside a single assert reports a bare
+        # `assert False` and names nothing.
+        for path in paths:
+            assert client.get(path).status_code == 200, f"{path} is not served"
+
+
+def test_search_treats_ilike_wildcards_as_literal_text() -> None:
+    """A typed ``%`` or ``_`` must match itself, not act as a wildcard.
+
+    The API tests inject a repository that ignores ``q`` entirely and the SQL
+    path is only reachable with a live database, so the escaping is pinned here
+    at the level that has no such dependency. Backslash is PostgreSQL's default
+    LIKE escape character, which is why it is escaped first — and why a trailing
+    one must not be left bare, since a pattern ending in the escape character is
+    an error rather than a miss.
+    """
+    assert _ilike_pattern("python") == "%python%"
+    assert _ilike_pattern("C_") == r"%C\_%"
+    assert _ilike_pattern("100%") == r"%100\%%"
+    assert _ilike_pattern("a%b_c") == r"%a\%b\_c%"
+    assert _ilike_pattern("\\") == r"%\\%"
+    assert _ilike_pattern("ends\\") == r"%ends\\%"

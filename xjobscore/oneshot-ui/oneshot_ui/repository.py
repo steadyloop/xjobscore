@@ -5,6 +5,7 @@ Harvesting and canonicalization belong to the core pipeline; OneShot is a
 reader for jobs and a writer for the single-user application tracker.
 """
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from typing import Any, Iterable
@@ -30,6 +31,19 @@ VALID_OPPORTUNITY_TYPES = frozenset(
         "review",
     }
 )
+# The board's default scope: every classified type. "unclassified" and "review"
+# are reachable only by asking for them explicitly, so the default view shows
+# the roles the pipeline is actually for instead of the whole firehose.
+DEFAULT_OPPORTUNITY_TYPES = (
+    "spring_internship",
+    "spring_coop",
+    "summer_internship",
+    "fall_internship",
+    "fall_coop",
+    "student_researcher",
+    "student_role",
+    "fellowship",
+)
 VALID_APPLICATION_STAGES = frozenset(
     {"considering", "applied", "assessment", "interview", "offer", "closed"}
 )
@@ -47,6 +61,19 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 def _iso(value: Any) -> Any:
     return value.isoformat() if isinstance(value, (date, datetime)) else value
+
+
+def _ilike_pattern(value: str) -> str:
+    """A substring pattern matching ``value`` literally.
+
+    ``%`` and ``_`` are ILIKE wildcards, so a typed ``C_`` would otherwise match
+    ``C#`` and a lone ``%`` would match the whole catalog. Backslash is
+    PostgreSQL's default LIKE escape character, so no ESCAPE clause is needed —
+    but it has to be escaped first, both to keep a typed backslash literal and
+    because a pattern ending in a lone escape character is an error.
+    """
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def _timestamp(value: Any, *, end_of_day: bool = False) -> datetime | None:
@@ -100,17 +127,37 @@ class PostgresRepository:
             raise RuntimeError("PostgresRepository.connect() has not been called")
         return self.pool
 
+    def for_account(self, account_id: UUID) -> "PostgresRepository":
+        """A per-request view of the same pool, scoped to one account.
+
+        Every query already filters on ``self.account_id``; this is the only
+        thing that has to vary per request, so cloning the object is cheaper and
+        far less invasive than threading an account through ten method
+        signatures. The clone is handed the live pool, so ``_owns_pool`` is
+        False and its ``close()`` is a no-op.
+
+        Calls ``_ready()`` rather than reading ``self.pool`` so cloning before
+        ``connect()`` fails loudly instead of yielding a half-dead store.
+        """
+        return PostgresRepository(self.dsn, account_id=account_id, pool=self._ready())
+
     @staticmethod
     def _job(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
         attributes = _json_object(row.get("attributes"))
         return {
             "id": row["id"],
+            "source": row.get("source"),
+            "source_url": row.get("source_url"),
             "company": row.get("company_name") or "Unknown company",
             "title": row["title"],
             "description": row.get("description"),
             "location": row.get("location_text"),
             "apply_url": row.get("apply_url") or row.get("source_url"),
             "posted_at": _iso(row.get("posted_at")),
+            # Most feeds publish no posting date, so the client falls back to
+            # this to say "Added 2d ago" rather than "Posted date unavailable".
+            # It is also what the "fresh" sort already orders by.
+            "first_seen_at": _iso(row.get("first_seen_at")),
             "last_seen_at": _iso(row.get("last_seen_at")),
             "status": row.get("status"),
             "attributes": attributes,
@@ -120,27 +167,36 @@ class PostgresRepository:
         self,
         *,
         opportunity_types: Iterable[str] = (),
+        exclude_job_ids: Iterable[int] = (),
+        hide_tracked: bool = True,
         q: str = "",
         sort: str = "fresh",
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        params: list[Any] = [self.account_id]
+        params: list[Any] = []
 
         def bind(value: Any) -> str:
             params.append(value)
             return f"${len(params)}"
 
-        clauses = [
-            "j.status = 'active'",
-            "NOT EXISTS (SELECT 1 FROM job_application a WHERE a.account_id = $1 AND a.job_posting_id = j.id)",
-        ]
+        clauses = ["j.status = 'active'"]
+        if hide_tracked:
+            account_marker = bind(self.account_id)
+            clauses.append(
+                "NOT EXISTS (SELECT 1 FROM job_application a "
+                f"WHERE a.account_id = {account_marker} AND a.job_posting_id = j.id)"
+            )
         types = tuple(dict.fromkeys(opportunity_types))
         if types:
             marker = bind(list(types))
             clauses.append(f"j.attributes ->> 'opportunity_type' = ANY({marker}::text[])")
+        excluded = tuple(dict.fromkeys(int(job_id) for job_id in exclude_job_ids))
+        if excluded:
+            marker = bind(list(excluded))
+            clauses.append(f"NOT (j.id = ANY({marker}::bigint[]))")
         if q.strip():
-            marker = bind(f"%{q.strip()}%")
+            marker = bind(_ilike_pattern(q.strip()))
             clauses.append(
                 f"(c.name ILIKE {marker} OR j.title ILIKE {marker} "
                 f"OR COALESCE(j.description, '') ILIKE {marker})"
@@ -152,18 +208,24 @@ class PostgresRepository:
             "fresh": "COALESCE(j.posted_at, j.first_seen_at) DESC, j.id DESC",
         }.get(sort, "COALESCE(j.posted_at, j.first_seen_at) DESC, j.id DESC")
         pool = self._ready()
-        total = await pool.fetchval(
+        # Counting and reading a page use the same eligibility predicate but
+        # neither depends on the other. Run them on separate pool connections
+        # so a large count does not hold the first visible results hostage.
+        # Keep the filter arguments separate: binding LIMIT/OFFSET below must
+        # not change the count query's positional parameters.
+        filter_params = tuple(params)
+        total_read = pool.fetchval(
             f"SELECT COUNT(*) FROM job_posting j JOIN company c ON c.id = j.company_id WHERE {where}",
-            *params,
+            *filter_params,
         )
         limit_marker = bind(max(1, min(limit, 500)))
         offset_marker = bind(max(0, offset))
-        rows = await pool.fetch(
+        page_read = pool.fetch(
             f"""
             SELECT
-                j.id, c.name AS company_name, j.title, j.description,
+                j.id, j.source, c.name AS company_name, j.title, j.description,
                 j.location_text, j.source_url, j.apply_url, j.posted_at,
-                j.last_seen_at, j.status, j.attributes
+                j.first_seen_at, j.last_seen_at, j.status, j.attributes
             FROM job_posting j
             JOIN company c ON c.id = j.company_id
             WHERE {where}
@@ -172,6 +234,7 @@ class PostgresRepository:
             """,
             *params,
         )
+        total, rows = await asyncio.gather(total_read, page_read)
         return {
             "jobs": [self._job(row) for row in rows],
             "total": int(total or 0),
@@ -187,10 +250,11 @@ class PostgresRepository:
                     f.source,
                     COUNT(*) FILTER (WHERE f.enabled) AS board_count,
                     COUNT(*) FILTER (WHERE f.enabled AND s.last_poll_at IS NOT NULL) AS polled_count,
+                    -- A paused feed is held on purpose: it is overdue by design
+                    -- and must not be counted as something to go and fix.
                     COUNT(*) FILTER (
-                        WHERE f.enabled AND (
-                            s.disabled_at IS NOT NULL
-                            OR COALESCE(s.strikes, 0) > 0
+                        WHERE f.enabled AND s.paused_at IS NULL AND (
+                            COALESCE(s.strikes, 0) > 0
                             OR (
                                 s.due_at < now()
                                 AND (s.hold_until IS NULL OR s.hold_until < now())
@@ -204,13 +268,15 @@ class PostgresRepository:
             ),
             posting_stats AS (
                 SELECT
-                    source,
-                    COUNT(*) FILTER (WHERE status = 'active') AS coverage,
+                    f.source,
+                    COUNT(j.id) FILTER (WHERE j.status = 'active') AS coverage,
                     COUNT(*) FILTER (
-                        WHERE first_seen_at >= date_trunc('day', now())
+                        WHERE j.first_seen_at >= date_trunc('day', now())
                     ) AS added_today
-                FROM job_posting
-                GROUP BY source
+                FROM feed f
+                LEFT JOIN job_posting j
+                    ON j.source = f.source || ':' || f.key
+                GROUP BY f.source
             )
             SELECT
                 f.source,

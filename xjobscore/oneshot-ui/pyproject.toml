@@ -6,13 +6,18 @@ requires-python = ">=3.12"
 dependencies = [
     "asyncpg>=0.29",
     "fastapi>=0.141.1",
+    # Runtime, not just tests: the Google OAuth token exchange runs over httpx.
+    # The Dockerfile installs this project without dev groups, so a dev-only
+    # httpx imports fine locally and breaks only in the container.
+    "httpx>=0.27",
+    # Required by Starlette's SessionMiddleware, which signs the session cookie.
+    "itsdangerous>=2.0",
     "pydantic>=2.0",
     "uvicorn>=0.52.0",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.27",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
@@ -24,6 +29,3 @@ pythonpath = [".", "../.."]
 
 [tool.setuptools]
 packages = ["oneshot_ui"]
-
-[tool.setuptools.package-data]
-oneshot_ui = ["static/*", "static/**/*"]
