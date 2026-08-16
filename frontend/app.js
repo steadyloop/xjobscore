@@ -2,16 +2,16 @@
   "use strict";
 
   // No tab active sends no opportunity_type parameters, and the API answers
-  // with its classified default scope; "Needs review" is the one tab that
-  // reaches the unclassified pool, by naming it explicitly.
+  // with its classified default scope. "Needs review" maps to `review` only
+  // -- `unclassified` is every non-student posting (~83k of them) now that
+  // opportunity.py classifies on every parse, so including it here would
+  // make the tab useless.
   const FILTERS = [
-    { key: "summer_internships", label: "Summer Internships", types: ["summer_internship"] },
-    { key: "spring_coop", label: "Spring Co-op", types: ["spring_internship", "spring_coop"] },
-    { key: "fall", label: "Fall", types: ["fall_internship", "fall_coop"] },
-    { key: "research", label: "Research", types: ["student_researcher"] },
-    { key: "early_career", label: "Early-Career", types: ["student_role"] },
-    { key: "fellowships", label: "Fellowships", types: ["fellowship"] },
-    { key: "review", label: "Needs review", types: ["unclassified", "review"] },
+    { key: "internships", label: "Internships", types: ["summer_internship"] },
+    { key: "early_career", label: "Early Career", types: ["student_role"] },
+    { key: "working_student", label: "Working Student", types: ["spring_coop"] },
+    { key: "research", label: "Research", types: ["student_researcher", "fellowship"] },
+    { key: "review", label: "Needs review", types: ["review"] },
   ];
   const opportunityTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
   const relativeTime = (value, now = new Date()) => {
