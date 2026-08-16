@@ -1,0 +1,216 @@
+# Opportunity-type canon: the patterns that decide whether a posting is gated
+# to students, and which of the three student tabs it belongs on.
+#
+# Read by `xjobscore/opportunity.py` and resolved against `job_posting.title`
+# and the plaintext `job_posting.description` — never against raw vendor JSON,
+# whose shape differs per ATS.
+#
+# One table per rule. Rules are evaluated in the order they appear here, and
+# the first match wins, so `[order]` is semantic: `reject` rules must precede
+# every `title` rule or "Senior Research Fellow" resolves through `fellow`.
+#
+#   verdict     what a match means:
+#                 reject  -> not a student role, stop (writes `unclassified`)
+#                 title   -> student role, high confidence (title names the gate)
+#                 evidence-> student role, high confidence (description states
+#                            eligibility; only consulted when no title rule hit)
+#                 weak    -> mentions a student program but may be boilerplate
+#                            (writes `review`, kept off the board)
+#   type        the opportunity_type written on a match. Omitted on `reject`
+#               and `weak`, which write `unclassified` and `review`.
+#   scope       title | description. Defaults to title.
+#   patterns    lowercase regex alternatives, matched with word boundaries.
+#
+# Every pattern below was measured against the live 8,844-posting catalog
+# before being added; the hit counts and the aliases that were tested and
+# dropped are recorded in `doc/opportunity-filtering.md`. Patterns that scored
+# zero are kept only where they cost nothing and guard an obvious future gap;
+# patterns that scored non-zero but were mostly false positives were removed
+# outright and are listed in that document so they are not re-added.
+
+# -- reject ------------------------------------------------------------
+# Seniority wins over every student signal. A posting whose title claims
+# seniority is not gated to students no matter what its description says --
+# 35 postings in the catalog match both, and all 35 are senior roles whose
+# description merely mentions the company's internship program.
+
+[senior]
+verdict = "reject"
+scope = "title"
+patterns = [
+  "senior", "staff", "principal", "lead", "director", "vp",
+  "head of", "sr\\.", "manager", "architect", "chief", "attending",
+]
+
+# -- title: internships ------------------------------------------------
+# Fixed-term cohort programs. The largest group by far (385 English title
+# matches alone) and the highest-precision signal in the whole canon.
+
+[internship]
+verdict = "title"
+type = "summer_internship"
+scope = "title"
+patterns = [
+  "interns?", "internships?",
+  "externs?", "externships?",
+  "co-?op", "co op",
+  "summer analyst", "summer associate", "summer scholar",
+  "summer program", "summer internship",
+]
+
+# English idioms that collide with the non-English student terms below.
+# `stage` is French and Dutch for internship, but English uses it for company
+# maturity ("Account Executive, Early Stage") and for hardware ("Precision
+# Stage Architect"). Most collisions are already caught by `[senior]`, but
+# three survive it, so they are rejected explicitly here.
+#
+# Placement matters: this sits *after* `[internship]` so a genuine posting
+# like "Early Stage Investment Intern" matches `intern` first and is never
+# reached, and *before* `[internship-intl]` so the bare `stage` alias below
+# never sees these.
+
+[false-friends]
+verdict = "reject"
+scope = "title"
+patterns = [
+  "early.stage", "late.stage", "growth.stage", "seed.stage",
+  "stage gate", "series [a-e] stage",
+]
+
+# Non-English spellings of the same thing. 240 title matches, but concentrated
+# in four employers (John Deere, SAP, Bayer, Amazon) -- see the concentration
+# note in the doc. Cheap to keep, and the only thing standing between those
+# employers' EU requisitions and being invisible.
+
+[internship-intl]
+verdict = "title"
+type = "summer_internship"
+scope = "title"
+patterns = [
+  "prakti(kum|kant|ka|ku)",            # de
+  "stage", "stagiaire", "stage de fin", # fr
+  "stagiair", "afstudeer",              # nl
+  "est[aá]gi(o|ario|[aá]rio)",          # pt
+  "tirocin(io|ante)",                   # it
+  "becari[oa]", "beca", "pr[aá]cticas", "pasant[ií]a", "pasante",  # es
+  "praktyk", "sta[zż]yst",              # pl
+  "praktik", "praktikant", "sommarjobb", "sommerjobb",  # nordic
+  "实习", "インターン", "인턴",
+]
+
+# -- title: working student & apprenticeships --------------------------
+# Ongoing, term-time, alongside enrolment -- 12 to 36 months rather than a
+# season. This is the distinction the "Year-Round" tab is named for, and it
+# is why these do not belong under internships despite also being student-
+# gated. 164 title matches.
+
+[working-student]
+verdict = "title"
+type = "spring_coop"
+scope = "title"
+patterns = [
+  "werkstudent", "working student", "work-?study",
+  "ausbildung", "auszubildende", "azubi",
+  "duales studium", "dualer student", "dual student",
+  "alternan(ce|t)",
+  "apprentices?", "apprenticeships?", "apprenti", "apprentissage",
+  "aprendiz", "jovem aprendiz",
+  "contrat de professionnalisation",
+  "placement year", "industrial placement", "sandwich year", "year in industry",
+]
+
+# -- title: research -----------------------------------------------------
+# Academic student roles. PhD-gated postings are deliberately included here
+# rather than rejected: the tab exists so they can be seen and skipped, and
+# excluding them at the classifier would also drop masters-level research
+# assistantships that share the same vocabulary.
+
+[research]
+verdict = "title"
+type = "student_researcher"
+scope = "title"
+patterns = [
+  "student researcher", "undergraduate researcher", "research assistant",
+  "thesis", "masterarbeit", "bachelorarbeit", "abschlussarbeit",
+  "graduate student", "phd student", "doctoral student", "masters student",
+]
+
+[fellowship]
+verdict = "title"
+type = "fellowship"
+scope = "title"
+patterns = ["fellows?", "fellowships?", "post-?doc", "postdoctoral", "post doctoral"]
+
+# -- title: general student ---------------------------------------------
+# Student-gated but with no term or shape named. Falls to the Research tab's
+# neighbour, `student_role`, which the default scope includes but no tab
+# currently surfaces -- see the open question in the doc.
+
+[student]
+verdict = "title"
+type = "student_role"
+scope = "title"
+patterns = [
+  "students?", "undergrad", "undergraduate",
+  "campus", "university (program|recruit|graduate|hire)",
+  "new grad", "new graduate", "recent grad", "recent graduate",
+  "graduate (program|scheme|analyst|engineer|developer|associate)",
+  "early.?career", "early talent", "emerging talent",
+  "rotational program", "rotation program", "leadership development program",
+  "trainees?", "traineeship", "graduate engineer trainee", "management trainee",
+]
+
+# -- description: strong evidence ----------------------------------------
+# Only consulted when no title rule matched. These are statements of
+# eligibility, not mentions of a program, which is what separates them from
+# the `weak` rule below. 111 postings are caught here and nowhere else --
+# `SAP iXp`, `2026 Inexperienced Hire`, and every neutral-titled requisition
+# whose body says who may apply.
+
+[enrolment-evidence]
+verdict = "evidence"
+type = "student_role"
+scope = "description"
+patterns = [
+  "(currently|actively|must be) enrolled",
+  "enrolled (in|at) (an?|your) (accredited|degree|bachelor|master|phd|university|college)",
+  "pursuing (a|an|your) (bachelor|master|phd|b\\.?s|m\\.?s|degree|undergraduate|graduate)",
+  "currently pursuing",
+  "rising (junior|senior|sophomore|freshman)",
+  "(expected|anticipated) graduation",
+  "graduating (in|by) 20[2-3][0-9]",
+  "class of 20[2-3][0-9]",
+  "return(ing)? to (school|campus|university)",
+  "degree in progress", "matriculated",
+  "cpt", "curricular practical", "optional practical training",
+  "(academic|course|school) credit",
+]
+
+# Non-English eligibility language carries the term itself rather than a
+# sentence about enrolment, so it reads as strong evidence on its own.
+
+[enrolment-evidence-intl]
+verdict = "evidence"
+type = "summer_internship"
+scope = "description"
+patterns = [
+  "prakti(kum|kant)", "werkstudent", "ausbildung", "alternan(ce|t)",
+  "stagiaire", "becari[oa]", "est[aá]gi", "tirocin", "praktyk",
+]
+
+# -- description: weak ---------------------------------------------------
+# The word appears, but in a long description it is as often the company
+# describing its own programme in boilerplate as it is a statement about this
+# requisition. 97 postings match only here, and sampling found `Software
+# Engineer`, `Medical Assistant`, and `Network Engineer` among them. They go
+# to `review` so a human decides, and never onto the board.
+
+[program-mention]
+verdict = "weak"
+scope = "description"
+patterns = [
+  "internship", "externship",
+  "co-?op (program|experience|term)",
+  "campus (hire|program|recruit)",
+  "new graduate program",
+]

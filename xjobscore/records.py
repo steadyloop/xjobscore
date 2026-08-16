@@ -8,19 +8,19 @@ sent, so bronze (`raw_posting`) is genuinely replayable and a parser bug is
 fixed by re-running over stored payloads, never by re-fetching postings that
 may have closed.
 
-`Posting`, `Target`, `Label` and `Fact` are the silver vocabulary: what raw
-items become downstream of bronze. They are produced by the parsing layer, not
-by sources, and land in the canonical tables. (Where that layer lives is an
-open item in ARCHITECTURE.md.)
+`Posting`, `Target`, `Label` and `Fact` are the parser vocabulary: what raw
+items become downstream of bronze. `Posting` currently lands in
+`job_posting`; the other outputs remain available to adapters but are counted
+as unsupported until schema.sql gives them durable storage.
 
 Every type here is frozen. A source hands back a value, not a handle: nothing
 downstream can mutate what a source observed, and nothing a source returns can
 be quietly rewritten before it lands.
 
 Field names track `schema.sql` where a column exists, so the mapping in
-`store.py` stays mechanical. Columns the engine owns -- `content_hash`,
-`title_normalized`, `first_seen_at`, `status`, `group_id` -- are deliberately
-absent: a source reports what it saw, not what the database should conclude.
+`silver.py` stays mechanical. Columns the engine owns -- `content_hash`,
+`first_seen_at`, and canonical `status` -- are deliberately absent: a source
+reports what it saw, not what the database should conclude.
 """
 
 from __future__ import annotations
@@ -45,27 +45,25 @@ __all__ = [
     "Target",
 ]
 
-# Mirrors raw_posting.kind: the vendor transport format the payload arrived
-# in, not the role it plays (that is Record.envelope, routed separately).
-# 'json' -> payload_json; 'xml' | 'html' | 'mime' -> payload_text -- a source
-# must say which of the three, since router cannot tell them apart from a
-# bare `str`.
+# The vendor transport format stored inside raw_posting.data's versioned
+# wrapper. A source must distinguish XML, HTML, and MIME because router cannot
+# infer the format from a bare string.
 Kind = Literal["json", "xml", "html", "mime"]
 
 # Did we read the employer's own listing, or someone's copy of it? Secondhand
-# never lands canonical; it is promoted by re-fetch at origin.
+# remains bronze-only until schema.sql has an explicit provenance model.
 Fidelity = Literal["origin", "secondhand"]
 
-# What the *source* says about the posting. Not job_posting.status, which the
-# engine owns and which also has 'unlisted'.
+# What the *source* says about the posting. The engine maps this to the smaller
+# active/closed job_posting.status vocabulary.
 PostState = Literal["open", "closed"]
 
 # Who asserted a Label or Fact. Source-stated outranks model-inferred, which is
 # the whole reason the field exists.
 Provenance = Literal["source", "model", "human"]
 
-# Mirrors job_posting.published_at_precision. Gates detect_latency_s so latency is
-# never fabricated out of a "Posted Today".
+# Parser metadata retained for date-quality decisions; schema.sql currently
+# stores only the resulting posted_at value.
 Precision = Literal["exact", "date", "unknown"]
 
 
@@ -73,33 +71,30 @@ Precision = Literal["exact", "date", "unknown"]
 class Feed:
     """One fetchable endpoint, as a source sees it.
 
-    A source reads `key` and `config` and nothing else. The four capability
-    flags are the operator's assertions about the endpoint, not facts a source
-    module may claim: a credentialed or incomplete feed will never close
-    anything, so authed and partial sources need no special handling.
+    A source reads ``key``, ``config``, and ``etag``. Company and scheduling
+    fields are carried for the orchestrator and ignored by harvesters.
 
-    `state` is engine-owned -- etag, last_modified, cursor,
-    consecutive_failures. A source must not write it, and `config` and `state`
-    stay separate columns precisely so rotating a credential cannot silently
-    take the cursor with it.
+    Runtime configuration comes from the validated registry. Scheduling state
+    comes from schema.sql's ``schedule`` row; only the ETag is exposed to a
+    source because it is the only conditional-request validator the schema
+    persists.
     """
 
     id: int
     source: str  # resolves to a harvest function in sources.SOURCES
     key: str  # locates the endpoint: a token, a URL, a Gmail query
-    config: dict  # operator-owned: credentials, URLs, per-feed parameters
-    state: dict  # engine-owned; see above
+    config: dict = field(default_factory=dict)  # registry-owned adapter parameters
 
     enabled: bool = True
-    complete: bool = False  # the response is the full listing
-    closes: bool = False  # absence may close postings (requires complete)
-    credentialed: bool = False  # failure is expected on expiry; best-effort
-    cadence_s: int = 900  # base poll interval; backoff writes over it
-    next_poll_at: datetime | None = None
-    # Inspector-only display metadata. Harvesters deliberately ignore it;
-    # the company label is resolved from feed_ats/company when available.
     company_id: int | None = None
     company_name: str | None = None
+    source_type: str = "Other"
+    etag: str | None = None
+    res_hash: str | None = None
+    interval_s: int = 900
+    strikes: int = 0
+    due_at: datetime | None = None
+    hold_until: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,9 +107,9 @@ class Item:
     by re-fetching a posting that may have closed since.
     """
 
-    external_id: str  # -> raw_posting.external_id; text always, per Posting
-    payload: dict | str  # -> payload_json / payload_text
-    kind: Kind = "json"  # -> raw_posting.kind; the source knows its own transport
+    external_id: str  # -> raw_posting.source_key; text always, per Posting
+    payload: dict | str  # -> raw_posting.data.payload
+    kind: Kind = "json"  # -> raw_posting.data.kind
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,16 +121,22 @@ class Record:
     holds response-root facts no single item carries (Workable's company name
     lives only here, on no element). `truncated` reports that *this fetch*
     did not finish (a paginated board that died halfway) and is distinct from
-    `Feed.complete`, which is the operator's claim that the endpoint, when it
-    succeeds, returns the full listing -- a truncated listing must never be
-    returned as if whole.
+    scheduler state. A truncated listing must never be returned as if whole.
     """
 
     items: list[Item] = field(default_factory=list)
     envelope: dict = field(default_factory=dict)
     truncated: bool = False
-    http_status: int | None = None  # -> poll_run.http_status
-    validators: dict = field(default_factory=dict)  # etag/last_modified -> feed.state
+    http_status: int | None = None  # diagnostics/logging; schedule has no status column
+    etag: str | None = None  # response ETag -> schedule.etag
+    # Inspector-only incremental harvests may carry forward a detail payload
+    # whose stable list/detail identity fields prove it unchanged. Production
+    # harvesters leave this at zero; it is diagnostics only.
+    reused_item_count: int = 0
+    enumerated_item_count: int = 0
+    partition_count: int = 0
+    detail_fetched_count: int = 0
+    result_window_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,9 +144,8 @@ class Posting:
     """A job.
     `state='closed'` is a *stated* closure: an aggregator's `active: false`, a
     404 on a detail page, an explicit "this role is filled". It requires
-    `closed_evidence`. Absence from a listing is not closure and is not yours
-    to report; that is `reconcile`'s job and it runs only on feeds the operator
-    flagged `complete` and `closes`.
+    `closed_evidence`. Absence from a listing is not closure; reconciliation
+    remains deferred until schema.sql has an explicit completeness model.
     """
 
     external_id: str  # source_key
@@ -180,9 +180,8 @@ class Posting:
     content_sections: list = field(default_factory=list)
     source_extra: dict = field(default_factory=dict)  # the verbatim long tail
 
-    # Where to re-fetch this posting at origin. Meaningful only when
-    # fidelity == 'secondhand', and the Target you emit alongside is what
-    # actually schedules it.
+    # A parser hint retained for future provenance support. It does not create
+    # a feed; only the registry controls feed inventory.
     origin_url: str | None = None
 
 
@@ -190,16 +189,15 @@ class Posting:
 class Target:
     """Something worth fetching later.
 
-    A new board, an unprobed token, or a secondhand posting needing an origin
-    re-fetch. A Target and a recurring feed are the same row in the same table,
-    differing only by `once` -- which is why scheduling, backoff and one-shot
-    dispatch share one code path and one policy function.
+    Kept in the parser contract for adapter compatibility. The registry owns
+    feed inventory, so the core reports Target outputs as unsupported and
+    never creates runtime feeds from them.
     """
 
     source: str  # the source it will be harvested as
     key: str
     config: dict = field(default_factory=dict)
-    once: bool = True  # False makes this a recurring feed instead
+    once: bool = True  # compatibility metadata; scheduler ignores Target
     reason: str = ""  # 'origin_refetch' | 'discovered_board' | ...
     company_raw: str | None = None  # if the finder knew who it belongs to
 
@@ -208,9 +206,8 @@ class Target:
 class Label:
     """A fact about a posting: term, sponsorship, degree, workplace type.
 
-    `provenance` is the point of the record. A source that *stated* the term
-    outranks a model that guessed it, and both can be stored without either
-    overwriting the other.
+    `provenance` remains useful to adapters even though schema.sql currently
+    has no label table. The core counts this output as unsupported.
     """
 
     external_id: str  # identifies the posting within the emitting feed
@@ -224,10 +221,8 @@ class Label:
 class Fact:
     """A fact about a company: cooldown expiry, referral contact, headcount.
 
-    Company-level facts reach the scorer, which is what makes "referral in
-    hand" and "cooled down until March" scoreable. Human channels emit these
-    through the same router as any source -- a referral is a hand-written Fact,
-    not a module.
+    Kept for parser compatibility. schema.sql currently has no fact table, so
+    the core counts this output as unsupported.
     """
 
     company_raw: str
