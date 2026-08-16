@@ -1,154 +1,227 @@
-"""Bronze -> silver: the replay pass. Turns stored `raw_document` rows into
-`posting` rows (and, when a parser emits them, `feed` rows from `Target`).
-
-This is deliberately not called from `run.poll`. `harvest` -> `router.route`
-lands bronze on the poll's own schedule; `replay` reads what bronze already
-holds, on a schedule of its own. That split is what makes "replayable" -- the
-word `schema.sql` uses for `raw_document` -- actually true: a parsing bug is
-fixed by running `replay` again, never by re-fetching a posting that may have
-closed since.
-
-`replay` reads the *latest* revision per `external_id` (`store.latest_raw`,
-served by `raw_document_lookup`) rather than tracking a watermark. There is no
-cursor in `feed.state` for this pass and no new DDL -- re-running is a no-op
-because `store.upsert_posting` compares `content_hash` and, when it matches,
-touches only `last_seen_at`.
-"""
+"""Parse replayable bronze rows into schema.sql's ``job_posting`` projection."""
 
 from __future__ import annotations
 
 import hashlib
+from html.parser import HTMLParser
 import json
+import logging
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
-from xjobscore import sources, store
-from xjobscore.records import Feed, Item, Posting, Target
+from xjobscore import opportunity, router, sources, store
+from xjobscore.records import Feed, Item, Posting
 
-if TYPE_CHECKING:  # asyncpg is store's implementation detail, not silver's
+if TYPE_CHECKING:
     from asyncpg import Connection
 
-__all__ = ["Counts", "normalize_title", "replay"]
+logger = logging.getLogger(__name__)
 
-# Jane Street serves Lisu code points as Latin look-alikes in job titles
-# (schema.sql's own comment on posting.title_normalized): U+A4DF/A4E1/A4E3 for
-# M/L/R. This is a seed, not the full Unicode TR39 confusables table -- add to
-# it only against an observed title, the same rule VOLATILE in router.py
-# follows for hash-stripped keys.
-_CONFUSABLES = str.maketrans({
-    "ꓟ": "M",  # Lisu LETTER MA
-    "ꓡ": "L",  # Lisu LETTER LA
-    "ꓣ": "R",  # Lisu LETTER RA
-})
+__all__ = ["Counts", "normalize_title", "process", "replay"]
+
+_CONFUSABLES = str.maketrans({"ꓟ": "M", "ꓡ": "L", "ꓣ": "R"})
 
 
-def normalize_title(t: str) -> str:
-    """The one function that writes `posting.title_normalized`.
-
-    Must stay byte-identical to `normalize_title()` in seeds/gen_umbrellas.py
-    below the confusables fold -- NFKC, casefold, collapse to [a-z0-9] -- or
-    role matching silently misses. The confusables `translate` is a no-op on
-    plain ASCII titles, so the two functions agree everywhere gen_umbrellas.py
-    has been exercised; it only diverges on the Jane Street titles that motivated
-    this column being engine-written in the first place.
-    """
-    t = t.translate(_CONFUSABLES)
-    t = unicodedata.normalize("NFKC", t).casefold()
-    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+def normalize_title(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value.translate(_CONFUSABLES)).casefold()
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
 
 
-def _posting_hash(posting: Posting) -> str:
-    """Hash of what we actually store, distinct from router.py's bronze hash.
+class _PlainText(HTMLParser):
+    _BLOCKS = {"br", "div", "p", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"}
 
-    router's `_content_hash` hashes the vendor payload verbatim (minus
-    volatile keys) so an unchanged poll inserts nothing new. This hashes the
-    parsed `Posting`, so `store.upsert_posting` can tell an unchanged parse
-    from a changed one and touch only `last_seen_at` on the former --
-    unrelated questions that happen to share a hashing shape.
-    """
-    encoded = json.dumps(asdict(posting), sort_keys=True, default=str, ensure_ascii=False)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in self._BLOCKS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in self._BLOCKS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _plain_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    parser = _PlainText()
+    parser.feed(value)
+    lines = [" ".join(line.split()) for line in "".join(parser.parts).splitlines()]
+    text = "\n".join(line for line in lines if line).strip()
+    return text or None
+
+
+def _workplace(value: str | None) -> str | None:
+    normalized = re.sub(r"[^a-z]+", "_", (value or "").strip().lower()).strip("_")
+    return {
+        "remote": "remote",
+        "hybrid": "hybrid",
+        "on_site": "on_site",
+        "onsite": "on_site",
+    }.get(normalized)
+
+
+def _projection(posting: Posting) -> dict[str, Any]:
+    description = _plain_text(posting.description_html)
+    attributes: dict[str, Any] = {
+        "version": 1,
+        "opportunity_type": opportunity.classify(posting.title, description),
+    }
+    workplace = _workplace(posting.workplace_type_raw)
+    if workplace:
+        attributes["workplace"] = workplace
+    if posting.deadline_at is not None:
+        attributes["deadline_at"] = posting.deadline_at.isoformat()
+    return {
+        "title": posting.title,
+        "description": description,
+        "location_text": posting.location_raw,
+        "source_url": posting.url_posting,
+        "apply_url": posting.apply_url,
+        "posted_at": posting.published_at,
+        "attributes": attributes,
+        "status": "closed"
+        if posting.state == "closed" or posting.source_active is False
+        else "active",
+    }
+
+
+def _content_hash(values: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        values, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
 class Counts:
-    """What one `replay` call did."""
+    postings: int = 0
+    # Subset of ``postings``: rows this call inserted rather than revised. A
+    # posting whose description was edited is a changed posting, not a new one,
+    # and only this counter may reach ``poll_observation.new_postings``.
+    created: int = 0
+    unchanged: int = 0
+    unresolved: int = 0
+    unsupported: int = 0
+    secondhand: int = 0
 
-    postings: int = 0  # inserted or changed
-    unchanged: int = 0  # parsed, hash matched, only last_seen touched
-    unresolved: int = 0  # company_raw had no company_alias hit; parked in company_new
-    targets: int = 0  # Target -> feed rows
-    dropped: int = 0  # Label / Fact -- no destination table yet (store.put_label/put_fact)
-
-
-async def replay(conn: Connection, feed: Feed, *, dry_run: bool = False) -> Counts:
-    """Parse every current `raw_document` row of one feed into silver.
-
-    `dry_run=True` parses and resolves companies (a read) but performs no
-    write -- parity with `run.cycle`'s own dry-run, which harvests and routes
-    but writes nothing.
-    """
-    parse = sources.parser(feed.source)
-    rows = await store.latest_raw(conn, feed.id)
-
-    postings = unchanged = unresolved = targets = dropped = 0
-
-    for row in rows:
-        item = Item(
-            external_id=row["external_id"],
-            payload=row["payload_json"] if row["kind"] == "json" else row["payload_text"],
-            kind=row["kind"],
+    def __add__(self, other: "Counts") -> "Counts":
+        return Counts(
+            postings=self.postings + other.postings,
+            created=self.created + other.created,
+            unchanged=self.unchanged + other.unchanged,
+            unresolved=self.unresolved + other.unresolved,
+            unsupported=self.unsupported + other.unsupported,
+            secondhand=self.secondhand + other.secondhand,
         )
-        envelope = row["envelope"] or {}
 
-        for canonical in parse(feed, item, envelope):
-            if isinstance(canonical, Posting):
-                company_id = None
-                if canonical.company_raw:
-                    company_id = await store.resolve_company(conn, canonical.company_raw)
-                if company_id is None:
-                    if canonical.company_raw and not dry_run:
-                        await store.note_unknown_company(conn, canonical.company_raw, feed.source)
-                    unresolved += 1
-                    continue
 
-                if dry_run:
-                    postings += 1
-                    continue
+async def _company_id(conn: Connection, feed: Feed, posting: Posting) -> int | None:
+    resolved = None
+    if posting.company_raw:
+        resolved = await store.resolve_company(conn, posting.company_raw)
+    if resolved is not None:
+        return resolved
+    if feed.source_type in {"ATS", "Direct"}:
+        return feed.company_id
+    return None
 
-                # posting.last_seen_poll_run_id is stamped from the *bronze
-                # row's own* poll_run_id, not a live run this pass is part
-                # of -- replay has no poll_run of its own. This is known to
-                # be wrong for closure-by-absence once reconcile.py exists;
-                # see ARCHITECTURE.md's Open items.
-                _, changed = await store.upsert_posting(
-                    conn,
-                    feed.id,
-                    company_id,
-                    canonical,
-                    run_id=row["poll_run_id"],
-                    title_normalized=normalize_title(canonical.title),
-                    content_hash=_posting_hash(canonical),
+
+async def process(
+    conn: Connection,
+    feed: Feed,
+    stored: list[router.StoredRaw],
+    envelope: dict,
+    *,
+    seen_at: datetime,
+    dry_run: bool = False,
+) -> Counts:
+    """Parse and project raw items. Parser exceptions intentionally propagate."""
+    parse = sources.parser(feed.source)
+    total = Counts()
+    source = store.source_instance(feed)
+    for raw in stored:
+        item = raw.item
+        item_envelope = envelope
+        if raw.data is not None:
+            reconstructed, item_envelope = router.unwrap(raw.data)
+            item = Item(
+                external_id=raw.item.external_id,
+                payload=reconstructed.payload,
+                kind=reconstructed.kind,
+            )
+        canonicals = parse(feed, item, item_envelope)
+        postings = []
+        for canonical in canonicals:
+            if not isinstance(canonical, Posting):
+                total += Counts(unsupported=1)
+            elif canonical.fidelity != "origin":
+                total += Counts(secondhand=1)
+            else:
+                postings.append(canonical)
+        for posting in postings:
+            company_id = await _company_id(conn, feed, posting)
+            if company_id is None:
+                logger.warning(
+                    "unresolved company source=%s source_key=%s company_raw=%r",
+                    source,
+                    posting.external_id,
+                    posting.company_raw,
                 )
-                if changed:
-                    postings += 1
-                else:
-                    unchanged += 1
+                total += Counts(unresolved=1)
+                continue
+            values = _projection(posting)
+            if dry_run:
+                total += Counts(postings=1)
+                continue
+            _, changed, created = await store.upsert_job_posting(
+                conn,
+                source=source,
+                source_key=posting.external_id,
+                company_id=company_id,
+                values=values,
+                content_hash=_content_hash(values),
+                raw_id=raw.raw_id,
+                seen_at=seen_at,
+            )
+            total += (
+                Counts(postings=1, created=1 if created else 0)
+                if changed
+                else Counts(unchanged=1)
+            )
+    return total
 
-            elif isinstance(canonical, Target):
-                if not dry_run:
-                    await store.upsert_feed(conn, canonical.source, canonical.key, canonical.config)
-                targets += 1
 
-            else:  # Label | Fact -- store.put_label/put_fact still raise NotImplementedError
-                dropped += 1
-
-    return Counts(
-        postings=postings,
-        unchanged=unchanged,
-        unresolved=unresolved,
-        targets=targets,
-        dropped=dropped,
-    )
+async def replay(
+    conn: Connection,
+    feed: Feed,
+    *,
+    seen_at: datetime,
+    dry_run: bool = False,
+) -> Counts:
+    """Reparse each source key's latest bronze revision without scheduling."""
+    total = Counts()
+    sources.parser(feed.source)  # fail before writing any replayed rows
+    source = store.source_instance(feed)
+    for row in await store.latest_raw(conn, source):
+        item, envelope = router.unwrap(row["data"])
+        item = Item(external_id=row["source_key"], payload=item.payload, kind=item.kind)
+        stored = router.StoredRaw(
+            item=item,
+            raw_id=row["id"],
+            data_hash=row["data_hash"],
+            created=False,
+            data=row["data"],
+        )
+        total += await process(
+            conn, feed, [stored], envelope, seen_at=seen_at, dry_run=dry_run
+        )
+    return total

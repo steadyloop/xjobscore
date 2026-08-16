@@ -1,242 +1,408 @@
-"""Config and the loop. The only module aware of all the others.
+"""Schema-aligned registry sync, scheduler, fetch, bronze, and silver pass.
 
-Everything else in the tree is deliberately ignorant: a source knows `net` and
-`records`, `work` knows nothing at all, `store` knows SQL. This file is where
-those become a system, and it is the only place a new wire may be run between
-two modules.
-
-One cycle: take the due feeds, harvest each concurrently, route what came back,
-reschedule, and reconcile the ones the operator flagged as complete listings.
-A feed that raises does not abort the cycle -- it becomes a poll_run row with
-status 'error' and a backed-off next_poll_at, which is the difference between
-one dead board and a stalled engine.
+One invocation runs one cycle and exits. Scheduling repetition is deliberately
+left to cron or a launch agent rather than an internal sleep loop.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xjobscore import router, silver, sources, store, work
+from xjobscore import feader, gold, router, silver, sources, store, work
 from xjobscore.net import Net
 from xjobscore.records import Feed
+from xjobscore.sources.registry.loader import entries as registry_entries
+from xjobscore.sources.registry.loader import source_types
 from xjobscore.work import Outcome
 
 if TYPE_CHECKING:
-    from asyncpg import Connection
+    from asyncpg import Pool
 
-__all__ = ["Config", "cycle", "load_config", "main", "parse_all", "poll"]
+logger = logging.getLogger(__name__)
 
-# How long the continuous loop naps between cycles when nothing forces --once.
-# Not a Config field: the loop cadence is an operational knob, not part of the
-# per-run policy the rest of the module reasons about.
-_LOOP_INTERVAL_S = 60.0
+__all__ = [
+    "Config",
+    "cycle",
+    "gold_all",
+    "load_config",
+    "main",
+    "parse_all",
+    "poll",
+    "sync_registry",
+]
 
 
 @dataclass(frozen=True, slots=True)
 class Config:
-    """Everything the loop needs, resolved once at startup."""
-
     dsn: str
     user_agent: str
-    batch: int = 20  # feeds harvested concurrently per cycle
-    once: bool = False  # one cycle then exit, for cron and for tests
-    dry_run: bool = False  # harvest and route, write nothing
-    parse: bool = False  # run silver.replay over every feed instead of polling
+    batch: int = 20
+    dry_run: bool = False
+    parse: bool = False
+    sync_registry: bool = False
+    lease_seconds: int = 3600
+    gold: bool = False
+    gold_step: str | None = None
 
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in ("1", "true", "yes", "on")
+    return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_dotenv() -> None:
+    """Read KEY=VALUE from ``.env`` so a bare invocation finds the DSN.
+
+    Deliberately duplicated from ``inspector/config.py`` rather than imported:
+    the core pipeline does not depend on the inspector, and this is ten lines.
+    ``setdefault`` semantics mean a real environment variable always wins, so
+    running under a process manager that already exports the DSN is unaffected.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    for candidate in (Path.cwd() / ".env", repo_root / ".env"):
+        if not candidate.exists():
+            continue
+        for line in candidate.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 def load_config(argv: Sequence[str]) -> Config:
-    """Flags over environment over defaults. No config file, no framework."""
+    _load_dotenv()
     parser = argparse.ArgumentParser(prog="xjobscore")
-    parser.add_argument("--dsn", default=None)
-    parser.add_argument("--user-agent", default=None)
-    parser.add_argument("--batch", type=int, default=None)
-    parser.add_argument("--once", action="store_true", default=None)
+    parser.add_argument("--dsn")
+    parser.add_argument("--user-agent")
+    parser.add_argument("--batch", type=int)
+    parser.add_argument("--lease-seconds", type=int)
     parser.add_argument("--dry-run", action="store_true", default=None)
     parser.add_argument("--parse", action="store_true", default=None)
+    parser.add_argument("--sync-registry", action="store_true", default=None)
+    parser.add_argument("--gold", action="store_true", default=None)
+    parser.add_argument("--gold-step")
     args = parser.parse_args(argv)
 
-    dsn = args.dsn or os.environ.get("XJOBSCORE_DSN")
+    dsn = args.dsn or os.environ.get("XJOBSCORE_DSN") or os.environ.get("DATABASE_URL")
     if not dsn:
-        raise ValueError("no dsn: pass --dsn or set XJOBSCORE_DSN")
-
-    user_agent = args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or "xjobscore/0.1"
-    batch = args.batch if args.batch is not None else int(os.environ.get("XJOBSCORE_BATCH", "20"))
-    once = args.once if args.once is not None else _env_bool("XJOBSCORE_ONCE", False)
-    dry_run = args.dry_run if args.dry_run is not None else _env_bool("XJOBSCORE_DRY_RUN", False)
-    parse = args.parse if args.parse is not None else _env_bool("XJOBSCORE_PARSE", False)
-
+        raise ValueError("no dsn: pass --dsn or set XJOBSCORE_DSN/DATABASE_URL")
     return Config(
-        dsn=dsn, user_agent=user_agent, batch=batch, once=once, dry_run=dry_run, parse=parse
+        dsn=dsn,
+        user_agent=args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or "xjobscore/0.1",
+        batch=args.batch if args.batch is not None else int(os.environ.get("XJOBSCORE_BATCH", "20")),
+        lease_seconds=args.lease_seconds
+        if args.lease_seconds is not None
+        else int(os.environ.get("XJOBSCORE_LEASE_SECONDS", "3600")),
+        dry_run=args.dry_run if args.dry_run is not None else _env_bool("XJOBSCORE_DRY_RUN", False),
+        parse=args.parse if args.parse is not None else _env_bool("XJOBSCORE_PARSE", False),
+        sync_registry=args.sync_registry
+        if args.sync_registry is not None
+        else _env_bool("XJOBSCORE_SYNC_REGISTRY", False),
+        gold=args.gold
+        if args.gold is not None
+        else bool(args.gold_step) or _env_bool("XJOBSCORE_GOLD", False),
+        gold_step=args.gold_step or os.environ.get("XJOBSCORE_GOLD_STEP") or None,
     )
 
 
-async def poll(conn: Connection, net: Net, feed: Feed, now: datetime) -> Outcome:
-    """Harvest one feed and land what it returns.
+def _registry_index() -> dict[tuple[str, str], object]:
+    return {(entry.source, entry.key): entry for entry in registry_entries()}
 
-        store.start_run
-          -> sources.get(feed.source)(feed, net)
-          -> router.route(conn, feed, record, run_id)
-          -> work.next_state / work.next_poll_at -> store.set_feed_state / set_next_poll
-          -> reconcile.run(conn, feed, run_id)   if work.should_reconcile
-          -> store.finish_run
 
-    Every exception is caught here and becomes Outcome 'error' plus a finished
-    poll_run carrying error_class and error_detail. Nothing propagates: the
-    caller is a gather over the whole batch.
+def _hydrate(feed: Feed, index: dict[tuple[str, str], object], types: dict[str, str]) -> Feed:
+    entry = index.get((feed.source, feed.key))
+    if entry is None:
+        logger.warning(
+            "historical feed is absent from registry; replaying without adapter config: %s",
+            store.source_instance(feed),
+        )
+        return replace(feed, source_type=types.get(feed.source, "Other"))
+    return replace(
+        feed,
+        config=dict(entry.config),
+        company_id=entry.company_id,
+        company_name=entry.company_name,
+        source_type=types.get(feed.source, "Other"),
+    )
 
-    Rescheduling happens on every path including the failing one, or a feed
-    that errors stays due forever and is retried in a hot loop.
+
+async def _finish_failure(
+    pool: Pool,
+    feed: Feed,
+    now: datetime,
+    outcome: Outcome,
+    *,
+    new_postings: int = 0,
+) -> None:
+    """Release a failed claim and record the attempt.
+
+    ``new_postings`` is zero for a genuine error, which never reached silver. A
+    truncated fetch did reach it and may have created rows, so the partial path
+    passes its real count rather than pretending the poll produced nothing.
     """
-    run_id = await store.start_run(conn, feed.id)
+    due_at = work.next_due_at(feed.interval_s, feed.strikes, outcome, now)
+    async with pool.acquire() as conn:
+        if await store.finish_schedule_failure(conn, feed, now=now, due_at=due_at):
+            await store.append_poll_observation(
+                conn,
+                feed_id=feed.id,
+                polled_at=now,
+                status=outcome,
+                new_postings=new_postings,
+            )
+        else:
+            logger.warning("lost schedule lease while failing %s", store.source_instance(feed))
 
-    outcome: Outcome
-    error_class: str | None = None
-    error_detail: str | None = None
-    record: Record | None = None
-    items_listed = 0
-    items_new = 0
-    items_changed = 0
+
+async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
+    """Fetch one claimed feed and carry a changed snapshot through silver."""
+    source = store.source_instance(feed)
+    try:
+        record = await sources.get(feed.source)(feed, net)
+    except Exception:
+        logger.exception("harvest failed source=%s", source)
+        await _finish_failure(pool, feed, now, "error")
+        return "error"
+
+    if record.http_status == 304:
+        due_at = work.next_due_at(feed.interval_s, feed.strikes, "not_modified", now)
+        async with pool.acquire() as conn, conn.transaction():
+            await store.touch_source_postings(conn, source, now)
+            ok = await store.finish_schedule_success(
+                conn,
+                feed,
+                now=now,
+                due_at=due_at,
+                etag=record.etag if record.etag is not None else feed.etag,
+                res_hash=None,
+                changed=False,
+            )
+            if ok:
+                await store.append_poll_observation(
+                    conn,
+                    feed_id=feed.id,
+                    polled_at=now,
+                    status="not_modified",
+                    new_postings=0,
+                )
+        if not ok:
+            logger.warning("lost schedule lease after 304 source=%s", source)
+        return "not_modified"
+
+    prepared = router.prepare(feed, record)
+    response_hash = router.snapshot_hash(prepared)
+    changed = response_hash != feed.res_hash
+
+    if not changed and not record.truncated:
+        due_at = work.next_due_at(feed.interval_s, feed.strikes, "ok", now)
+        async with pool.acquire() as conn, conn.transaction():
+            await store.touch_source_postings(conn, source, now)
+            ok = await store.finish_schedule_success(
+                conn,
+                feed,
+                now=now,
+                due_at=due_at,
+                etag=record.etag,
+                res_hash=response_hash,
+                changed=False,
+            )
+            # "ok", not "not_modified": the fetch returned a full body and only
+            # the snapshot hash matched. Keep the status matching what poll()
+            # returns for this path.
+            if ok:
+                await store.append_poll_observation(
+                    conn,
+                    feed_id=feed.id,
+                    polled_at=now,
+                    status="ok",
+                    new_postings=0,
+                )
+        if not ok:
+            logger.warning("lost schedule lease after unchanged poll source=%s", source)
+        return "ok"
 
     try:
-        harvest = sources.get(feed.source)
-        record = await harvest(feed, net)
-        items_listed = len(record.items)
+        async with pool.acquire() as conn, conn.transaction():
+            stored = await router.persist(conn, feed, prepared)
+        async with pool.acquire() as conn, conn.transaction():
+            counts = await silver.process(
+                conn, feed, stored, record.envelope, seen_at=now
+            )
+    except Exception:
+        logger.exception("parse/persist failed source=%s", source)
+        await _finish_failure(pool, feed, now, "error")
+        return "error"
 
-        # Bronze only: record.items land in raw_document via router.route.
-        # Parsing a raw item into Posting/Target/Label/Fact (silver) is a
-        # separate, not-yet-designed downstream layer. Routed before the
-        # outcome branch so a route failure falls into the except below and
-        # becomes outcome 'error' -- a poll that could not persist is not
-        # 'ok', even if the fetch itself succeeded.
-        counts = await router.route(conn, feed, record, run_id)
-        items_new = counts.new
-        items_changed = counts.changed
+    if counts.unresolved or counts.unsupported or counts.secondhand:
+        logger.info(
+            "silver skips source=%s unresolved=%d unsupported=%d secondhand=%d",
+            source,
+            counts.unresolved,
+            counts.unsupported,
+            counts.secondhand,
+        )
 
-        if record.http_status == 304:
-            outcome = "not_modified"
-        elif record.truncated:
-            outcome = "partial"
-        else:
-            outcome = "ok"
-    except Exception as exc:
-        outcome = "error"
-        error_class = type(exc).__name__
-        error_detail = str(exc)
+    outcome: Outcome = "partial" if record.truncated else "ok"
+    if outcome == "partial":
+        await _finish_failure(pool, feed, now, outcome, new_postings=counts.created)
+        return outcome
 
-    # record.validators carries etag/last_modified back out of the source, so
-    # a conditional GET that matched actually shortens the next poll's body.
-    new_state = work.next_state(feed.state, outcome, record.validators if record else {})
-    await store.set_feed_state(conn, feed.id, new_state)
-
-    when = work.next_poll_at(feed, outcome, now)
-    await store.set_next_poll(conn, feed.id, when)
-
-    if work.should_reconcile(feed, outcome):
-        # TODO(reconcile): reconcile.run(conn, feed, run_id) belongs here --
-        # it does not exist yet. It would close postings that
-        # store.open_postings_missed(conn, feed.id, run_id) returns.
-        pass
-
-    await store.finish_run(
-        conn,
-        run_id,
-        status=outcome if outcome != "not_modified" else "ok",
-        http_status=record.http_status if record else None,
-        items_listed=items_listed,
-        items_new=items_new,
-        items_changed=items_changed,
-        error_class=error_class,
-        error_detail=error_detail,
-    )
-    return outcome
+    due_at = work.next_due_at(feed.interval_s, feed.strikes, "ok", now)
+    async with pool.acquire() as conn:
+        ok = await store.finish_schedule_success(
+            conn,
+            feed,
+            now=now,
+            due_at=due_at,
+            etag=record.etag,
+            res_hash=response_hash,
+            changed=changed,
+        )
+        # Only when the lease held: a reclaimed worker polled this feed too and
+        # records its own row, and two rows for one poll double-count lambda.
+        if ok:
+            await store.append_poll_observation(
+                conn,
+                feed_id=feed.id,
+                polled_at=now,
+                status="ok",
+                new_postings=counts.created,
+            )
+    if not ok:
+        logger.warning("lost schedule lease after success source=%s", source)
+    return "ok"
 
 
-async def cycle(conn: Connection, net: Net, cfg: Config, now: datetime) -> int:
-    """One pass over the due feeds. Returns how many were polled.
+async def cycle(
+    pool: Pool,
+    net: Net,
+    cfg: Config,
+    now: datetime,
+    *,
+    index: dict[tuple[str, str], object] | None = None,
+    types: dict[str, str] | None = None,
+) -> int:
+    """Claim due feeds and poll them.
 
-    Concurrency is bounded by cfg.batch rather than by the number of due feeds,
-    and `net` rate-limits per host underneath, so a batch that happens to be
-    fifty feeds on one ATS still goes out politely.
+    ``index``/``types`` are the parsed registry, reused verbatim rather than
+    rebuilt: reparsing the whole registry (2600+ feeds, every catalog) is cheap
+    once per short-lived CLI process but not once per tick of a caller that
+    calls ``cycle`` repeatedly on an event loop -- see
+    ``inspector.runner.SchedulerRunner``, which builds these once off-thread and
+    passes them in. The default here rebuilds every call, preserving today's
+    CLI behavior.
     """
-    feeds = await store.due_feeds(conn, now, cfg.batch)
-    if not feeds:
-        return 0
-
-    semaphore = asyncio.Semaphore(cfg.batch)
-
-    async def run_one(feed: Feed) -> None:
-        async with semaphore:
-            if cfg.dry_run:
-                # "harvest and route, write nothing" -- poll() always writes
-                # (that is its whole job), so a dry run calls harvest directly
-                # and skips poll()/store entirely rather than threading a flag
-                # through poll()'s fixed signature.
-                try:
-                    await sources.get(feed.source)(feed, net)
-                except Exception:
-                    pass
-            else:
-                await poll(conn, net, feed, now)
-
-    await asyncio.gather(*(run_one(feed) for feed in feeds))
+    index = index if index is not None else _registry_index()
+    types = types if types is not None else source_types()
+    async with pool.acquire() as conn:
+        if cfg.dry_run:
+            claimed = await store.due_feeds(conn, now, cfg.batch)
+        else:
+            claimed = await store.claim_due_feeds(
+                conn, now, cfg.batch, lease_seconds=cfg.lease_seconds
+            )
+    feeds = [_hydrate(feed, index, types) for feed in claimed]
+    if cfg.dry_run:
+        await asyncio.gather(*(sources.get(feed.source)(feed, net) for feed in feeds))
+    else:
+        await asyncio.gather(*(poll(pool, net, feed, now) for feed in feeds))
     return len(feeds)
 
 
-async def parse_all(conn: Connection, cfg: Config) -> list[tuple[Feed, silver.Counts]]:
-    """Replay every feed's current bronze into silver. Not part of `cycle` --
-    see silver.py's own docstring for why this runs on a separate schedule
-    from the poll rather than inline with `harvest`.
-    """
-    feeds = await store.all_feeds(conn)
+async def parse_all(pool: Pool, cfg: Config) -> list[tuple[Feed, silver.Counts]]:
+    index = _registry_index()
+    types = source_types()
+    async with pool.acquire() as conn:
+        feeds = await store.replay_feeds(conn)
     results = []
-    for feed in feeds:
-        counts = await silver.replay(conn, feed, dry_run=cfg.dry_run)
+    seen_at = datetime.now(timezone.utc)
+    for raw_feed in feeds:
+        feed = _hydrate(raw_feed, index, types)
+        async with pool.acquire() as conn, conn.transaction():
+            counts = await silver.replay(conn, feed, seen_at=seen_at, dry_run=cfg.dry_run)
         results.append((feed, counts))
     return results
 
 
-async def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point. Returns a process exit code."""
-    cfg = load_config(argv if argv is not None else sys.argv[1:])
+async def gold_all(pool: Pool, cfg: Config) -> dict[str, gold.Counts | Exception]:
+    """Rebuild gold artifacts. Each step gets its own transaction so one
+    failing step neither aborts nor half-writes the others."""
+    results: dict[str, gold.Counts | Exception] = {}
+    for step in gold.steps(cfg.gold_step):
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                results[step.name] = await step.rebuild(conn, dry_run=cfg.dry_run)
+        except Exception as exc:  # one step's failure must not sink the layer
+            logger.exception("gold step failed name=%s", step.name)
+            results[step.name] = exc
+    return results
 
-    conn = await store.connect(cfg.dsn)
+
+async def sync_registry(pool: Pool, cfg: Config) -> feader.Plan:
+    async with pool.acquire() as conn:
+        return await feader.feed(conn, dry_run=cfg.dry_run)
+
+
+async def main(argv: Sequence[str] | None = None) -> int:
+    cfg = load_config(argv if argv is not None else sys.argv[1:])
+    logging.basicConfig(level=os.environ.get("XJOBSCORE_LOG_LEVEL", "INFO"))
+    pool = await store.connect(cfg.dsn)
     try:
+        plan = await sync_registry(pool, cfg)
+        if cfg.sync_registry:
+            print(
+                f"companies={len(plan.companies)} aliases={plan.alias_count} "
+                f"tokens={len(plan.tokens)} feeds={len(plan.feeds)}"
+                f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
+            )
+            return 0
         if cfg.parse:
-            for feed, counts in await parse_all(conn, cfg):
+            for feed, counts in await parse_all(pool, cfg):
                 print(
-                    f"{feed.source}:{feed.key} "
-                    f"postings={counts.postings} unchanged={counts.unchanged} "
-                    f"unresolved={counts.unresolved} targets={counts.targets} "
-                    f"dropped={counts.dropped}"
+                    f"{feed.source}:{feed.key} postings={counts.postings} "
+                    f"created={counts.created} "
+                    f"unchanged={counts.unchanged} unresolved={counts.unresolved} "
+                    f"unsupported={counts.unsupported} secondhand={counts.secondhand}"
                 )
             return 0
-
+        if cfg.gold:
+            failed = False
+            for name, outcome in (await gold_all(pool, cfg)).items():
+                if isinstance(outcome, Exception):
+                    failed = True
+                    print(f"{name} failed: {outcome}")
+                    continue
+                print(
+                    f"{name} groups={outcome.groups} postings={outcome.postings} "
+                    f"skipped_keys={outcome.skipped_keys} "
+                    f"skipped_postings={outcome.skipped_postings}"
+                    f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
+                )
+            return 1 if failed else 0
+        # One cycle, then exit. This CLI entry point is not a daemon: repeating
+        # it here is a job for cron or a launch agent, which restart cleanly,
+        # log per run, and cannot wedge a long-lived process holding a pool and
+        # a batch of feed leases. `cycle()` itself has no such assumption baked
+        # in, though: `inspector.runner.SchedulerRunner` calls it on a tick from
+        # inside the inspector's own long-lived process, reusing one `Net` and
+        # one parsed registry across calls instead of rebuilding them here.
         async with Net(user_agent=cfg.user_agent) as net:
-            await cycle(conn, net, cfg, datetime.now(timezone.utc))
-            while not cfg.once:
-                await asyncio.sleep(_LOOP_INTERVAL_S)
-                await cycle(conn, net, cfg, datetime.now(timezone.utc))
+            polled = await cycle(pool, net, cfg, datetime.now(timezone.utc))
+            print(f"polled={polled}{' (dry run, nothing written)' if cfg.dry_run else ''}")
     finally:
-        await conn.close()
+        await pool.close()
     return 0
 
 
-if __name__ == "__main__":  # python -m xjobscore.run --once
-    import asyncio
-    import sys
-
-    sys.exit(asyncio.run(main(sys.argv[1:])))
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main(sys.argv[1:])))

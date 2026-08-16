@@ -1,620 +1,782 @@
-# store.py
-"""The only code that touches the database.
-
-Every SQL statement in the project lives in this file. Callers pass an open
-asyncpg connection and get records back; nothing outside this module knows a
-column name. That is what lets `schema.sql` change without a search across the
-tree, and it is why `sources/` cannot reach the database even by accident --
-there is nothing there to import.
-
-This module maps records to rows and back. It decides nothing: what to poll
-next is `work.py`, what a record means is `router.py`, and what is closed is
-`reconcile.py`.
-"""
+"""PostgreSQL mechanics for the schema.sql-backed core pipeline."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
+import re
 from typing import TYPE_CHECKING, Any
+import unicodedata
 
 import asyncpg
 
-from xjobscore.records import Fact, Feed, Label, Posting
+from xjobscore.records import Feed
 
-if TYPE_CHECKING:  # asyncpg is an implementation detail of this module
-    from asyncpg import Connection
+if TYPE_CHECKING:
+    from asyncpg import Connection, Pool
 
 __all__ = [
+    "align_company_identity",
     "all_feeds",
-    "close_posting",
+    "append_poll_observation",
+    "claim_due_feeds",
+    "claim_feed",
+    "clear_registry_company_domains",
     "connect",
+    "dedup_candidates",
     "due_feeds",
-    "finish_run",
-    "get_feed",
+    "finish_schedule_failure",
+    "finish_schedule_success",
     "latest_raw",
-    "note_unknown_company",
-    "open_postings_missed",
-    "put_fact",
-    "put_label",
+    "prune_registry_aliases",
+    "replace_dup_groups",
+    "replay_feeds",
+    "reconcile_registry_inventory",
     "resolve_company",
     "save_raw",
-    "seen_external_ids",
-    "set_feed_state",
-    "set_next_poll",
-    "start_run",
-    "touch_posting",
-    "upsert_catalog_company",
-    "upsert_catalog_token",
-    "upsert_feed",
-    "upsert_posting",
+    "set_feed_enabled",
+    "set_schedule_interval",
+    "set_schedule_paused",
+    "source_instance",
+    "touch_source_postings",
+    "upsert_job_posting",
+    "upsert_registry_alias",
+    "upsert_registry_company",
+    "upsert_registry_feed",
+    "upsert_registry_token",
 ]
 
 
 async def _install_jsonb_codec(conn: Connection) -> None:
-    # feed.config, feed.state, and the posting jsonb long-tail columns all move
-    # as plain dicts/lists through this module -- the codec is the one place
-    # that decision is made, so no query below carries a manual json.dumps or
-    # a ::jsonb cast.
     await conn.set_type_codec(
         "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
     )
 
 
-async def connect(dsn: str) -> Connection:
-    """Open one connection. Pooling, if it is ever needed, belongs here too."""
-    conn = await asyncpg.connect(dsn)
-    await _install_jsonb_codec(conn)
-    return conn
+async def connect(dsn: str, *, search_path: str | None = None) -> Pool:
+    """Create the pool used by concurrent poll tasks.
+
+    ``search_path`` scopes every connection in the pool to one schema. Production
+    leaves it unset and gets ``public``; the integration test points it at a
+    throwaway schema so it can exercise the real claim/poll path without
+    touching a developer's actual feeds.
+    """
+    return await asyncpg.create_pool(
+        dsn,
+        min_size=1,
+        max_size=20,
+        init=_install_jsonb_codec,
+        **({"server_settings": {"search_path": search_path}} if search_path else {}),
+    )
 
 
-# --------------------------------------------------------------------------
-# feeds -- the queue
-# --------------------------------------------------------------------------
+def source_instance(feed: Feed) -> str:
+    """Return the collision-safe posting namespace documented by schema.sql."""
+    return f"{feed.source}:{feed.key}"
 
 
 def _feed_from_row(row: asyncpg.Record) -> Feed:
-    # complete/closes/credentialed/cadence_s have no columns yet -- they are
-    # operator-set keys inside the config jsonb until the DDL catches up. This
-    # function is the only place that reads them out of config; sources and
-    # work.py just see a Feed that already looks like it has real columns.
-    config = row["config"] or {}
     return Feed(
         id=row["id"],
         source=row["source"],
         key=row["key"],
-        config=config,
-        state=row["state"] or {},
         enabled=row["enabled"],
-        complete=bool(config.get("complete", False)),
-        closes=bool(config.get("closes", False)),
-        credentialed=bool(config.get("credentialed", False)),
-        cadence_s=int(config.get("cadence_s", 900)),
-        next_poll_at=row["next_poll_at"],
+        company_id=row.get("company_id"),
+        company_name=row.get("company_name"),
+        etag=row.get("etag"),
+        res_hash=row.get("res_hash"),
+        interval_s=int(row.get("interval_s") or 900),
+        strikes=int(row.get("strikes") or 0),
+        due_at=row.get("due_at"),
+        hold_until=row.get("hold_until"),
     )
 
 
-async def due_feeds(conn: Connection, now: Any, limit: int) -> list[Feed]:
-    """Enabled feeds with next_poll_at <= now, never-run first.
+_FEED_SELECT = """
+    SELECT
+        f.id, f.source, f.key, f.enabled,
+        s.interval_s, s.etag, s.res_hash, s.strikes, s.due_at, s.hold_until,
+        t.company_id, c.name AS company_name
+    FROM feed f
+    JOIN schedule s ON s.feed_id = f.id
+    LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
+    LEFT JOIN company c ON c.id = t.company_id
+"""
 
-    Served by `feed_due_idx` (next_poll_at NULLS FIRST WHERE enabled), so a
-    feed that has never run sorts to the front instead of never being picked.
 
-    The `feed` table has no capability columns yet, so `complete`, `closes`,
-    `credentialed` and `cadence_s` are read out of the operator-owned `config`
-    jsonb here and materialized onto the Feed. When the DDL lands, this
-    function is the only thing that changes -- sources and work.py already see
-    a Feed that looks identical either way.
-    """
+async def claim_due_feeds(
+    conn: Connection,
+    now: datetime,
+    limit: int,
+    *,
+    lease_seconds: int = 3600,
+) -> list[Feed]:
+    """Lease due schedule rows atomically for horizontally safe workers."""
+    lease_until = now + timedelta(seconds=max(60, lease_seconds))
     rows = await conn.fetch(
         """
-        SELECT id, source, key, config, state, enabled, next_poll_at
-        FROM feed
-        WHERE enabled AND (next_poll_at IS NULL OR next_poll_at <= $1)
-        ORDER BY next_poll_at NULLS FIRST
-        LIMIT $2
+        WITH picked AS (
+            SELECT s.feed_id
+            FROM schedule s
+            JOIN feed f ON f.id = s.feed_id
+            WHERE f.enabled
+              AND s.paused_at IS NULL
+              AND s.due_at <= $1
+              AND (s.hold_until IS NULL OR s.hold_until <= $1)
+            ORDER BY s.due_at, s.feed_id
+            FOR UPDATE OF s SKIP LOCKED
+            LIMIT $2
+        ), claimed AS (
+            UPDATE schedule s
+            SET hold_until = $3
+            FROM picked p
+            WHERE s.feed_id = p.feed_id
+            RETURNING s.feed_id, s.hold_until
+        )
+        SELECT
+            f.id, f.source, f.key, f.enabled,
+            s.interval_s, s.etag, s.res_hash, s.strikes, s.due_at,
+            -- The lease must come from the CTE, not from `s`. A data-modifying
+            -- CTE's writes are invisible to the rest of the same query, so
+            -- `s.hold_until` here is the *pre-claim* value -- NULL on a feed
+            -- nobody has polled. finish_schedule_*() then guards on
+            -- `hold_until = $7`, which never matches NULL, so every completed
+            -- poll reported a lost lease and skipped its poll_observation row.
+            x.hold_until,
+            t.company_id, c.name AS company_name
+        FROM claimed x
+        JOIN feed f ON f.id = x.feed_id
+        JOIN schedule s ON s.feed_id = f.id
+        LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
+        LEFT JOIN company c ON c.id = t.company_id
+        ORDER BY s.due_at, f.id
         """,
         now,
-        limit,
+        max(1, limit),
+        lease_until,
     )
     return [_feed_from_row(row) for row in rows]
+
+
+async def claim_feed(
+    conn: Connection,
+    *,
+    source: str,
+    key: str,
+    now: datetime,
+    lease_seconds: int = 3600,
+) -> Feed | None:
+    """Lease one feed for an on-demand poll, regardless of due_at.
+
+    Same eligibility as claim_due_feeds minus the due check: enabled, unpaused,
+    and not already held. None means the feed is unknown or not claimable; the
+    caller diagnoses which.
+    """
+    lease_until = now + timedelta(seconds=max(60, lease_seconds))
+    row = await conn.fetchrow(
+        """
+        WITH picked AS (
+            SELECT s.feed_id
+            FROM schedule s
+            JOIN feed f ON f.id = s.feed_id
+            WHERE f.source = $1
+              AND f.key = $2
+              AND f.enabled
+              AND s.paused_at IS NULL
+              AND (s.hold_until IS NULL OR s.hold_until <= $3)
+            FOR UPDATE OF s SKIP LOCKED
+        ), claimed AS (
+            UPDATE schedule s
+            SET hold_until = $4
+            FROM picked p
+            WHERE s.feed_id = p.feed_id
+            RETURNING s.feed_id, s.hold_until
+        )
+        SELECT
+            f.id, f.source, f.key, f.enabled,
+            s.interval_s, s.etag, s.res_hash, s.strikes, s.due_at,
+            -- The lease must come from the CTE, not from `s`: a data-modifying
+            -- CTE's writes are invisible to the rest of the same query, so
+            -- `s.hold_until` would be the pre-claim value and finish_schedule_*'s
+            -- `hold_until = $N` guard would never match. Same trap as
+            -- claim_due_feeds above.
+            x.hold_until,
+            t.company_id, c.name AS company_name
+        FROM claimed x
+        JOIN feed f ON f.id = x.feed_id
+        JOIN schedule s ON s.feed_id = f.id
+        LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
+        LEFT JOIN company c ON c.id = t.company_id
+        """,
+        source,
+        key,
+        now,
+        lease_until,
+    )
+    return _feed_from_row(row) if row else None
 
 
 async def all_feeds(conn: Connection) -> list[Feed]:
-    """Every feed, enabled or not -- the replay pass's input.
-
-    Unlike `due_feeds`, not gated on `next_poll_at`: parsing bronze into
-    silver runs on its own schedule (`run.py --parse`), not the poll's, and a
-    disabled feed's already-stored raw_document rows are still fair game to
-    replay.
-    """
-    rows = await conn.fetch("SELECT id, source, key, config, state, enabled, next_poll_at FROM feed")
+    rows = await conn.fetch(_FEED_SELECT + " ORDER BY f.source, f.key")
     return [_feed_from_row(row) for row in rows]
 
 
-async def get_feed(conn: Connection, source: str, key: str) -> Feed | None:
-    """Look up by the natural key. Identity is (source, key), never a hash."""
-    row = await conn.fetchrow(
-        "SELECT id, source, key, config, state, enabled, next_poll_at "
-        "FROM feed WHERE source = $1 AND key = $2",
-        source,
-        key,
-    )
-    return _feed_from_row(row) if row is not None else None
-
-
-async def upsert_feed(
-    conn: Connection,
-    source: str,
-    key: str,
-    config: dict,
-    *,
-    enabled: bool = True,
-) -> int:
-    """Where a Target lands. Returns the feed id, new or existing.
-
-    ON CONFLICT (source, key) DO NOTHING semantics for `config`: rediscovering
-    a board must not overwrite what the operator has since configured on it.
-    """
-    row = await conn.fetchrow(
-        """
-        INSERT INTO feed (source, key, config, enabled)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (source, key) DO NOTHING
-        RETURNING id
+async def due_feeds(conn: Connection, now: datetime, limit: int) -> list[Feed]:
+    """Read the claimable queue without taking leases, for dry runs."""
+    rows = await conn.fetch(
+        _FEED_SELECT
+        + """
+        WHERE f.enabled
+          AND s.paused_at IS NULL
+          AND s.due_at <= $1
+          AND (s.hold_until IS NULL OR s.hold_until <= $1)
+        ORDER BY s.due_at, f.id
+        LIMIT $2
         """,
-        source,
-        key,
-        config,
-        enabled,
+        now,
+        max(1, limit),
     )
-    if row is not None:
-        return row["id"]
-    existing = await conn.fetchrow(
-        "SELECT id FROM feed WHERE source = $1 AND key = $2", source, key
+    return [_feed_from_row(row) for row in rows]
+
+
+async def replay_feeds(conn: Connection) -> list[Feed]:
+    """Return only feed instances that currently have replayable bronze."""
+    rows = await conn.fetch(
+        _FEED_SELECT
+        + """
+        WHERE EXISTS (
+            SELECT 1 FROM raw_posting r
+            WHERE r.source = f.source || ':' || f.key
+        )
+        ORDER BY f.source, f.key
+        """
     )
-    return existing["id"]
+    return [_feed_from_row(row) for row in rows]
 
 
-async def set_next_poll(conn: Connection, feed_id: int, when: Any | None) -> None:
-    """Write the due time. NULL means never again -- a spent one-off."""
-    await conn.execute("UPDATE feed SET next_poll_at = $2 WHERE id = $1", feed_id, when)
-
-
-async def set_feed_state(conn: Connection, feed_id: int, state: dict) -> None:
-    """Replace `feed.state`. Never touches `config`; that is the operator's."""
-    await conn.execute("UPDATE feed SET state = $2 WHERE id = $1", feed_id, state)
-
-
-# --------------------------------------------------------------------------
-# poll_run -- one row per attempt, the audit trail closure depends on
-# --------------------------------------------------------------------------
-
-
-async def start_run(conn: Connection, feed_id: int) -> int:
-    """Insert a 'running' poll_run and return its id."""
-    row = await conn.fetchrow(
-        "INSERT INTO poll_run (feed_id, status) VALUES ($1, 'running') RETURNING id",
-        feed_id,
-    )
-    return row["id"]
-
-
-async def finish_run(
+async def finish_schedule_success(
     conn: Connection,
-    run_id: int,
+    feed: Feed,
     *,
-    status: str,  # 'ok' | 'partial' | 'error'
-    http_status: int | None = None,
-    items_listed: int = 0,
-    items_new: int = 0,
-    items_changed: int = 0,
-    items_gone: int = 0,
-    error_class: str | None = None,
-    error_detail: str | None = None,
-) -> None:
-    """Close out the run and stamp duration.
+    now: datetime,
+    due_at: datetime,
+    etag: str | None,
+    res_hash: str | None,
+    changed: bool,
+) -> bool:
+    """Complete a claimed poll without overwriting a reclaimed worker's lease."""
+    result = await conn.execute(
+        """
+        UPDATE schedule SET
+            etag = $3,
+            res_hash = COALESCE($4, res_hash),
+            strikes = 0,
+            due_at = $5,
+            hold_until = NULL,
+            last_poll_at = $2,
+            last_change_at = CASE WHEN $6 THEN $2 ELSE last_change_at END
+        WHERE feed_id = $1 AND hold_until = $7
+        """,
+        feed.id,
+        now,
+        etag,
+        res_hash,
+        due_at,
+        changed,
+        feed.hold_until,
+    )
+    return result == "UPDATE 1"
 
-    `status` is load-bearing: closure may only ever be inferred from 'ok'. A
-    fetch that died halfway through pagination is 'partial', because a board
-    you failed to page through is not evidence that the rest is gone.
+
+async def finish_schedule_failure(
+    conn: Connection,
+    feed: Feed,
+    *,
+    now: datetime,
+    due_at: datetime,
+    etag: str | None = None,
+) -> bool:
+    """Release a failed claim, retaining bronze and the prior response hash."""
+    result = await conn.execute(
+        """
+        UPDATE schedule SET
+            etag = COALESCE($3, etag),
+            strikes = LEAST(strikes::integer + 1, 32767)::smallint,
+            due_at = $4,
+            hold_until = NULL,
+            last_poll_at = $2
+        WHERE feed_id = $1 AND hold_until = $5
+        """,
+        feed.id,
+        now,
+        etag,
+        due_at,
+        feed.hold_until,
+    )
+    return result == "UPDATE 1"
+
+
+async def append_poll_observation(
+    conn: Connection,
+    *,
+    feed_id: int,
+    polled_at: datetime,
+    status: str,
+    new_postings: int = 0,
+) -> None:
+    """Record what one completed poll did -- the Scheduler page's only input.
+
+    Append-only and never updated: the row is the fact that a poll happened, so
+    a later poll adds a row rather than revising this one. ``status`` mirrors
+    ``work.Outcome``; ``new_postings`` counts first sightings only, never
+    re-seen postings whose content merely changed.
     """
     await conn.execute(
         """
-        UPDATE poll_run SET
-            finished_at   = now(),
-            duration_ms   = EXTRACT(EPOCH FROM (now() - started_at)) * 1000,
-            status        = $2,
-            http_status   = $3,
-            items_listed  = $4,
-            items_new     = $5,
-            items_changed = $6,
-            items_gone    = $7,
-            error_class   = $8,
-            error_detail  = $9
-        WHERE id = $1
+        INSERT INTO poll_observation (feed_id, polled_at, status, new_postings)
+        VALUES ($1, $2, $3, $4)
         """,
-        run_id,
+        feed_id,
+        polled_at,
         status,
-        http_status,
-        items_listed,
-        items_new,
-        items_changed,
-        items_gone,
-        error_class,
-        error_detail,
+        new_postings,
     )
-
-
-# --------------------------------------------------------------------------
-# L1 bronze -- append-only, replayable, doubles as revision history
-# --------------------------------------------------------------------------
 
 
 async def save_raw(
     conn: Connection,
-    feed_id: int,
-    run_id: int,
     *,
-    external_id: str,
-    kind: str,  # 'json' | 'xml' | 'html' | 'mime' -- transport format, not role
-    content_hash: str,
-    payload_json: Any = None,
-    payload_text: str | None = None,
-    envelope: Any = None,
-) -> bool:
-    """Store one raw item. Returns False when the hash already exists.
-
-    Unchanged polls insert nothing -- that is the UNIQUE
-    (feed_id, external_id, kind, content_hash) doing the work, and the False
-    return is what feeds items_changed. The hash must be over the canonicalized
-    payload with volatile keys stripped; the stored payload stays verbatim.
-    Miss one and every item looks changed on every poll.
-
-    `envelope` is response-root facts no single item carries (Workable's
-    company name); it is not part of content_hash, so it riding along on every
-    row of a poll does not itself make an unchanged item look changed.
-    """
+    source: str,
+    source_key: str,
+    data: Any,
+    data_hash: str,
+) -> tuple[int, bool]:
+    """Persist one immutable bronze revision and return its durable id."""
     row = await conn.fetchrow(
         """
-        INSERT INTO raw_document
-            (feed_id, poll_run_id, external_id, kind, content_hash, payload_json, payload_text, envelope)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (feed_id, external_id, kind, content_hash) DO NOTHING
+        INSERT INTO raw_posting(source, source_key, data, data_hash)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (source, source_key, data_hash) DO NOTHING
         RETURNING id
         """,
-        feed_id,
-        run_id,
-        external_id,
-        kind,
-        content_hash,
-        payload_json,
-        payload_text,
-        envelope,
+        source,
+        source_key,
+        data,
+        data_hash,
     )
-    return row is not None
-
-
-async def seen_external_ids(conn: Connection, feed_id: int) -> set[str]:
-    """Every external_id raw_document has ever stored for this feed.
-
-    Router's new/changed split needs this: save_raw's bool return only says
-    whether *this hash* already existed, not whether the external_id itself
-    is new to the feed. Served by raw_document_lookup, which otherwise has no
-    reader at all.
-    """
-    rows = await conn.fetch(
-        "SELECT DISTINCT external_id FROM raw_document WHERE feed_id = $1", feed_id
+    if row is not None:
+        return row["id"], True
+    raw_id = await conn.fetchval(
+        "SELECT id FROM raw_posting WHERE source = $1 AND source_key = $2 AND data_hash = $3",
+        source,
+        source_key,
+        data_hash,
     )
-    return {row["external_id"] for row in rows}
+    return int(raw_id), False
 
 
-async def latest_raw(conn: Connection, feed_id: int) -> list[asyncpg.Record]:
-    """The latest raw_document revision per external_id for one feed.
-
-    This is what a replay pass parses: not the full history `raw_document`
-    doubles as, just where each external_id currently stands. `DISTINCT ON
-    (external_id) ... ORDER BY external_id, fetched_at DESC` matches
-    `raw_document_lookup`'s column order exactly, so this is an index-only
-    walk, not a sort.
-    """
+async def latest_raw(conn: Connection, source: str) -> list[asyncpg.Record]:
+    """Return the newest bronze revision per source-local posting identity."""
     return await conn.fetch(
         """
-        SELECT DISTINCT ON (external_id)
-            id, external_id, kind, payload_json, payload_text, envelope, poll_run_id, fetched_at
-        FROM raw_document
-        WHERE feed_id = $1
-        ORDER BY external_id, fetched_at DESC
+        SELECT DISTINCT ON (source_key) id, source_key, data, data_hash, fetched_at
+        FROM raw_posting
+        WHERE source = $1
+        ORDER BY source_key, fetched_at DESC, id DESC
         """,
-        feed_id,
-    )
-
-
-# --------------------------------------------------------------------------
-# companies
-# --------------------------------------------------------------------------
-
-
-async def resolve_company(conn: Connection, raw: str) -> int | None:
-    """One lookup against company_alias on lower(btrim(raw)).
-
-    A hit proves the company is known. A miss proves nothing, which is why the
-    caller follows it with `note_unknown_company` rather than creating one.
-    """
-    row = await conn.fetchrow(
-        "SELECT company_id FROM company_alias WHERE alias_norm = lower(btrim($1))", raw
-    )
-    return row["company_id"] if row is not None else None
-
-
-async def note_unknown_company(conn: Connection, raw: str, source: str) -> None:
-    """Park an unresolved name in company_new for later resolution."""
-    await conn.execute(
-        """
-        INSERT INTO company_new (name, source)
-        VALUES (lower(btrim($1)), $2)
-        ON CONFLICT (name) DO NOTHING
-        """,
-        raw,
         source,
     )
 
 
-# --------------------------------------------------------------------------
-# catalog -- schema.sql's company/alias/token, written by `run --sync-catalog`
-#
-# These are the schema.sql spelling of a company, distinct from the
-# company_alias/company_new pair above. `catalog_sync` decides what the rows
-# should contain; everything here is mechanics.
-# --------------------------------------------------------------------------
+async def set_feed_enabled(
+    conn: Connection, *, source: str, key: str, enabled: bool
+) -> int | None:
+    """Operator on/off switch for one feed; None when the feed is unknown."""
+    return await conn.fetchval(
+        "UPDATE feed SET enabled = $3 WHERE source = $1 AND key = $2 RETURNING id",
+        source,
+        key,
+        enabled,
+    )
 
 
-async def upsert_catalog_company(
-    conn: Connection, alias_norm: str, name: str, domain: str | None
+async def set_feeds_enabled(
+    conn: Connection, identities: list[tuple[str, str]], *, enabled: bool
 ) -> int:
-    """Find-or-create one company, keyed by its alias. Returns the company id.
+    """Operator on/off switch for many feeds at once; returns rows affected.
 
-    `alias` is the natural key because `company` has none: `id` is generated
-    and `domain` is NULL for the 2589 catalog entries with no known website.
+    Enabling imports any feed PostgreSQL has never seen, because the vendor
+    switch on the Feeds page is useless otherwise: a catalog-only source like
+    Ashby has no rows to flip until the first import. Unlike
+    :func:`upsert_registry_feed` the conflict branch writes ``enabled`` through
+    -- this is an explicit operator flip, not a registry sync, so it must
+    resurrect a feed that was previously switched off.
 
-    A known domain is never overwritten with NULL -- a later catalog pass that
-    lost the domain must not erase a resolved one, and COALESCE is cheaper than
-    reasoning about which pass ran last.
+    Disabling never inserts: a feed absent from PostgreSQL is already off.
     """
-    row = await conn.fetchrow(
-        "SELECT company_id FROM alias WHERE alias_norm = $1", alias_norm
-    )
-    if row is not None:
-        company_id = row["company_id"]
-        await conn.execute(
-            "UPDATE company SET name = $2, domain = COALESCE($3, domain) WHERE id = $1",
-            company_id,
-            name,
-            domain,
+    if not identities:
+        return 0
+    sources = [source for source, _ in identities]
+    keys = [key for _, key in identities]
+    if not enabled:
+        result = await conn.execute(
+            """
+            UPDATE feed SET enabled = false
+            WHERE (source, key) IN (SELECT * FROM unnest($1::text[], $2::text[]))
+            """,
+            sources,
+            keys,
         )
-        return company_id
-
-    created = await conn.fetchrow(
-        "INSERT INTO company (name, domain) VALUES ($1, $2) RETURNING id", name, domain
-    )
-    company_id = created["id"]
+        return int(result.rsplit(" ", 1)[-1])
+    feed_ids = [
+        row["id"]
+        for row in await conn.fetch(
+            """
+            INSERT INTO feed(source, key, enabled)
+            SELECT source, key, true
+            FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
+            ON CONFLICT (source, key) DO UPDATE SET enabled = true
+            RETURNING id
+            """,
+            sources,
+            keys,
+        )
+    ]
     await conn.execute(
         """
-        INSERT INTO alias (alias_norm, company_id, alias)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (alias_norm) DO NOTHING
+        INSERT INTO schedule(feed_id)
+        SELECT unnest($1::bigint[]) ON CONFLICT (feed_id) DO NOTHING
+        """,
+        feed_ids,
+    )
+    return len(feed_ids)
+
+
+async def set_schedule_interval(
+    conn: Connection, feed_id: int, interval_s: int
+) -> bool:
+    """Operator cadence change. Runtime schedule state is left untouched."""
+    result = await conn.execute(
+        "UPDATE schedule SET interval_s = $2 WHERE feed_id = $1",
+        feed_id,
+        interval_s,
+    )
+    return result == "UPDATE 1"
+
+
+async def set_schedule_paused(conn: Connection, feed_id: int, paused: bool) -> bool:
+    """Hold or release one feed's polling without touching ``feed.enabled``.
+
+    A held feed is skipped by both queue readers while staying enabled, so it
+    keeps its place in every listing rather than disappearing the way disabling
+    it would. ``due_at`` is deliberately untouched: it goes stale in the past for
+    the duration of the hold, which makes releasing one immediately due.
+    """
+    result = await conn.execute(
+        """
+        UPDATE schedule
+        SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END
+        WHERE feed_id = $1
+        """,
+        feed_id,
+        paused,
+    )
+    return result == "UPDATE 1"
+
+
+async def resolve_company(conn: Connection, raw: str) -> int | None:
+    exact = unicodedata.normalize("NFKC", raw).strip().casefold()
+    slug = re.sub(r"[^a-z0-9]+", "-", exact).strip("-")
+    without_suffix = re.sub(
+        r"-(?:inc|incorporated|llc|ltd|limited|corp|corporation|co|company)$",
+        "",
+        slug,
+    )
+    candidates = list(
+        dict.fromkeys(value for value in (exact, slug, without_suffix) if value)
+    )
+    row = await conn.fetchrow(
+        """
+        SELECT company_id
+        FROM alias
+        WHERE alias_norm = ANY($1::text[])
+        ORDER BY array_position($1::text[], alias_norm)
+        LIMIT 1
+        """,
+        candidates,
+    )
+    return row["company_id"] if row is not None else None
+
+
+async def touch_source_postings(conn: Connection, source: str, now: datetime) -> int:
+    result = await conn.execute(
+        "UPDATE job_posting SET last_seen_at = $2 WHERE source = $1", source, now
+    )
+    return int(result.rsplit(" ", 1)[-1])
+
+
+async def upsert_job_posting(
+    conn: Connection,
+    *,
+    source: str,
+    source_key: str,
+    company_id: int,
+    values: dict[str, Any],
+    content_hash: str,
+    raw_id: int,
+    seen_at: datetime,
+) -> tuple[int, bool, bool]:
+    """Upsert the exact canonical projection declared by ``job_posting``.
+
+    Returns ``(id, changed, created)``. The two flags differ only when a posting
+    we already had comes back with new content: ``changed`` is true, ``created``
+    is false. That gap is the whole distinction between churn and arrivals, and
+    ``poll_observation.new_postings`` is defined on ``created`` alone.
+    """
+    existing = await conn.fetchrow(
+        "SELECT id, content_hash FROM job_posting WHERE source = $1 AND source_key = $2",
+        source,
+        source_key,
+    )
+    changed = existing is None or existing["content_hash"] != content_hash
+    row = await conn.fetchrow(
+        """
+        INSERT INTO job_posting(
+            source, source_key, company_id, title, description, location_text,
+            source_url, apply_url, posted_at, attributes, status,
+            last_seen_at, content_hash, raw_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ON CONFLICT (source, source_key) DO UPDATE SET
+            company_id = EXCLUDED.company_id,
+            title = EXCLUDED.title,
+            description = EXCLUDED.description,
+            location_text = EXCLUDED.location_text,
+            source_url = EXCLUDED.source_url,
+            apply_url = EXCLUDED.apply_url,
+            posted_at = EXCLUDED.posted_at,
+            -- Merge rather than replace: enrichment keys written after upsert (e.g., opportunity_type) must not be clobbered on re-poll.
+            attributes = job_posting.attributes || EXCLUDED.attributes,
+            status = EXCLUDED.status,
+            last_seen_at = EXCLUDED.last_seen_at,
+            content_hash = EXCLUDED.content_hash,
+            raw_id = EXCLUDED.raw_id
+        RETURNING id
+        """,
+        source,
+        source_key,
+        company_id,
+        values["title"],
+        values.get("description"),
+        values.get("location_text"),
+        values.get("source_url"),
+        values.get("apply_url"),
+        values.get("posted_at"),
+        values["attributes"],
+        values["status"],
+        seen_at,
+        content_hash,
+        raw_id,
+    )
+    return row["id"], changed, existing is None
+
+
+# Gold projection -----------------------------------------------------------
+
+
+async def dedup_candidates(conn: Connection) -> list[asyncpg.Record]:
+    """Silver columns the gold dedup step keys and gathers evidence on."""
+    return await conn.fetch(
+        """
+        SELECT id, company_id, source, title, location_text, description,
+               source_url, apply_url
+        FROM job_posting
+        ORDER BY id
+        """
+    )
+
+
+async def replace_dup_groups(
+    conn: Connection, *, groups: list[dict[str, Any]], members: list[dict[str, Any]]
+) -> int:
+    """Rebuild every derived duplicate group and return how many were written.
+
+    Destructive by design: gold groups are a pure function of ``job_posting``.
+    Human judgements must never live here -- a rebuild erases them.
+
+    ``job_posting.dup_group_id`` carries no ``ON DELETE`` action, so membership
+    is cleared before the groups it references are removed.
+    """
+    await conn.execute(
+        "UPDATE job_posting SET dup_group_id = NULL WHERE dup_group_id IS NOT NULL"
+    )
+    await conn.execute("DELETE FROM job_posting_dup_group")
+    if not groups:
+        return 0
+    await conn.execute(
+        """
+        INSERT INTO job_posting_dup_group(id, primary_posting_id, state, evidence)
+        SELECT g.id, NULL, g.state, g.evidence
+        FROM jsonb_to_recordset($1::jsonb) AS g(id uuid, state text, evidence jsonb)
+        """,
+        groups,
+    )
+    await conn.execute(
+        """
+        UPDATE job_posting p SET dup_group_id = m.group_id
+        FROM jsonb_to_recordset($1::jsonb) AS m(posting_id bigint, group_id uuid)
+        WHERE p.id = m.posting_id
+        """,
+        members,
+    )
+    return len(groups)
+
+
+# Registry projection -------------------------------------------------------
+
+
+async def clear_registry_company_domains(conn: Connection, company_ids: list[int]) -> None:
+    await conn.execute(
+        "UPDATE company SET domain = NULL, domain_verified_at = NULL WHERE id = ANY($1::bigint[])",
+        company_ids,
+    )
+
+
+async def upsert_registry_company(
+    conn: Connection,
+    *,
+    company_id: int,
+    name: str,
+    domain: str | None,
+    domain_verified_at: datetime | None,
+    description: str,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO company(id, name, domain, domain_verified_at, description)
+        OVERRIDING SYSTEM VALUE
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            domain = EXCLUDED.domain,
+            domain_verified_at = EXCLUDED.domain_verified_at,
+            description = EXCLUDED.description
+        """,
+        company_id,
+        name,
+        domain,
+        domain_verified_at,
+        description,
+    )
+
+
+async def upsert_registry_alias(
+    conn: Connection, *, alias_norm: str, company_id: int
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO alias(alias_norm, company_id, alias)
+        VALUES ($1, $2, $1)
+        ON CONFLICT (alias_norm) DO UPDATE SET
+            company_id = EXCLUDED.company_id,
+            alias = EXCLUDED.alias
         """,
         alias_norm,
         company_id,
-        name,
     )
-    return company_id
 
 
-async def upsert_catalog_token(
-    conn: Connection, ats: str, token: str, company_id: int, status: str
-) -> None:
-    """Write one endpoint. Re-linking is allowed; re-activating is not.
+async def prune_registry_aliases(conn: Connection, aliases: list[str]) -> None:
+    await conn.execute("DELETE FROM alias WHERE alias_norm <> ALL($1::text[])", aliases)
 
-    `status` is set on insert and never on update, for the same reason
-    `upsert_feed` refuses to overwrite `config`: it is the operator's column.
-    Deactivating a company means flipping its tokens to 'inactive', and a
-    routine catalog re-sync must not undo that.
-    """
+
+async def align_company_identity(conn: Connection) -> None:
     await conn.execute(
         """
-        INSERT INTO token (ats, token, company_id, status)
+        WITH identity_sequence AS (
+            SELECT pg_get_serial_sequence('company', 'id')::regclass AS sequence_id
+        )
+        SELECT setval(
+            sequence_id,
+            GREATEST((SELECT MAX(id) FROM company), pg_sequence_last_value(sequence_id)),
+            true
+        )
+        FROM identity_sequence
+        """
+    )
+
+
+async def upsert_registry_token(
+    conn: Connection, *, source: str, key: str, company_id: int, status: str
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO token(ats, token, company_id, status)
         VALUES ($1, $2, $3, $4)
-        ON CONFLICT (ats, token) DO UPDATE SET company_id = EXCLUDED.company_id
+        ON CONFLICT (ats, token) DO UPDATE SET
+            company_id = EXCLUDED.company_id,
+            status = EXCLUDED.status
         """,
-        ats,
-        token,
+        source,
+        key,
         company_id,
         status,
     )
 
 
-# --------------------------------------------------------------------------
-# L2 canonical
-# --------------------------------------------------------------------------
+async def upsert_registry_feed(
+    conn: Connection, *, source: str, key: str, enabled: bool
+) -> int:
+    """Insert a registry feed, seeding ``enabled`` only on first sight.
 
-_POSTING_COLUMNS = (
-    "title",
-    "title_normalized",
-    "url_posting",
-    "apply_url",
-    "location_raw",
-    "description_html",
-    "requisition_id",
-    "employment_type",
-    "workplace_type_raw",
-    "published_at",
-    "published_at_precision",
-    "source_updated_at",
-    "deadline_at",
-    "source_active",
-    "company_raw",
-    "content_hash",
-    "locations_extra",
-    "content_sections",
-    "source_extra",
-)
-
-
-def _posting_values(posting: Posting, *, title_normalized: str, content_hash: str) -> tuple:
-    return (
-        posting.title,
-        title_normalized,
-        posting.url_posting,
-        posting.apply_url,
-        posting.location_raw,
-        posting.description_html,
-        posting.requisition_id,
-        posting.employment_type,
-        posting.workplace_type_raw,
-        posting.published_at,
-        posting.published_at_precision,
-        posting.source_updated_at,
-        posting.deadline_at,
-        posting.source_active,
-        posting.company_raw,
-        content_hash,
-        posting.locations_extra,
-        posting.content_sections,
-        posting.source_extra,
-    )
-
-
-async def upsert_posting(
-    conn: Connection,
-    feed_id: int,
-    company_id: int,
-    posting: Posting,
-    *,
-    run_id: int,
-    title_normalized: str,
-    content_hash: str,
-) -> tuple[int, bool]:
-    """Insert or update on (feed_id, external_id). Returns (id, changed).
-
-    `title_normalized` and `content_hash` are arguments, not computed here.
-    Normalization must stay byte-identical to seeds/gen_umbrellas.py
-    normalize_title() or role matching silently misses, so exactly one
-    engine-owned function may produce it -- and store.py, which also serves
-    reconcile and the viewer, is not that function's home.
-
-    An unchanged posting must touch only last_seen_at / last_seen_poll_run_id;
-    the table is fillfactor 80 so those stay HOT updates and never touch an
-    index.
+    The registry no longer carries an ``enabled`` flag, so ``enabled`` here is
+    just the birth default for a feed PostgreSQL has never seen. Afterwards the
+    column is operator state owned by the inspector, and re-syncing the registry
+    must not resurrect a feed the operator switched off. The conflict branch is
+    therefore a no-op write on ``source``, which leaves ``enabled`` untouched
+    while still returning the existing row's id (``DO NOTHING`` would return no
+    row at all).
     """
-    existing = await conn.fetchrow(
-        "SELECT id, content_hash FROM posting WHERE feed_id = $1 AND external_id = $2",
-        feed_id,
-        posting.external_id,
-    )
-
-    if existing is None:
-        columns = ("feed_id", "company_id", "external_id", *_POSTING_COLUMNS, "last_seen_poll_run_id")
-        values = (
-            feed_id,
-            company_id,
-            posting.external_id,
-            *_posting_values(posting, title_normalized=title_normalized, content_hash=content_hash),
-            run_id,
-        )
-        placeholders = ", ".join(f"${i}" for i in range(1, len(values) + 1))
-        row = await conn.fetchrow(
-            f"INSERT INTO posting ({', '.join(columns)}) VALUES ({placeholders}) RETURNING id",
-            *values,
-        )
-        return row["id"], True
-
-    if existing["content_hash"] == content_hash:
-        await touch_posting(conn, existing["id"], run_id, None)
-        return existing["id"], False
-
-    set_clause = ", ".join(f"{col} = ${i}" for i, col in enumerate(_POSTING_COLUMNS, start=2))
-    values = _posting_values(posting, title_normalized=title_normalized, content_hash=content_hash)
-    await conn.execute(
-        f"""
-        UPDATE posting SET
-            {set_clause},
-            last_seen_at = now(),
-            last_seen_poll_run_id = ${len(values) + 2}
-        WHERE id = $1
-        """,
-        existing["id"],
-        *values,
-        run_id,
-    )
-    return existing["id"], True
-
-
-async def touch_posting(conn: Connection, posting_id: int, run_id: int, now: Any) -> None:
-    """Record 'still there' without rewriting the row's content columns."""
-    if now is None:
-        await conn.execute(
-            "UPDATE posting SET last_seen_at = now(), last_seen_poll_run_id = $2 WHERE id = $1",
-            posting_id,
-            run_id,
-        )
-    else:
-        await conn.execute(
-            "UPDATE posting SET last_seen_at = $2, last_seen_poll_run_id = $3 WHERE id = $1",
-            posting_id,
-            now,
-            run_id,
-        )
-
-
-async def close_posting(
-    conn: Connection,
-    posting_id: int,
-    *,
-    reason: str,  # 'source_flag' | 'absent_from_poll' | 'manual'
-    at: Any,
-) -> None:
-    """Set status='closed' plus closed_at. The CHECK ties the two together."""
-    await conn.execute(
-        "UPDATE posting SET status = 'closed', closed_at = $2, closed_reason = $3 WHERE id = $1",
-        posting_id,
-        at,
-        reason,
-    )
-
-
-async def open_postings_missed(conn: Connection, feed_id: int, run_id: int) -> list[int]:
-    """Open postings of this feed that the given run did not see.
-
-    The closure sweep's input, served by `posting_sweep_idx`. Returning ids and
-    not closing them is the point: whether absence *means* closed is
-    reconcile's decision, gated on feed.complete, feed.closes and a run that
-    finished 'ok'.
-    """
-    rows = await conn.fetch(
+    feed_id = await conn.fetchval(
         """
-        SELECT id FROM posting
-        WHERE feed_id = $1 AND status = 'open' AND last_seen_poll_run_id IS DISTINCT FROM $2
+        INSERT INTO feed(source, key, enabled)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
+        RETURNING id
         """,
-        feed_id,
-        run_id,
+        source,
+        key,
+        enabled,
     )
-    return [row["id"] for row in rows]
+    await conn.execute(
+        "INSERT INTO schedule(feed_id) VALUES ($1) ON CONFLICT (feed_id) DO NOTHING",
+        feed_id,
+    )
+    return int(feed_id)
 
 
-# --------------------------------------------------------------------------
-# labels and facts -- no destination tables yet; see the DDL in the plan
-# --------------------------------------------------------------------------
-
-
-async def put_label(conn: Connection, posting_id: int, label: Label) -> None:
-    """Attach a Label. Higher provenance wins per (posting, name).
-
-    Unimplemented until the `label` table exists. Sources may already emit
-    Labels; the router drops them until then.
-    """
-    raise NotImplementedError
-
-
-async def put_fact(conn: Connection, company_id: int, fact: Fact) -> None:
-    """Attach a company Fact. Unimplemented until `company_fact` exists."""
-    raise NotImplementedError
+async def reconcile_registry_inventory(
+    conn: Connection, identities: list[dict[str, str]]
+) -> None:
+    """Disable feeds and tokens no longer present without deleting history."""
+    await conn.execute(
+        """
+        UPDATE feed f SET enabled = false
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM jsonb_to_recordset($1::jsonb) AS incoming(source text, key text)
+            WHERE incoming.source = f.source AND incoming.key = f.key
+        )
+        """,
+        identities,
+    )
+    await conn.execute(
+        """
+        UPDATE token t SET status = 'inactive'
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM jsonb_to_recordset($1::jsonb) AS incoming(source text, key text)
+            WHERE incoming.source = t.ats AND incoming.key = t.token
+        )
+        """,
+        identities,
+    )
