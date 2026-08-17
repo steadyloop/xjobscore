@@ -29,3 +29,4 @@ ats-optimizations.md
 /xjobscore.egg-info
 .env.example
 /raw
+/docs
