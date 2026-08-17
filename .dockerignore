@@ -26,7 +26,8 @@ node_modules
 frontend/node_modules
 dist
 build
-*.egg-info
+**/build/
+**/*.egg-info/
 .coverage
 .coverage.*
 coverage
