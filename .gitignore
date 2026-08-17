@@ -28,3 +28,4 @@ ats-optimizations.md
 /xjobscore/registry/sample-resume
 /xjobscore.egg-info
 .env.example
+/raw
