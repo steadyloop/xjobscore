@@ -74,8 +74,8 @@ class Feed:
     A source reads ``key``, ``config``, and ``etag``. Company and scheduling
     fields are carried for the orchestrator and ignored by harvesters.
 
-    Runtime configuration comes from the validated registry. Scheduling state
-    comes from schema.sql's ``schedule`` row; only the ETag is exposed to a
+    Runtime configuration comes from the validated registry. Scheduler state
+    comes from schema.sql's ``feed`` row; only the ETag is exposed to a
     source because it is the only conditional-request validator the schema
     persists.
     """
@@ -127,8 +127,8 @@ class Record:
     items: list[Item] = field(default_factory=list)
     envelope: dict = field(default_factory=dict)
     truncated: bool = False
-    http_status: int | None = None  # diagnostics/logging; schedule has no status column
-    etag: str | None = None  # response ETag -> schedule.etag
+    http_status: int | None = None  # diagnostics/logging; feed has no status column
+    etag: str | None = None  # response ETag -> feed.etag
     # Inspector-only incremental harvests may carry forward a detail payload
     # whose stable list/detail identity fields prove it unchanged. Production
     # harvesters leave this at zero; it is diagnostics only.

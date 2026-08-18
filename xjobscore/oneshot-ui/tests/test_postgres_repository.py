@@ -49,7 +49,6 @@ async def test_schema_sql_repository_round_trip() -> None:
         feed_id = await pool.fetchval(
             "INSERT INTO feed(source, key) VALUES ($1, 'board') RETURNING id", source
         )
-        await pool.execute("INSERT INTO schedule(feed_id) VALUES ($1)", feed_id)
 
         jobs = await repository.list_jobs(opportunity_types=["internship"])
         assert jobs["total"] == 1

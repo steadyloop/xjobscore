@@ -5,8 +5,8 @@ polling into *doing* it. Everything else in the inspector -- ``service.py``'s
 ``fetch_once``, the ``inspector`` schema -- is deliberately side-effect-free;
 ``SchedulerRunner`` is not. It calls the exact ``run.cycle`` (and therefore
 ``run.poll``) path cron would, against the exact ``public`` tables:
-``raw_posting``, ``job_posting``, ``poll_observation``, and the runtime
-``schedule`` columns run.py's workers own. See ``inspector/__init__.py`` and
+``raw_posting``, ``job_posting``, ``poll_observation``, and the runtime feed
+columns run.py's workers own. See ``inspector/__init__.py`` and
 ``inspector/README.md`` for the boundary this redraws.
 
 There are two entry points into that path. The tick loop below runs
@@ -316,11 +316,9 @@ class SchedulerRunner:
         row = await conn.fetchrow(
             """
             SELECT f.enabled,
-                   s.feed_id IS NOT NULL AS scheduled,
-                   s.paused_at,
-                   s.hold_until > now() AS held
+                   f.paused_at,
+                   f.hold_until > now() AS held
             FROM feed f
-            LEFT JOIN schedule s ON s.feed_id = f.id
             WHERE f.source = $1 AND f.key = $2
             """,
             source,
@@ -328,8 +326,6 @@ class SchedulerRunner:
         )
         if row is None:
             raise FeedNotInPostgres(f"{source}:{key}")
-        if not row["scheduled"]:
-            raise FeedNotInPostgres(f"{source}:{key} has no schedule row")
         if not row["enabled"]:
             raise PollNowRefused(
                 f"{source}:{key} is disabled; enable it before polling",

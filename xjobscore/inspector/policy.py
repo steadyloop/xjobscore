@@ -1,8 +1,8 @@
 """PostgreSQL policy reads and writes -- the inspector's only PG coupling.
 
 The inspector may WRITE four operator-owned things: ``feed.enabled``,
-``schedule.interval_s``, ``schedule.paused_at``, and ``scheduler_control.running``
-(plus feed import via the registry upsert). The runtime columns on ``schedule``
+``feed.interval_s``, ``feed.paused_at``, and ``scheduler_control.running``
+(plus feed import via the registry upsert). The runtime columns on ``feed``
 -- etag, res_hash, strikes, hold_until -- belong to the production worker and
 are read here for display only. Writing them would corrupt run.py's change
 detection and 304 handling.
@@ -29,7 +29,7 @@ module's docstring for the two-level gate. That runner is the one place the
 inspector's PG coupling widens past policy: through its tick loop and its
 on-demand ``poll_feed_now`` (the Scheduler page's Fetch-all), it runs run.py's
 own worker path against ``raw_posting``, ``job_posting``,
-``poll_observation``, and the runtime ``schedule`` columns this file otherwise
+``poll_observation``, and the runtime ``feed`` columns this file otherwise
 treats as read-only.
 
 When no DSN is configured or PostgreSQL is unreachable the inspector runs in
@@ -159,11 +159,10 @@ class PolicyStore:
                 rows = await conn.fetch(
                     """
                     SELECT f.id, f.source, f.key, f.enabled,
-                           s.interval_s, s.strikes, s.due_at, s.hold_until,
-                           s.paused_at, s.last_poll_at, s.last_change_at,
-                           s.etag IS NOT NULL AS has_etag
+                           f.interval_s, f.strikes, f.due_at, f.hold_until,
+                           f.paused_at, f.last_poll_at, f.last_change_at,
+                           f.etag IS NOT NULL AS has_etag
                     FROM feed f
-                    JOIN schedule s ON s.feed_id = f.id
                     """
                 )
         except Exception as exc:
@@ -231,7 +230,7 @@ class PolicyStore:
                 raise FeedNotInPostgres(f"{source}:{key}")
             updated = await store.set_schedule_interval(conn, feed_id, interval_s)
         if not updated:
-            raise FeedNotInPostgres(f"{source}:{key} has no schedule row")
+            raise FeedNotInPostgres(f"{source}:{key}")
         return {"feed_id": feed_id, "interval_s": interval_s}
 
     async def set_paused(self, source: str, key: str, paused: bool) -> dict[str, Any]:
@@ -250,7 +249,7 @@ class PolicyStore:
                 raise FeedNotInPostgres(f"{source}:{key}")
             updated = await store.set_schedule_paused(conn, feed_id, paused)
         if not updated:
-            raise FeedNotInPostgres(f"{source}:{key} has no schedule row")
+            raise FeedNotInPostgres(f"{source}:{key}")
         return {"feed_id": feed_id, "paused": paused}
 
     async def poll_now(self, source: str, key: str) -> dict[str, Any]:
@@ -283,11 +282,9 @@ class PolicyStore:
             row = await conn.fetchrow(
                 """
                 SELECT f.id, f.enabled,
-                       s.feed_id IS NOT NULL AS scheduled,
-                       s.paused_at,
-                       s.hold_until > now() AS held
+                       f.paused_at,
+                       f.hold_until > now() AS held
                 FROM feed f
-                LEFT JOIN schedule s ON s.feed_id = f.id
                 WHERE f.source = $1 AND f.key = $2
                 """,
                 source,
@@ -295,8 +292,6 @@ class PolicyStore:
             )
             if row is None:
                 raise FeedNotInPostgres(f"{source}:{key}")
-            if not row["scheduled"]:
-                raise FeedNotInPostgres(f"{source}:{key} has no schedule row")
             if not row["enabled"]:
                 # claim_due_feeds filters on f.enabled (store.py:109), so this
                 # used to answer 200 and then never poll.
@@ -317,8 +312,8 @@ class PolicyStore:
             feed_id = row["id"]
             updated = await conn.fetchval(
                 """
-                UPDATE schedule SET due_at = now() - $2::interval
-                WHERE feed_id = $1 AND paused_at IS NULL
+                UPDATE feed SET due_at = now() - $2::interval
+                WHERE id = $1 AND paused_at IS NULL
                 RETURNING due_at
                 """,
                 feed_id,
@@ -343,12 +338,10 @@ class PolicyStore:
             updated = await conn.fetchval(
                 """
                 WITH bumped AS (
-                    UPDATE schedule s SET due_at = now()
-                    FROM feed f
-                    WHERE s.feed_id = f.id
-                      AND f.enabled
-                      AND s.paused_at IS NULL
-                      AND s.due_at > now()
+                    UPDATE feed f SET due_at = now()
+                    WHERE f.enabled
+                      AND f.paused_at IS NULL
+                      AND f.due_at > now()
                       AND ($1::text IS NULL OR f.source = $1)
                     RETURNING 1
                 )

@@ -183,7 +183,7 @@ def create_app(
         and disabling it is what takes it off. Nothing on the Scheduler widens
         or narrows that set.
 
-        A paused feed (``schedule.paused_at`` set, ``enabled`` still true)
+        A paused feed (``feed.paused_at`` set, ``enabled`` still true)
         deliberately stays visible. That is the entire point of pausing rather
         than disabling: holding a feed's polling should not cost you the ability
         to see it, read its history, or resume it.

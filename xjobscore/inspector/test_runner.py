@@ -358,11 +358,11 @@ async def test_poll_feed_now_degraded_postgres(monkeypatch):
 @pytest.mark.parametrize(
     ("diagnostic_row", "expected_reason"),
     [
-        ({"enabled": False, "scheduled": True, "paused_at": None, "held": False}, "feed_disabled"),
-        ({"enabled": True, "scheduled": True, "paused_at": "x", "held": False}, "feed_paused"),
-        ({"enabled": True, "scheduled": True, "paused_at": None, "held": True}, "already_polling"),
+        ({"enabled": False, "paused_at": None, "held": False}, "feed_disabled"),
+        ({"enabled": True, "paused_at": "x", "held": False}, "feed_paused"),
+        ({"enabled": True, "paused_at": None, "held": True}, "already_polling"),
         # A pure race: eligible on re-read, but the claim itself lost.
-        ({"enabled": True, "scheduled": True, "paused_at": None, "held": False}, "already_polling"),
+        ({"enabled": True, "paused_at": None, "held": False}, "already_polling"),
     ],
 )
 async def test_poll_feed_now_refuses_unclaimable(monkeypatch, diagnostic_row, expected_reason):
@@ -381,13 +381,7 @@ async def test_poll_feed_now_refuses_unclaimable(monkeypatch, diagnostic_row, ex
     assert excinfo.value.reason == expected_reason
 
 
-@pytest.mark.parametrize(
-    "diagnostic_row",
-    [
-        None,  # no feed row at all
-        {"enabled": True, "scheduled": False, "paused_at": None, "held": False},
-    ],
-)
+@pytest.mark.parametrize("diagnostic_row", [None])  # no feed row at all
 async def test_poll_feed_now_unknown_feed(monkeypatch, diagnostic_row):
     conn = PollConn(diagnostic_row=diagnostic_row)
     runner = make_runner(FakePolicy(running=True, pool=PollPool(conn)))

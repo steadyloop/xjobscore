@@ -1,4 +1,4 @@
-"""Schema-aligned registry sync, scheduler, fetch, bronze, and silver pass.
+"""Schema-aligned registry seed, scheduler, fetch, bronze, and silver pass.
 
 One invocation runs one cycle and exits. Scheduling repetition is deliberately
 left to cron or a launch agent rather than an internal sleep loop.
@@ -32,12 +32,13 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "Config",
     "cycle",
+    "fetch_all",
     "load_config",
     "main",
     "parse_all",
     "poll",
     "run_enrichments",
-    "sync_registry",
+    "seed_registry",
 ]
 
 
@@ -48,7 +49,9 @@ class Config:
     batch: int = 20
     dry_run: bool = False
     parse: bool = False
-    sync_registry: bool = False
+    seed: bool = False
+    fetch_all: bool = False
+    concurrency: int = 8
     lease_seconds: int = 3600
     enrich: str | None = None
 
@@ -87,7 +90,23 @@ def load_config(argv: Sequence[str]) -> Config:
     parser.add_argument("--lease-seconds", type=int)
     parser.add_argument("--dry-run", action="store_true", default=None)
     parser.add_argument("--parse", action="store_true", default=None)
-    parser.add_argument("--sync-registry", action="store_true", default=None)
+    parser.add_argument(
+        "--fetch-all",
+        action="store_true",
+        default=None,
+        help="poll every currently claimable feed, ignoring its due time",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        help="maximum simultaneous polls for --fetch-all; default: 8",
+    )
+    parser.add_argument(
+        "--seed",
+        action="store_true",
+        default=None,
+        help="seed the TOML registry into PostgreSQL, then exit without fetching",
+    )
     parser.add_argument(
         "--enrich",
         nargs="?",
@@ -106,6 +125,13 @@ def load_config(argv: Sequence[str]) -> Config:
     if enrich is not None and enrich not in known_enrichments:
         choices = ", ".join(step.name for step in gold.steps())
         parser.error(f"unknown enrichment {enrich!r}; choose {choices}")
+    concurrency = (
+        args.concurrency
+        if args.concurrency is not None
+        else int(os.environ.get("XJOBSCORE_FETCH_ALL_CONCURRENCY", "8"))
+    )
+    if concurrency < 1:
+        parser.error("--concurrency must be at least 1")
     return Config(
         dsn=dsn,
         user_agent=args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or "xjobscore/0.1",
@@ -115,9 +141,11 @@ def load_config(argv: Sequence[str]) -> Config:
         else int(os.environ.get("XJOBSCORE_LEASE_SECONDS", "3600")),
         dry_run=args.dry_run if args.dry_run is not None else _env_bool("XJOBSCORE_DRY_RUN", False),
         parse=args.parse if args.parse is not None else _env_bool("XJOBSCORE_PARSE", False),
-        sync_registry=args.sync_registry
-        if args.sync_registry is not None
-        else _env_bool("XJOBSCORE_SYNC_REGISTRY", False),
+        seed=args.seed if args.seed is not None else _env_bool("XJOBSCORE_SEED", False),
+        fetch_all=args.fetch_all
+        if args.fetch_all is not None
+        else _env_bool("XJOBSCORE_FETCH_ALL", False),
+        concurrency=concurrency,
         enrich=enrich,
     )
 
@@ -326,6 +354,88 @@ async def cycle(
     return len(feeds)
 
 
+@dataclass(frozen=True, slots=True)
+class FetchAllResult:
+    eligible: int = 0
+    polled: int = 0
+    skipped: int = 0
+    errors: int = 0
+    partial: int = 0
+
+
+async def fetch_all(
+    pool: Pool,
+    net: Net,
+    cfg: Config,
+    *,
+    index: dict[tuple[str, str], object] | None = None,
+    types: dict[str, str] | None = None,
+) -> FetchAllResult:
+    """Poll every currently claimable feed with bounded shared concurrency.
+
+    This is the command-line counterpart to the inspector's Fetch all.  The
+    inventory intentionally ignores schedules, but every live task claims its
+    individual feed immediately before polling so it cannot override a pause,
+    disable, or concurrent worker lease.
+    """
+    index = index if index is not None else _registry_index()
+    types = types if types is not None else source_types()
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        candidates = await store.fetchable_feeds(conn, now)
+
+    cursor = 0
+    cursor_lock = asyncio.Lock()
+
+    async def next_feed() -> Feed | None:
+        nonlocal cursor
+        async with cursor_lock:
+            if cursor == len(candidates):
+                return None
+            feed = candidates[cursor]
+            cursor += 1
+            return feed
+
+    async def one(candidate: Feed) -> str:
+        if cfg.dry_run:
+            try:
+                feed = _hydrate(candidate, index, types)
+                await sources.get(feed.source)(feed, net)
+            except Exception:
+                logger.exception("fetch-all harvest failed source=%s", store.source_instance(candidate))
+                return "error"
+            return "ok"
+
+        claimed_at = datetime.now(timezone.utc)
+        async with pool.acquire() as conn:
+            claimed = await store.claim_feed(
+                conn,
+                source=candidate.source,
+                key=candidate.key,
+                now=claimed_at,
+                lease_seconds=cfg.lease_seconds,
+            )
+        if claimed is None:
+            return "skipped"
+        outcome = await poll(pool, net, _hydrate(claimed, index, types), claimed_at)
+        return outcome
+
+    outcomes: list[str] = []
+
+    async def worker() -> None:
+        while candidate := await next_feed():
+            outcomes.append(await one(candidate))
+
+    await asyncio.gather(*(worker() for _ in range(min(cfg.concurrency, len(candidates)))))
+    return FetchAllResult(
+        eligible=len(candidates),
+        polled=sum(outcome in {"ok", "not_modified"} for outcome in outcomes),
+        skipped=outcomes.count("skipped"),
+        errors=outcomes.count("error"),
+        partial=outcomes.count("partial"),
+    )
+
+
 async def parse_all(pool: Pool, cfg: Config) -> list[tuple[Feed, silver.Counts]]:
     index = _registry_index()
     types = source_types()
@@ -357,9 +467,19 @@ async def run_enrichments(
     return results
 
 
-async def sync_registry(pool: Pool, cfg: Config) -> feader.Plan:
+async def seed_registry(pool: Pool, cfg: Config) -> feader.Plan:
+    logger.info("registry seed started dry_run=%s", cfg.dry_run)
     async with pool.acquire() as conn:
-        return await feader.feed(conn, dry_run=cfg.dry_run)
+        plan = await feader.feed(conn, dry_run=cfg.dry_run)
+    logger.info(
+        "registry seed complete companies=%d aliases=%d tokens=%d feeds=%d dry_run=%s",
+        len(plan.companies),
+        plan.alias_count,
+        len(plan.tokens),
+        len(plan.feeds),
+        cfg.dry_run,
+    )
+    return plan
 
 
 async def main(argv: Sequence[str] | None = None) -> int:
@@ -367,14 +487,23 @@ async def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=os.environ.get("XJOBSCORE_LOG_LEVEL", "INFO"))
     pool = await store.connect(cfg.dsn)
     try:
-        plan = await sync_registry(pool, cfg)
-        if cfg.sync_registry:
+        plan = await seed_registry(pool, cfg)
+        if cfg.seed:
             print(
                 f"companies={len(plan.companies)} aliases={plan.alias_count} "
                 f"tokens={len(plan.tokens)} feeds={len(plan.feeds)}"
                 f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
             )
             return 0
+        if cfg.fetch_all:
+            async with Net(user_agent=cfg.user_agent) as net:
+                result = await fetch_all(pool, net, cfg)
+            print(
+                f"eligible={result.eligible} polled={result.polled} "
+                f"partial={result.partial} errors={result.errors} skipped={result.skipped}"
+                f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
+            )
+            return 1 if result.errors else 0
         if cfg.parse:
             for feed, counts in await parse_all(pool, cfg):
                 print(

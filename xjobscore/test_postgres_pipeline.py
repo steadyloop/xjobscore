@@ -74,11 +74,9 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
             company_id,
         )
         feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key) VALUES ($1, $2) RETURNING id", source, key
-        )
-        await conn.execute(
-            "INSERT INTO schedule(feed_id, due_at, hold_until) VALUES ($1, $2, $2)",
-            feed_id,
+            "INSERT INTO feed(source, key, due_at, hold_until) VALUES ($1, $2, $3, $3) RETURNING id",
+            source,
+            key,
             now,
         )
 
@@ -95,9 +93,9 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     async with pool.acquire() as conn:
         claimable = await conn.fetchval(
             """
-            SELECT count(*) FROM schedule s JOIN feed f ON f.id = s.feed_id
-            WHERE f.enabled AND s.paused_at IS NULL AND s.due_at <= $1
-              AND (s.hold_until IS NULL OR s.hold_until <= $1)
+            SELECT count(*) FROM feed f
+            WHERE f.enabled AND f.paused_at IS NULL AND f.due_at <= $1
+              AND (f.hold_until IS NULL OR f.hold_until <= $1)
             """,
             now,
         )
@@ -111,12 +109,12 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     feed = replace(claimed[0], source_type="ATS")
     # The claim must carry the lease it just took, not the value the row
     # held beforehand. A data-modifying CTE's writes are invisible to the
-    # rest of its own query, so reading hold_until off `schedule` instead
+    # rest of its own query, so reading hold_until off `feed` instead
     # of the CTE hands back the stale value and every finish_schedule_*()
     # guard silently misses.
     async with pool.acquire() as conn:
         stored_hold = await conn.fetchval(
-            "SELECT hold_until FROM schedule WHERE feed_id = $1", feed_id
+            "SELECT hold_until FROM feed WHERE id = $1", feed_id
         )
     assert feed.hold_until == stored_hold
 
@@ -142,13 +140,9 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
             company_id,
         )
         second_feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key) VALUES ($1, $2) RETURNING id",
+            "INSERT INTO feed(source, key, due_at) VALUES ($1, $2, $3) RETURNING id",
             source,
             second_key,
-        )
-        await conn.execute(
-            "INSERT INTO schedule(feed_id, due_at) VALUES ($1, $2)",
-            second_feed_id,
             now,
         )
         second_claim = await store.claim_due_feeds(conn, now, 1)
@@ -179,27 +173,18 @@ async def test_claim_feed_leases_one_feed_regardless_of_due_at(core_schema):
 
     async with pool.acquire() as conn:
         feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key) VALUES ($1, 'board') RETURNING id", source
-        )
-        # A day away from due: claim_feed must take it anyway.
-        await conn.execute(
-            "INSERT INTO schedule(feed_id, due_at) VALUES ($1, $2)",
-            feed_id,
+            "INSERT INTO feed(source, key, due_at) VALUES ($1, 'board', $2) RETURNING id",
+            source,
             now + timedelta(days=1),
         )
         disabled_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, enabled) VALUES ($1, 'off', false) RETURNING id",
+            "INSERT INTO feed(source, key, enabled, due_at) VALUES ($1, 'off', false, $2) RETURNING id",
             source,
-        )
-        await conn.execute(
-            "INSERT INTO schedule(feed_id, due_at) VALUES ($1, $2)", disabled_id, now
+            now,
         )
         paused_id = await conn.fetchval(
-            "INSERT INTO feed(source, key) VALUES ($1, 'held') RETURNING id", source
-        )
-        await conn.execute(
-            "INSERT INTO schedule(feed_id, due_at, paused_at) VALUES ($1, $2, $2)",
-            paused_id,
+            "INSERT INTO feed(source, key, due_at, paused_at) VALUES ($1, 'held', $2, $2) RETURNING id",
+            source,
             now,
         )
 
@@ -223,7 +208,7 @@ async def test_claim_feed_leases_one_feed_regardless_of_due_at(core_schema):
         # stale lease here means every on-demand poll silently skips its
         # poll_observation row.
         stored_hold = await conn.fetchval(
-            "SELECT hold_until FROM schedule WHERE feed_id = $1", feed_id
+            "SELECT hold_until FROM feed WHERE id = $1", feed_id
         )
         assert feed.hold_until == stored_hold
         assert await store.finish_schedule_success(

@@ -5,7 +5,7 @@ points at a private schema exercises the real ``claim_due_feeds`` / ``poll``
 path without touching a developer's actual feeds. That isolation is not a
 nicety: ``claim_due_feeds`` takes ``LIMIT n`` off the *global* due queue, so a
 test run against a populated database claims whichever real feeds happen to be
-due, polls them through its fake harvester, and leaves their schedule and bronze
+due, polls them through its fake harvester, and leaves their feed state and bronze
 rows corrupted. Cleaning up by source name cannot undo that, because the rows
 belong to feeds the test never created.
 

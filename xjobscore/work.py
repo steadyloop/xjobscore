@@ -1,4 +1,4 @@
-"""Pure scheduling policy over schema.sql's ``schedule`` columns."""
+"""Pure scheduling policy over schema.sql's ``feed`` columns."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def next_due_at(
     outcome: Outcome,
     now: datetime,
 ) -> datetime:
-    """Calculate ``schedule.due_at`` after one attempt."""
+    """Calculate ``feed.due_at`` after one attempt."""
     rolled = next_strikes(strikes, outcome)
     delay = backoff_s(interval_s, rolled) if outcome in ("partial", "error") else interval_s
     return now + timedelta(seconds=delay)

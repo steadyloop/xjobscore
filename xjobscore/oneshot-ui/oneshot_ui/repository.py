@@ -276,21 +276,20 @@ class PostgresRepository:
                 SELECT
                     f.source,
                     COUNT(*) FILTER (WHERE f.enabled) AS board_count,
-                    COUNT(*) FILTER (WHERE f.enabled AND s.last_poll_at IS NOT NULL) AS polled_count,
+                    COUNT(*) FILTER (WHERE f.enabled AND f.last_poll_at IS NOT NULL) AS polled_count,
                     -- A paused feed is held on purpose: it is overdue by design
                     -- and must not be counted as something to go and fix.
                     COUNT(*) FILTER (
-                        WHERE f.enabled AND s.paused_at IS NULL AND (
-                            COALESCE(s.strikes, 0) > 0
+                        WHERE f.enabled AND f.paused_at IS NULL AND (
+                            COALESCE(f.strikes, 0) > 0
                             OR (
-                                s.due_at < now()
-                                AND (s.hold_until IS NULL OR s.hold_until < now())
+                                f.due_at < now()
+                                AND (f.hold_until IS NULL OR f.hold_until < now())
                             )
                         )
                     ) AS attention_count,
-                    MAX(s.last_poll_at) FILTER (WHERE f.enabled) AS last_poll_at
+                    MAX(f.last_poll_at) FILTER (WHERE f.enabled) AS last_poll_at
                 FROM feed f
-                LEFT JOIN schedule s ON s.feed_id = f.id
                 GROUP BY f.source
             ),
             posting_stats AS (

@@ -92,6 +92,7 @@ def plan(
             )
         )
 
+    verified_feeds = tuple(entry for entry in loaded_feeds if entry.verified)
     tokens = tuple(
         TokenRow(
             source=entry.source,
@@ -99,7 +100,7 @@ def plan(
             company_id=entry.company_id,
             status=_token_status(entry),
         )
-        for entry in sorted(loaded_feeds, key=lambda entry: (entry.source, entry.key))
+        for entry in sorted(verified_feeds, key=lambda entry: (entry.source, entry.key))
     )
     feeds = tuple(
         FeedRow(
@@ -107,7 +108,7 @@ def plan(
             key=entry.key,
             enabled=entry.verified,
         )
-        for entry in sorted(loaded_feeds, key=lambda entry: (entry.source, entry.key))
+        for entry in sorted(verified_feeds, key=lambda entry: (entry.source, entry.key))
     )
     return Plan(
         companies=tuple(sorted(companies, key=lambda row: row.id)),

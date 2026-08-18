@@ -29,7 +29,7 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
 - **Feeds** (`/`) — every registry feed plus one local feed per non-registry
   source, grouped by source with category/enabled/error filters and search.
   Per feed: the `feed.enabled` switch and the last run's harvest
-  status/items/elapsed; `schedule.interval_s` and pause live in the detail
+  status/items/elapsed; `feed.interval_s` and pause live in the detail
   pane. Flipping the switch on a feed PostgreSQL has never seen imports it
   first, so there is no separate Import control.
 
@@ -102,7 +102,7 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   Nothing here can widen or narrow that set — the Scheduler adjusts cadence and
   queue position only.
 
-  Stopping a feed here is **Pause**, not disable: it sets `schedule.paused_at`,
+  Stopping a feed here is **Pause**, not disable: it sets `feed.paused_at`,
   so production stops claiming the feed while it stays enabled, stays listed,
   and keeps its history. Poll now is refused while held, and resuming leaves
   `due_at` where it was — in the past — so the feed is due immediately. The
@@ -149,22 +149,22 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
 Everything is PostgreSQL, but in two deliberately separate places:
 
 - **`public` — the core pipeline's tables.** `policy.py` writes exactly four
-  operator-owned fields — `feed.enabled`, `schedule.interval_s`,
-  `schedule.paused_at`, and `scheduler_control.running` — plus feed import via
-  the registry upsert. The remaining `schedule` columns (`etag`, `res_hash`,
+  operator-owned fields — `feed.enabled`, `feed.interval_s`,
+  `feed.paused_at`, and `scheduler_control.running` — plus feed import via
+  the registry upsert. The remaining `feed` columns (`etag`, `res_hash`,
   `strikes`, `hold_until`) belong to `run.py`'s workers and are read for
   display only *by that class*. `due_at` is the one documented exception: Poll
   now moves it, which is a queue *position* rather than derived state —
   `run.py` overwrites it unconditionally when the poll finishes. Bulk
-  registry→PostgreSQL sync is not a *policy* concern; `run.py` does it on every
-  startup and `python -m xjobscore.run --sync-registry` does it standalone.
+  registry→PostgreSQL seed is not a *policy* concern; `run.py` does it on every
+  startup and `python -m xjobscore.run --seed` does it standalone.
   `SchedulerRunner` also does it — see below. With PostgreSQL down the policy
   layer runs in degraded mode: policy controls disable, everything else works.
 
   That "policy only" boundary describes `policy.py`, not the process. When
   `inspector.runner.SchedulerRunner` is enabled and `scheduler_control.running`
   is true, this same process also runs `run.cycle` — writing `raw_posting`,
-  `job_posting`, `poll_observation`, and the runtime `schedule` columns for
+  `job_posting`, `poll_observation`, and the runtime `feed` columns for
   whatever feeds it polls, exactly as `run.py`'s CLI would. The Scheduler
   page's Fetch all takes the same path per feed on demand
   (`SchedulerRunner.poll_feed_now`), with neither gate required. See "Running

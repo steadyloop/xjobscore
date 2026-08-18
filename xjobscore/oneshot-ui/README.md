@@ -4,7 +4,7 @@ A local job-discovery and application workspace backed directly by the
 project's PostgreSQL `schema.sql`.
 
 OneShot does not harvest or canonicalize postings. The core xjobscore pipeline
-owns `feed`, `schedule`, `raw_posting`, and `job_posting`; this application
+owns `feed`, `raw_posting`, and `job_posting`; this application
 reads those tables and writes `job_application` and `job_application_event`.
 
 ## Database

@@ -63,6 +63,43 @@ CREATE TABLE account_company (
 -- FEEDS --
 CREATE TABLE feed (
     id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source   text NOT NULL, -- ashby, greenhouse, workable, etc.
+    key      text NOT NULL, -- openai, anthropic, janestreet, etc.
+    enabled  boolean NOT NULL DEFAULT false,
+
+    -- Config
+    interval_s      integer NOT NULL DEFAULT 900 CHECK (interval_s > 0),
+
+    -- Queue
+    due_at          timestamptz NOT NULL DEFAULT now(), -- when the feed is next due; this column is the queue
+    hold_until      timestamptz,                         -- claim stamp so a crashed worker's feed gets retried, not lost
+
+    -- Optimization
+    etag            text,                                -- server's version token; 304 upon hit
+    res_hash        text,                                -- hash of listing response; skip parse when nothing moved
+    last_change_at  timestamptz,                         -- last poll hash moved; back off keys on to slow a dormant board
+
+    -- Health
+    strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0), -- fail strike; drives retry backoff/disable
+    last_poll_at    timestamptz,
+    paused_at       timestamptz, -- operator hold; the feed stays enabled and stays visible, but is never claimed
+
+    -- Potential fields
+    -- feed.last_modified — add later if you meet a server that has no ETag. Trivial migration.
+    -- feed.cursor — only needed for incremental pagination; skip until an adapter demands it.
+    -- feed.last_change_at — adaptive backoff for dormant boards is an optimization, not MVP.
+    -- feed.status, feed.last_success_at, feed.consecutive_failures — redundant with paused_at, last_poll_at + last_error, and strikes respectively.
+
+    UNIQUE (source, key)
+);
+CREATE INDEX feed_due_idx ON feed (due_at) WHERE paused_at IS NULL;
+
+/*
+-- Historical pre-collapse schema (reference only; not executed).
+
+-- FEEDS --
+CREATE TABLE feed (
+    id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- change source to name later
     source   text NOT NULL,      -- ashby, greenhouse, workable, etc.
     key      text NOT NULL,      -- openai, anthropic, janestreet, etc.
@@ -98,6 +135,7 @@ CREATE TABLE schedule (
     -- status, last_success_at, consecutive_failures — redundant with paused_at, last_poll_at + last_error, and strikes respectively.
 );
 CREATE INDEX schedule_due_idx ON schedule (due_at) WHERE paused_at IS NULL;
+*/
 
 -- One row per poll, append-only. Never updated or deleted: this is the history
 -- the arrival-rate estimator, the replay simulator, and the feed sparkline read.
@@ -136,9 +174,9 @@ INSERT INTO scheduler_control (id) VALUES (true) ON CONFLICT DO NOTHING;
 -- Deferred: adaptive polling. Intervals stay operator-set until poll_observation
 -- holds enough history to estimate an arrival rate from.
 --
--- schedule.interval_auto        boolean          -- false = operator pinned interval_s; scheduler leaves it alone
--- schedule.decayed_arrivals     double precision -- EWMA posting count, decayed as of estimator_updated_at
--- schedule.estimator_updated_at timestamptz      -- when decayed_arrivals was last decayed
+-- feed.interval_auto        boolean          -- false = operator pinned interval_s; scheduler leaves it alone
+-- feed.decayed_arrivals     double precision -- EWMA posting count, decayed as of estimator_updated_at
+-- feed.estimator_updated_at timestamptz      -- when decayed_arrivals was last decayed
 --
 -- CREATE TABLE vendor (   -- one row per ATS; learned limits survive restarts
 --     name          text PRIMARY KEY,
@@ -159,7 +197,7 @@ CREATE TABLE fetched_feed (
     -- Request waterfall, timings, byte counts; the only place per-fetch request count is visible.
     network     jsonb NOT NULL DEFAULT '{}',
     fetched_at  timestamptz NOT NULL DEFAULT now(),
-    -- Carried into schedule.etag / schedule.res_hash on promotion; first real poll costs a 304.
+    -- Carried into feed.etag / feed.res_hash on promotion; first real poll costs a 304.
     etag        text,
     res_hash    text,
 

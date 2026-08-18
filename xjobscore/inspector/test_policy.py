@@ -239,8 +239,8 @@ async def test_policy_store_set_paused_uses_store_mutator(monkeypatch):
     connection = FakeConnection(
         {
             "SELECT id FROM feed WHERE source = $1 AND key = $2": 7,
-            "UPDATE schedule SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END "
-            "WHERE feed_id = $1": "UPDATE 1",
+            "UPDATE feed SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END "
+            "WHERE id = $1": "UPDATE 1",
         }
     )
     pool = FakePool(connection)
@@ -275,13 +275,12 @@ async def test_policy_store_set_paused_on_a_missing_feed_raises(monkeypatch):
 
 _CONTROL_SQL = "SELECT running, changed_at, note FROM scheduler_control WHERE id"
 _STATE_SQL = (
-    "SELECT f.id, f.enabled, s.feed_id IS NOT NULL AS scheduled, s.paused_at, "
-    "s.hold_until > now() AS held FROM feed f LEFT JOIN schedule s ON s.feed_id = f.id "
+    "SELECT f.id, f.enabled, f.paused_at, f.hold_until > now() AS held FROM feed f "
     "WHERE f.source = $1 AND f.key = $2"
 )
 _EXPRESS_SQL = (
-    "UPDATE schedule SET due_at = now() - $2::interval "
-    "WHERE feed_id = $1 AND paused_at IS NULL RETURNING due_at"
+    "UPDATE feed SET due_at = now() - $2::interval "
+    "WHERE id = $1 AND paused_at IS NULL RETURNING due_at"
 )
 
 
@@ -304,7 +303,7 @@ def poll_now_store(monkeypatch, *, running=True, state=None, due_at=None):
 
 
 def healthy_state(**overrides):
-    row = {"id": 7, "enabled": True, "scheduled": True, "paused_at": None, "held": False}
+    row = {"id": 7, "enabled": True, "paused_at": None, "held": False}
     row.update(overrides)
     return row
 
@@ -376,14 +375,10 @@ async def test_poll_now_refuses_a_feed_a_worker_already_holds(monkeypatch):
     assert all(sql != _EXPRESS_SQL for sql, _ in connection.queries)
 
 
-async def test_poll_now_on_a_missing_feed_or_schedule_raises(monkeypatch):
+async def test_poll_now_on_a_missing_feed_raises(monkeypatch):
     policy, _ = poll_now_store(monkeypatch, state=None)
     with pytest.raises(FeedNotInPostgres):
         await policy.poll_now("lever", "ghost")
-
-    policy, _ = poll_now_store(monkeypatch, state=healthy_state(scheduled=False))
-    with pytest.raises(FeedNotInPostgres):
-        await policy.poll_now("lever", "acme")
 
 
 async def test_policy_store_interval_bounds():
@@ -408,7 +403,7 @@ async def test_store_set_feed_enabled_sql():
 
 async def test_store_set_schedule_interval_sql():
     connection = FakeConnection(
-        {"UPDATE schedule SET interval_s = $2 WHERE feed_id = $1": "UPDATE 1"}
+        {"UPDATE feed SET interval_s = $2 WHERE id = $1": "UPDATE 1"}
     )
 
     assert await store.set_schedule_interval(connection, 3, 1800) is True
@@ -417,8 +412,8 @@ async def test_store_set_schedule_interval_sql():
 
 async def test_store_set_schedule_paused_sql():
     sql = (
-        "UPDATE schedule SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END "
-        "WHERE feed_id = $1"
+        "UPDATE feed SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END "
+        "WHERE id = $1"
     )
     connection = FakeConnection({sql: "UPDATE 1"})
 

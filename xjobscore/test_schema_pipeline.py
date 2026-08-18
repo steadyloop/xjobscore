@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,31 @@ def test_enrich_cli_selects_all_or_one(arguments, expected):
 def test_legacy_gold_cli_flags_are_rejected(legacy):
     with pytest.raises(SystemExit):
         run.load_config(["--dsn", "postgresql://example/test", legacy])
+
+
+def test_seed_cli_selects_standalone_registry_seed():
+    config = run.load_config(["--dsn", "postgresql://example/test", "--seed"])
+
+    assert config.seed is True
+
+
+def test_fetch_all_cli_selects_full_sweep_and_concurrency():
+    config = run.load_config(
+        ["--dsn", "postgresql://example/test", "--fetch-all", "--concurrency", "3"]
+    )
+
+    assert config.fetch_all is True
+    assert config.concurrency == 3
+
+
+def test_fetch_all_cli_rejects_zero_concurrency():
+    with pytest.raises(SystemExit):
+        run.load_config(["--dsn", "postgresql://example/test", "--concurrency", "0"])
+
+
+def test_sync_registry_cli_flag_is_rejected():
+    with pytest.raises(SystemExit):
+        run.load_config(["--dsn", "postgresql://example/test", "--sync-registry"])
 
 
 def test_schema_indexes_the_opportunities_filter_and_default_sort():
@@ -89,6 +115,82 @@ class _Pool:
 
     def acquire(self):
         return _AsyncContext(self.connection)
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_dry_run_fetches_every_eligible_feed_with_bounded_concurrency(monkeypatch):
+    feeds = [
+        Feed(id=index, source="fixture", key=f"feed-{index}") for index in range(1, 4)
+    ]
+    active = 0
+    peak = 0
+    fetched = []
+
+    async def candidates(conn, now):
+        return feeds
+
+    async def harvest(feed, net):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0)
+        fetched.append(feed.key)
+        active -= 1
+
+    monkeypatch.setattr(store, "fetchable_feeds", candidates)
+    monkeypatch.setattr(run, "_registry_index", lambda: {})
+    monkeypatch.setattr(run, "source_types", lambda: {})
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    cfg = run.Config(
+        dsn="postgresql://example/test",
+        user_agent="test",
+        dry_run=True,
+        fetch_all=True,
+        concurrency=2,
+    )
+
+    result = await run.fetch_all(_Pool(), object(), cfg)
+
+    assert set(fetched) == {"feed-1", "feed-2", "feed-3"}
+    assert peak == 2
+    assert result == run.FetchAllResult(eligible=3, polled=3)
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_claims_each_feed_and_reports_concurrent_skips(monkeypatch):
+    feeds = [
+        Feed(id=index, source="fixture", key=f"feed-{index}") for index in range(1, 4)
+    ]
+    claimed = []
+
+    async def candidates(conn, now):
+        return feeds
+
+    async def claim(conn, *, source, key, now, lease_seconds):
+        claimed.append((source, key, lease_seconds))
+        return None if key == "feed-2" else next(feed for feed in feeds if feed.key == key)
+
+    async def poll(pool, net, feed, now):
+        return "partial" if feed.key == "feed-3" else "ok"
+
+    monkeypatch.setattr(store, "fetchable_feeds", candidates)
+    monkeypatch.setattr(store, "claim_feed", claim)
+    monkeypatch.setattr(run, "poll", poll)
+    monkeypatch.setattr(run, "_registry_index", lambda: {})
+    monkeypatch.setattr(run, "source_types", lambda: {})
+    cfg = run.Config(
+        dsn="postgresql://example/test",
+        user_agent="test",
+        fetch_all=True,
+        concurrency=2,
+        lease_seconds=123,
+    )
+
+    result = await run.fetch_all(_Pool(), object(), cfg)
+
+    assert {key for _, key, _ in claimed} == {"feed-1", "feed-2", "feed-3"}
+    assert {lease for _, _, lease in claimed} == {123}
+    assert result == run.FetchAllResult(eligible=3, polled=1, skipped=1, partial=1)
 
 
 def _claimed_feed(**overrides) -> Feed:

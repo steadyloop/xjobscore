@@ -452,10 +452,10 @@ def _retry_after_seconds(retry_after: str | None) -> float | None:
 
 
 def conditional(value: str | None) -> dict[str, str]:
-    """Build the conditional request headers represented by ``schedule``."""
+    """Build the conditional request headers represented by a ``feed``."""
     return {"If-None-Match": value} if value else {}
 
 
 def etag(response: Response) -> str | None:
-    """Extract the response ETag persisted by ``schedule.etag``."""
+    """Extract the response ETag persisted by ``feed.etag``."""
     return response.headers.get("etag") or None

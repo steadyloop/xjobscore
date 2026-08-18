@@ -109,8 +109,8 @@ def test_registry_aliases_are_seeded_with_company_slug():
     assert aliases == ("ambient-ai", "ambient.ai")
 
 
-def test_feed_state_maps_to_token_status():
-    tokens = feader.plan(
+def test_seed_includes_only_verified_tokens_and_feeds():
+    import_plan = feader.plan(
         (
             _company(id=1, aliases=("a",)),
             _company(id=2, aliases=("b",)),
@@ -119,11 +119,14 @@ def test_feed_state_maps_to_token_status():
             _entry(key="a", company_id=1),
             _entry(key="b", company_id=2, verified=False),
         ),
-    ).tokens
+    )
 
-    # "inactive" is unreachable from the registry now that ``enabled`` is gone;
-    # only reconcile_registry_inventory produces it.
-    assert [token.status for token in tokens] == ["live", "unverified"]
+    assert [(token.source, token.key, token.status) for token in import_plan.tokens] == [
+        ("ashby", "a", "live"),
+    ]
+    assert [(feed.source, feed.key, feed.enabled) for feed in import_plan.feeds] == [
+        ("ashby", "a", True),
+    ]
 
 
 def test_real_registry_loads_under_schema_constraints(db):
@@ -255,7 +258,7 @@ async def test_company_upsert_overrides_identity_and_sequence_is_aligned():
 
 
 @pytest.mark.asyncio
-async def test_feed_sync_preserves_existing_schedule_tuning():
+async def test_feed_seed_preserves_existing_feed_tuning():
     calls = []
 
     class Connection:
@@ -274,9 +277,7 @@ async def test_feed_sync_preserves_existing_schedule_tuning():
     # Seed-only: re-syncing must not overwrite the operator's inspector toggle.
     assert "ON CONFLICT (source, key) DO UPDATE SET source" in calls[0][0]
     assert "SET enabled" not in calls[0][0]
-    assert "INSERT INTO schedule(feed_id)" in calls[1][0]
-    assert "ON CONFLICT (feed_id) DO NOTHING" in calls[1][0]
-    assert "interval_s" not in calls[1][0]
+    assert "interval_s" not in calls[0][0]
 
 
 @pytest.mark.asyncio

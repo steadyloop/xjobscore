@@ -48,7 +48,7 @@ FALLBACK_PRIOR_LAMBDA = 1.0
 CALIBRATING_DAYS = 7
 # Missed cadences before a feed reads as stale.
 STALE_INTERVAL_MULTIPLE = 3
-# schedule.strikes at which the engine's backoff is visibly in control.
+# feed.strikes at which the engine's backoff is visibly in control.
 BACKING_OFF_STRIKES = 3
 
 STATE_LABELS = {

@@ -23,9 +23,9 @@ the same flattened layout in its `[[board]]` declaration.
 
 An ATS declaration contains only `name` and `catalog`. Direct and Board
 declarations contain `name` plus the standard feed fields. The registry carries
-no `enabled` flag: it decides which feeds *exist*, while whether a feed is
-polled is operator state in PostgreSQL's `feed.enabled`, owned by the inspector.
-A registry sync seeds that column on first insert and never overwrites it after.
+no `enabled` flag: verified entries are seeded as feeds, while whether a seeded
+feed is polled is operator state in PostgreSQL's `feed.enabled`, owned by the inspector.
+A registry seed sets that column on first insert and never overwrites it after.
 Adapter selection and source-spec registration are owned by runtime code, so
 `feeds.toml` does not duplicate adapter names or config-file pointers. Optional
 per-feed configuration remains operational: use
@@ -64,7 +64,8 @@ false`, `verified_at = ""`, `company_id = 0`, `company_name = ""`, and
 they have been resolved to a canonical company.
 
 `xjobscore/feader.py` consumes those validated objects for PostgreSQL. It
-upserts companies with their exact registry IDs, upserts aliases and ATS
-tokens, and advances the company identity sequence beyond explicit registry
-IDs. Run it through `python -m xjobscore.run --sync-registry`; add `--dry-run`
-to validate and print counts without writing.
+upserts companies with their exact registry IDs and aliases, then seeds only
+verified feed entries as ATS tokens and feeds. It advances the company identity
+sequence beyond explicit registry IDs. Run it through
+`python -m xjobscore.run --seed`; add `--dry-run` to validate and print counts
+without writing.

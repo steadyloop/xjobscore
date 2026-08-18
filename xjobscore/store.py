@@ -25,6 +25,7 @@ __all__ = [
     "connect",
     "dedup_candidates",
     "due_feeds",
+    "fetchable_feeds",
     "finish_schedule_failure",
     "finish_schedule_success",
     "latest_raw",
@@ -95,10 +96,9 @@ def _feed_from_row(row: asyncpg.Record) -> Feed:
 _FEED_SELECT = """
     SELECT
         f.id, f.source, f.key, f.enabled,
-        s.interval_s, s.etag, s.res_hash, s.strikes, s.due_at, s.hold_until,
+        f.interval_s, f.etag, f.res_hash, f.strikes, f.due_at, f.hold_until,
         t.company_id, c.name AS company_name
     FROM feed f
-    JOIN schedule s ON s.feed_id = f.id
     LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
     LEFT JOIN company c ON c.id = t.company_id
 """
@@ -111,45 +111,43 @@ async def claim_due_feeds(
     *,
     lease_seconds: int = 3600,
 ) -> list[Feed]:
-    """Lease due schedule rows atomically for horizontally safe workers."""
+    """Lease due feed rows atomically for horizontally safe workers."""
     lease_until = now + timedelta(seconds=max(60, lease_seconds))
     rows = await conn.fetch(
         """
         WITH picked AS (
-            SELECT s.feed_id
-            FROM schedule s
-            JOIN feed f ON f.id = s.feed_id
+            SELECT f.id
+            FROM feed f
             WHERE f.enabled
-              AND s.paused_at IS NULL
-              AND s.due_at <= $1
-              AND (s.hold_until IS NULL OR s.hold_until <= $1)
-            ORDER BY s.due_at, s.feed_id
-            FOR UPDATE OF s SKIP LOCKED
+              AND f.paused_at IS NULL
+              AND f.due_at <= $1
+              AND (f.hold_until IS NULL OR f.hold_until <= $1)
+            ORDER BY f.due_at, f.id
+            FOR UPDATE OF f SKIP LOCKED
             LIMIT $2
         ), claimed AS (
-            UPDATE schedule s
+            UPDATE feed f
             SET hold_until = $3
             FROM picked p
-            WHERE s.feed_id = p.feed_id
-            RETURNING s.feed_id, s.hold_until
+            WHERE f.id = p.id
+            RETURNING f.id, f.hold_until
         )
         SELECT
             f.id, f.source, f.key, f.enabled,
-            s.interval_s, s.etag, s.res_hash, s.strikes, s.due_at,
-            -- The lease must come from the CTE, not from `s`. A data-modifying
+            f.interval_s, f.etag, f.res_hash, f.strikes, f.due_at,
+            -- The lease must come from the CTE. A data-modifying
             -- CTE's writes are invisible to the rest of the same query, so
-            -- `s.hold_until` here is the *pre-claim* value -- NULL on a feed
+            -- `f.hold_until` here is the *pre-claim* value -- NULL on a feed
             -- nobody has polled. finish_schedule_*() then guards on
             -- `hold_until = $7`, which never matches NULL, so every completed
             -- poll reported a lost lease and skipped its poll_observation row.
             x.hold_until,
             t.company_id, c.name AS company_name
         FROM claimed x
-        JOIN feed f ON f.id = x.feed_id
-        JOIN schedule s ON s.feed_id = f.id
+        JOIN feed f ON f.id = x.id
         LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
         LEFT JOIN company c ON c.id = t.company_id
-        ORDER BY s.due_at, f.id
+        ORDER BY f.due_at, f.id
         """,
         now,
         max(1, limit),
@@ -176,35 +174,33 @@ async def claim_feed(
     row = await conn.fetchrow(
         """
         WITH picked AS (
-            SELECT s.feed_id
-            FROM schedule s
-            JOIN feed f ON f.id = s.feed_id
+            SELECT f.id
+            FROM feed f
             WHERE f.source = $1
               AND f.key = $2
               AND f.enabled
-              AND s.paused_at IS NULL
-              AND (s.hold_until IS NULL OR s.hold_until <= $3)
-            FOR UPDATE OF s SKIP LOCKED
+              AND f.paused_at IS NULL
+              AND (f.hold_until IS NULL OR f.hold_until <= $3)
+            FOR UPDATE OF f SKIP LOCKED
         ), claimed AS (
-            UPDATE schedule s
+            UPDATE feed f
             SET hold_until = $4
             FROM picked p
-            WHERE s.feed_id = p.feed_id
-            RETURNING s.feed_id, s.hold_until
+            WHERE f.id = p.id
+            RETURNING f.id, f.hold_until
         )
         SELECT
             f.id, f.source, f.key, f.enabled,
-            s.interval_s, s.etag, s.res_hash, s.strikes, s.due_at,
-            -- The lease must come from the CTE, not from `s`: a data-modifying
+            f.interval_s, f.etag, f.res_hash, f.strikes, f.due_at,
+            -- The lease must come from the CTE: a data-modifying
             -- CTE's writes are invisible to the rest of the same query, so
-            -- `s.hold_until` would be the pre-claim value and finish_schedule_*'s
+            -- `f.hold_until` would be the pre-claim value and finish_schedule_*'s
             -- `hold_until = $N` guard would never match. Same trap as
             -- claim_due_feeds above.
             x.hold_until,
             t.company_id, c.name AS company_name
         FROM claimed x
-        JOIN feed f ON f.id = x.feed_id
-        JOIN schedule s ON s.feed_id = f.id
+        JOIN feed f ON f.id = x.id
         LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
         LEFT JOIN company c ON c.id = t.company_id
         """,
@@ -227,14 +223,35 @@ async def due_feeds(conn: Connection, now: datetime, limit: int) -> list[Feed]:
         _FEED_SELECT
         + """
         WHERE f.enabled
-          AND s.paused_at IS NULL
-          AND s.due_at <= $1
-          AND (s.hold_until IS NULL OR s.hold_until <= $1)
-        ORDER BY s.due_at, f.id
+          AND f.paused_at IS NULL
+          AND f.due_at <= $1
+          AND (f.hold_until IS NULL OR f.hold_until <= $1)
+        ORDER BY f.due_at, f.id
         LIMIT $2
         """,
         now,
         max(1, limit),
+    )
+    return [_feed_from_row(row) for row in rows]
+
+
+async def fetchable_feeds(conn: Connection, now: datetime) -> list[Feed]:
+    """List feeds an explicit fetch-all sweep may attempt.
+
+    Unlike ``due_feeds``, this deliberately ignores ``due_at``.  It otherwise
+    observes the same operator and lease boundaries as ``claim_feed``.  A
+    caller must still claim each row before a live poll: another worker may
+    change that state between this initial inventory read and its turn.
+    """
+    rows = await conn.fetch(
+        _FEED_SELECT
+        + """
+        WHERE f.enabled
+          AND f.paused_at IS NULL
+          AND (f.hold_until IS NULL OR f.hold_until <= $1)
+        ORDER BY f.source, f.key
+        """,
+        now,
     )
     return [_feed_from_row(row) for row in rows]
 
@@ -267,7 +284,7 @@ async def finish_schedule_success(
     """Complete a claimed poll without overwriting a reclaimed worker's lease."""
     result = await conn.execute(
         """
-        UPDATE schedule SET
+        UPDATE feed SET
             etag = $3,
             res_hash = COALESCE($4, res_hash),
             strikes = 0,
@@ -275,7 +292,7 @@ async def finish_schedule_success(
             hold_until = NULL,
             last_poll_at = $2,
             last_change_at = CASE WHEN $6 THEN $2 ELSE last_change_at END
-        WHERE feed_id = $1 AND hold_until = $7
+        WHERE id = $1 AND hold_until = $7
         """,
         feed.id,
         now,
@@ -299,13 +316,13 @@ async def finish_schedule_failure(
     """Release a failed claim, retaining bronze and the prior response hash."""
     result = await conn.execute(
         """
-        UPDATE schedule SET
+        UPDATE feed SET
             etag = COALESCE($3, etag),
             strikes = LEAST(strikes::integer + 1, 32767)::smallint,
             due_at = $4,
             hold_until = NULL,
             last_poll_at = $2
-        WHERE feed_id = $1 AND hold_until = $5
+        WHERE id = $1 AND hold_until = $5
         """,
         feed.id,
         now,
@@ -428,28 +445,18 @@ async def set_feeds_enabled(
             keys,
         )
         return int(result.rsplit(" ", 1)[-1])
-    feed_ids = [
-        row["id"]
-        for row in await conn.fetch(
-            """
-            INSERT INTO feed(source, key, enabled)
-            SELECT source, key, true
-            FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
-            ON CONFLICT (source, key) DO UPDATE SET enabled = true
-            RETURNING id
-            """,
-            sources,
-            keys,
-        )
-    ]
-    await conn.execute(
+    rows = await conn.fetch(
         """
-        INSERT INTO schedule(feed_id)
-        SELECT unnest($1::bigint[]) ON CONFLICT (feed_id) DO NOTHING
+        INSERT INTO feed(source, key, enabled)
+        SELECT source, key, true
+        FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
+        ON CONFLICT (source, key) DO UPDATE SET enabled = true
+        RETURNING id
         """,
-        feed_ids,
+        sources,
+        keys,
     )
-    return len(feed_ids)
+    return len(rows)
 
 
 async def set_schedule_interval(
@@ -457,7 +464,7 @@ async def set_schedule_interval(
 ) -> bool:
     """Operator cadence change. Runtime schedule state is left untouched."""
     result = await conn.execute(
-        "UPDATE schedule SET interval_s = $2 WHERE feed_id = $1",
+        "UPDATE feed SET interval_s = $2 WHERE id = $1",
         feed_id,
         interval_s,
     )
@@ -474,9 +481,9 @@ async def set_schedule_paused(conn: Connection, feed_id: int, paused: bool) -> b
     """
     result = await conn.execute(
         """
-        UPDATE schedule
+        UPDATE feed
         SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END
-        WHERE feed_id = $1
+        WHERE id = $1
         """,
         feed_id,
         paused,
@@ -756,10 +763,6 @@ async def upsert_registry_feed(
         source,
         key,
         enabled,
-    )
-    await conn.execute(
-        "INSERT INTO schedule(feed_id) VALUES ($1) ON CONFLICT (feed_id) DO NOTHING",
-        feed_id,
     )
     return int(feed_id)
 
