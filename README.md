@@ -52,8 +52,7 @@ Use cron or another process manager to repeat polling.
 | Fetch (default; no flag) | Fetch up to 20 due feeds and persist raw and canonical postings. |
 | `--sync-registry` | Sync the TOML registry to PostgreSQL, then exit without fetching. |
 | `--parse` | Replay stored raw postings through the current parsers without fetching. |
-| `--gold` | Rebuild every derived gold artifact. |
-| `--gold-step NAME` | Rebuild one gold step; currently `dedup`. |
+| `--enrich [NAME]` | Run all enrichments, or only `job_type`/`skills`/`degrees`/`dedup` when named. |
 
 ### Options
 
