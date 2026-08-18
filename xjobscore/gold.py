@@ -1,9 +1,9 @@
 """Derived gold-layer passes over silver.
 
-Every gold artifact is a pure function of ``job_posting`` and is maintained by
-deleting and recomputing it, never by incremental edit. Nothing here may hold
-state that cannot be recovered from silver -- human judgements in particular,
-which a rebuild would erase.
+Every gold artifact is recoverable from ``job_posting``. Set-like artifacts
+such as duplicate groups are rebuilt wholesale; per-posting enrichments are
+stamped into ``job_posting.attributes`` once per silver content revision.
+Nothing here may hold human judgement or other irrecoverable state.
 
 Adding a gold concern means appending a ``Step``; improving an existing one
 means changing its own pure helpers. The two axes stay independent.
@@ -12,17 +12,18 @@ means changing its own pure helpers. The two axes stay independent.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from xjobscore import store
-from xjobscore.silver import normalize_title
+from xjobscore import degrees, opportunity, skills, store
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -36,7 +37,14 @@ __all__ = [
     "Step",
     "ats_identity",
     "description_hash",
+    "degree_fields_input_hash",
+    "degree_fields_payload",
+    "normalize_title",
+    "opportunity_input_hash",
+    "opportunity_payload",
     "plan_dedup",
+    "skills_input_hash",
+    "skills_payload",
     "steps",
 ]
 
@@ -70,6 +78,241 @@ class Step:
     rebuild: Callable[..., Awaitable[Counts]]
 
 
+# OPPORTUNITY TYPE ---------------------------------------------------------
+
+_OPPORTUNITY_VERSION = 1
+_OPPORTUNITY_BATCH_SIZE = 1_000
+_CONFUSABLES = str.maketrans({"ꓟ": "M", "ꓡ": "L", "ꓣ": "R"})
+
+
+def normalize_title(value: str) -> str:
+    """Normalize a silver title for derived grouping and classification work."""
+    value = unicodedata.normalize("NFKC", value.translate(_CONFUSABLES)).casefold()
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
+def opportunity_input_hash(title: str | None) -> str:
+    """Fingerprint exactly the title consumed by the opportunity classifier."""
+    return hashlib.sha256((title or "").encode("utf-8")).hexdigest()
+
+
+def opportunity_payload(title: str | None, *, parsed_at: datetime) -> dict[str, Any]:
+    """The complete JSONB patch for one opportunity classification."""
+    return {
+        "opportunity_type": opportunity.classify(title or ""),
+        "opportunity_type_meta": {
+            "version": _OPPORTUNITY_VERSION,
+            "parsed_at": _utc_text(parsed_at),
+            "input_hash": opportunity_input_hash(title),
+        },
+    }
+
+
+async def _opportunity_rebuild(
+    conn: Connection,
+    *,
+    dry_run: bool = False,
+    parsed_at: datetime | None = None,
+) -> Counts:
+    """Classify each unstamped silver title once, in bounded batches."""
+    stamp = parsed_at or datetime.now(timezone.utc)
+    last_id = 0
+    enriched = 0
+    while True:
+        rows = await conn.fetch(
+            """
+            SELECT id, title
+            FROM job_posting
+            WHERE id > $1
+              AND attributes #>> '{opportunity_type_meta,version}' IS DISTINCT FROM $3
+            ORDER BY id
+            LIMIT $2
+            """,
+            last_id,
+            _OPPORTUNITY_BATCH_SIZE,
+            str(_OPPORTUNITY_VERSION),
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        updates = [
+            (
+                int(row["id"]),
+                opportunity_payload(row["title"], parsed_at=stamp),
+                row["title"],
+                str(_OPPORTUNITY_VERSION),
+            )
+            for row in rows
+        ]
+        if not dry_run:
+            await conn.executemany(
+                """
+                UPDATE job_posting
+                SET attributes = attributes || $2::jsonb
+                WHERE id = $1
+                  AND title = $3
+                  AND attributes #>> '{opportunity_type_meta,version}' IS DISTINCT FROM $4
+                """,
+                updates,
+            )
+        enriched += len(updates)
+    return Counts(postings=enriched)
+
+
+# SKILLS -------------------------------------------------------------------
+
+_SKILLS_VERSION = 1
+_SKILLS_BATCH_SIZE = 1_000
+
+
+def skills_input_hash(description: str | None) -> str:
+    """Fingerprint exactly the text consumed by the skill matcher."""
+    return hashlib.sha256((description or "").encode("utf-8")).hexdigest()
+
+
+def _utc_text(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def skills_payload(description: str | None, *, parsed_at: datetime) -> dict[str, Any]:
+    """The complete JSONB patch for one skill-enrichment result."""
+    return {
+        "skills": skills.extract(description or ""),
+        "skills_meta": {
+            "parsed_at": _utc_text(parsed_at),
+            "input_hash": skills_input_hash(description),
+        },
+    }
+
+
+async def _skills_rebuild(
+    conn: Connection,
+    *,
+    dry_run: bool = False,
+    parsed_at: datetime | None = None,
+) -> Counts:
+    """Enrich each unstamped silver row once, in bounded batches.
+
+    Silver removes ``skills`` and ``skills_meta`` when its canonical content
+    hash changes, making that posting eligible again without making every gold
+    invocation rescan its description in Python.
+    """
+    stamp = parsed_at or datetime.now(timezone.utc)
+    last_id = 0
+    enriched = 0
+    while True:
+        rows = await conn.fetch(
+            """
+            SELECT id, description
+            FROM job_posting
+            WHERE id > $1
+              AND NOT (attributes ? 'skills_meta')
+            ORDER BY id
+            LIMIT $2
+            """,
+            last_id,
+            _SKILLS_BATCH_SIZE,
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        updates = [
+            (
+                int(row["id"]),
+                skills_payload(row["description"], parsed_at=stamp),
+                row["description"] or "",
+            )
+            for row in rows
+        ]
+        if not dry_run:
+            await conn.executemany(
+                """
+                UPDATE job_posting
+                SET attributes = attributes || $2::jsonb
+                WHERE id = $1
+                  AND COALESCE(description, '') = $3
+                  AND NOT (attributes ? 'skills_meta')
+                """,
+                updates,
+            )
+        enriched += len(updates)
+    return Counts(postings=enriched)
+
+
+# DEGREE FIELDS ------------------------------------------------------------
+
+_DEGREES_VERSION = 1
+_DEGREES_BATCH_SIZE = 1_000
+
+
+def degree_fields_input_hash(description: str | None) -> str:
+    """Fingerprint exactly the text consumed by the degree-field matcher."""
+    return hashlib.sha256((description or "").encode("utf-8")).hexdigest()
+
+
+def degree_fields_payload(description: str | None, *, parsed_at: datetime) -> dict[str, Any]:
+    """The complete JSONB patch for one degree-field enrichment result."""
+    return {
+        "degree_fields": degrees.extract(description or ""),
+        "degree_fields_meta": {
+            "version": _DEGREES_VERSION,
+            "parsed_at": _utc_text(parsed_at),
+            "input_hash": degree_fields_input_hash(description),
+        },
+    }
+
+
+async def _degrees_rebuild(
+    conn: Connection,
+    *,
+    dry_run: bool = False,
+    parsed_at: datetime | None = None,
+) -> Counts:
+    """Enrich each unstamped silver row with mentioned degree fields."""
+    stamp = parsed_at or datetime.now(timezone.utc)
+    last_id = 0
+    enriched = 0
+    while True:
+        rows = await conn.fetch(
+            """
+            SELECT id, description
+            FROM job_posting
+            WHERE id > $1
+              AND NOT (attributes ? 'degree_fields_meta')
+            ORDER BY id
+            LIMIT $2
+            """,
+            last_id,
+            _DEGREES_BATCH_SIZE,
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        updates = [
+            (
+                int(row["id"]),
+                degree_fields_payload(row["description"], parsed_at=stamp),
+                row["description"] or "",
+            )
+            for row in rows
+        ]
+        if not dry_run:
+            await conn.executemany(
+                """
+                UPDATE job_posting
+                SET attributes = attributes || $2::jsonb
+                WHERE id = $1
+                  AND COALESCE(description, '') = $3
+                  AND NOT (attributes ? 'degree_fields_meta')
+                """,
+                updates,
+            )
+        enriched += len(updates)
+    return Counts(postings=enriched)
+
+
 # DEDUP --------------------------------------------------------------------
 #
 # Stage one generates *candidates and evidence*, not verdicts. The key is the
@@ -78,8 +321,8 @@ class Step:
 # on them.
 
 _NAMESPACE = uuid.UUID("9f8b2c14-6d3a-5e7f-8a1b-2c3d4e5f6071")
-_STRATEGY_VERSION = 1
-_KEYER = "company_role"
+_STRATEGY_VERSION = 2
+_KEYER = "company_role_location"
 
 # A key shared by more members than this is a placeholder, not an identity, and
 # the group would be too large to adjudicate by hand.
@@ -162,7 +405,7 @@ class Plan:
 
 
 def plan_dedup(rows: Sequence[Mapping[str, Any]]) -> Plan:
-    """Group silver rows by ``(company_id, normalized title)``.
+    """Group silver rows by ``(company_id, normalized title, location)``.
 
     Pure: the whole strategy lives here and is testable without a database.
     """
@@ -173,7 +416,11 @@ def plan_dedup(rows: Sequence[Mapping[str, Any]]) -> Plan:
         role = normalize_title(row["title"] or "")
         if not role:
             continue
-        buckets.setdefault(f"{row['company_id']}:{role}", []).append(row)
+        # ``None`` is intentional: an absent location is a valid component of
+        # the key rather than an error or a reason to discard the posting.
+        location = _norm_text(row["location_text"])
+        key = json.dumps([row["company_id"], role, location], separators=(",", ":"))
+        buckets.setdefault(key, []).append(row)
 
     groups: list[dict[str, Any]] = []
     members: list[dict[str, Any]] = []
@@ -224,7 +471,12 @@ async def _dedup_rebuild(conn: Connection, *, dry_run: bool = False) -> Counts:
 # Steps are independent and order does not matter. Add ``requires`` and sort
 # only once a step genuinely reads another's output.
 
-STEPS: tuple[Step, ...] = (Step("dedup", _STRATEGY_VERSION, _dedup_rebuild),)
+STEPS: tuple[Step, ...] = (
+    Step("job_type", _OPPORTUNITY_VERSION, _opportunity_rebuild),
+    Step("skills", _SKILLS_VERSION, _skills_rebuild),
+    Step("degrees", _DEGREES_VERSION, _degrees_rebuild),
+    Step("dedup", _STRATEGY_VERSION, _dedup_rebuild),
+)
 
 
 def steps(only: str | None = None) -> tuple[Step, ...]:
@@ -234,5 +486,5 @@ def steps(only: str | None = None) -> tuple[Step, ...]:
     selected = tuple(step for step in STEPS if step.name == only)
     if not selected:
         known = ", ".join(step.name for step in STEPS)
-        raise ValueError(f"unknown gold step {only!r}; known steps: {known}")
+        raise ValueError(f"unknown enrichment {only!r}; known enrichments: {known}")
     return selected
