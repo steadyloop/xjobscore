@@ -38,11 +38,12 @@ packages = [
     "xjobscore.sources.unified_v2",
 ]
 
-# Registry TOML is package data consumed by sources.registry.loader.
+# Registry files are package data consumed by their respective loaders.
 [tool.setuptools.package-data]
 xjobscore = [
     "fixtures/*.json",
     "registry/*.toml",
+    "registry/*.yaml",
     "sources/registry/*.toml",
     "sources/registry/ats-catalog/*.toml",
     "inspector/static/**/*",
