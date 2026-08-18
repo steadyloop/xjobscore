@@ -42,7 +42,7 @@ frontend is static and has no build process; OneShot serves it from `frontend/`.
 uv run python -m xjobscore.run [OPTIONS]
 ```
 
-Each invocation syncs the registry, performs one selected operation, and exits.
+Each invocation seeds the registry, performs one selected operation, and exits.
 Use cron or another process manager to repeat polling.
 
 ### Modes
@@ -50,7 +50,8 @@ Use cron or another process manager to repeat polling.
 | Mode | What it does |
 |---|---|
 | Fetch (default; no flag) | Fetch up to 20 due feeds and persist raw and canonical postings. |
-| `--sync-registry` | Sync the TOML registry to PostgreSQL, then exit without fetching. |
+| `--seed` | Seed the TOML registry to PostgreSQL, then exit without fetching. |
+| `--fetch-all` | Fetch every enabled, unpaused, unheld feed, ignoring its due time. |
 | `--parse` | Replay stored raw postings through the current parsers without fetching. |
 | `--enrich [NAME]` | Run all enrichments, or only `job_type`/`skills`/`degrees`/`dedup` when named. |
 
@@ -60,6 +61,7 @@ Use cron or another process manager to repeat polling.
 |---|---|
 | `--dry-run` | Perform the selected operation without database writes. Fetch mode still makes network requests. |
 | `--batch N` | Process at most `N` due feeds; default: `20`. |
+| `--concurrency N` | Run at most `N` simultaneous polls with `--fetch-all`; default: `8`. Host/vendor rate limits still apply. |
 | `--lease-seconds N` | Hold each claimed feed for `N` seconds; default: `3600`. |
 | `--dsn DSN` | Override `XJOBSCORE_DSN` or `DATABASE_URL`. |
 | `--user-agent VALUE` | Override the outbound HTTP user agent. |
