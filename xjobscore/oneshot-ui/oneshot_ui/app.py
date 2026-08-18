@@ -22,6 +22,7 @@ from .repository import (
     DEFAULT_OPPORTUNITY_TYPES,
     LOCAL_ACCOUNT_ID,
     PostgresRepository,
+    VALID_DEGREE_FIELDS,
     VALID_OPPORTUNITY_TYPES,
 )
 from .resume_api import router as resume_router
@@ -154,6 +155,7 @@ def create_app(
     async def jobs(
         request: Request,
         opportunity_type: list[str] = Query(default=[]),
+        degree_field: list[str] = Query(default=[]),
         q: str = "",
         sort: str = "fresh",
         limit: int = Query(default=100, ge=1, le=500),
@@ -167,10 +169,17 @@ def create_app(
                 status_code=400,
                 detail=f"Unknown opportunity_type: {unknown[0]}",
             )
+        unknown_degree = [value for value in degree_field if value not in VALID_DEGREE_FIELDS]
+        if unknown_degree:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown degree_field: {unknown_degree[0]}",
+            )
         # No filter does not mean "everything": it means the classified default
-        # scope. The unclassified/review pool is opt-in via explicit parameters.
+        # scope. The unclassified pool is opt-in via an explicit parameter.
         return await store.list_jobs(
             opportunity_types=opportunity_type or list(DEFAULT_OPPORTUNITY_TYPES),
+            degree_fields=degree_field,
             q=q,
             sort=sort,
             limit=limit,

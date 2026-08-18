@@ -40,12 +40,16 @@ class FakeRepository:
                 "apply_url": "https://jobs.example.test/41/apply",
                 "attributes": {
                     "version": 1,
-                    "opportunity_type": "summer_internship",
+                    "opportunity_type": "internship",
                     "term": "Summer 2027",
                     "workplace": "remote",
-                    "skills": ["Python", "PostgreSQL"],
-                    "eligibility": "eligible",
+                    "skills": ["python", "postgresql"],
+                    "degree_fields": ["computer_science"],
                 },
+                "skills": [
+                    {"id": "python", "name": "Python", "category": "language"},
+                    {"id": "postgresql", "name": "PostgreSQL", "category": "stack"},
+                ],
             }
         ]
         self.applications: list[dict] = []
@@ -69,6 +73,13 @@ class FakeRepository:
         types = set(options["opportunity_types"])
         if types:
             rows = [row for row in rows if row["attributes"]["opportunity_type"] in types]
+        degree_fields = set(options["degree_fields"])
+        if degree_fields:
+            rows = [
+                row
+                for row in rows
+                if degree_fields.intersection(row["attributes"].get("degree_fields", []))
+            ]
         return {"jobs": deepcopy(rows), "total": len(rows), "limit": options["limit"], "offset": options["offset"]}
 
     async def source_coverage(self):
@@ -168,7 +179,24 @@ def test_job_response_exposes_provenance_without_internal_trace_fields() -> None
 
     assert result["source"] == "greenhouse:example-labs"
     assert result["source_url"] == "https://jobs.example.test/41"
+    assert result["skills"] == []
     assert not ({"content_hash", "raw_id", "source_key"} & result.keys())
+
+
+def test_job_response_derives_structured_skills_without_mutating_attributes() -> None:
+    stored = ["go", "Kubernetes", "legacy-tool", "go", "", 7]
+    result = PostgresRepository._job({
+        "id": 42,
+        "title": "Backend Engineer",
+        "attributes": {"version": 1, "skills": stored},
+    })
+
+    assert result["attributes"]["skills"] == stored
+    assert result["skills"] == [
+        {"id": "go", "name": "Go", "category": "language"},
+        {"id": "kubernetes", "name": "Kubernetes", "category": "stack"},
+        {"id": "legacy-tool", "name": "legacy-tool", "category": None},
+    ]
 
 
 @pytest.mark.asyncio
@@ -210,7 +238,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
                     "status": "active",
                     "attributes": {
                         "version": 1,
-                        "opportunity_type": "summer_internship",
+                        "opportunity_type": "internship",
                     },
                 }
             ]
@@ -220,7 +248,11 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
 
     result = await asyncio.wait_for(
         repository.list_jobs(
-            opportunity_types=["summer_internship"], exclude_job_ids=[99], limit=25, offset=50
+            opportunity_types=["internship"],
+            degree_fields=["computer_science"],
+            exclude_job_ids=[99],
+            limit=25,
+            offset=50,
         ),
         timeout=1,
     )
@@ -228,8 +260,9 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     assert result["total"] == 1
     assert result["jobs"][0]["id"] == 41
     # COUNT sees only account + filters; LIMIT/OFFSET belong only to the page.
-    assert len(pool.count_args) == 3
-    assert pool.count_args[2] == [99]
+    assert len(pool.count_args) == 4
+    assert pool.count_args[2] == ["computer_science"]
+    assert pool.count_args[3] == [99]
     assert pool.page_args[-2:] == (25, 50)
 
 def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
@@ -239,10 +272,16 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
         assert repository.connected
         assert client.get("/api/health").json() == {"ok": True}
         jobs = client.get(
-            "/api/jobs", params={"opportunity_type": "summer_internship"}
+            "/api/jobs",
+            params={"opportunity_type": "internship", "degree_field": "computer_science"},
         ).json()
         assert jobs["total"] == 1
-        assert jobs["jobs"][0]["attributes"]["skills"] == ["Python", "PostgreSQL"]
+        assert jobs["jobs"][0]["attributes"]["skills"] == ["python", "postgresql"]
+        assert jobs["jobs"][0]["attributes"]["degree_fields"] == ["computer_science"]
+        assert jobs["jobs"][0]["skills"] == [
+            {"id": "python", "name": "Python", "category": "language"},
+            {"id": "postgresql", "name": "PostgreSQL", "category": "stack"},
+        ]
         created = client.post("/api/jobs/41/applications").json()
         assert created["stage"] == "considering"
         assert client.post("/api/jobs/41/applications").json()["already_exists"]
@@ -281,16 +320,28 @@ def test_jobs_default_scope_excludes_the_unclassified_pool() -> None:
         default = client.get("/api/jobs").json()
         assert [job["id"] for job in default["jobs"]] == [41]
         review = client.get(
-            "/api/jobs",
-            params=[("opportunity_type", "unclassified"), ("opportunity_type", "review")],
+            "/api/jobs", params={"opportunity_type": "unclassified"}
         ).json()
         assert [job["id"] for job in review["jobs"]] == [77]
+        assert client.get(
+            "/api/jobs", params={"opportunity_type": "review"}
+        ).status_code == 400
 
 
 def test_api_rejects_unknown_job_filter_and_invalid_application_mutation() -> None:
     application = signed_in_app(repository=FakeRepository())
     with TestClient(application) as client:
+        assert client.get(
+            "/api/jobs",
+            params=[
+                ("opportunity_type", "internship"),
+                ("opportunity_type", "coop"),
+                ("opportunity_type", "apprenticeship"),
+                ("opportunity_type", "new_grad_program"),
+            ],
+        ).status_code == 200
         assert client.get("/api/jobs", params={"opportunity_type": "made_up"}).status_code == 400
+        assert client.get("/api/jobs", params={"degree_field": "made_up"}).status_code == 400
         created = client.post("/api/jobs/41/applications").json()
         assert client.patch(
             f"/api/applications/{created['id']}", json={"company": "Changed"}
@@ -312,15 +363,15 @@ def test_discover_route_serves_the_standalone_document() -> None:
     assert '<a ' not in response.text
 
 
-def test_opportunities_v2_route_serves_an_independent_preview() -> None:
+def test_main_route_serves_the_v2_opportunities_design() -> None:
     application = create_app(Settings(dsn="injected"), repository=FakeRepository())
     with TestClient(application) as client:
-        response = client.get("/opportunities-v2/")
+        response = client.get("/")
 
     assert response.status_code == 200
     assert 'href="/static/opportunities-v2/styles.css?v=' in response.text
     assert 'src="/static/opportunities-v2/app.js?v=' in response.text
-    assert 'href="/"' in response.text
+    assert "Opportunities V2" not in response.text
 
 
 def test_page_shells_reference_assets_by_absolute_path() -> None:

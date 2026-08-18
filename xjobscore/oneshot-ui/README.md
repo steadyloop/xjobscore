@@ -3,9 +3,6 @@
 A local job-discovery and application workspace backed directly by the
 project's PostgreSQL `schema.sql`.
 
-See [CLEANUP_AND_ROLLBACK.md](CLEANUP_AND_ROLLBACK.md) for the August 2026
-cleanup record, compatibility changes, validation, and rollback procedures.
-
 OneShot does not harvest or canonicalize postings. The core xjobscore pipeline
 owns `feed`, `schedule`, `raw_posting`, and `job_posting`; this application
 reads those tables and writes `job_application` and `job_application_event`.
@@ -36,6 +33,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS account_google_sub_key ON account (google_sub)
 
 The unique indexes are separate statements because `ADD COLUMN ... UNIQUE` has no
 `IF NOT EXISTS` form, so inlining it would make a re-run fail instead of no-op.
+
+To align an existing database with the canonical opportunity types in
+`registry/type.yaml`, run the checked-in migration from the repository
+root before replaying:
+
+```bash
+psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
+  --file=xjobscore/migrations/20260817_opportunity_types.sql
+uv run python -m xjobscore.run --parse
+```
 
 Configure one of these DSN variables, in precedence order:
 
@@ -105,14 +112,11 @@ signature verification, and the profile is read from the userinfo endpoint.
 ## Run
 
 ```bash
-cd xjobscore/oneshot-ui
-../../.venv/bin/python -m oneshot_ui
+uv run --directory xjobscore/oneshot-ui python -m oneshot_ui
 ```
 
 The server starts at <http://127.0.0.1:8766>. Opportunities, Applications,
 and Source Coverage all use the live `/api` transport.
-
-The standalone discovery concept is available at <http://127.0.0.1:8766/discover/>.
 
 ## The browser client
 
@@ -155,22 +159,36 @@ returns the compiled PDF (503 with a reason if Typst is not installed), and
 ## Data contract
 
 `job_posting.attributes` is the versioned enrichment contract consumed by the
-Opportunities UI:
+Opportunities UI. Skills are stored as canonical taxonomy ids:
 
 ```json
 {
   "version": 1,
-  "opportunity_type": "summer_internship",
+  "opportunity_type": "internship",
   "term": "Summer 2027",
   "workplace": "hybrid",
-  "skills": ["Python", "PostgreSQL"],
-  "deadline_at": "2027-02-01T23:59:59Z",
-  "eligibility": "eligible"
+  "skills": ["python", "postgresql"],
+  "deadline_at": "2027-02-01T23:59:59Z"
 }
 ```
 
 Keys other than `version` may be absent while enrichment is pending. PostgreSQL
 enforces their types and allowed enum values.
+
+`GET /api/jobs` leaves those stored attributes unchanged and adds taxonomy
+metadata for presentation at the top level of each job:
+
+```json
+{
+  "skills": [
+    {"id": "python", "name": "Python", "category": "language"},
+    {"id": "postgresql", "name": "PostgreSQL", "category": "stack"}
+  ]
+}
+```
+
+Historical display-name values and unknown taxonomy strings remain visible
+during replay; they never cause the API to rewrite `job_posting.attributes`.
 
 ## Tests
 

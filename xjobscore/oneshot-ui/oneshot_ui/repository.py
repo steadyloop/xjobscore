@@ -6,44 +6,30 @@ reader for jobs and a writer for the single-user application tracker.
 """
 
 import asyncio
-from datetime import date, datetime, time, timedelta, timezone
+import functools
 import json
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 from uuid import UUID
 
 import asyncpg
 
+from xjobscore.degrees import canon as degree_canon
+from xjobscore.opportunity import canon as opportunity_canon
+from xjobscore.skills import canon
+
 
 LOCAL_ACCOUNT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
-VALID_OPPORTUNITY_TYPES = frozenset(
-    {
-        "spring_internship",
-        "spring_coop",
-        "student_researcher",
-        "summer_internship",
-        "fall_coop",
-        "fall_internship",
-        "student_role",
-        "fellowship",
-        "unclassified",
-        "review",
-    }
+# Keep the API contract tied to the registry rather than maintaining a second
+# hand-written enum. ``dict.fromkeys`` preserves the registry's rule order and
+# collapses multiple rules that intentionally produce the same type.
+DEFAULT_OPPORTUNITY_TYPES = tuple(
+    dict.fromkeys(rule.type for rule in opportunity_canon())
 )
-# The board's default scope: every classified type. "unclassified" and "review"
-# are reachable only by asking for them explicitly, so the default view shows
-# the roles the pipeline is actually for instead of the whole firehose.
-DEFAULT_OPPORTUNITY_TYPES = (
-    "spring_internship",
-    "spring_coop",
-    "summer_internship",
-    "fall_internship",
-    "fall_coop",
-    "student_researcher",
-    "student_role",
-    "fellowship",
-)
+VALID_OPPORTUNITY_TYPES = frozenset((*DEFAULT_OPPORTUNITY_TYPES, "unclassified"))
+VALID_DEGREE_FIELDS = frozenset(field.name for field in degree_canon())
 VALID_APPLICATION_STAGES = frozenset(
     {"considering", "applied", "assessment", "interview", "offer", "closed"}
 )
@@ -57,6 +43,39 @@ def _json_object(value: Any) -> dict[str, Any]:
         decoded = json.loads(value)
         return decoded if isinstance(decoded, dict) else {}
     return {}
+
+
+@functools.lru_cache(maxsize=1)
+def _skill_lookups() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Index the cached canon by stable id and case-insensitive display name."""
+    by_id = canon()
+    by_name = {skill.name.casefold(): skill for skill in by_id.values()}
+    return by_id, by_name
+
+
+def _skill_details(attributes: dict[str, Any]) -> list[dict[str, Any]]:
+    """Derive display metadata without changing stored canonical skill ids."""
+    values = attributes.get("skills")
+    if not isinstance(values, list):
+        return []
+
+    by_id, by_name = _skill_lookups()
+    details: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        raw = value.strip()
+        skill = by_id.get(raw) or by_name.get(raw.casefold())
+        if skill is None:
+            skill_id, name, category = raw, raw, None
+        else:
+            skill_id, name, category = skill.id, skill.name, skill.category
+        if skill_id in seen:
+            continue
+        seen.add(skill_id)
+        details.append({"id": skill_id, "name": name, "category": category})
+    return details
 
 
 def _iso(value: Any) -> Any:
@@ -161,12 +180,16 @@ class PostgresRepository:
             "last_seen_at": _iso(row.get("last_seen_at")),
             "status": row.get("status"),
             "attributes": attributes,
+            # Derived API presentation; attributes.skills remains the durable
+            # JSONB array of canonical ids.
+            "skills": _skill_details(attributes),
         }
 
     async def list_jobs(
         self,
         *,
         opportunity_types: Iterable[str] = (),
+        degree_fields: Iterable[str] = (),
         exclude_job_ids: Iterable[int] = (),
         hide_tracked: bool = True,
         q: str = "",
@@ -191,6 +214,10 @@ class PostgresRepository:
         if types:
             marker = bind(list(types))
             clauses.append(f"j.attributes ->> 'opportunity_type' = ANY({marker}::text[])")
+        fields = tuple(dict.fromkeys(degree_fields))
+        if fields:
+            marker = bind(list(fields))
+            clauses.append(f"(j.attributes -> 'degree_fields') ?| {marker}::text[]")
         excluded = tuple(dict.fromkeys(int(job_id) for job_id in exclude_job_ids))
         if excluded:
             marker = bind(list(excluded))
@@ -208,7 +235,7 @@ class PostgresRepository:
             "fresh": "COALESCE(j.posted_at, j.first_seen_at) DESC, j.id DESC",
         }.get(sort, "COALESCE(j.posted_at, j.first_seen_at) DESC, j.id DESC")
         pool = self._ready()
-        # Counting and reading a page use the same eligibility predicate but
+        # Counting and reading a page use the same filter predicate but
         # neither depends on the other. Run them on separate pool connections
         # so a large count does not hold the first visible results hostage.
         # Keep the filter arguments separate: binding LIMIT/OFFSET below must

@@ -44,14 +44,14 @@ async def test_schema_sql_repository_round_trip() -> None:
             posting_source,
             company_id,
             raw_id,
-            '{"version":1,"opportunity_type":"summer_internship","term":"Summer 2027","workplace":"remote","skills":["Python","PostgreSQL"],"eligibility":"eligible"}',
+            '{"version":1,"opportunity_type":"internship","term":"Summer 2027","workplace":"remote","skills":["Python","PostgreSQL"]}',
         )
         feed_id = await pool.fetchval(
             "INSERT INTO feed(source, key) VALUES ($1, 'board') RETURNING id", source
         )
         await pool.execute("INSERT INTO schedule(feed_id) VALUES ($1)", feed_id)
 
-        jobs = await repository.list_jobs(opportunity_types=["summer_internship"])
+        jobs = await repository.list_jobs(opportunity_types=["internship"])
         assert jobs["total"] == 1
         assert jobs["jobs"][0]["source"] == posting_source
         assert jobs["jobs"][0]["source_url"] == "https://repository.test/job"
