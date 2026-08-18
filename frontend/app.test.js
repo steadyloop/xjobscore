@@ -1,22 +1,29 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const { opportunityTypes, relativeTime, postedPresentation } = require("./app.js");
+const { FILTERS, opportunityTypes, relativeTime, postedPresentation } = require("./app.js");
+const opportunitiesV2 = require("./opportunities-v2/app.js");
 const sampleData = require("./sample-data.js");
 const { ROUTES, query } = require("./api-client.js");
 const { opportunityTotal } = require("./nav-count.js");
 
 test("visible filters map to PostgreSQL opportunity types", () => {
-  assert.deepEqual(
-    opportunityTypes(["internships", "early_career", "working_student", "research", "review"]),
-    ["summer_internship", "student_role", "spring_coop", "student_researcher", "fellowship", "review"],
-  );
+  const labels = ["Internships", "Co-ops", "Student Programs"];
+  const keys = ["internships", "coops", "student_programs"];
+  const types = ["internship", "coop", "student_researcher", "fellowship", "apprenticeship", "new_grad_program", "student_role"];
+
+  assert.deepEqual(FILTERS.map(filter => filter.label), labels);
+  assert.deepEqual(opportunityTypes(keys), types);
+  assert.deepEqual(opportunitiesV2.FILTERS.map(filter => filter.label), labels);
+  assert.deepEqual(opportunitiesV2.opportunityTypes(keys), types);
   assert.deepEqual(opportunityTypes([]), [], "no tab active defers to the API's default scope");
 });
 
-test("opportunity filters expose their pressed state", () => {
+test("opportunity tabs expose exclusive selection state", () => {
   const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  assert.match(source, /type="button" data-filter="\$\{filter\.key\}" aria-pressed="\$\{active\}"/);
+  assert.match(source, /role="tab" data-filter="\$\{filter\.key\}" aria-selected="\$\{active\}"/);
+  assert.match(source, /state\.filters = \[filter\.dataset\.filter\];/);
+  assert.doesNotMatch(source, /\.\.\.state\.filters/);
 });
 
 test("job freshness labels stay concise", () => {
@@ -30,7 +37,7 @@ test("job freshness labels stay concise", () => {
 test("sample jobs match the live list contract", async () => {
   const state = sampleData.createState();
   const listing = await (await sampleData.handle("/jobs?limit=100", {}, state)).json();
-  assert.equal(listing.total, 4);
+  assert.equal(listing.total, 9);
   for (const job of listing.jobs) {
     assert.deepEqual(
       Object.keys(job).sort(),
@@ -71,7 +78,7 @@ test("sample Add to Applications creates one Considering record", async () => {
   assert.equal(firstResponse.status, 201);
   assert.equal(first.stage, "considering");
   assert.equal(first.job_id, "sample-software");
-  assert.equal((await (await sampleData.handle("/jobs", {}, state)).json()).total, 3);
+  assert.equal((await (await sampleData.handle("/jobs", {}, state)).json()).total, 8);
 
   const duplicate = await (await sampleData.handle("/jobs/sample-software/applications", { method: "POST" }, state)).json();
   assert.equal(duplicate.id, first.id);
@@ -139,8 +146,9 @@ test("visitor workspace starts blank and stays separate from sample fixtures", a
 test("frontend client builds current API routes", () => {
   assert.equal(ROUTES.addToApplications("job 1"), "/jobs/job%201/applications");
   assert.equal(ROUTES.application("app 1"), "/applications/app%201");
-  assert.equal(query({ q: "python", opportunity_type: ["summer_internship", "student_role"] }), "?q=python&opportunity_type=summer_internship&opportunity_type=student_role");
+  assert.equal(query({ q: "python", opportunity_type: ["internship", "student_role"] }), "?q=python&opportunity_type=internship&opportunity_type=student_role");
   assert.equal(query({ exclude_job_id: [41, 42] }), "?exclude_job_id=41&exclude_job_id=42");
+  assert.equal(query({ degree_field: ["computer_science", "mathematics"] }), "?degree_field=computer_science&degree_field=mathematics");
   const source = fs.readFileSync(require.resolve("./api-client.js"), "utf8");
   assert.match(source, /OneShotVisitorData\.isLocal\(\)/);
   assert.match(source, /applications:[\s\S]*privateData|applications:[\s\S]*, true\)/);
@@ -159,16 +167,17 @@ test("navigation count uses the unfiltered opportunity total on every page", () 
 });
 
 test("Opportunities exposes its action and workspace navigation", () => {
-  const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const source = fs.readFileSync(require.resolve("./opportunities-v2/app.js"), "utf8");
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   assert.match(source, /data-action=\"add-to-applications\"/);
-  assert.match(source, /class=\"discover-search-surface\".*class=\"discover-sort\".*class=\"discover-controls-pane\"/);
+  assert.match(source, /class=\"discover-controls-pane\".*class=\"discover-search-surface\".*class=\"discover-sort\"/);
   assert.doesNotMatch(source, /<span>Sort<\/span>/);
   // Canonical page URLs, not the /static/ mount path the shells also answer on.
   assert.match(html, /href=\"\/application\/\"/);
   assert.match(html, /href=\"\/source-coverage\/\"/);
   assert.doesNotMatch(html, /href=\"\/static\/[a-z-]+\/index\.html\"/);
-  assert.match(html, /href=\"\/static\/app\.css\?v=opportunities-/);
+  assert.match(html, /href=\"\/static\/opportunities-v2\/styles\.css\?v=degree-fields-/);
+  assert.match(html, /src=\"\/static\/opportunities-v2\/app\.js\?v=degree-fields-/);
   assert.match(html, /href=\"\/static\/navigation\.css\?v=stable-nav-/);
 });
 
@@ -197,7 +206,7 @@ test("the sample switch is per page, guest-only, and absent only from Source cov
   const opportunities = shellFor("./index.html");
   assert.match(opportunities, /sample-data\.js/);
   assert.doesNotMatch(sidebarOf(opportunities), /sample-toggle/);
-  const page = fs.readFileSync(require.resolve("./app.js"), "utf8");
+  const page = fs.readFileSync(require.resolve("./opportunities-v2/app.js"), "utf8");
   assert.match(page, /data-action="sample-toggle"/);
   assert.match(page, /class="discover-page-head">[\s\S]*?\$\{sampleToggle\(\)\}/);
   assert.match(page, /OneShotSampleData\?\.sync\?\.\(\)/);
@@ -230,6 +239,15 @@ test("shared navigation keeps active states from changing geometry", () => {
   assert.match(navigation, /width: 24px/);
   assert.match(navigation, /a\.active \{[\s\S]*?order: initial/);
   assert.doesNotMatch(navigation, /a\.active \{\s*order: -1/);
+  assert.match(navigation, /\.side-nav \.nav-icon \{[\s\S]*?fill: none;[\s\S]*?stroke: currentColor;/);
+
+  for (const page of ["./index.html", "./application/index.html", "./resume/index.html", "./source-coverage/index.html"]) {
+    const html = fs.readFileSync(require.resolve(page), "utf8");
+    assert.match(html, /class="icon-sprite"/);
+    for (const icon of ["compass", "pipeline", "doc", "radar"]) {
+      assert.match(html, new RegExp(`href="#icon-${icon}"`));
+    }
+  }
 });
 
 test("Opportunities exposes only its canonical layout", () => {
@@ -238,7 +256,7 @@ test("Opportunities exposes only its canonical layout", () => {
     fs.readFileSync(require.resolve("./application/index.html"), "utf8"),
     fs.readFileSync(require.resolve("./source-coverage/index.html"), "utf8"),
   ];
-  const styles = fs.readFileSync(require.resolve("./app.css"), "utf8");
+  const styles = fs.readFileSync(require.resolve("./opportunities-v2/styles.css"), "utf8");
 
   for (const page of pages) {
     assert.doesNotMatch(page, /opportunities-(?:full|split)|Opportunities \((?:Left|Full|Split)\)/);
@@ -246,7 +264,8 @@ test("Opportunities exposes only its canonical layout", () => {
   assert.doesNotMatch(styles, /data-opportunities-layout/);
   assert.match(styles, /\.discover-search-surface \{[^}]*display: flex/);
   assert.match(styles, /\.discover-search-surface \{[^}]*gap: 12px/);
-  assert.match(styles, /\.filter\.active \{[^}]*border-color: var\(--nav\); background: var\(--nav\); color: white/);
-  assert.match(styles, /\.discover-sort select \{[^}]*width: 110px; height: 42px[^}]*font-size: 12px/);
-  assert.match(styles, /grid-template-areas: "controls \." "search \." "list detail"/);
+  assert.match(styles, /\.filter\.active \{[^}]*background: transparent; color: var\(--ink\)/);
+  assert.match(styles, /\.filter\.active::after \{[^}]*background: var\(--ink\)/);
+  assert.match(styles, /\.discover-sort select \{[^}]*width: 110px; height: 38px[^}]*font-size: 12px/);
+  assert.match(styles, /grid-template-areas: "controls controls" "search \." "list detail"/);
 });

@@ -1,17 +1,10 @@
 (function (root) {
   "use strict";
 
-  // No tab active sends no opportunity_type parameters, and the API answers
-  // with its classified default scope. "Needs review" maps to `review` only
-  // -- `unclassified` is every non-student posting (~83k of them) now that
-  // opportunity.py classifies on every parse, so including it here would
-  // make the tab useless.
   const FILTERS = [
-    { key: "internships", label: "Internships", types: ["summer_internship"] },
-    { key: "early_career", label: "Early Career", types: ["student_role"] },
-    { key: "working_student", label: "Working Student", types: ["spring_coop"] },
-    { key: "research", label: "Research", types: ["student_researcher", "fellowship"] },
-    { key: "review", label: "Needs review", types: ["review"] },
+    { key: "internships", label: "Internships", types: ["internship"] },
+    { key: "coops", label: "Co-ops", types: ["coop"] },
+    { key: "student_programs", label: "Student Programs", types: ["student_researcher", "fellowship", "apprenticeship", "new_grad_program", "student_role"] },
   ];
   const opportunityTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
   const relativeTime = (value, now = new Date()) => {
@@ -49,7 +42,7 @@
   const $ = selector => document.querySelector(selector);
   const view = $("#view"), flash = $("#flash");
   const PAGE_SIZE = 100;
-  const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: [], sort: "fresh", query: "" };
+  const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: ["internships"], sort: "fresh", query: "" };
   const esc = value => String(value == null ? "" : value).replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
   const safeHref = value => /^https?:\/\//i.test(String(value || "")) ? String(value) : "";
   const attributes = job => job.attributes || {};
@@ -117,7 +110,7 @@
   function filtersMarkup() {
     return FILTERS.map(filter => {
       const active = state.filters.includes(filter.key);
-      return `<button class="filter ${active ? "active" : ""}" type="button" data-filter="${filter.key}" aria-pressed="${active}">${filter.label}</button>`;
+      return `<button class="filter ${active ? "active" : ""}" type="button" role="tab" data-filter="${filter.key}" aria-selected="${active}" tabindex="${active ? "0" : "-1"}">${filter.label}</button>`;
     }).join("");
   }
 
@@ -142,7 +135,7 @@
   function render() {
     const search = $("#discover-search"), restoreFocus = search && document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
     const jobs = state.jobs || [], selected = jobs.find(job => String(job.id) === String(state.selected));
-    paint(`<section class="discover-page"><header class="discover-page-head"><button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button><div><a class="preview-link" href="/opportunities-v2/" target="_blank" rel="noopener noreferrer">Preview redesigned Opportunities ↗</a><div class="section-kicker">Multi-source intelligence</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><div class="discover-search-surface"><label class="discover-search"><svg class="discover-search-icon" aria-hidden="true"><use href="#i-search"/></svg><span class="sr-only">Search opportunities</span><input id="discover-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" aria-label="Opportunity types">${filtersMarkup()}</div></section><div class="opportunity-list" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search or clear a filter.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
+    paint(`<section class="discover-page"><header class="discover-page-head"><button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button><div><a class="preview-link" href="/opportunities-v2/" target="_blank" rel="noopener noreferrer">Preview redesigned Opportunities ↗</a><div class="section-kicker">Multi-source intelligence</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><div class="discover-search-surface"><label class="discover-search"><svg class="discover-search-icon" aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="discover-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Opportunity types">${filtersMarkup()}</div></section><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
     if (restoreFocus) {
       const next = $("#discover-search");
       next.focus();
@@ -221,8 +214,17 @@
   document.addEventListener("click", event => {
     const filter = event.target.closest("[data-filter]");
     if (!filter) return;
-    state.filters = state.filters.includes(filter.dataset.filter) ? state.filters.filter(key => key !== filter.dataset.filter) : [...state.filters, filter.dataset.filter];
+    state.filters = [filter.dataset.filter];
     loadJobs();
+  });
+  document.addEventListener("keydown", event => {
+    const tab = event.target.closest('[role="tab"][data-filter]');
+    if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = [...tab.parentElement.querySelectorAll('[role="tab"][data-filter]')];
+    const at = tabs.indexOf(tab);
+    const next = event.key === "Home" ? tabs[0] : event.key === "End" ? tabs.at(-1) : tabs[(at + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+    event.preventDefault();
+    next.click();
   });
   document.addEventListener("change", event => {
     if (!event.target.matches("[data-sort]")) return;
