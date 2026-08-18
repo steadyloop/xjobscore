@@ -492,7 +492,6 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
         static / "shared" / "inspect.js",
         static / "scheduler" / "app.js",
         static / "postings" / "app.js",
-        static / "postings-old" / "app.js",
     ]
     for script in scripts:
         assert "feed.id" not in script.read_text(), script.name
@@ -500,6 +499,12 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
     feeds_js = (static / "feeds.js").read_text()
     assert "feed.last_result = await api(`/api/feeds/${feed.feed_ref}/fetch`" in feeds_js
     assert "for (const feed of feeds)" in feeds_js  # sequential by design
+    # Header Enable-all has the same import-and-enable semantics as row/vendor
+    # toggles; it must not discard catalog-only feeds before the bulk request.
+    candidates = feeds_js.split("function enableCandidates()", 1)[1].split("}\n", 1)[0]
+    assert "feed.policy?.in_postgres" not in candidates
+    assert "!(feed.policy.in_postgres && feed.policy.enabled)" in candidates
+    assert "await setFeedsEnabled(feeds, true)" in feeds_js
 
 
 async def test_feed_rows_use_string_ids_and_stable_public_refs(store):

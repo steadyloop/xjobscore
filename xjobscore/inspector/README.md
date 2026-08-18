@@ -38,9 +38,9 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   online, since 2,591 of the 2,626 catalogued feeds are Ashby and none of them
   start out in PostgreSQL. It goes through `POST /api/feeds/bulk-policy`, one
   request and one round trip for the batch rather than a POST per feed. The
-  header's **Enable all visible** button is deliberately narrower: it touches
-  only feeds already imported, so importing stays a per-row or per-vendor
-  decision rather than something one click does across every source at once.
+  header's **Enable all visible** button uses that same import-and-enable
+  operation for every feed matching the current filters, guarded by a second
+  confirmation click.
 - **Feed detail** (`/feed?ref=…`) — the three-tab view:
   - *Harvest*: item picker + verbatim payload JSON, with the response envelope
     as a synthetic first row.
@@ -128,18 +128,21 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   precisely because gold tables are rebuilt destructively. A shuffled order
   (seeded, stable across pagination) plus an "Unlabeled" filter and an
   "Intern titles" stratum filter make an unbiased labeling draw practical.
-  Press `?` on the page for the full keymap.
+  The same page's **Duplicate review** mode pages by candidate group, nests
+  every member beneath one group row, and compares location, ATS identity, and
+  description evidence without loading full descriptions. `1`/`2`/`3` mark a
+  group correct / incorrect / needs-review. Reviews live in
+  `{schema}.duplicate_group_review`, keyed by group and evidence fingerprint;
+  a rebuild that changes the evidence returns that group to the unreviewed
+  queue while retaining its prior review history. Hidden groups leave the
+  ordinary queues but remain recoverable through the **Hidden** filter. Press
+  `?` for the keymap.
   A **Rebuild duplicate groups** button reruns the gold dedup step
   (`gold.steps("dedup")`) against `public.job_posting`, replacing
   `job_posting_dup_group` entirely. It is deliberately manual and separate
   from the poll loop: the rebuild is a destructive full-table recompute, too
-  heavy to run on every tick. Each row's dup group shows in the detail pane
-  after a reload.
-- **Postings (Old)** (`/postings-old`) — the superseded staging browser:
-  filterable view over the latest stored run per feed, reading
-  `fetched_feed`/`fetched_feed_posting` with payload-heuristic filters
-  (`staging_postings.py`, `/api/postings-old`). Kept for payload-level
-  inspection of what a fetch actually returned.
+  heavy to run on every tick. A completed rebuild refreshes Duplicate review
+  automatically; Inspector reviews are not stored in the replaced gold table.
 
 ## Architecture
 

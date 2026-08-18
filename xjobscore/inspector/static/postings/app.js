@@ -15,6 +15,8 @@ const PAGE = 50;
 const PREFS_KEY = "inspector-postings-prefs";
 const LABEL_KEYS = { 1: "relevant", r: "relevant", 2: "irrelevant", i: "irrelevant", 3: "unsure", u: "unsure" };
 const LABEL_STATES = ["all", "unlabeled", "labeled", "relevant", "irrelevant", "unsure"];
+const REVIEW_KEYS = { 1: "correct", 2: "incorrect", 3: "needs_review" };
+const REVIEW_STATES = ["unreviewed", "needs_review", "correct", "incorrect", "all", "hidden"];
 
 const prefs = (() => {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY)) ?? {}; } catch { return {}; }
@@ -24,6 +26,7 @@ const state = {
   source: null,          // null = all vendors
   status: "active",
   labelState: LABEL_STATES.includes(prefs.labelState) ? prefs.labelState : "all",
+  reviewState: REVIEW_STATES.includes(prefs.reviewState) ? prefs.reviewState : "unreviewed",
   search: "",
   internSignal: Boolean(prefs.internSignal),
   order: ["newest", "company", "random"].includes(prefs.order) ? prefs.order : "newest",
@@ -32,6 +35,9 @@ const state = {
   total: 0,
   cursor: -1,
   labelCounts: { relevant: 0, irrelevant: 0, unsure: 0, total: 0 },
+  reviewCounts: { all: 0, unreviewed: 0, correct: 0, incorrect: 0, needs_review: 0, hidden: 0 },
+  expandedGroups: new Set(),
+  selectedMemberId: null,
   detailCache: new Map(),  // id -> detail payload, insertion-order eviction
   loadToken: 0,            // api.js has no AbortController; stale guard instead
   detailTimer: null,
@@ -39,8 +45,13 @@ const state = {
 
 function savePrefs() {
   localStorage.setItem(PREFS_KEY, JSON.stringify({
-    labelState: state.labelState, order: state.order, internSignal: state.internSignal,
+    labelState: state.labelState, reviewState: state.reviewState,
+    order: state.order, internSignal: state.internSignal,
   }));
+}
+
+function duplicateMode() {
+  return state.status === "duplicates";
 }
 
 const listEl = document.getElementById("posting-list");
@@ -57,6 +68,7 @@ const internBtn = document.getElementById("intern-signal");
 const pillsEl = document.getElementById("label-state-pills");
 const helpDialog = document.getElementById("key-help");
 const noteEl = document.getElementById("detail-note");
+const noteLabelEl = document.querySelector("label[for='detail-note']");
 
 /* ---- resizable split (feeds.js pattern; pane is always open here) ---- */
 const masterEl = document.getElementById("master");
@@ -99,6 +111,19 @@ function matchesLabelFilter(row) {
 }
 
 function queryParams(offset) {
+  if (duplicateMode()) {
+    const params = new URLSearchParams({
+      review_state: state.reviewState,
+      search: state.search,
+      intern_signal: String(state.internSignal),
+      order: state.order,
+      seed: state.seed,
+      limit: String(PAGE),
+      offset: String(offset),
+    });
+    if (state.source) params.set("source", state.source);
+    return params;
+  }
   const params = new URLSearchParams({
     status: state.status,
     label_state: state.labelState,
@@ -113,15 +138,21 @@ function queryParams(offset) {
   return params;
 }
 
-async function load() {
+async function load(preferredCursor = 0) {
   const token = ++state.loadToken;
-  const payload = await api(`/api/postings?${queryParams(0)}`);
+  const endpoint = duplicateMode() ? "/api/duplicate-groups" : "/api/postings";
+  const payload = await api(`${endpoint}?${queryParams(0)}`);
   if (token !== state.loadToken) return;
-  state.rows = payload.rows;
+  state.rows = duplicateMode() ? payload.groups : payload.rows;
   state.total = payload.total;
   state.seed = payload.filters.seed;
-  state.labelCounts = payload.label_counts;
-  state.cursor = state.rows.length ? 0 : -1;
+  if (duplicateMode()) state.reviewCounts = payload.review_counts;
+  else state.labelCounts = payload.label_counts;
+  state.cursor = state.rows.length
+    ? Math.min(Math.max(0, preferredCursor), state.rows.length - 1)
+    : -1;
+  state.selectedMemberId = null;
+  state.expandedGroups = new Set();
   fillSources(payload.sources, payload.filters.source);
   renderList();
   renderChrome();
@@ -132,20 +163,27 @@ async function loadMore() {
   // Rows labeled this session can drop out of the server-side filter, which
   // would shift OFFSET under us; compensate by how many rendered rows no
   // longer match, so the next page starts where the server thinks we are.
-  const drift = state.rows.filter((row) => !matchesLabelFilter(row)).length;
+  const drift = duplicateMode()
+    ? 0
+    : state.rows.filter((row) => !matchesLabelFilter(row)).length;
   const token = ++state.loadToken;
-  const payload = await api(`/api/postings?${queryParams(state.rows.length - drift)}`);
+  const endpoint = duplicateMode() ? "/api/duplicate-groups" : "/api/postings";
+  const payload = await api(`${endpoint}?${queryParams(state.rows.length - drift)}`);
   if (token !== state.loadToken) return;
+  const incoming = duplicateMode() ? payload.groups : payload.rows;
   const seen = new Set(state.rows.map((row) => row.id));
-  state.rows.push(...payload.rows.filter((row) => !seen.has(row.id)));
+  state.rows.push(...incoming.filter((row) => !seen.has(row.id)));
   state.total = payload.total;
-  state.labelCounts = payload.label_counts;
+  if (duplicateMode()) state.reviewCounts = payload.review_counts;
+  else state.labelCounts = payload.label_counts;
   renderList();
   renderChrome();
 }
 
 function moreAvailable() {
-  const drift = state.rows.filter((row) => !matchesLabelFilter(row)).length;
+  const drift = duplicateMode()
+    ? 0
+    : state.rows.filter((row) => !matchesLabelFilter(row)).length;
   return state.rows.length - drift < state.total;
 }
 
@@ -170,7 +208,7 @@ function labelBadge(label) {
     : null;
 }
 
-function entryNode(row, index) {
+function postingEntryNode(row, index) {
   const attrs = row.attributes ?? {};
   const node = el("div", { class: "plist-entry", role: "option", dataset: { index: String(index) } },
     el("div", { class: "plist-line1" },
@@ -179,7 +217,7 @@ function entryNode(row, index) {
       attrs.opportunity_type
         ? el("span", { class: "badge" }, attrs.opportunity_type)
         : null,
-      row.status === "closed" ? el("span", { class: "badge", "data-kind": "error" }, "closed") : null),
+      row.status === "closed" ? el("span", { class: "badge" }, "closed") : null),
     el("div", { class: "plist-line2 muted" },
       [row.company, row.location_text,
        relativeTime(row.posted_at ?? row.first_seen_at), row.source]
@@ -189,10 +227,80 @@ function entryNode(row, index) {
   return node;
 }
 
+function reviewBadge(review, changed = false) {
+  const decision = review?.decision ?? (changed ? "changed" : "unreviewed");
+  const text = {
+    correct: "correct",
+    incorrect: "not duplicates",
+    needs_review: "needs review",
+    hidden: "hidden",
+    changed: "changed",
+    unreviewed: "unreviewed",
+  }[decision];
+  return el("span", { class: "dup-review-badge", dataset: { decision } }, text);
+}
+
+function duplicateGroupNode(group, index) {
+  const expanded = state.expandedGroups.has(group.id);
+  const node = el("div", {
+    class: "dup-group",
+    role: "treeitem",
+    "aria-expanded": String(expanded),
+    dataset: { index: String(index), groupId: group.id },
+  });
+  const header = el("div", { class: "plist-entry dup-group-head" },
+    el("div", { class: "plist-line1" },
+      el("span", { class: "dup-disclosure", "aria-hidden": "true" }, expanded ? "▾" : "▸"),
+      el("span", { class: "plist-title" }, group.title),
+      el("span", { class: "badge" }, `${group.member_count} postings`),
+      reviewBadge(group.review, group.changed_since_review)),
+    el("div", { class: "plist-line2 muted" },
+      [group.company, group.sources.join(", "), group.locations.join(" · ")]
+        .filter(Boolean).join(" · "))
+  );
+  header.addEventListener("click", () => selectDuplicateGroup(index, true));
+  node.append(header);
+
+  const members = el("div", { class: "dup-members", role: "group" });
+  members.hidden = !expanded;
+  group.members.forEach((member) => {
+    const child = el("div", {
+      class: "dup-member",
+      role: "treeitem",
+      tabindex: "-1",
+      dataset: { memberId: String(member.id) },
+    },
+    el("div", { class: "plist-line1" },
+      el("span", { class: "plist-title" }, member.title),
+      member.status === "closed"
+        ? el("span", { class: "badge" }, "closed")
+        : null),
+    el("div", { class: "plist-line2 muted" },
+      [member.source, member.location_text,
+       relativeTime(member.posted_at ?? member.first_seen_at)]
+        .filter(Boolean).join(" · ")));
+    child.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectDuplicateMember(index, member.id);
+    });
+    members.append(child);
+  });
+  node.append(members);
+  return node;
+}
+
+function entryNode(row, index) {
+  return duplicateMode()
+    ? duplicateGroupNode(row, index)
+    : postingEntryNode(row, index);
+}
+
 function renderList() {
   rowNodes.length = 0;
   state.rows.forEach((row, index) => rowNodes.push(entryNode(row, index)));
   listEl.replaceChildren(...rowNodes);
+  listEl.setAttribute("role", duplicateMode() ? "tree" : "listbox");
+  listEl.setAttribute("aria-label", duplicateMode() ? "Duplicate groups" : "Postings");
   emptyEl.hidden = state.rows.length > 0;
   applyCursor();
 }
@@ -200,6 +308,15 @@ function renderList() {
 function applyCursor() {
   rowNodes.forEach((node, index) => {
     node.setAttribute("aria-selected", String(index === state.cursor));
+    if (duplicateMode()) {
+      node.querySelectorAll(".dup-member").forEach((child) => {
+        child.setAttribute(
+          "aria-selected",
+          String(index === state.cursor
+            && Number(child.dataset.memberId) === state.selectedMemberId)
+        );
+      });
+    }
   });
   const node = rowNodes[state.cursor];
   if (node) node.scrollIntoView({ block: "nearest" });
@@ -216,6 +333,41 @@ function refreshRow(index) {
 }
 
 function renderChrome() {
+  document.querySelectorAll(".posting-key-help").forEach((row) => {
+    row.hidden = duplicateMode();
+  });
+  document.querySelectorAll(".duplicate-key-help").forEach((row) => {
+    row.hidden = !duplicateMode();
+  });
+  if (duplicateMode()) {
+    const counts = state.reviewCounts;
+    const reviewed = Math.max(0, counts.all - counts.unreviewed);
+    const decided = counts.correct + counts.incorrect;
+    const correctness = decided
+      ? ` · ${Math.round((counts.correct / decided) * 100)}% correct`
+      : "";
+    const hidden = counts.hidden ? ` · ${formatCount(counts.hidden)} hidden` : "";
+    progressEl.textContent = `${formatCount(reviewed)} reviewed · ${formatCount(counts.unreviewed)} unreviewed${correctness}${hidden}`;
+    countEl.textContent = state.total
+      ? `${formatCount(state.rows.length)} of ${formatCount(state.total)} groups loaded`
+      : "";
+    loadMoreBtn.hidden = !moreAvailable();
+    reshuffleBtn.hidden = state.order !== "random";
+    internBtn.setAttribute("aria-pressed", String(state.internSignal));
+    pillsEl.setAttribute("aria-label", "Duplicate review filter");
+    pillsEl.replaceChildren(
+      ...REVIEW_STATES.map((value) => {
+        const count = counts[value];
+        const label = value.replace("_", " ");
+        return el("button", {
+          class: "pill", type: "button",
+          "aria-pressed": String(state.reviewState === value),
+          onclick: () => { state.reviewState = value; savePrefs(); load(); },
+        }, `${label} ${formatCount(count)}`);
+      })
+    );
+    return;
+  }
   const counts = state.labelCounts;
   progressEl.textContent = counts.total
     ? `${formatCount(counts.total)} labeled · ${formatCount(counts.relevant)} relevant`
@@ -226,6 +378,7 @@ function renderChrome() {
   loadMoreBtn.hidden = !moreAvailable();
   reshuffleBtn.hidden = state.order !== "random";
   internBtn.setAttribute("aria-pressed", String(state.internSignal));
+  pillsEl.setAttribute("aria-label", "Label filter");
   pillsEl.replaceChildren(
     ...LABEL_STATES.map((value) => {
       const count = { relevant: counts.relevant, irrelevant: counts.irrelevant,
@@ -241,7 +394,36 @@ function renderChrome() {
 
 /* ---- cursor + detail pane ---- */
 
+function selectDuplicateGroup(index, toggle = false) {
+  if (index < 0 || index >= state.rows.length) return;
+  const group = state.rows[index];
+  state.cursor = index;
+  state.selectedMemberId = null;
+  if (toggle) {
+    if (state.expandedGroups.has(group.id)) state.expandedGroups.delete(group.id);
+    else state.expandedGroups.add(group.id);
+    renderList();
+  } else {
+    applyCursor();
+  }
+  followCursor();
+  if (index >= state.rows.length - 1 && moreAvailable()) loadMore();
+}
+
+function selectDuplicateMember(index, memberId) {
+  if (index < 0 || index >= state.rows.length) return;
+  state.cursor = index;
+  state.selectedMemberId = Number(memberId);
+  state.expandedGroups.add(state.rows[index].id);
+  renderList();
+  followCursor();
+}
+
 function setCursor(index) {
+  if (duplicateMode()) {
+    selectDuplicateGroup(index, false);
+    return;
+  }
   if (index < 0 || index >= state.rows.length) return;
   state.cursor = index;
   applyCursor();
@@ -250,6 +432,28 @@ function setCursor(index) {
 }
 
 function followCursor() {
+  if (duplicateMode()) {
+    const group = state.rows[state.cursor];
+    if (!group) {
+      renderDetail(null, null);
+      return;
+    }
+    const member = group.members.find((row) => row.id === state.selectedMemberId);
+    if (!member) {
+      renderGroupDetail(group);
+      return;
+    }
+    renderDetail(member, null);
+    clearTimeout(state.detailTimer);
+    state.detailTimer = setTimeout(async () => {
+      const detail = await fetchDetail(member.id);
+      const current = state.rows[state.cursor];
+      if (current?.id === group.id && state.selectedMemberId === member.id && detail) {
+        renderDetail(member, detail);
+      }
+    }, 80);
+    return;
+  }
   const row = state.rows[state.cursor];
   renderDetail(row ?? null, null);
   if (!row) return;
@@ -276,6 +480,86 @@ async function fetchDetail(id) {
   } catch {
     return null;
   }
+}
+
+function renderGroupDetail(group) {
+  const titleEl = document.getElementById("detail-title");
+  const labelEl = document.getElementById("detail-label");
+  const linksEl = document.getElementById("detail-links");
+  const fieldsEl = document.getElementById("detail-fields");
+  const attrsEl = document.getElementById("detail-attrs");
+  const descEl = document.getElementById("detail-desc");
+
+  titleEl.textContent = `${group.company} · ${group.title}`;
+  labelEl.replaceChildren(reviewBadge(group.review, group.changed_since_review));
+  const reviewActions = [
+      ["Correct duplicates", "correct"],
+      ["Not duplicates", "incorrect"],
+      ["Needs review", "needs_review"],
+      ["Hide from review", "hidden"],
+    ].map(([text, decision]) => el("button", {
+      class: "btn small", type: "button",
+      onclick: () => writeGroupReview(decision),
+    }, text));
+  if (group.review) {
+    reviewActions.push(el("button", {
+      class: "btn small", type: "button",
+      onclick: () => writeGroupReview(null),
+    }, "Clear review"));
+  }
+  linksEl.replaceChildren(...reviewActions);
+  const fields = [
+    ["members", group.member_count],
+    ["sources", group.sources.join(", ")],
+    ["locations", group.locations.join(" · ") || "—"],
+    ["candidate state", group.algorithm_state],
+    ["latest seen", group.latest_seen_at],
+    ["group id", group.id],
+  ];
+  fieldsEl.replaceChildren(
+    ...fields.flatMap(([name, value]) => [
+      el("dt", {}, name), el("dd", {}, String(value ?? "—")),
+    ])
+  );
+  attrsEl.replaceChildren(
+    ...group.warnings.flatMap((warning) => [
+      el("dt", {}, "warning"),
+      el("dd", { class: "dup-warning" }, warning.replaceAll("_", " ")),
+    ])
+  );
+  noteLabelEl.textContent = "Review note";
+  noteEl.value = group.review?.note ?? group.draftNote ?? "";
+  noteEl.disabled = false;
+
+  const rawTitles = new Set(group.members.map((member) => member.title));
+  const table = el("table", { class: "dup-compare" },
+    el("thead", {}, el("tr", {},
+      ...["Source", "Title", "Location", "Status", "ATS identity", "Description", "Links"]
+        .map((value) => el("th", {}, value)))),
+    el("tbody", {}, ...group.members.map((member) => {
+      const evidence = member.evidence ?? {};
+      const sourceUrl = safeUrl(member.source_url);
+      const applyUrl = safeUrl(member.apply_url);
+      return el("tr", {},
+        el("td", {}, member.source),
+        el("td", { class: rawTitles.size > 1 ? "dup-diff" : "" }, member.title),
+        el("td", {
+          class: group.warnings.includes("location_mismatch") ? "dup-diff" : "",
+        }, evidence.location ?? member.location_text ?? "—"),
+        el("td", {}, member.status),
+        el("td", {
+          class: group.warnings.includes("ats_identity_mismatch") ? "dup-diff" : "",
+        }, evidence.ats_identity ?? "—"),
+        el("td", {
+          class: group.warnings.includes("description_hash_mismatch") ? "dup-diff" : "",
+        }, evidence.description_hash ? evidence.description_hash.slice(0, 10) : "—"),
+        el("td", { class: "dup-links" },
+          sourceUrl ? el("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer" }, "open") : null,
+          applyUrl ? el("a", { href: applyUrl, target: "_blank", rel: "noopener noreferrer" }, "apply") : null)
+      );
+    }))
+  );
+  descEl.replaceChildren(table);
 }
 
 function safeUrl(value) {
@@ -309,6 +593,7 @@ function renderDetail(row, detail) {
   const fieldsEl = document.getElementById("detail-fields");
   const attrsEl = document.getElementById("detail-attrs");
   const descEl = document.getElementById("detail-desc");
+  noteLabelEl.textContent = "Note";
   if (!row) {
     titleEl.textContent = "Select a posting";
     labelEl.replaceChildren();
@@ -357,6 +642,43 @@ function renderDetail(row, detail) {
 }
 
 /* ---- label writes: immediate, optimistic, retry by re-press ---- */
+
+async function writeGroupReview(decision, { advance = true } = {}) {
+  const group = state.rows[state.cursor];
+  if (!duplicateMode() || !group) return;
+  const index = state.cursor;
+  const previous = {
+    review: group.review ? { ...group.review } : null,
+    changed_since_review: group.changed_since_review,
+  };
+  const note = state.selectedMemberId === null
+    ? noteEl.value.trim() || null
+    : group.review?.note ?? group.draftNote ?? null;
+  group.review = decision
+    ? { decision, note, reviewed_at: new Date().toISOString() }
+    : null;
+  group.changed_since_review = false;
+  renderList();
+  renderGroupDetail(group);
+  try {
+    const response = await api(`/api/duplicate-groups/${group.id}/review`, {
+      body: { decision, note },
+    });
+    group.fingerprint = response.fingerprint;
+    group.review = response.review
+      ? { ...response.review, reviewed_at: new Date().toISOString() }
+      : null;
+    if (duplicateMode()) await load(advance ? index : state.cursor);
+  } catch (error) {
+    group.review = previous.review;
+    group.changed_since_review = previous.changed_since_review;
+    if (duplicateMode()) {
+      renderList();
+      renderGroupDetail(group);
+    }
+    alert(`Could not save duplicate review: ${error.message}`);
+  }
+}
 
 async function writeLabel(index, label, note) {
   const row = state.rows[index];
@@ -418,12 +740,50 @@ document.addEventListener("keydown", (event) => {
   if (typing || helpDialog.open) return;
   if (event.key === "?") { helpDialog.showModal(); event.preventDefault(); return; }
   if (event.key === "/") { searchInput.focus(); event.preventDefault(); return; }
+  if (duplicateMode()) {
+    const group = state.rows[state.cursor];
+    if ((event.key === "ArrowRight" || event.key === "Enter" || event.key === " ") && group) {
+      state.expandedGroups.add(group.id);
+      renderList();
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowLeft" && group) {
+      state.expandedGroups.delete(group.id);
+      state.selectedMemberId = null;
+      renderList();
+      renderGroupDetail(group);
+      event.preventDefault();
+      return;
+    }
+    const decision = REVIEW_KEYS[event.key];
+    if (decision && group) {
+      writeGroupReview(decision);
+      event.preventDefault();
+      return;
+    }
+    if ((event.key === "0" || event.key === "x") && group) {
+      writeGroupReview(null);
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "o" && group) {
+      const member = group.members.find((row) => row.id === state.selectedMemberId)
+        ?? group.members.find((row) => row.id === group.representative_posting_id)
+        ?? group.members[0];
+      const url = safeUrl(member?.source_url) ?? safeUrl(member?.apply_url);
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      event.preventDefault();
+      return;
+    }
+  }
   if (event.key === "j" || event.key === "ArrowDown") {
     setCursor(state.cursor + 1); event.preventDefault(); return;
   }
   if (event.key === "k" || event.key === "ArrowUp") {
     setCursor(state.cursor - 1); event.preventDefault(); return;
   }
+  if (duplicateMode()) return;
   const label = LABEL_KEYS[event.key];
   if (label && state.cursor >= 0) {
     writeLabel(state.cursor, label);
@@ -452,6 +812,9 @@ sourceSelect.addEventListener("change", () => {
 });
 statusSelect.addEventListener("change", () => {
   state.status = statusSelect.value;
+  state.detailCache.clear();
+  state.expandedGroups = new Set();
+  state.selectedMemberId = null;
   load();
 });
 orderSelect.addEventListener("change", () => {
@@ -484,7 +847,13 @@ document.getElementById("help-btn").addEventListener("click", () => {
 });
 noteEl.addEventListener("change", () => {
   const row = state.rows[state.cursor];
-  if (row?.label) writeLabel(state.cursor, row.label, noteEl.value.trim() || null);
+  if (duplicateMode()) {
+    if (!row || state.selectedMemberId !== null) return;
+    row.draftNote = noteEl.value.trim() || null;
+    if (row.review) writeGroupReview(row.review.decision, { advance: false });
+  } else if (row?.label) {
+    writeLabel(state.cursor, row.label, noteEl.value.trim() || null);
+  }
 });
 
 /* Rebuilds job_posting_dup_group from public.job_posting -- the very table
@@ -509,6 +878,7 @@ async function pollDedup() {
     if (job.state === "running") continue;
     dedupButton.textContent = describeDedup(job);
     dedupButton.disabled = false;
+    if (job.state === "done" && duplicateMode()) await load();
     return;
   }
 }
@@ -516,7 +886,8 @@ async function pollDedup() {
 dedupButton.addEventListener("click", async () => {
   if (!confirm(
     "Rebuild every duplicate group from the current job_posting rows? " +
-    "This replaces job_posting_dup_group entirely -- any manual adjudication is lost."
+    "This replaces the derived candidate table; Inspector reviews are retained, " +
+    "and changed groups return to the unreviewed queue."
   )) {
     return;
   }

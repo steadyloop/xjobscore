@@ -283,6 +283,49 @@ async def test_posting_labels_delete_ignores_unknown_keys(store):
     assert await store.set_posting_labels([]) == 0
 
 
+async def test_duplicate_group_reviews_retain_versions_and_clear_current(store):
+    group_id = "00000000-0000-0000-0000-000000000001"
+    await store.create_schema()  # existing Inspector schemas upgrade idempotently
+    await store.create_schema()
+    assert await store.duplicate_group_reviews() == {}
+
+    await store.set_duplicate_group_review(
+        group_id=group_id,
+        fingerprint="first",
+        decision="correct",
+        note="same role",
+    )
+    await store.set_duplicate_group_review(
+        group_id=group_id,
+        fingerprint="second",
+        decision="needs_review",
+    )
+    reviews = await store.duplicate_group_reviews()
+    assert reviews[(group_id, "first")]["decision"] == "correct"
+    assert reviews[(group_id, "first")]["note"] == "same role"
+    assert reviews[(group_id, "second")]["decision"] == "needs_review"
+    assert reviews[(group_id, "second")]["reviewed_at"] is not None
+
+    await store.set_duplicate_group_review(
+        group_id=group_id,
+        fingerprint="second",
+        decision="incorrect",
+        note="different locations",
+    )
+    reviews = await store.duplicate_group_reviews()
+    assert reviews[(group_id, "second")]["decision"] == "incorrect"
+    assert reviews[(group_id, "second")]["note"] == "different locations"
+
+    assert await store.delete_duplicate_group_review(
+        group_id=group_id, fingerprint="second"
+    ) == 1
+    assert (group_id, "second") not in await store.duplicate_group_reviews()
+    assert (group_id, "first") in await store.duplicate_group_reviews()
+    assert await store.delete_duplicate_group_review(
+        group_id=group_id, fingerprint="missing"
+    ) == 0
+
+
 async def test_company_descriptions_bulk_lookup(store):
     pool = await store.pool()
     async with pool.acquire() as conn:

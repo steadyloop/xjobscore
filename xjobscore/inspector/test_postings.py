@@ -77,9 +77,20 @@ def pool_with(rows):
 
 # ------------------------------------------------------------- validation
 
-async def test_unknown_status_rejected():
+@pytest.mark.parametrize("status", ["all", "bogus"])
+async def test_unknown_status_rejected(status):
     with pytest.raises(ValueError):
-        await postings.query(pool_with([]), {}, status="bogus")
+        await postings.query(pool_with([]), {}, status=status)
+
+
+async def test_duplicates_status_filters_on_group_membership():
+    pool = pool_with([])
+    body = await postings.query(pool, {}, status="duplicates")
+
+    sql, args = pool.calls[-1]
+    assert "p.dup_group_id IS NOT NULL" in sql
+    assert args[4] == "duplicates"
+    assert body["filters"]["status"] == "duplicates"
 
 
 async def test_unknown_label_state_rejected():

@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
+from uuid import UUID
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 from xjobscore.inspector import config, scheduling, telemetry
 from xjobscore.inspector.cache import now_utc
 from xjobscore.inspector.db import CatalogDB
+from xjobscore.inspector.duplicate_groups import current_fingerprint
+from xjobscore.inspector.duplicate_groups import query as duplicate_group_query
 from xjobscore.inspector.persistence import ResultStore
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
@@ -25,8 +28,6 @@ from xjobscore.inspector.policy import (
 from xjobscore.inspector.postings import detail as posting_detail
 from xjobscore.inspector.postings import query as posting_query
 from xjobscore.inspector.profile import source_profile, wire_content_type
-from xjobscore.inspector.staging_postings import detail as staging_posting_detail
-from xjobscore.inspector.staging_postings import query as staging_posting_query
 from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.inspector.service import InspectorService
 from xjobscore.sources import UnknownSource
@@ -71,6 +72,11 @@ class PostingLabel(BaseModel):
 
 class PostingLabelsBody(BaseModel):
     labels: list[PostingLabel]
+
+
+class DuplicateReviewBody(BaseModel):
+    decision: Literal["correct", "incorrect", "needs_review", "hidden"] | None = None
+    note: str | None = None
 
 
 def _policy_error(exc: Exception) -> HTTPException:
@@ -700,51 +706,76 @@ def create_app(
             raise HTTPException(status_code=404, detail="Posting not found")
         return value
 
-    @application.get("/api/postings-old")
-    async def postings_old(
+    @application.get("/api/duplicate-groups")
+    async def duplicate_groups(
         source: str | None = None,
+        review_state: str = "unreviewed",
         search: str = "",
-        mode: str = "exclude_full_time",
-        us_only: bool = True,
-        limit: int = Query(default=50, ge=1, le=500),
+        intern_signal: bool = False,
+        order: str = "newest",
+        seed: str = "",
+        limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
-        if mode not in {
-            "all",
-            "exclude_full_time",
-            "intern_explicit",
-            "intern_implicit",
-            "full_time_internship",
-        }:
-            raise HTTPException(
-                status_code=400, detail=f"Unknown posting filter mode: {mode}"
-            )
+        pool = await _postings_pool()
         try:
-            return await staging_posting_query(
-                store,
-                source=source,
-                search=search,
-                mode=mode,
-                us_only=us_only,
-                limit=limit,
-                offset=offset,
-            )
+            reviews = await store.duplicate_group_reviews()
+            return {
+                "postgres": policy_store.status(),
+                **await duplicate_group_query(
+                    pool,
+                    reviews,
+                    source=source,
+                    review_state=review_state,
+                    search=search,
+                    intern_signal=intern_signal,
+                    order=order,
+                    seed=seed,
+                    limit=limit,
+                    offset=offset,
+                ),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (OSError, asyncpg.PostgresError) as exc:
             raise HTTPException(
-                status_code=503, detail=f"Inspector database unavailable: {exc}"
+                status_code=503, detail=f"Duplicate review unavailable: {exc}"
             ) from exc
 
-    @application.get("/api/postings-old/{result_id}/items/{item_index}")
-    async def posting_old_item(result_id: str, item_index: int) -> dict[str, Any]:
+    @application.post("/api/duplicate-groups/{group_id}/review")
+    async def duplicate_group_review(
+        group_id: UUID, body: DuplicateReviewBody
+    ) -> dict[str, Any]:
+        pool = await _postings_pool()
         try:
-            value = await staging_posting_detail(store, result_id, item_index)
+            fingerprint = await current_fingerprint(pool, group_id)
+            if fingerprint is None:
+                raise HTTPException(status_code=404, detail="Duplicate group not found")
+            note = body.note.strip() if body.note and body.note.strip() else None
+            if body.decision is None:
+                await store.delete_duplicate_group_review(
+                    group_id=str(group_id), fingerprint=fingerprint
+                )
+                review = None
+            else:
+                await store.set_duplicate_group_review(
+                    group_id=str(group_id),
+                    fingerprint=fingerprint,
+                    decision=body.decision,
+                    note=note,
+                )
+                review = {"decision": body.decision, "note": note}
+            return {
+                "group_id": str(group_id),
+                "fingerprint": fingerprint,
+                "review": review,
+            }
+        except HTTPException:
+            raise
         except (OSError, asyncpg.PostgresError) as exc:
             raise HTTPException(
-                status_code=503, detail=f"Inspector database unavailable: {exc}"
+                status_code=503, detail=f"Duplicate review unavailable: {exc}"
             ) from exc
-        if value is None:
-            raise HTTPException(status_code=404, detail="Posting not found")
-        return value
 
     @application.get("/")
     async def index():
@@ -761,10 +792,6 @@ def create_app(
     @application.get("/postings")
     async def postings_page():
         return FileResponse(STATIC_DIR / "postings" / "index.html")
-
-    @application.get("/postings-old")
-    async def postings_old_page():
-        return FileResponse(STATIC_DIR / "postings-old" / "index.html")
 
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return application

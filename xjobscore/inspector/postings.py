@@ -21,7 +21,7 @@ from typing import Any
 LABELS = ("relevant", "irrelevant", "unsure")
 LABEL_STATES = ("all", "unlabeled", "labeled") + LABELS
 ORDERS = ("newest", "company", "random")
-STATUSES = ("all", "active", "closed")
+STATUSES = ("active", "closed", "duplicates")
 
 # POSIX character classes, not \b: PostgreSQL ARE word boundaries ([[:<:]])
 # read poorly and \b means backspace inside a bracket expression.
@@ -59,7 +59,8 @@ JOIN company AS c ON c.id = p.company_id
 LEFT JOIN lab AS l
   ON l.source = p.source AND l.source_key = p.source_key
 WHERE ($4::text IS NULL OR split_part(p.source, ':', 1) = $4)
-  AND ($5::text IS NULL OR p.status = $5)
+  AND (($5::text IN ('active', 'closed') AND p.status = $5)
+       OR ($5::text = 'duplicates' AND p.dup_group_id IS NOT NULL))
   AND ($6::text = '' OR p.title ILIKE '%' || $6 || '%'
        OR c.name ILIKE '%' || $6 || '%'
        OR p.location_text ILIKE '%' || $6 || '%'
@@ -176,7 +177,7 @@ async def query(
             [key[1] for key in keys],
             [labels[key]["label"] for key in keys],
             source,
-            None if status == "all" else status,
+            status,
             search.strip(),
             intern_signal,
             INTERN_TITLE_SQL_RE,

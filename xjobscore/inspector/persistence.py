@@ -20,6 +20,7 @@ import re
 import unicodedata
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 
@@ -126,6 +127,19 @@ CREATE TABLE IF NOT EXISTS {schema}.posting_label (
     company_snapshot TEXT,
     labeled_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (source, source_key)
+);
+
+-- Human review of derived duplicate candidates. The gold group table is
+-- rebuilt destructively, so reviews live here without a foreign key. A group
+-- id is stable for one strategy key while its evidence can change; retaining
+-- each fingerprint preserves history and makes changed groups require review.
+CREATE TABLE IF NOT EXISTS {schema}.duplicate_group_review (
+    group_id     UUID NOT NULL,
+    fingerprint  TEXT NOT NULL,
+    decision     TEXT NOT NULL,
+    note         TEXT,
+    reviewed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (group_id, fingerprint)
 );
 """
 
@@ -759,6 +773,72 @@ class ResultStore:
                 """,
                 [key[0] for key in keys],
                 [key[1] for key in keys],
+            )
+        return int(result.split()[-1])
+
+    # Duplicate-group reviews ----------------------------------------------
+
+    async def duplicate_group_reviews(
+        self,
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        """Every retained review, keyed by ``(group_id, fingerprint)``."""
+        pool = await self.pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT group_id, fingerprint, decision, note, reviewed_at
+                FROM {self.schema}.duplicate_group_review
+                """
+            )
+        return {
+            (str(row["group_id"]), row["fingerprint"]): {
+                "decision": row["decision"],
+                "note": row["note"],
+                "reviewed_at": _iso(row["reviewed_at"]),
+            }
+            for row in rows
+        }
+
+    async def set_duplicate_group_review(
+        self,
+        *,
+        group_id: str,
+        fingerprint: str,
+        decision: str,
+        note: str | None = None,
+    ) -> None:
+        """Upsert one review version and refresh its review timestamp."""
+        pool = await self.pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self.schema}.duplicate_group_review
+                    (group_id, fingerprint, decision, note)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (group_id, fingerprint) DO UPDATE SET
+                    decision = excluded.decision,
+                    note = excluded.note,
+                    reviewed_at = now()
+                """,
+                UUID(group_id),
+                fingerprint,
+                decision,
+                note,
+            )
+
+    async def delete_duplicate_group_review(
+        self, *, group_id: str, fingerprint: str
+    ) -> int:
+        """Clear only the current review version; older history is retained."""
+        pool = await self.pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                DELETE FROM {self.schema}.duplicate_group_review
+                WHERE group_id = $1 AND fingerprint = $2
+                """,
+                UUID(group_id),
+                fingerprint,
             )
         return int(result.split()[-1])
 

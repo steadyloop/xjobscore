@@ -14,7 +14,7 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from xjobscore import silver, sources
+from xjobscore import gold, sources
 from xjobscore.records import Fact, Feed, Item, Label, Posting, Target
 
 __all__ = ["parse_record"]
@@ -94,9 +94,9 @@ def _canonical_entry(
     ] += 1
     entry["company_resolution"] = resolution
     try:
-        entry["title_normalized"] = silver.normalize_title(canonical.title)
+        entry["title_normalized"] = gold.normalize_title(canonical.title)
     except (AttributeError, TypeError):
-        # Known silver defect: normalize_title crashes on a None title. The
+        # normalize_title requires a canonical string title. The
         # preview reports it as a data problem instead of failing the run.
         entry["title_normalized"] = None
         entry["title_warning"] = (

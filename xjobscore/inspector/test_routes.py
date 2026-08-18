@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import importlib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -714,14 +715,23 @@ def test_scheduler_page_is_served(client):
     assert client.get("/scheduler").status_code == 200
 
 
-def test_postings_old_rejects_unknown_mode(client):
-    assert client.get("/api/postings-old", params={"mode": "bogus"}).status_code == 400
+def test_postings_page_offers_duplicates_instead_of_any_status(client):
+    response = client.get("/postings")
+
+    assert response.status_code == 200
+    assert '<option value="duplicates">Duplicate review</option>' in response.text
+    assert "Any status" not in response.text
 
 
-def test_postings_old_empty_store(client):
-    body = client.get("/api/postings-old").json()
-    assert body["rows"] == []
-    assert body["total"] == 0
+def test_retired_postings_old_routes_are_not_found(client):
+    for path in (
+        "/postings-old",
+        "/api/postings-old",
+        "/api/postings-old/a-result/items/0",
+        "/static/postings-old/index.html",
+        "/static/postings-old/app.js",
+    ):
+        assert client.get(path).status_code == 404
 
 
 # --------------------------------------------------------------- postings
@@ -730,9 +740,10 @@ class FakePublicPool:
     """Canned job_posting pool: first fetch answers the vendor list, the
     second the page itself; fetchrow answers the detail query."""
 
-    def __init__(self, rows=(), row=None):
+    def __init__(self, rows=(), row=None, fingerprint=None):
         self.fetches = [[{"vendor": "route-test"}], list(rows)]
         self.row = row
+        self.fingerprint = fingerprint
 
     @asynccontextmanager
     async def acquire(self):
@@ -743,6 +754,9 @@ class FakePublicPool:
 
     async def fetchrow(self, sql, *args):
         return self.row
+
+    async def fetchval(self, sql, *args):
+        return self.fingerprint
 
 
 def posting_row(**overrides):
@@ -792,12 +806,21 @@ def test_postings_503_without_public_pool(client):
     # not empty -- an unreachable database is not "no postings".
     assert client.get("/api/postings").status_code == 503
     assert client.get("/api/postings/1").status_code == 503
+    assert client.get("/api/duplicate-groups").status_code == 503
+    assert client.post(
+        "/api/duplicate-groups/00000000-0000-0000-0000-000000000001/review",
+        json={"decision": "correct"},
+    ).status_code == 503
 
 
 def test_postings_rejects_unknown_enums(postings_client):
     with postings_client(FakePublicPool()) as test_client:
         for params in ({"label_state": "bogus"}, {"order": "bogus"}, {"status": "bogus"}):
             assert test_client.get("/api/postings", params=params).status_code == 400
+
+        assert test_client.get(
+            "/api/duplicate-groups", params={"review_state": "pending"}
+        ).status_code == 400
 
 
 def test_postings_list_shape(postings_client):
@@ -857,3 +880,71 @@ def test_posting_labels_rejects_empty_and_unknown_values(client):
         json={"labels": [{"source": "s", "source_key": "k", "label": "great"}]},
     )
     assert bad.status_code == 422
+
+
+def test_duplicate_group_list_contract(monkeypatch, postings_client):
+    async def fake_query(pool, reviews, **kwargs):
+        assert kwargs["review_state"] == "needs_review"
+        return {
+            "sources": ["route-test"],
+            "filters": kwargs,
+            "total": 1,
+            "offset": kwargs["offset"],
+            "limit": kwargs["limit"],
+            "review_counts": {
+                "all": 1,
+                "unreviewed": 0,
+                "correct": 0,
+                "incorrect": 0,
+                "needs_review": 1,
+                "hidden": 0,
+            },
+            "groups": [{"id": "00000000-0000-0000-0000-000000000001"}],
+        }
+
+    app_module = importlib.import_module("xjobscore.inspector.app")
+    monkeypatch.setattr(app_module, "duplicate_group_query", fake_query)
+    with postings_client(FakePublicPool()) as test_client:
+        response = test_client.get(
+            "/api/duplicate-groups", params={"review_state": "needs_review"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["groups"][0]["id"].endswith("0001")
+
+
+def test_duplicate_group_review_write_and_clear(postings_client):
+    group_id = "00000000-0000-0000-0000-000000000001"
+    with postings_client(FakePublicPool(fingerprint="fingerprint")) as test_client:
+        saved = test_client.post(
+            f"/api/duplicate-groups/{group_id}/review",
+            json={"decision": "correct", "note": " same opening "},
+        )
+        hidden = test_client.post(
+            f"/api/duplicate-groups/{group_id}/review",
+            json={"decision": "hidden"},
+        )
+        cleared = test_client.post(
+            f"/api/duplicate-groups/{group_id}/review",
+            json={"decision": None},
+        )
+
+    assert saved.status_code == 200
+    assert saved.json()["review"] == {"decision": "correct", "note": "same opening"}
+    assert hidden.status_code == 200
+    assert hidden.json()["review"] == {"decision": "hidden", "note": None}
+    assert cleared.status_code == 200
+    assert cleared.json()["review"] is None
+
+
+def test_duplicate_group_review_rejects_unknown_and_missing(postings_client):
+    group_id = "00000000-0000-0000-0000-000000000001"
+    with postings_client(FakePublicPool(fingerprint=None)) as test_client:
+        assert test_client.post(
+            f"/api/duplicate-groups/{group_id}/review",
+            json={"decision": "correct"},
+        ).status_code == 404
+        assert test_client.post(
+            f"/api/duplicate-groups/{group_id}/review",
+            json={"decision": "confirmed"},
+        ).status_code == 422

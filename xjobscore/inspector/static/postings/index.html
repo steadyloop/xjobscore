@@ -19,10 +19,10 @@
   <main class="page">
     <div class="page-header">
       <select id="source-select" title="Source"></select>
-      <select id="status-select" title="Lifecycle status">
+      <select id="status-select" title="Posting filter">
         <option value="active">Active</option>
         <option value="closed">Closed</option>
-        <option value="all">Any status</option>
+        <option value="duplicates">Duplicate review</option>
       </select>
       <select id="order-select" title="Order">
         <option value="newest">Newest</option>
@@ -81,10 +81,15 @@
     <table class="plist-keys">
       <tr><td><kbd>j</kbd> / <kbd>↓</kbd></td><td>next posting</td></tr>
       <tr><td><kbd>k</kbd> / <kbd>↑</kbd></td><td>previous posting</td></tr>
-      <tr><td><kbd>1</kbd> / <kbd>r</kbd></td><td>label relevant, advance</td></tr>
-      <tr><td><kbd>2</kbd> / <kbd>i</kbd></td><td>label irrelevant, advance</td></tr>
-      <tr><td><kbd>3</kbd> / <kbd>u</kbd></td><td>label unsure, advance</td></tr>
-      <tr><td><kbd>0</kbd> / <kbd>x</kbd></td><td>clear label</td></tr>
+      <tr class="posting-key-help"><td><kbd>1</kbd> / <kbd>r</kbd></td><td>label relevant, advance</td></tr>
+      <tr class="posting-key-help"><td><kbd>2</kbd> / <kbd>i</kbd></td><td>label irrelevant, advance</td></tr>
+      <tr class="posting-key-help"><td><kbd>3</kbd> / <kbd>u</kbd></td><td>label unsure, advance</td></tr>
+      <tr class="posting-key-help"><td><kbd>0</kbd> / <kbd>x</kbd></td><td>clear label</td></tr>
+      <tr class="duplicate-key-help" hidden><td><kbd>1</kbd></td><td>correct duplicates, advance</td></tr>
+      <tr class="duplicate-key-help" hidden><td><kbd>2</kbd></td><td>not duplicates, advance</td></tr>
+      <tr class="duplicate-key-help" hidden><td><kbd>3</kbd></td><td>needs review, advance</td></tr>
+      <tr class="duplicate-key-help" hidden><td><kbd>0</kbd> / <kbd>x</kbd></td><td>clear review</td></tr>
+      <tr class="duplicate-key-help" hidden><td><kbd>←</kbd> / <kbd>→</kbd></td><td>collapse / expand group</td></tr>
       <tr><td><kbd>o</kbd></td><td>open posting in new tab</td></tr>
       <tr><td><kbd>/</kbd></td><td>focus search</td></tr>
       <tr><td><kbd>?</kbd></td><td>toggle this help</td></tr>

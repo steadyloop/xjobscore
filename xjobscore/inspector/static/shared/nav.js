@@ -7,7 +7,6 @@ const LINKS = [
   ["Feeds", "/"],
   ["Scheduler", "/scheduler"],
   ["Postings", "/postings"],
-  ["Postings (Old)", "/postings-old"],
 ];
 
 const THEME_KEY = "inspector-theme";

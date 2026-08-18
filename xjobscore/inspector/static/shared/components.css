@@ -1081,6 +1081,71 @@ table.data tbody tr.flat-source .feed-name {
   box-shadow: inset 2px 0 0 var(--err);
 }
 
+.dup-group {
+  border-bottom: 1px solid var(--grid);
+}
+
+.dup-group > .plist-entry {
+  border-bottom: 0;
+}
+
+.dup-group[aria-selected="true"] > .dup-group-head {
+  background: var(--accent-soft);
+}
+
+.dup-disclosure {
+  flex: none;
+  width: 12px;
+  color: var(--text-muted);
+}
+
+.dup-members {
+  border-top: 1px solid var(--grid);
+  background: var(--surface-2);
+}
+
+.dup-member {
+  padding: 5px var(--space-3) 5px calc(var(--space-3) + 20px);
+  border-bottom: 1px solid var(--grid);
+  cursor: pointer;
+}
+
+.dup-member:last-child {
+  border-bottom: 0;
+}
+
+.dup-member:hover,
+.dup-member[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.dup-review-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dup-review-badge[data-decision="correct"] {
+  color: var(--ok-text);
+}
+
+.dup-review-badge[data-decision="incorrect"] {
+  color: var(--text-muted);
+}
+
+.dup-review-badge[data-decision="hidden"] {
+  color: var(--text-muted);
+}
+
+.dup-review-badge[data-decision="needs_review"],
+.dup-review-badge[data-decision="changed"] {
+  color: var(--warn);
+}
+
 .plist-line1 {
   display: flex;
   align-items: baseline;
@@ -1206,6 +1271,44 @@ table.data tbody tr.flat-source .feed-name {
   max-width: 70ch;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.dup-warning {
+  color: var(--warn);
+}
+
+.dup-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.dup-compare th,
+.dup-compare td {
+  padding: 5px 6px;
+  border: 1px solid var(--grid);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.dup-compare th {
+  color: var(--text-muted);
+  background: var(--surface-2);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.dup-compare td.dup-diff {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.dup-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 #key-help {

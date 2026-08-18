@@ -192,14 +192,14 @@ function wireFetchAllButton(button) {
 }
 wireFetchAllButton(document.getElementById("fetch-all-visible"));
 
-// Same two-click arm/confirm as Fetch-all, but scoped to feeds already in
-// Postgres, so this button never mass-imports the (mostly Ashby) catalog
-// across every vendor at once. Importing is deliberately a per-row or
-// per-vendor decision -- see groupToggle.
+// Same two-click arm/confirm as Fetch-all. Enabling has one meaning everywhere
+// on this page: import a feed into Postgres if needed, then switch it on. Use
+// the bulk route so a broad visible selection remains one database round trip.
 function enableCandidates() {
   return state.feeds
     .filter(matches)
-    .filter((feed) => feed.policy?.in_postgres && !feed.policy.enabled);
+    .filter((feed) => feed.policy && feed.feed_ref)
+    .filter((feed) => !(feed.policy.in_postgres && feed.policy.enabled));
 }
 
 function wireEnableAllButton(button) {
@@ -230,33 +230,24 @@ function wireEnableAllButton(button) {
     running = true;
 
     const feeds = enableCandidates();
-    let completed = 0;
-    let failed = 0;
     button.classList.add("primary");
-    button.textContent = `Enabling 0/${feeds.length}…`;
-
-    let cursor = 0;
-    async function worker() {
-      while (cursor < feeds.length) {
-        const feed = feeds[cursor++];
-        try {
-          await setFeedEnabled(feed, true);
-          feed.policy = { ...feed.policy, enabled: true };
-        } catch {
-          failed += 1;
-        }
-        completed += 1;
-        button.textContent = `Enabling ${completed}/${feeds.length}…`;
+    button.textContent = `Enabling ${feeds.length} feeds…`;
+    let enabled = false;
+    try {
+      await setFeedsEnabled(feeds, true);
+      for (const feed of feeds) {
+        feed.policy = { ...feed.policy, in_postgres: true, enabled: true };
       }
+      enabled = true;
+      button.textContent = `Enabled ${feeds.length}/${feeds.length}`;
+    } catch {
+      button.textContent = "Enable failed";
     }
-    const workerCount = Math.min(BULK_FETCH_CONCURRENCY, feeds.length);
-    await Promise.all(Array.from({ length: workerCount }, worker));
-
-    const failedNote = failed ? ` (${failed} failed)` : "";
-    button.textContent = `Enabled ${completed}/${feeds.length}${failedNote}`;
     button.classList.remove("primary");
     running = false;
     render();
+    // Reconcile imported feeds with their new feed_id and schedule state.
+    if (enabled) await load().catch(() => {});
     setTimeout(() => {
       button.textContent = original;
     }, 2500);
