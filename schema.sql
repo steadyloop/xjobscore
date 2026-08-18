@@ -240,16 +240,14 @@ CREATE TABLE job_posting (
             OR (
                 jsonb_typeof(attributes -> 'opportunity_type') = 'string'
                 AND attributes ->> 'opportunity_type' IN (
-                    'spring_internship',
-                    'spring_coop',
+                    'internship',
+                    'coop',
                     'student_researcher',
-                    'summer_internship',
-                    'fall_coop',
-                    'fall_internship',
                     'student_role',
                     'fellowship',
-                    'unclassified',
-                    'review'
+                    'apprenticeship',
+                    'new_grad_program',
+                    'unclassified'
                 )
             )
         )
@@ -275,15 +273,18 @@ CREATE TABLE job_posting (
             )
         )
         CHECK (
-            NOT attributes ? 'deadline_at'
-            OR jsonb_typeof(attributes -> 'deadline_at') = 'string'
+            NOT attributes ? 'degree_fields'
+            OR (
+                jsonb_typeof(attributes -> 'degree_fields') = 'array'
+                AND NOT jsonb_path_exists(
+                    attributes,
+                    '$.degree_fields[*] ? (@.type() != "string")'
+                )
+            )
         )
         CHECK (
-            NOT attributes ? 'eligibility'
-            OR (
-                jsonb_typeof(attributes -> 'eligibility') = 'string'
-                AND attributes ->> 'eligibility' IN ('eligible', 'review', 'ineligible')
-            )
+            NOT attributes ? 'deadline_at'
+            OR jsonb_typeof(attributes -> 'deadline_at') = 'string'
         ),
     -- Lifecycle
     status                   text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
@@ -297,8 +298,11 @@ CREATE TABLE job_posting (
     UNIQUE (source, source_key)
 );
 COMMENT ON COLUMN job_posting.attributes IS
-    'OneShot enrichment v1: version, opportunity_type, term, workplace, skills, deadline_at, eligibility';
+    'OneShot enrichment v1: version, opportunity_type/meta, term, workplace, skills/meta, degree_fields/meta, deadline_at';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
+CREATE INDEX job_posting_degree_fields_active_idx
+    ON job_posting USING gin ((attributes -> 'degree_fields'))
+    WHERE status = 'active';
 -- OneShot Opportunities filters this scalar on every list/count request. The
 -- general jsonb GIN index above does not accelerate the ->> equality form.
 CREATE INDEX job_posting_opportunity_type_active_idx
@@ -322,6 +326,7 @@ CREATE TABLE job_posting_dup_group (
 ALTER TABLE job_posting
     ADD FOREIGN KEY (dup_group_id)
     REFERENCES job_posting_dup_group(id);
+CREATE INDEX job_posting_dup_group_id_idx ON job_posting (dup_group_id);
 
 -- APPLICATION TRACKER
 CREATE TABLE job_application (
@@ -439,5 +444,48 @@ CREATE TABLE resume_document (
 );
 CREATE INDEX resume_document_account_updated_idx
     ON resume_document (account_id, updated_at DESC, id DESC);
+
+
+-- EXPERIMENTS --
+CREATE TABLE job_classification_experiment (
+    job_id              TEXT PRIMARY KEY,
+    content_hash        TEXT UNIQUE NOT NULL,
+    title               TEXT NOT NULL,
+    company             TEXT,
+    location            TEXT,
+    posting_text        TEXT NOT NULL,
+    dataset_split       TEXT CHECK (dataset_split IN ('train', 'validation', 'test')),
+
+    -- Human ground truth
+    gold_internship     BOOLEAN,
+    gold_cs             BOOLEAN,
+    gold_bioe           BOOLEAN,
+    gold_ambiguous      BOOLEAN DEFAULT FALSE,
+    gold_notes          TEXT,
+
+    -- TF-IDF
+    tfidf_internship    REAL,
+    tfidf_cs            REAL,
+    tfidf_bioe          REAL,
+    tfidf_version       TEXT,
+    tfidf_latency_ms    REAL,
+
+    -- ModernBERT
+    modernbert_internship REAL,
+    modernbert_cs         REAL,
+    modernbert_bioe       REAL,
+    modernbert_version    TEXT,
+    modernbert_latency_ms REAL,
+
+    -- Frontier + rules
+    frontier_internship REAL,
+    frontier_cs         REAL,
+    frontier_bioe       REAL,
+    frontier_version    TEXT,
+    frontier_latency_ms REAL,
+
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
 
 COMMIT;
