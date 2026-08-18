@@ -1,12 +1,17 @@
-"""Gold-layer dedup planning. Pure: no database, no clock."""
+"""Gold-layer enrichment and dedup behavior."""
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 
 from xjobscore import gold
+
+
+NOW = datetime(2026, 8, 17, 21, 34, tzinfo=timezone.utc)
 
 
 def _row(posting_id: int, **overrides: Any) -> dict[str, Any]:
@@ -27,12 +32,26 @@ def _row(posting_id: int, **overrides: Any) -> dict[str, Any]:
 # Keying -------------------------------------------------------------------
 
 
-def test_same_company_and_normalized_title_group_together() -> None:
+def test_same_company_title_and_missing_location_group_together() -> None:
     plan = gold.plan_dedup(
         [_row(1, title="Software Engineer"), _row(2, title="software   engineer!")]
     )
     assert plan.counts == gold.Counts(groups=1, postings=2)
     assert {member["group_id"] for member in plan.members} == {plan.groups[0]["id"]}
+
+
+def test_different_locations_never_group() -> None:
+    plan = gold.plan_dedup(
+        [_row(1, location_text="New York, NY"), _row(2, location_text="San José, CA")]
+    )
+    assert plan.counts.groups == 0
+
+
+def test_equivalent_normalized_locations_group_together() -> None:
+    plan = gold.plan_dedup(
+        [_row(1, location_text="San José, CA"), _row(2, location_text="san jose ca")]
+    )
+    assert plan.counts == gold.Counts(groups=1, postings=2)
 
 
 def test_different_companies_never_group() -> None:
@@ -85,14 +104,18 @@ def test_stage_one_never_decides() -> None:
     plan = gold.plan_dedup([_row(1), _row(2)])
     group = plan.groups[0]
     assert group["state"] == "pending"
-    assert group["evidence"]["keyer"] == "company_role"
-    assert group["evidence"]["strategy_version"] == 1
+    assert group["evidence"]["keyer"] == "company_role_location"
+    assert group["evidence"]["strategy_version"] == 2
 
 
 def test_evidence_records_signals_it_does_not_key_on() -> None:
     plan = gold.plan_dedup(
         [
-            _row(1, source_url="https://job-boards.greenhouse.io/acme/jobs/12345"),
+            _row(
+                1,
+                source_url="https://job-boards.greenhouse.io/acme/jobs/12345",
+                location_text="San Jose, CA",
+            ),
             _row(2, source="ashby:acme", location_text="San José, CA"),
         ]
     )
@@ -173,14 +196,216 @@ def test_description_hash_ignores_the_boilerplate_tail() -> None:
     assert gold.description_hash(body) == gold.description_hash(f"{body} equal opportunity employer")
 
 
+# Opportunity enrichment ---------------------------------------------------
+
+
+def test_opportunity_payload_records_classification_hash_and_version() -> None:
+    payload = gold.opportunity_payload("Platform Intern", parsed_at=NOW)
+
+    assert payload == {
+        "opportunity_type": "internship",
+        "opportunity_type_meta": {
+            "version": 1,
+            "parsed_at": "2026-08-17T21:34:00Z",
+            "input_hash": gold.opportunity_input_hash("Platform Intern"),
+        },
+    }
+
+
+class _OpportunityConnection:
+    def __init__(self) -> None:
+        self.rows = {
+            1: {"id": 1, "title": "Platform Intern", "attributes": {}},
+            2: {"id": 2, "title": "Software Engineer", "attributes": {}},
+        }
+        self.update_calls = 0
+
+    async def fetch(self, query: str, last_id: int, limit: int, version: str):
+        return [
+            {"id": row["id"], "title": row["title"]}
+            for row in self.rows.values()
+            if row["id"] > last_id
+            and str(row["attributes"].get("opportunity_type_meta", {}).get("version"))
+            != version
+        ][:limit]
+
+    async def executemany(self, query: str, updates):
+        self.update_calls += 1
+        for posting_id, payload, title, version in updates:
+            row = self.rows[posting_id]
+            current_version = str(
+                row["attributes"].get("opportunity_type_meta", {}).get("version")
+            )
+            if row["title"] == title and current_version != version:
+                row["attributes"].update(payload)
+
+
+@pytest.mark.asyncio
+async def test_opportunity_step_classifies_each_unstamped_posting_once() -> None:
+    connection = _OpportunityConnection()
+
+    first = await gold._opportunity_rebuild(connection, parsed_at=NOW)
+    second = await gold._opportunity_rebuild(connection, parsed_at=NOW)
+
+    assert first == gold.Counts(postings=2)
+    assert second == gold.Counts()
+    assert connection.update_calls == 1
+    assert connection.rows[1]["attributes"]["opportunity_type"] == "internship"
+    assert connection.rows[2]["attributes"]["opportunity_type"] == "unclassified"
+
+
+# Skill enrichment ---------------------------------------------------------
+
+
+def test_skills_payload_records_matches_hash_and_timestamp() -> None:
+    description = "Experience with C++, Python, and SQL."
+
+    payload = gold.skills_payload(description, parsed_at=NOW)
+
+    assert payload == {
+        "skills": ["cpp", "python", "sql"],
+        "skills_meta": {
+            "parsed_at": "2026-08-17T21:34:00Z",
+            "input_hash": gold.skills_input_hash(description),
+        },
+    }
+
+
+def test_empty_skill_result_is_stamped_as_processed() -> None:
+    payload = gold.skills_payload(None, parsed_at=NOW)
+
+    assert payload["skills"] == []
+    assert payload["skills_meta"]["input_hash"] == gold.skills_input_hash("")
+
+
+# Degree-field enrichment --------------------------------------------------
+
+
+def test_degree_fields_payload_records_matches_hash_and_timestamp() -> None:
+    description = "Bachelor's degree in Computer Science, Applied Mathematics, or BME."
+
+    payload = gold.degree_fields_payload(description, parsed_at=NOW)
+
+    assert payload == {
+        "degree_fields": ["bioengineering", "computer_science", "mathematics"],
+        "degree_fields_meta": {
+            "version": 1,
+            "parsed_at": "2026-08-17T21:34:00Z",
+            "input_hash": gold.degree_fields_input_hash(description),
+        },
+    }
+
+
+def test_empty_degree_result_is_stamped_as_processed() -> None:
+    payload = gold.degree_fields_payload(None, parsed_at=NOW)
+
+    assert payload["degree_fields"] == []
+    assert payload["degree_fields_meta"]["input_hash"] == gold.degree_fields_input_hash("")
+
+
+class _DegreesConnection:
+    def __init__(self) -> None:
+        self.rows = {
+            1: {"id": 1, "description": "Degree in Computer Science.", "attributes": {}},
+            2: {"id": 2, "description": None, "attributes": {}},
+        }
+        self.update_calls = 0
+
+    async def fetch(self, query, last_id: int, limit: int):
+        return [
+            {"id": row["id"], "description": row["description"]}
+            for row in self.rows.values()
+            if row["id"] > last_id and "degree_fields_meta" not in row["attributes"]
+        ][:limit]
+
+    async def executemany(self, query, updates):
+        self.update_calls += 1
+        for posting_id, payload, description in updates:
+            row = self.rows[posting_id]
+            if (row["description"] or "") != description:
+                continue
+            if "degree_fields_meta" not in row["attributes"]:
+                row["attributes"].update(payload)
+
+
+@pytest.mark.asyncio
+async def test_degrees_step_enriches_each_unstamped_posting_only_once() -> None:
+    connection = _DegreesConnection()
+
+    first = await gold._degrees_rebuild(connection, parsed_at=NOW)
+    second = await gold._degrees_rebuild(connection, parsed_at=NOW)
+
+    assert first == gold.Counts(postings=2)
+    assert second == gold.Counts()
+    assert connection.update_calls == 1
+    assert connection.rows[1]["attributes"]["degree_fields"] == ["computer_science"]
+    assert connection.rows[2]["attributes"]["degree_fields"] == []
+
+
+class _SkillsConnection:
+    def __init__(self) -> None:
+        self.rows = {
+            1: {"id": 1, "description": "Build Python and C++ services.", "attributes": {}},
+            2: {"id": 2, "description": None, "attributes": {}},
+        }
+        self.update_calls = 0
+
+    async def fetch(self, query: str, last_id: int, limit: int):
+        return [
+            {"id": row["id"], "description": row["description"]}
+            for row in self.rows.values()
+            if row["id"] > last_id and "skills_meta" not in row["attributes"]
+        ][:limit]
+
+    async def executemany(self, query: str, updates):
+        self.update_calls += 1
+        for posting_id, payload, description in updates:
+            row = self.rows[posting_id]
+            if (row["description"] or "") != description:
+                continue
+            if "skills_meta" not in row["attributes"]:
+                row["attributes"].update(payload)
+
+
+@pytest.mark.asyncio
+async def test_skills_step_enriches_each_unstamped_posting_only_once() -> None:
+    connection = _SkillsConnection()
+
+    first = await gold._skills_rebuild(connection, parsed_at=NOW)
+    second = await gold._skills_rebuild(connection, parsed_at=NOW)
+
+    assert first == gold.Counts(postings=2)
+    assert second == gold.Counts()
+    assert connection.update_calls == 1
+    assert connection.rows[1]["attributes"]["skills"] == ["cpp", "python"]
+    assert connection.rows[2]["attributes"]["skills"] == []
+
+
+@pytest.mark.asyncio
+async def test_skills_step_reprocesses_a_posting_after_silver_invalidates_it() -> None:
+    connection = _SkillsConnection()
+    await gold._skills_rebuild(connection, parsed_at=NOW)
+    connection.rows[1]["description"] = "Build SQL services."
+    connection.rows[1]["attributes"].pop("skills")
+    connection.rows[1]["attributes"].pop("skills_meta")
+
+    counts = await gold._skills_rebuild(connection, parsed_at=NOW)
+
+    assert counts == gold.Counts(postings=1)
+    assert connection.rows[1]["attributes"]["skills"] == ["sql"]
+
+
 # Step registry ------------------------------------------------------------
 
 
 def test_steps_selects_all_or_one() -> None:
-    assert [step.name for step in gold.steps()] == ["dedup"]
+    assert [step.name for step in gold.steps()] == ["job_type", "skills", "degrees", "dedup"]
+    assert [step.name for step in gold.steps("job_type")] == ["job_type"]
+    assert [step.name for step in gold.steps("degrees")] == ["degrees"]
+    assert [step.name for step in gold.steps("skills")] == ["skills"]
     assert [step.name for step in gold.steps("dedup")] == ["dedup"]
 
 
 def test_unknown_step_is_rejected() -> None:
-    with pytest.raises(ValueError, match="unknown gold step"):
+    with pytest.raises(ValueError, match="unknown enrichment"):
         gold.steps("scoring")

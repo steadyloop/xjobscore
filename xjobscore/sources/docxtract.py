@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from functools import partial
 from html import unescape
@@ -26,6 +26,16 @@ from xjobscore.records import Canonical, Feed, Item, Posting, Record
 CONFIGS = import_module(".docxtract-configs", __package__).CONFIGS
 
 SPECS = CONFIGS
+
+# Mirror the public Summer2027-Internships README selection.  The repository's
+# listings.json is a shared historical/off-season store despite living in the
+# Summer 2027 repository; its README generator applies these two time bounds in
+# addition to the row's active/visible flags and term.  Keep the copied rows in
+# bronze, but only turn the current README population into canonicals.
+_SIMPLIFY_TERM = "Summer 2027"
+_SIMPLIFY_POSTED_AFTER = datetime.fromtimestamp(1777618800, tz=timezone.utc)
+_SIMPLIFY_STALE_AFTER = timedelta(days=60)
+_SIMPLIFY_BLOCKED_COMPANY_URLS = ("https://simplify.jobs/c/jerry",)
 
 
 class _HTML(HTMLParser):
@@ -450,6 +460,36 @@ def _simplify(config: dict, item: Item) -> Posting:
     )
 
 
+def _simplify_is_current(payload: object, *, now: datetime | None = None) -> bool:
+    """Whether a listings.json row belongs in the repository's main README."""
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("active") is not True or payload.get("is_visible") is not True:
+        return False
+    company_url = str(payload.get("company_url") or "").casefold()
+    if any(blocked in company_url for blocked in _SIMPLIFY_BLOCKED_COMPANY_URLS):
+        return False
+    terms = payload.get("terms")
+    if not isinstance(terms, list) or not any(
+        isinstance(term, str) and _SIMPLIFY_TERM in term for term in terms
+    ):
+        return False
+    posted_raw = payload.get("date_posted")
+    if not isinstance(posted_raw, (int, float)) or isinstance(posted_raw, bool):
+        return False
+    try:
+        posted_at = datetime.fromtimestamp(posted_raw, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return False
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return (
+        posted_at > _SIMPLIFY_POSTED_AFTER
+        and current - posted_at < _SIMPLIFY_STALE_AFTER
+    )
+
+
 def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     config = CONFIGS[name]
     if config["parser"] == "schemaorg":
@@ -461,7 +501,7 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     if config["parser"] == "xml_map":
         return [_xml_map(config, feed, item)]
     if config["parser"] == "simplify":
-        return [_simplify(config, item)]
+        return [_simplify(config, item)] if _simplify_is_current(item.payload) else []
     raise ValueError(f"unsupported web-board parser: {config['parser']}")
 
 

@@ -32,11 +32,11 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "Config",
     "cycle",
-    "gold_all",
     "load_config",
     "main",
     "parse_all",
     "poll",
+    "run_enrichments",
     "sync_registry",
 ]
 
@@ -50,8 +50,7 @@ class Config:
     parse: bool = False
     sync_registry: bool = False
     lease_seconds: int = 3600
-    gold: bool = False
-    gold_step: str | None = None
+    enrich: str | None = None
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -89,13 +88,24 @@ def load_config(argv: Sequence[str]) -> Config:
     parser.add_argument("--dry-run", action="store_true", default=None)
     parser.add_argument("--parse", action="store_true", default=None)
     parser.add_argument("--sync-registry", action="store_true", default=None)
-    parser.add_argument("--gold", action="store_true", default=None)
-    parser.add_argument("--gold-step")
+    parser.add_argument(
+        "--enrich",
+        nargs="?",
+        const="all",
+        choices=("all", *(step.name for step in gold.steps())),
+        metavar="NAME",
+        help="run all enrichments, or only job_type/skills/degrees/dedup when named",
+    )
     args = parser.parse_args(argv)
 
     dsn = args.dsn or os.environ.get("XJOBSCORE_DSN") or os.environ.get("DATABASE_URL")
     if not dsn:
         raise ValueError("no dsn: pass --dsn or set XJOBSCORE_DSN/DATABASE_URL")
+    enrich = args.enrich or os.environ.get("XJOBSCORE_ENRICH") or None
+    known_enrichments = {"all", *(step.name for step in gold.steps())}
+    if enrich is not None and enrich not in known_enrichments:
+        choices = ", ".join(step.name for step in gold.steps())
+        parser.error(f"unknown enrichment {enrich!r}; choose {choices}")
     return Config(
         dsn=dsn,
         user_agent=args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or "xjobscore/0.1",
@@ -108,10 +118,7 @@ def load_config(argv: Sequence[str]) -> Config:
         sync_registry=args.sync_registry
         if args.sync_registry is not None
         else _env_bool("XJOBSCORE_SYNC_REGISTRY", False),
-        gold=args.gold
-        if args.gold is not None
-        else bool(args.gold_step) or _env_bool("XJOBSCORE_GOLD", False),
-        gold_step=args.gold_step or os.environ.get("XJOBSCORE_GOLD_STEP") or None,
+        enrich=enrich,
     )
 
 
@@ -334,16 +341,18 @@ async def parse_all(pool: Pool, cfg: Config) -> list[tuple[Feed, silver.Counts]]
     return results
 
 
-async def gold_all(pool: Pool, cfg: Config) -> dict[str, gold.Counts | Exception]:
-    """Rebuild gold artifacts. Each step gets its own transaction so one
-    failing step neither aborts nor half-writes the others."""
+async def run_enrichments(
+    pool: Pool, cfg: Config
+) -> dict[str, gold.Counts | Exception]:
+    """Run the selected enrichments, isolating each in its own transaction."""
     results: dict[str, gold.Counts | Exception] = {}
-    for step in gold.steps(cfg.gold_step):
+    selected = None if cfg.enrich == "all" else cfg.enrich
+    for step in gold.steps(selected):
         try:
             async with pool.acquire() as conn, conn.transaction():
                 results[step.name] = await step.rebuild(conn, dry_run=cfg.dry_run)
         except Exception as exc:  # one step's failure must not sink the layer
-            logger.exception("gold step failed name=%s", step.name)
+            logger.exception("enrichment failed name=%s", step.name)
             results[step.name] = exc
     return results
 
@@ -375,9 +384,9 @@ async def main(argv: Sequence[str] | None = None) -> int:
                     f"unsupported={counts.unsupported} secondhand={counts.secondhand}"
                 )
             return 0
-        if cfg.gold:
+        if cfg.enrich:
             failed = False
-            for name, outcome in (await gold_all(pool, cfg)).items():
+            for name, outcome in (await run_enrichments(pool, cfg)).items():
                 if isinstance(outcome, Exception):
                     failed = True
                     print(f"{name} failed: {outcome}")

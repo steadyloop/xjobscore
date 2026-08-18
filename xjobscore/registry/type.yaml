@@ -1,0 +1,56 @@
+# Opportunity types are intentionally classified from the posting title only.
+# Rules are evaluated in order and the first match wins.
+
+type:
+  - name: internship
+    type: internship
+    patterns: ["interns?", "internships?"]
+
+  - name: coop
+    type: coop
+    patterns: ["co-?ops?", "co ops?"]
+
+  - name: fellowship
+    type: fellowship
+    patterns: ["fellowships?", "fellows? program"]
+
+  - name: apprenticeship
+    type: apprenticeship
+    patterns: ["apprentices?", "apprenticeships?", "apprenti[a-z]*"]
+
+  - name: new-grad
+    type: new_grad_program
+    patterns: ["new[ -]?grads?", "new[ -]?graduates?", "recent graduates?"]
+
+  - name: student-research
+    type: student_researcher
+    patterns:
+      - "student researchers?"
+      - "undergraduate researchers?"
+      - "research students?"
+      - "(undergraduate|graduate) research appointments?"
+      - "undergraduate research associates?"
+
+  - name: student
+    type: student_role
+    patterns:
+      - student
+      - "working student"
+      - "werkstudent[a-z]*"
+      - "student (worker|assistant|trainee|program|programme|position)"
+      - "part[ -]time student"
+
+degree:
+  - name: computer_science
+    patterns:
+      - '(?i)\b(?:computer\s+science|comp\s*sci|computer\s+engineering|c\.?s\.?)\b'
+
+  - name: mathematics
+    patterns:
+      - '(?i)\b(?:math(?:ematics)?|applied\s+math(?:ematics)?|mathematical\s+sciences?)\b'
+
+  - name: bioengineering
+    patterns:
+      - '(?i)\b(?:bio[- ]?engineering|bio[- ]?medical\s+engineering|b\.?m\.?e\.?)\b'
+      - (?i)\b(?:medical\s+device|clinical|bioinformatics|computational\s+bio(?:logy|engineering)?|bio[\s\-]?process(?:ing)?|bio[\s\-]?materials|tissue|rehabilitation)\s+(?:engineer|scientist|developer|specialist)\b
+      - (?i)\b(biomedical\s+engineer(ing)?|clinical\s+engineer(ing)?|cce|abet|tjc|the\s+joint\s+commission|nfpa|smda|medical\s+device(s)?|healthcare\s+technology|visn(\s*12)?|gs-1[34]|preventative\s+maintenance|recall\s+management)\b

@@ -1,0 +1,1349 @@
+skill:
+  - id: c
+    name: C
+    category: language
+    aliases: []
+    ambiguous_aliases: [c]
+    case_sensitive: false
+
+  - id: cpp
+    name: C++
+    category: language
+    aliases: [c++, cpp, c++17, c++20, c++23]
+    case_sensitive: false
+
+  - id: python
+    name: Python
+    category: language
+    aliases: [python]
+    case_sensitive: false
+
+  - id: cuda
+    name: CUDA
+    category: language
+    aliases: [cuda]
+    case_sensitive: false
+
+  - id: go
+    name: Go
+    category: language
+    aliases: [golang]
+    ambiguous_aliases: [go]
+    case_sensitive: false
+
+  - id: rust
+    name: Rust
+    category: language
+    aliases: [rust]
+    case_sensitive: false
+
+  - id: sql
+    name: SQL
+    category: language
+    aliases: [sql]
+    case_sensitive: false
+
+  - id: bash
+    name: Bash
+    category: language
+    aliases: [bash, shell, shell scripting]
+    case_sensitive: false
+
+  - id: triton
+    name: Triton
+    category: stack
+    aliases: []
+    ambiguous_aliases: [triton]
+    case_sensitive: false
+
+  - id: cutlass
+    name: CUTLASS
+    category: stack
+    aliases: [cutlass]
+    case_sensitive: false
+
+  - id: nccl
+    name: NCCL
+    category: stack
+    aliases: [nccl]
+    case_sensitive: false
+
+  - id: tensorrt
+    name: TensorRT
+    category: stack
+    aliases: [tensorrt]
+    case_sensitive: false
+
+  - id: vllm
+    name: vLLM
+    category: stack
+    aliases: [vllm]
+    case_sensitive: false
+
+  - id: mpi
+    name: MPI
+    category: stack
+    aliases: [mpi]
+    case_sensitive: false
+
+  - id: grpc
+    name: gRPC
+    category: stack
+    aliases: [grpc]
+    case_sensitive: false
+
+  - id: linux
+    name: Linux
+    category: stack
+    aliases: [linux]
+    case_sensitive: false
+
+  - id: gdb
+    name: gdb
+    category: stack
+    aliases: [gdb]
+    case_sensitive: false
+
+  - id: nsight
+    name: Nsight
+    category: stack
+    aliases: [nsight, nsight profiling, nsight systems, nsight compute]
+    case_sensitive: false
+
+  - id: git
+    name: Git
+    category: stack
+    aliases: [git]
+    case_sensitive: false
+
+  - id: cmake
+    name: CMake
+    category: stack
+    aliases: [cmake]
+    case_sensitive: false
+
+  - id: docker
+    name: Docker
+    category: stack
+    aliases: [docker]
+    case_sensitive: false
+
+  - id: kubernetes
+    name: Kubernetes
+    category: stack
+    aliases: [kubernetes, k8s]
+    case_sensitive: false
+
+  - id: ebpf
+    name: eBPF
+    category: stack
+    aliases: [ebpf, bpf]
+    case_sensitive: false
+
+  - id: prometheus
+    name: Prometheus
+    category: stack
+    aliases: [prometheus]
+    case_sensitive: false
+
+  - id: hdrhistogram
+    name: HdrHistogram
+    category: stack
+    aliases: [hdrhistogram]
+    case_sensitive: false
+
+  - id: quantization
+    name: quantization
+    category: concept
+    aliases: [quantization, int8 quantization, int4 quantization, awq, gptq, smoothquant]
+    case_sensitive: false
+
+  - id: mixed-precision
+    name: mixed precision
+    category: concept
+    aliases: [mixed precision, mixed-precision, fp16, bf16, fp8]
+    case_sensitive: false
+
+  - id: roofline
+    name: roofline
+    category: concept
+    aliases: [roofline, roofline model, roofline analysis]
+    case_sensitive: false
+
+  - id: memory-bandwidth
+    name: memory bandwidth
+    category: concept
+    aliases: [memory bandwidth, memory-bandwidth, gpu memory bandwidth, hbm3, hbm3e]
+    case_sensitive: false
+
+  - id: numerical-linear-algebra
+    name: numerical linear algebra
+    category: concept
+    aliases: [numerical linear algebra, singular value decomposition, svd]
+    case_sensitive: false
+
+  - id: floating-point
+    name: floating point
+    category: concept
+    aliases: [floating point, floating-point]
+    case_sensitive: false
+
+  - id: concurrency
+    name: concurrency
+    category: concept
+    aliases: [concurrency, concurrent programming]
+    case_sensitive: false
+
+  - id: low-latency
+    name: low latency
+    category: concept
+    aliases: [low latency, low-latency]
+    case_sensitive: false
+
+  - id: lock-free
+    name: lock-free
+    category: concept
+    aliases: [lock-free, lockfree, lock free, lock-free data structures, lock free data structures, spsc queues, mpmc queues]
+    case_sensitive: false
+
+  - id: market-data
+    name: market data
+    category: concept
+    aliases: [market data, market-data]
+    case_sensitive: false
+
+  - id: order-book
+    name: order book
+    category: concept
+    aliases: [order book, order-book, orderbook, order-book mechanics, order book mechanics, order-book reconstruction, order book reconstruction, market depth, l2 market depth, l3 market depth]
+    case_sensitive: false
+
+  - id: numa
+    name: NUMA
+    category: concept
+    aliases: [numa]
+    case_sensitive: false
+
+  - id: monte-carlo
+    name: Monte Carlo
+    category: concept
+    aliases: [monte carlo, monte-carlo]
+    case_sensitive: false
+
+  - id: queueing-theory
+    name: queueing theory
+    category: concept
+    aliases: [queueing theory, queuing theory, queueing-theory]
+    case_sensitive: false
+
+# Skills imported from 1.lab/taxanomy/skills.md.
+
+  - id: cuda-cpp
+    name: "CUDA C++"
+    category: language
+    aliases: ["cuda c++"]
+    case_sensitive: false
+
+  - id: triton-kernel-language
+    name: "Triton kernel language"
+    category: language
+    aliases: ["triton kernel language", "openai triton"]
+    case_sensitive: false
+
+  - id: ninja
+    name: "Ninja"
+    category: stack
+    aliases: ["ninja build", "ninja build system"]
+    ambiguous_aliases: ["ninja"]
+    case_sensitive: false
+
+  - id: make
+    name: "Make"
+    category: stack
+    aliases: ["gnu make", "makefile", "makefiles"]
+    ambiguous_aliases: ["make"]
+    case_sensitive: false
+
+  - id: gcc
+    name: "GCC"
+    category: stack
+    aliases: ["gcc", "gnu compiler collection"]
+    case_sensitive: false
+
+  - id: clang
+    name: "Clang"
+    category: stack
+    aliases: ["clang"]
+    case_sensitive: false
+
+  - id: llvm
+    name: "LLVM"
+    category: stack
+    aliases: ["llvm"]
+    case_sensitive: false
+
+  - id: valgrind
+    name: "Valgrind"
+    category: stack
+    aliases: ["valgrind"]
+    case_sensitive: false
+
+  - id: address-sanitizer
+    name: "AddressSanitizer"
+    category: stack
+    aliases: ["addresssanitizer", "address sanitizer", "asan"]
+    case_sensitive: false
+
+  - id: thread-sanitizer
+    name: "ThreadSanitizer"
+    category: stack
+    aliases: ["threadsanitizer", "thread sanitizer", "tsan"]
+    case_sensitive: false
+
+  - id: clang-tidy
+    name: "Clang-Tidy"
+    category: stack
+    aliases: ["clang-tidy", "clang tidy"]
+    case_sensitive: false
+
+  - id: bazel
+    name: "Bazel"
+    category: stack
+    aliases: ["bazel"]
+    case_sensitive: false
+
+  - id: ccache
+    name: "ccache"
+    category: stack
+    aliases: ["ccache"]
+    case_sensitive: false
+
+  - id: gpu-architecture
+    name: "GPU architecture"
+    category: concept
+    aliases: ["gpu architecture", "gpu memory hierarchy", "gpu occupancy"]
+    case_sensitive: false
+
+  - id: memory-coalescing
+    name: "memory coalescing"
+    category: concept
+    aliases: ["memory coalescing", "coalesced memory access", "coalesced memory accesses"]
+    case_sensitive: false
+
+  - id: tensor-cores
+    name: "Tensor Cores"
+    category: concept
+    aliases: ["tensor cores", "tensor core"]
+    case_sensitive: false
+
+  - id: cublas
+    name: "cuBLAS"
+    category: stack
+    aliases: ["cublas"]
+    case_sensitive: false
+
+  - id: flashattention
+    name: "FlashAttention"
+    category: stack
+    aliases: ["flashattention", "flash attention", "flashattention v1", "flashattention v2", "flashattention v3"]
+    case_sensitive: false
+
+  - id: cudnn
+    name: "cuDNN"
+    category: stack
+    aliases: ["cudnn"]
+    case_sensitive: false
+
+  - id: unified-memory
+    name: "Unified Memory"
+    category: concept
+    aliases: ["unified memory", "cuda unified memory"]
+    case_sensitive: false
+
+  - id: pcie
+    name: "PCIe"
+    category: concept
+    aliases: ["pcie", "pci express", "pcie gen4", "pcie gen5", "pcie 4.0", "pcie 5.0"]
+    case_sensitive: false
+
+  - id: nvlink
+    name: "NVLink"
+    category: concept
+    aliases: ["nvlink"]
+    case_sensitive: false
+
+  - id: nvswitch
+    name: "NVSwitch"
+    category: concept
+    aliases: ["nvswitch"]
+    case_sensitive: false
+
+  - id: gpu-virtualization
+    name: "GPU virtualization"
+    category: concept
+    aliases: ["gpu virtualization", "multi-instance gpu", "nvidia mig"]
+    ambiguous_aliases: ["mig"]
+    case_sensitive: false
+
+  - id: transformer-architecture
+    name: "transformer architecture"
+    category: concept
+    aliases: ["transformer architecture", "transformer model", "transformer models"]
+    case_sensitive: false
+
+  - id: attention-mechanism
+    name: "attention mechanism"
+    category: concept
+    aliases: ["attention mechanism", "attention mechanisms"]
+    case_sensitive: false
+
+  - id: autoregressive-decoding
+    name: "autoregressive decoding"
+    category: concept
+    aliases: ["autoregressive decoding"]
+    case_sensitive: false
+
+  - id: kv-cache-management
+    name: "KV-cache management"
+    category: concept
+    aliases: ["kv-cache management", "kv cache management", "kv-cache", "kv cache"]
+    case_sensitive: false
+
+  - id: pagedattention
+    name: "PagedAttention"
+    category: concept
+    aliases: ["pagedattention", "paged attention"]
+    case_sensitive: false
+
+  - id: continuous-batching
+    name: "continuous batching"
+    category: concept
+    aliases: ["continuous batching"]
+    case_sensitive: false
+
+  - id: dynamic-batching
+    name: "dynamic batching"
+    category: concept
+    aliases: ["dynamic batching"]
+    case_sensitive: false
+
+  - id: speculative-decoding
+    name: "speculative decoding"
+    category: concept
+    aliases: ["speculative decoding"]
+    case_sensitive: false
+
+  - id: chunked-prefill
+    name: "chunked prefill"
+    category: concept
+    aliases: ["chunked prefill"]
+    case_sensitive: false
+
+  - id: prefill-decode-disaggregation
+    name: "prefill-decode disaggregation"
+    category: concept
+    aliases: ["prefill-decode disaggregation", "prefill decode disaggregation"]
+    case_sensitive: false
+
+  - id: tensor-parallelism
+    name: "tensor parallelism"
+    category: concept
+    aliases: ["tensor parallelism"]
+    case_sensitive: false
+
+  - id: pipeline-parallelism
+    name: "pipeline parallelism"
+    category: concept
+    aliases: ["pipeline parallelism"]
+    case_sensitive: false
+
+  - id: sequence-parallelism
+    name: "sequence parallelism"
+    category: concept
+    aliases: ["sequence parallelism"]
+    case_sensitive: false
+
+  - id: context-parallelism
+    name: "context parallelism"
+    category: concept
+    aliases: ["context parallelism"]
+    case_sensitive: false
+
+  - id: request-scheduling-preemption
+    name: "request scheduling and preemption"
+    category: concept
+    aliases: ["request scheduling and preemption", "request scheduling & preemption", "request preemption"]
+    case_sensitive: false
+
+  - id: llm-serving-metrics
+    name: "LLM serving metrics"
+    category: concept
+    aliases: ["llm serving metrics", "serving metrics", "ttft", "time to first token", "tpot", "time per output token", "tokens/sec", "tokens per second"]
+    case_sensitive: false
+
+  - id: sglang
+    name: "SGLang"
+    category: stack
+    aliases: ["sglang"]
+    case_sensitive: false
+
+  - id: tensorrt-llm
+    name: "TensorRT-LLM"
+    category: stack
+    aliases: ["tensorrt-llm", "tensorrt llm"]
+    case_sensitive: false
+
+  - id: text-generation-inference
+    name: "Text Generation Inference"
+    category: stack
+    aliases: ["text generation inference", "hugging face tgi", "hf tgi", "tgi"]
+    case_sensitive: false
+
+  - id: triton-inference-server
+    name: "Triton Inference Server"
+    category: stack
+    aliases: ["triton inference server", "nvidia triton inference server"]
+    case_sensitive: false
+
+  - id: onnx-runtime
+    name: "ONNX Runtime"
+    category: stack
+    aliases: ["onnx runtime", "onnxruntime"]
+    case_sensitive: false
+
+  - id: llama-cpp
+    name: "llama.cpp"
+    category: stack
+    aliases: ["llama.cpp", "llama cpp"]
+    case_sensitive: false
+
+  - id: fastertransformer
+    name: "FasterTransformer"
+    category: stack
+    aliases: ["fastertransformer", "faster transformer"]
+    case_sensitive: false
+
+  - id: torchserve
+    name: "TorchServe"
+    category: stack
+    aliases: ["torchserve", "torch serve"]
+    case_sensitive: false
+
+  - id: torch-compile
+    name: "PyTorch torch.compile"
+    category: stack
+    aliases: ["torch.compile", "pytorch torch.compile", "pytorch 2 torch.compile"]
+    case_sensitive: false
+
+  - id: onnx
+    name: "ONNX"
+    category: stack
+    aliases: ["onnx"]
+    case_sensitive: false
+
+  - id: lora
+    name: "LoRA"
+    category: concept
+    aliases: ["lora", "low-rank adaptation", "low rank adaptation"]
+    case_sensitive: false
+
+  - id: distillation
+    name: "distillation"
+    category: concept
+    aliases: ["distillation", "knowledge distillation", "model distillation"]
+    case_sensitive: false
+
+  - id: flashdecoding
+    name: "FlashDecoding"
+    category: concept
+    aliases: ["flashdecoding", "flash decoding"]
+    case_sensitive: false
+
+  - id: prefix-caching
+    name: "prefix caching"
+    category: concept
+    aliases: ["prefix caching", "prefix cache"]
+    case_sensitive: false
+
+  - id: megatron-lm
+    name: "Megatron-LM"
+    category: stack
+    aliases: ["megatron-lm", "megatron lm"]
+    case_sensitive: false
+
+  - id: deepspeed
+    name: "DeepSpeed"
+    category: stack
+    aliases: ["deepspeed"]
+    case_sensitive: false
+
+  - id: pytorch-distributed
+    name: "PyTorch Distributed"
+    category: stack
+    aliases: ["pytorch distributed", "fully sharded data parallel", "distributed data parallel", "fsdp", "pytorch ddp"]
+    ambiguous_aliases: ["ddp"]
+    case_sensitive: false
+
+  - id: ray
+    name: "Ray"
+    category: stack
+    aliases: ["ray framework", "ray.io"]
+    ambiguous_aliases: ["ray"]
+    case_sensitive: false
+
+  - id: horovod
+    name: "Horovod"
+    category: stack
+    aliases: ["horovod"]
+    case_sensitive: false
+
+  - id: safetensors
+    name: "Safetensors"
+    category: stack
+    aliases: ["safetensors", "safe tensors"]
+    case_sensitive: false
+
+  - id: gguf
+    name: "GGUF"
+    category: stack
+    aliases: ["gguf"]
+    case_sensitive: false
+
+  - id: torchscript
+    name: "TorchScript"
+    category: stack
+    aliases: ["torchscript", "torch script"]
+    case_sensitive: false
+
+  - id: pytorch-inductor
+    name: "PyTorch Inductor"
+    category: stack
+    aliases: ["pytorch inductor", "torchinductor", "torch inductor"]
+    ambiguous_aliases: ["inductor"]
+    case_sensitive: false
+
+  - id: tvm
+    name: "TVM"
+    category: stack
+    aliases: ["apache tvm", "tvm compiler"]
+    ambiguous_aliases: ["tvm"]
+    case_sensitive: false
+
+  - id: mlir
+    name: "MLIR"
+    category: stack
+    aliases: ["mlir"]
+    case_sensitive: false
+
+  - id: xla
+    name: "XLA"
+    category: stack
+    aliases: ["xla"]
+    case_sensitive: false
+
+  - id: memory-management-zero-copy
+    name: "memory management and zero-copy architecture"
+    category: concept
+    aliases: ["memory management", "zero-copy architecture", "memory pools", "custom allocators", "memory arenas", "mmap"]
+    case_sensitive: false
+
+  - id: cpu-cache-locality
+    name: "CPU cache locality"
+    category: concept
+    aliases: ["cpu cache locality", "cache locality", "l1 cache misses", "l2 cache misses", "l3 cache misses"]
+    case_sensitive: false
+
+  - id: false-sharing-avoidance
+    name: "false-sharing avoidance"
+    category: concept
+    aliases: ["false-sharing avoidance", "false sharing avoidance", "false sharing"]
+    case_sensitive: false
+
+  - id: simd
+    name: "SIMD"
+    category: concept
+    aliases: ["simd", "avx2", "avx-512", "avx512", "arm neon"]
+    ambiguous_aliases: ["neon"]
+    case_sensitive: false
+
+  - id: instruction-pipelining
+    name: "instruction pipelining"
+    category: concept
+    aliases: ["instruction pipelining"]
+    case_sensitive: false
+
+  - id: branch-prediction-optimization
+    name: "branch-prediction optimization"
+    category: concept
+    aliases: ["branch-prediction optimization", "branch prediction optimization", "branch prediction", "[[likely]]", "[[unlikely]]"]
+    case_sensitive: false
+
+  - id: multithreading
+    name: "multithreading"
+    category: concept
+    aliases: ["multithreading", "multi-threading", "multi threading"]
+    case_sensitive: false
+
+  - id: multiprocessing
+    name: "multiprocessing"
+    category: concept
+    aliases: ["multiprocessing", "multi-processing", "multi processing"]
+    case_sensitive: false
+
+  - id: parallelism
+    name: "parallelism"
+    category: concept
+    aliases: ["parallelism", "parallel programming"]
+    case_sensitive: false
+
+  - id: atomics
+    name: "atomics"
+    category: concept
+    aliases: ["atomics", "atomic operations", "std::atomic"]
+    case_sensitive: false
+
+  - id: mutexes
+    name: "mutexes"
+    category: concept
+    aliases: ["mutexes", "mutex", "shared mutexes", "shared mutex"]
+    case_sensitive: false
+
+  - id: semaphores
+    name: "semaphores"
+    category: concept
+    aliases: ["semaphores", "semaphore"]
+    case_sensitive: false
+
+  - id: condition-variables
+    name: "condition variables"
+    category: concept
+    aliases: ["condition variables", "condition variable"]
+    case_sensitive: false
+
+  - id: coroutines
+    name: "coroutines"
+    category: concept
+    aliases: ["coroutines", "coroutine"]
+    case_sensitive: false
+
+  - id: deadlock-race-condition-prevention
+    name: "deadlock and race-condition prevention"
+    category: concept
+    aliases: ["deadlock prevention", "race-condition prevention", "race condition prevention", "deadlocks", "race conditions"]
+    case_sensitive: false
+
+  - id: context-switching-overhead
+    name: "context-switching overhead"
+    category: concept
+    aliases: ["context-switching overhead", "context switching overhead"]
+    case_sensitive: false
+
+  - id: posix-threads
+    name: "POSIX threads"
+    category: concept
+    aliases: ["posix threads", "pthreads", "pthread"]
+    case_sensitive: false
+
+  - id: binary-protocol-parsing
+    name: "binary protocol parsing"
+    category: concept
+    aliases: ["binary protocol parsing"]
+    case_sensitive: false
+
+  - id: serialization
+    name: "serialization"
+    category: concept
+    aliases: ["serialization", "protocol buffers", "protocol buffer", "protobuf", "flatbuffers", "flat buffers"]
+    case_sensitive: false
+
+  - id: async-io
+    name: "async I/O"
+    category: concept
+    aliases: ["async i/o", "asynchronous i/o", "async io", "asynchronous io", "epoll", "kqueue", "io_uring"]
+    case_sensitive: false
+
+  - id: event-driven-architecture
+    name: "event-driven architecture"
+    category: concept
+    aliases: ["event-driven architecture", "event driven architecture"]
+    case_sensitive: false
+
+  - id: microbenchmarking
+    name: "microbenchmarking methodology"
+    category: concept
+    aliases: ["microbenchmarking", "micro-benchmarking", "microbenchmarking methodology"]
+    case_sensitive: false
+
+  - id: linux-perf
+    name: "Linux perf"
+    category: stack
+    aliases: ["linux perf", "perf profiler", "perf tool"]
+    case_sensitive: false
+
+  - id: google-benchmark
+    name: "Google Benchmark"
+    category: stack
+    aliases: ["google benchmark", "benchmark library"]
+    case_sensitive: false
+
+  - id: callgrind
+    name: "Callgrind"
+    category: stack
+    aliases: ["callgrind"]
+    case_sensitive: false
+
+  - id: flamegraphs
+    name: "FlameGraphs"
+    category: stack
+    aliases: ["flamegraphs", "flame graphs", "flamegraph", "flame graph"]
+    case_sensitive: false
+
+  - id: vtune
+    name: "VTune"
+    category: stack
+    aliases: ["vtune", "intel vtune"]
+    case_sensitive: false
+
+  - id: strace
+    name: "strace"
+    category: stack
+    aliases: ["strace"]
+    case_sensitive: false
+
+  - id: ftrace
+    name: "ftrace"
+    category: stack
+    aliases: ["ftrace"]
+    case_sensitive: false
+
+  - id: posix-sockets
+    name: "POSIX sockets"
+    category: concept
+    aliases: ["posix sockets", "posix socket"]
+    case_sensitive: false
+
+  - id: tcp-ip
+    name: "TCP/IP"
+    category: concept
+    aliases: ["tcp/ip", "tcp ip", "tcp"]
+    case_sensitive: false
+
+  - id: udp-multicast
+    name: "UDP multicast"
+    category: concept
+    aliases: ["udp multicast"]
+    case_sensitive: false
+
+  - id: kernel-bypass
+    name: "kernel bypass"
+    category: concept
+    aliases: ["kernel bypass", "kernel-bypass networking", "kernel bypass networking"]
+    case_sensitive: false
+
+  - id: dpdk
+    name: "DPDK"
+    category: stack
+    aliases: ["dpdk"]
+    case_sensitive: false
+
+  - id: openonload
+    name: "Solarflare OpenOnload"
+    category: stack
+    aliases: ["solarflare openonload", "openonload"]
+    case_sensitive: false
+
+  - id: rdma
+    name: "RDMA"
+    category: concept
+    aliases: ["rdma", "roce", "infiniband"]
+    case_sensitive: false
+
+  - id: non-blocking-io
+    name: "non-blocking I/O"
+    category: concept
+    aliases: ["non-blocking i/o", "nonblocking i/o", "non-blocking io", "nonblocking io"]
+    case_sensitive: false
+
+  - id: zeromq
+    name: "ZeroMQ"
+    category: stack
+    aliases: ["zeromq", "zero mq", "zmq"]
+    case_sensitive: false
+
+  - id: nanomsg
+    name: "Nanomsg"
+    category: stack
+    aliases: ["nanomsg"]
+    case_sensitive: false
+
+  - id: shared-memory-ipc
+    name: "shared-memory IPC"
+    category: concept
+    aliases: ["shared-memory ipc", "shared memory ipc", "shm_open"]
+    case_sensitive: false
+
+  - id: unix-domain-sockets
+    name: "UNIX domain sockets"
+    category: concept
+    aliases: ["unix domain sockets", "unix domain socket", "uds sockets"]
+    case_sensitive: false
+
+  - id: message-queues
+    name: "message queues"
+    category: concept
+    aliases: ["message queues", "message queue"]
+    case_sensitive: false
+
+  - id: restful-apis
+    name: "RESTful APIs"
+    category: concept
+    aliases: ["restful apis", "restful api", "rest apis", "rest api"]
+    ambiguous_aliases: ["rest"]
+    case_sensitive: false
+
+  - id: websockets
+    name: "WebSockets"
+    category: concept
+    aliases: ["websockets", "websocket"]
+    case_sensitive: false
+
+  - id: rpc
+    name: "RPC concepts"
+    category: concept
+    aliases: ["rpc concepts", "remote procedure calls", "remote procedure call", "rpc"]
+    case_sensitive: false
+
+  - id: pub-sub
+    name: "publish-subscribe"
+    category: concept
+    aliases: ["publish-subscribe", "publish/subscribe", "pub-sub", "pub/sub"]
+    case_sensitive: false
+
+  - id: consistent-hashing
+    name: "consistent hashing"
+    category: concept
+    aliases: ["consistent hashing"]
+    case_sensitive: false
+
+  - id: load-balancing
+    name: "load balancing"
+    category: concept
+    aliases: ["load balancing", "load balancer", "load balancers"]
+    case_sensitive: false
+
+  - id: partitioning-sharding
+    name: "partitioning and sharding"
+    category: concept
+    aliases: ["partitioning and sharding", "partitioning & sharding", "database partitioning", "sharding"]
+    case_sensitive: false
+
+  - id: fault-tolerance-patterns
+    name: "fault-tolerance patterns"
+    category: concept
+    aliases: ["fault-tolerance patterns", "fault tolerance patterns", "idempotency", "retry patterns"]
+    case_sensitive: false
+
+  - id: backpressure
+    name: "backpressure"
+    category: concept
+    aliases: ["backpressure", "back-pressure"]
+    case_sensitive: false
+
+  - id: distributed-consensus
+    name: "distributed consensus"
+    category: concept
+    aliases: ["distributed consensus", "raft consensus", "paxos consensus", "raft", "paxos"]
+    case_sensitive: false
+
+  - id: cap-theorem
+    name: "CAP theorem"
+    category: concept
+    aliases: ["cap theorem"]
+    case_sensitive: false
+
+  - id: distributed-locking
+    name: "distributed locking"
+    category: concept
+    aliases: ["distributed locking", "distributed locks", "etcd locking", "zookeeper locking"]
+    case_sensitive: false
+
+  - id: gossip-protocols
+    name: "gossip protocols"
+    category: concept
+    aliases: ["gossip protocols", "gossip protocol"]
+    case_sensitive: false
+
+  - id: replication-lag
+    name: "replication lag"
+    category: concept
+    aliases: ["replication lag"]
+    case_sensitive: false
+
+  - id: rate-limiting
+    name: "rate limiting"
+    category: concept
+    aliases: ["rate limiting", "rate limiter", "token bucket", "leaky bucket"]
+    case_sensitive: false
+
+  - id: split-brain-resolution
+    name: "split-brain resolution"
+    category: concept
+    aliases: ["split-brain resolution", "split brain resolution"]
+    case_sensitive: false
+
+  - id: postgresql
+    name: "PostgreSQL"
+    category: stack
+    aliases: ["postgresql", "postgres"]
+    case_sensitive: false
+
+  - id: redis
+    name: "Redis"
+    category: stack
+    aliases: ["redis"]
+    case_sensitive: false
+
+  - id: object-storage
+    name: "object storage"
+    category: concept
+    aliases: ["object storage", "s3 api", "s3-compatible storage"]
+    case_sensitive: false
+
+  - id: aws
+    name: "AWS"
+    category: stack
+    aliases: ["aws", "amazon web services"]
+    case_sensitive: false
+
+  - id: posix-internals
+    name: "POSIX internals"
+    category: concept
+    aliases: ["posix internals", "linux internals", "linux/posix internals"]
+    case_sensitive: false
+
+  - id: docker-compose
+    name: "Docker Compose"
+    category: stack
+    aliases: ["docker compose", "docker-compose"]
+    case_sensitive: false
+
+  - id: slurm
+    name: "Slurm"
+    category: stack
+    aliases: ["slurm", "slurm workload manager"]
+    case_sensitive: false
+
+  - id: ci-cd
+    name: "CI/CD"
+    category: concept
+    aliases: ["ci/cd", "ci-cd", "continuous integration", "continuous delivery", "continuous deployment"]
+    case_sensitive: false
+
+  - id: github-actions
+    name: "GitHub Actions"
+    category: stack
+    aliases: ["github actions"]
+    case_sensitive: false
+
+  - id: grafana
+    name: "Grafana"
+    category: stack
+    aliases: ["grafana"]
+    case_sensitive: false
+
+  - id: distributed-tracing
+    name: "distributed tracing"
+    category: concept
+    aliases: ["distributed tracing"]
+    case_sensitive: false
+
+  - id: opentelemetry
+    name: "OpenTelemetry"
+    category: stack
+    aliases: ["opentelemetry", "open telemetry", "otel"]
+    case_sensitive: false
+
+  - id: apache-arrow
+    name: "Apache Arrow"
+    category: stack
+    aliases: ["apache arrow", "pyarrow"]
+    case_sensitive: false
+
+  - id: apache-parquet
+    name: "Apache Parquet"
+    category: stack
+    aliases: ["apache parquet", "parquet"]
+    case_sensitive: false
+
+  - id: duckdb
+    name: "DuckDB"
+    category: stack
+    aliases: ["duckdb"]
+    case_sensitive: false
+
+  - id: columnar-storage
+    name: "columnar storage"
+    category: concept
+    aliases: ["columnar storage", "column-oriented storage"]
+    case_sensitive: false
+
+  - id: vectorized-query-execution
+    name: "vectorized query execution"
+    category: concept
+    aliases: ["vectorized query execution"]
+    case_sensitive: false
+
+  - id: zero-copy-serialization
+    name: "zero-copy serialization"
+    category: concept
+    aliases: ["zero-copy serialization", "zero copy serialization"]
+    case_sensitive: false
+
+  - id: feather
+    name: "Feather"
+    category: stack
+    aliases: ["apache feather", "feather format"]
+    ambiguous_aliases: ["feather"]
+    case_sensitive: false
+
+  - id: orc
+    name: "ORC"
+    category: stack
+    aliases: ["apache orc", "orc format"]
+    ambiguous_aliases: ["orc"]
+    case_sensitive: false
+
+  - id: sqlite
+    name: "SQLite"
+    category: stack
+    aliases: ["sqlite"]
+    case_sensitive: false
+
+  - id: rocksdb
+    name: "RocksDB"
+    category: stack
+    aliases: ["rocksdb"]
+    case_sensitive: false
+
+  - id: lmdb
+    name: "LMDB"
+    category: stack
+    aliases: ["lmdb"]
+    case_sensitive: false
+
+  - id: apache-spark
+    name: "Apache Spark"
+    category: stack
+    aliases: ["apache spark", "pyspark", "spark framework"]
+    ambiguous_aliases: ["spark"]
+    case_sensitive: false
+
+  - id: apache-kafka
+    name: "Apache Kafka"
+    category: stack
+    aliases: ["apache kafka", "kafka"]
+    case_sensitive: false
+
+  - id: apache-flink
+    name: "Apache Flink"
+    category: stack
+    aliases: ["apache flink", "flink"]
+    case_sensitive: false
+
+  - id: redpanda
+    name: "Redpanda"
+    category: stack
+    aliases: ["redpanda", "redpanda data"]
+    case_sensitive: false
+
+  - id: celery
+    name: "Celery"
+    category: stack
+    aliases: ["celery task queue", "python celery"]
+    ambiguous_aliases: ["celery"]
+    case_sensitive: false
+
+  - id: redis-streams
+    name: "Redis Streams"
+    category: stack
+    aliases: ["redis streams"]
+    case_sensitive: false
+
+  - id: polars
+    name: "Polars"
+    category: stack
+    aliases: ["python polars", "polars dataframe"]
+    ambiguous_aliases: ["polars"]
+    case_sensitive: false
+
+  - id: etl-elt-pipelines
+    name: "ETL/ELT pipelines"
+    category: concept
+    aliases: ["etl/elt pipelines", "etl pipelines", "elt pipelines", "etl", "elt"]
+    case_sensitive: false
+
+  - id: batch-real-time-streaming
+    name: "batch and real-time streaming"
+    category: concept
+    aliases: ["batch vs. real-time streaming", "batch and real-time streaming", "real-time streaming"]
+    case_sensitive: false
+
+  - id: olap-oltp
+    name: "OLAP and OLTP"
+    category: concept
+    aliases: ["olap vs. oltp", "olap and oltp", "olap", "oltp"]
+    case_sensitive: false
+
+  - id: star-snowflake-schema
+    name: "star and snowflake schema"
+    category: concept
+    aliases: ["star schema", "snowflake schema", "star/snowflake schema"]
+    case_sensitive: false
+
+  - id: append-only-logs
+    name: "append-only logs"
+    category: concept
+    aliases: ["append-only logs", "append only logs", "append-only log"]
+    case_sensitive: false
+
+  - id: compaction
+    name: "compaction"
+    category: concept
+    aliases: ["compaction", "data compaction"]
+    case_sensitive: false
+
+  - id: indexing
+    name: "indexing"
+    category: concept
+    aliases: ["indexing", "b-tree", "btree", "lsm-tree", "lsm tree", "inverted index"]
+    case_sensitive: false
+
+  - id: wal
+    name: "write-ahead logging"
+    category: concept
+    aliases: ["write-ahead logging", "write ahead logging", "wal"]
+    case_sensitive: false
+
+  - id: acid-transactions
+    name: "ACID transactions"
+    category: concept
+    aliases: ["acid transactions", "acid transaction"]
+    ambiguous_aliases: ["acid"]
+    case_sensitive: false
+
+  - id: itch-ouch-protocols
+    name: "ITCH/OUCH protocols"
+    category: concept
+    aliases: ["itch protocol", "ouch protocol", "itch/ouch protocols"]
+    ambiguous_aliases: ["itch", "ouch"]
+    case_sensitive: false
+
+  - id: fix-protocol
+    name: "FIX protocol"
+    category: concept
+    aliases: ["fix protocol"]
+    ambiguous_aliases: ["fix"]
+    case_sensitive: false
+
+  - id: fast-protocol
+    name: "FAST protocol"
+    category: concept
+    aliases: ["fast protocol"]
+    ambiguous_aliases: ["fast"]
+    case_sensitive: false
+
+  - id: sbe
+    name: "Simple Binary Encoding"
+    category: concept
+    aliases: ["simple binary encoding", "sbe"]
+    case_sensitive: false
+
+  - id: market-microstructure
+    name: "market microstructure"
+    category: concept
+    aliases: ["market microstructure"]
+    case_sensitive: false
+
+  - id: matching-engines
+    name: "matching engines"
+    category: concept
+    aliases: ["matching engines", "matching engine"]
+    case_sensitive: false
+
+  - id: trade-execution
+    name: "trade execution"
+    category: concept
+    aliases: ["trade execution"]
+    case_sensitive: false
+
+  - id: tick-to-trade-latency
+    name: "tick-to-trade latency"
+    category: concept
+    aliases: ["tick-to-trade latency", "tick to trade latency"]
+    case_sensitive: false
+
+  - id: deterministic-systems
+    name: "deterministic systems"
+    category: concept
+    aliases: ["deterministic systems", "deterministic system"]
+    case_sensitive: false
+
+  - id: clock-synchronization
+    name: "clock synchronization"
+    category: concept
+    aliases: ["clock synchronization", "precision time protocol", "ieee 1588", "ptp clock"]
+    case_sensitive: false
+
+  - id: backtesting
+    name: "backtesting"
+    category: concept
+    aliases: ["backtesting", "back-testing"]
+    case_sensitive: false
+
+  - id: probability-stochastic-processes
+    name: "probability and stochastic processes"
+    category: concept
+    aliases: ["probability and stochastic processes", "probability & stochastic processes", "stochastic processes"]
+    case_sensitive: false
+
+  - id: markov-chains
+    name: "Markov chains"
+    category: concept
+    aliases: ["markov chains", "markov chain"]
+    case_sensitive: false
+
+  - id: convex-optimization
+    name: "convex optimization"
+    category: concept
+    aliases: ["convex optimization"]
+    case_sensitive: false
+
+  - id: statistical-modeling-hypothesis-testing
+    name: "statistical modeling and hypothesis testing"
+    category: concept
+    aliases: ["statistical modeling", "statistical modelling", "hypothesis testing"]
+    case_sensitive: false
+
+  - id: pytorch
+    name: "PyTorch"
+    category: stack
+    aliases: ["pytorch"]
+    case_sensitive: false
+
+  - id: gradient-boosting
+    name: "gradient boosting"
+    category: concept
+    aliases: ["gradient boosting", "xgboost"]
+    case_sensitive: false
+
+  - id: clustering
+    name: "clustering"
+    category: concept
+    aliases: ["clustering", "hdbscan"]
+    case_sensitive: false
+
+  - id: model-explainability
+    name: "model explainability"
+    category: concept
+    aliases: ["model explainability", "shap"]
+    case_sensitive: false

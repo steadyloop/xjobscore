@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import yaml
 
 from xjobscore import router, run, silver, store, work
 from xjobscore.records import Fact, Feed, Item, Label, Posting, Record, Target
@@ -13,13 +15,53 @@ from xjobscore.records import Fact, Feed, Item, Label, Posting, Record, Target
 NOW = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (["--enrich"], "all"),
+        (["--enrich", "job_type"], "job_type"),
+        (["--enrich", "skills"], "skills"),
+        (["--enrich", "degrees"], "degrees"),
+        (["--enrich", "dedup"], "dedup"),
+    ],
+)
+def test_enrich_cli_selects_all_or_one(arguments, expected):
+    config = run.load_config(["--dsn", "postgresql://example/test", *arguments])
+
+    assert config.enrich == expected
+
+
+@pytest.mark.parametrize("legacy", ["--gold", "--gold-step"])
+def test_legacy_gold_cli_flags_are_rejected(legacy):
+    with pytest.raises(SystemExit):
+        run.load_config(["--dsn", "postgresql://example/test", legacy])
+
+
 def test_schema_indexes_the_opportunities_filter_and_default_sort():
     schema = (Path(__file__).parent.parent / "schema.sql").read_text()
 
     assert "job_posting_opportunity_type_active_idx" in schema
     assert "((attributes ->> 'opportunity_type'))" in schema
+    assert "'internship'" in schema
+    assert "'coop'" in schema
     assert "job_posting_fresh_active_idx" in schema
     assert "((COALESCE(posted_at, first_seen_at)) DESC, id DESC)" in schema
+
+
+def test_schema_opportunity_types_match_the_registry():
+    root = Path(__file__).parent.parent
+    schema = (root / "schema.sql").read_text()
+    registry = yaml.safe_load(
+        (root / "xjobscore" / "registry" / "type.yaml").read_text()
+    )
+    constraint = re.search(
+        r"attributes ->> 'opportunity_type' IN \((.*?)\)", schema, re.DOTALL
+    )
+
+    assert constraint is not None
+    schema_types = set(re.findall(r"'([^']+)'", constraint.group(1)))
+    registry_types = {rule["type"] for rule in registry["type"]}
+    assert schema_types == registry_types | {"unclassified"}
 
 
 class _AsyncContext:
@@ -481,12 +523,64 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
         "posted_at": None,
         "attributes": {
             "version": 1,
-            "opportunity_type": "summer_internship",
             "workplace": "remote",
             "deadline_at": deadline.isoformat(),
         },
         "status": "active",
     }
+
+
+def test_silver_leaves_derived_enrichment_to_gold():
+    posting = Posting(
+        external_id="pointer",
+        title="Engineer",
+        url_posting="https://example.test/jobs/pointer",
+        description_html=None,
+    )
+
+    values = silver._projection(posting)
+
+    assert values["description"] is None
+    assert "opportunity_type" not in values["attributes"]
+    assert "opportunity_type_meta" not in values["attributes"]
+    assert "skills" not in values["attributes"]
+    assert "skills_meta" not in values["attributes"]
+    assert "degree_fields" not in values["attributes"]
+    assert "degree_fields_meta" not in values["attributes"]
+
+
+@pytest.mark.asyncio
+async def test_changed_silver_posting_invalidates_gold_enrichments():
+    queries = []
+
+    class Connection:
+        async def fetchrow(self, query, *args):
+            queries.append(query)
+            if query.lstrip().startswith("SELECT"):
+                return {"id": 9, "content_hash": "old"}
+            return {"id": 9}
+
+    _, changed, created = await store.upsert_job_posting(
+        Connection(),
+        source="greenhouse:acme",
+        source_key="123",
+        company_id=42,
+        values={
+            "title": "Platform Intern",
+            "attributes": {"version": 1},
+            "status": "active",
+        },
+        content_hash="new",
+        raw_id=7,
+        seen_at=NOW,
+    )
+
+    assert changed is True
+    assert created is False
+    upsert = queries[1]
+    assert "- 'opportunity_type' - 'opportunity_type_meta'" in upsert
+    assert "- 'skills' - 'skills_meta'" in upsert
+    assert "- 'degree_fields' - 'degree_fields_meta'" in upsert
 
 
 @pytest.mark.asyncio

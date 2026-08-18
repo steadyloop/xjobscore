@@ -284,6 +284,10 @@ CONFIGS: dict[str, dict] = {
             },
         },
     },
+    # This repository's JSON is a shared historical/off-season store, not just
+    # the rows rendered in its main README. The bespoke parser mirrors the
+    # upstream active + visible + Summer 2027 + freshness selection while
+    # retaining every fetched row in replayable bronze.
     "simplify": {
         "list": {
             "url": "https://raw.githubusercontent.com/{key}/dev/.github/scripts/listings.json",

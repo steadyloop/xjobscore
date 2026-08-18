@@ -7,12 +7,11 @@ from html.parser import HTMLParser
 import json
 import logging
 import re
-import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from xjobscore import opportunity, router, sources, store
+from xjobscore import router, sources, store
 from xjobscore.records import Feed, Item, Posting
 
 if TYPE_CHECKING:
@@ -20,14 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Counts", "normalize_title", "process", "replay"]
-
-_CONFUSABLES = str.maketrans({"ꓟ": "M", "ꓡ": "L", "ꓣ": "R"})
-
-
-def normalize_title(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value.translate(_CONFUSABLES)).casefold()
-    return re.sub(r"[^a-z0-9]+", " ", value).strip()
+__all__ = ["Counts", "process", "replay"]
 
 
 class _PlainText(HTMLParser):
@@ -71,10 +63,7 @@ def _workplace(value: str | None) -> str | None:
 
 def _projection(posting: Posting) -> dict[str, Any]:
     description = _plain_text(posting.description_html)
-    attributes: dict[str, Any] = {
-        "version": 1,
-        "opportunity_type": opportunity.classify(posting.title, description),
-    }
+    attributes: dict[str, Any] = {"version": 1}
     workplace = _workplace(posting.workplace_type_raw)
     if workplace:
         attributes["workplace"] = workplace

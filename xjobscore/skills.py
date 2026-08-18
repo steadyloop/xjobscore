@@ -1,50 +1,50 @@
-"""Resolve plain text against the skill canon in ``registry/skills.toml``.
+"""Match plain text against the canonical skills in ``registry/skills.yaml``.
 
-One authority, two consumers: the pipeline labels a posting's description and the
-resume workspace matches a job description, both through the same slugs, so a
-resume skill and a posting requirement are finally the same vocabulary.
+The matcher is a pure-Python Aho--Corasick automaton. It compiles the skill
+aliases once and then scans each job description in linear time relative to the
+description length plus the number of candidate hits.
 
-The vocabulary is closed. ``extract`` emits only slugs declared in the canon and
-never infers: no stemming, no synonyms, no similarity. Matching is literal, which
-drives false positives to zero and accepts false negatives in exchange — a term
-whose spelling is not yet an alias is silently missed. That trade is deliberate.
-A missed label is invisible and fixed by adding an alias; a wrong label quietly
-corrupts every comparison downstream.
-
-Skills whose display name has a non-technical English use are marked
-``ambiguous`` in the canon; only their aliases resolve. ``Go`` is reachable
-through ``golang`` but never through bare "go", and ``C`` — which no spelling
-distinguishes from a letter or a grade — is never auto-labeled at all.
-
-``extract`` expects plain text. Silver already flattens HTML with its own
-``_plain_text``; keeping this module format-agnostic is what keeps it this small.
+Only entries in ``aliases`` are matchable. ``ambiguous_aliases`` document
+spellings such as ``go`` and ``c`` that are intentionally excluded from
+automatic extraction. The vocabulary is closed: no stemming, fuzzy matching,
+or inferred synonyms are applied.
 """
 
 from __future__ import annotations
 
 import functools
 import re
-import tomllib
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable, Iterator
 
-__all__ = ["CATEGORIES", "Skill", "SkillsError", "SKILLS_PATH", "canon", "extract"]
+import yaml
 
-SKILLS_PATH = Path(__file__).parent / "registry" / "skills.toml"
+__all__ = [
+    "CATEGORIES",
+    "SKILLS_PATH",
+    "Skill",
+    "SkillMatch",
+    "SkillMatcher",
+    "SkillsError",
+    "canon",
+    "extract",
+    "finditer",
+]
 
-#: language = programming languages; stack = software you run; concept = things
-#: you know. Category is a property of the skill, never of the posting, so it is
-#: resolved here at read time rather than stored alongside a label.
+SKILLS_PATH = Path(__file__).parent / "registry" / "skills.yaml"
 CATEGORIES = ("language", "stack", "concept")
 
-_FIELDS = {"name", "category", "aliases", "ambiguous"}
-_SLUG = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
-
-# `\b` cannot express these boundaries: `+` is not a word character, so `\bc\+\+\b`
-# fails to match "C++". Explicit lookaround keeps symbol-bearing names matchable
-# while still rejecting "Rustacean" for `rust`.
-_LEFT = r"(?<![a-z0-9])"
-_RIGHT = r"(?![a-z0-9])"
+_FIELDS = {
+    "id",
+    "name",
+    "category",
+    "aliases",
+    "ambiguous_aliases",
+    "case_sensitive",
+}
+_ID = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 
 
 class SkillsError(ValueError):
@@ -53,33 +53,81 @@ class SkillsError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class Skill:
-    slug: str
+    """One validated entry in the skill canon."""
+
+    id: str
     name: str
     category: str
     aliases: tuple[str, ...]
-    ambiguous: bool
+    ambiguous_aliases: tuple[str, ...]
+    case_sensitive: bool
+
+    @property
+    def slug(self) -> str:
+        """Backward-compatible name for the canonical skill identifier."""
+        return self.id
 
     @property
     def patterns(self) -> tuple[str, ...]:
-        """Lowercase spellings that resolve to this skill."""
-        if self.ambiguous:
-            return self.aliases
-        return (self.name.lower(), *self.aliases)
+        """Spellings eligible for automatic matching."""
+        return self.aliases
 
 
-def _entry(slug: object, row: object, path: Path) -> Skill:
-    where = f"{path}: [{slug}]"
-    if not isinstance(slug, str) or not _SLUG.match(slug):
-        raise SkillsError(f"{path}: {slug!r} is not a lowercase hyphenated slug")
+@dataclass(frozen=True, slots=True)
+class SkillMatch:
+    """A non-overlapping skill occurrence in source text.
+
+    ``start`` is inclusive and ``end`` is exclusive, matching Python's normal
+    slice convention. ``text[start:end]`` is therefore always ``matched_text``.
+    """
+
+    skill_id: str
+    alias: str
+    matched_text: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class _Output:
+    skill_id: str
+    alias: str
+
+
+@dataclass(slots=True)
+class _Node:
+    edges: dict[str, int]
+    fail: int
+    outputs: list[_Output]
+
+
+def _strings(value: object, field: str, where: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise SkillsError(f"{where}: {field} must be an array")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise SkillsError(f"{where}: {field} must contain non-empty strings")
+        result.append(item)
+    return tuple(result)
+
+
+def _entry(row: object, index: int, path: Path) -> Skill:
+    where = f"{path}: skill[{index}]"
     if not isinstance(row, dict):
-        raise SkillsError(f"{where} must be a TOML table")
-    # Unknown keys fail loudly. A typo such as `alias =` would otherwise read as
-    # an empty alias list and silently stop matching every spelling it named.
+        raise SkillsError(f"{where} must be a mapping")
+
     unknown = sorted(set(row) - _FIELDS)
     if unknown:
         raise SkillsError(f"{where}: unknown key {unknown[0]!r}")
 
-    name = row.get("name", slug)
+    skill_id = row.get("id")
+    if not isinstance(skill_id, str) or not _ID.fullmatch(skill_id):
+        raise SkillsError(f"{where}: {skill_id!r} is not a lowercase hyphenated id")
+
+    name = row.get("name")
     if not isinstance(name, str) or not name:
         raise SkillsError(f"{where}: name must be a non-empty string")
 
@@ -87,79 +135,220 @@ def _entry(slug: object, row: object, path: Path) -> Skill:
     if category not in CATEGORIES:
         raise SkillsError(f"{where}: category must be one of {CATEGORIES}, got {category!r}")
 
-    aliases = row.get("aliases", [])
-    if not isinstance(aliases, list):
-        raise SkillsError(f"{where}: aliases must be an array")
-    for alias in aliases:
-        if not isinstance(alias, str) or not alias:
-            raise SkillsError(f"{where}: aliases must be non-empty strings")
-        if alias != alias.lower():
-            raise SkillsError(f"{where}: alias {alias!r} must be lowercase")
+    aliases = _strings(row.get("aliases", []), "aliases", where)
+    ambiguous = _strings(row.get("ambiguous_aliases", []), "ambiguous_aliases", where)
 
-    ambiguous = row.get("ambiguous", False)
-    if not isinstance(ambiguous, bool):
-        raise SkillsError(f"{where}: ambiguous must be a boolean")
+    case_sensitive = row.get("case_sensitive", False)
+    if not isinstance(case_sensitive, bool):
+        raise SkillsError(f"{where}: case_sensitive must be a boolean")
 
     return Skill(
-        slug=slug,
+        id=skill_id,
         name=name,
         category=category,
-        aliases=tuple(aliases),
-        ambiguous=ambiguous,
+        aliases=aliases,
+        ambiguous_aliases=ambiguous,
+        case_sensitive=case_sensitive,
     )
+
+
+def _validate_claims(skills: Iterable[Skill], path: Path) -> None:
+    """Reject aliases that could make resolution depend on declaration order."""
+    exact: dict[str, str] = {}
+    insensitive: dict[str, str] = {}
+
+    for skill in skills:
+        local: set[tuple[str, bool]] = set()
+        for alias in (*skill.aliases, *skill.ambiguous_aliases):
+            key = (alias if skill.case_sensitive else alias.casefold(), skill.case_sensitive)
+            if key in local:
+                raise SkillsError(f"{path}: {alias!r} is repeated by {skill.id}")
+            local.add(key)
+
+            folded = alias.casefold()
+            if skill.case_sensitive:
+                owner = exact.setdefault(alias, skill.id)
+                # An insensitive spelling also matches this exact spelling.
+                conflicting = insensitive.get(folded)
+            else:
+                owner = insensitive.setdefault(folded, skill.id)
+                # Any exact spelling with the same case is reachable too.
+                conflicting = next(
+                    (claimed for text, claimed in exact.items() if text.casefold() == folded),
+                    None,
+                )
+
+            if owner != skill.id:
+                conflicting = owner
+            if conflicting is not None and conflicting != skill.id:
+                raise SkillsError(
+                    f"{path}: {alias!r} is claimed by both {conflicting} and {skill.id}"
+                )
 
 
 def _load(path: Path) -> dict[str, Skill]:
     try:
-        with path.open("rb") as handle:
-            document = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        with path.open(encoding="utf-8") as handle:
+            document = yaml.safe_load(handle)
+    except (OSError, yaml.YAMLError) as exc:
         raise SkillsError(f"{path}: {exc}") from exc
 
-    skills = {}
-    claimed: dict[str, str] = {}
-    for slug, row in document.items():
-        skill = _entry(slug, row, path)
-        skills[skill.slug] = skill
-        for pattern in skill.patterns:
-            # Two skills answering to one spelling would make resolution depend
-            # on alternation order rather than on the canon.
-            owner = claimed.setdefault(pattern, skill.slug)
-            if owner != skill.slug:
-                raise SkillsError(f"{path}: {pattern!r} is claimed by both {owner} and {skill.slug}")
+    if not isinstance(document, dict) or set(document) != {"skill"}:
+        raise SkillsError(f"{path}: root must contain exactly one 'skill' array")
+    rows = document["skill"]
+    if not isinstance(rows, list):
+        raise SkillsError(f"{path}: skill must be an array")
+
+    skills: dict[str, Skill] = {}
+    for index, row in enumerate(rows):
+        skill = _entry(row, index, path)
+        if skill.id in skills:
+            raise SkillsError(f"{path}: duplicate skill id {skill.id!r}")
+        skills[skill.id] = skill
+
     if not skills:
         raise SkillsError(f"{path}: canon is empty")
+    _validate_claims(skills.values(), path)
     return skills
 
 
 @functools.lru_cache(maxsize=1)
 def canon() -> dict[str, Skill]:
-    """The validated canon, keyed by slug. Read once, then cached."""
+    """Return the validated canon keyed by skill id, loading it only once."""
     return _load(SKILLS_PATH)
 
 
-@functools.lru_cache(maxsize=1)
-def _matcher() -> tuple[re.Pattern[str], dict[str, str]]:
-    """One alternation over every spelling, plus its spelling-to-slug map.
+class _Automaton:
+    """A compact Aho--Corasick trie for one case-sensitivity mode."""
 
-    A single pass costs the length of the text regardless of canon size, where a
-    scan per skill would cost their product.
-    """
-    slugs = {pattern: skill.slug for skill in canon().values() for pattern in skill.patterns}
-    # `re` alternation is ordered rather than longest-match, so a shorter
-    # alternative listed first would claim the prefix of a longer name and strand
-    # the rest: "numerical linear algebra" must not resolve through "algebra".
-    alternatives = "|".join(re.escape(p) for p in sorted(slugs, key=len, reverse=True))
-    return re.compile(f"{_LEFT}({alternatives}){_RIGHT}"), slugs
+    def __init__(self, patterns: Iterable[tuple[str, _Output]]) -> None:
+        self._nodes = [_Node(edges={}, fail=0, outputs=[])]
+        for pattern, output in patterns:
+            state = 0
+            for character in pattern:
+                next_state = self._nodes[state].edges.get(character)
+                if next_state is None:
+                    next_state = len(self._nodes)
+                    self._nodes[state].edges[character] = next_state
+                    self._nodes.append(_Node(edges={}, fail=0, outputs=[]))
+                state = next_state
+            self._nodes[state].outputs.append(output)
+        self._build_failure_links()
+
+    def _build_failure_links(self) -> None:
+        pending: deque[int] = deque(self._nodes[0].edges.values())
+        while pending:
+            state = pending.popleft()
+            for character, child in self._nodes[state].edges.items():
+                pending.append(child)
+                fallback = self._nodes[state].fail
+                while fallback and character not in self._nodes[fallback].edges:
+                    fallback = self._nodes[fallback].fail
+                self._nodes[child].fail = self._nodes[fallback].edges.get(character, 0)
+                self._nodes[child].outputs.extend(
+                    self._nodes[self._nodes[child].fail].outputs
+                )
+
+    def scan(self, text: str) -> Iterator[tuple[int, _Output]]:
+        state = 0
+        for end, character in enumerate(text, 1):
+            while state and character not in self._nodes[state].edges:
+                state = self._nodes[state].fail
+            state = self._nodes[state].edges.get(character, 0)
+            for output in self._nodes[state].outputs:
+                yield end, output
+
+
+def _casefold_with_offsets(text: str) -> tuple[str, list[int]]:
+    """Casefold text while retaining normalized-index to source-index mapping."""
+    parts: list[str] = []
+    offsets: list[int] = []
+    for source_index, character in enumerate(text):
+        folded = character.casefold()
+        parts.append(folded)
+        offsets.extend([source_index] * len(folded))
+    return "".join(parts), offsets
+
+
+def _has_boundaries(text: str, start: int, end: int) -> bool:
+    """Prevent aliases from matching inside larger alphanumeric tokens."""
+    return (
+        (start == 0 or not text[start - 1].isalnum())
+        and (end == len(text) or not text[end].isalnum())
+    )
+
+
+class SkillMatcher:
+    """Reusable Aho--Corasick matcher compiled from a skill canon."""
+
+    def __init__(self, skills: Iterable[Skill]) -> None:
+        insensitive: list[tuple[str, _Output]] = []
+        sensitive: list[tuple[str, _Output]] = []
+        for skill in skills:
+            destination = sensitive if skill.case_sensitive else insensitive
+            for alias in skill.aliases:
+                pattern = alias if skill.case_sensitive else alias.casefold()
+                destination.append((pattern, _Output(skill.id, alias)))
+        self._insensitive = _Automaton(insensitive)
+        self._sensitive = _Automaton(sensitive)
+
+    def _candidates(self, text: str) -> Iterator[SkillMatch]:
+        folded, offsets = _casefold_with_offsets(text)
+        for normalized_end, output in self._insensitive.scan(folded):
+            normalized_start = normalized_end - len(output.alias.casefold())
+            start = offsets[normalized_start]
+            end = offsets[normalized_end - 1] + 1
+            if _has_boundaries(text, start, end):
+                yield SkillMatch(output.skill_id, output.alias, text[start:end], start, end)
+
+        for end, output in self._sensitive.scan(text):
+            start = end - len(output.alias)
+            if _has_boundaries(text, start, end):
+                yield SkillMatch(output.skill_id, output.alias, text[start:end], start, end)
+
+    def finditer(self, text: str) -> Iterator[SkillMatch]:
+        """Yield non-overlapping occurrences using leftmost-longest selection."""
+        if not text:
+            return
+
+        # A list indexed by source offset keeps overlap resolution O(text + hits),
+        # rather than sorting every hit and adding an O(hits log hits) tail to the
+        # automaton scan. Job descriptions are small enough that one reference per
+        # source character is a useful speed/memory tradeoff.
+        candidates: list[SkillMatch | None] = [None] * len(text)
+        for match in self._candidates(text):
+            current = candidates[match.start]
+            match_length = match.end - match.start
+            current_length = 0 if current is None else current.end - current.start
+            if current is None or match_length > current_length or (
+                match_length == current_length and match.skill_id < current.skill_id
+            ):
+                candidates[match.start] = match
+
+        cursor = 0
+        for match in candidates:
+            if match is None:
+                continue
+            if match.start < cursor:
+                continue
+            yield match
+            cursor = match.end
+
+    def extract(self, text: str) -> list[str]:
+        """Return matched canonical ids, deduplicated and sorted."""
+        return sorted({match.skill_id for match in self.finditer(text)})
+
+
+@functools.lru_cache(maxsize=1)
+def _matcher() -> SkillMatcher:
+    return SkillMatcher(canon().values())
+
+
+def finditer(text: str) -> Iterator[SkillMatch]:
+    """Yield skill occurrences from the process-wide cached matcher."""
+    return _matcher().finditer(text)
 
 
 def extract(text: str) -> list[str]:
-    """Canon slugs named in ``text``, deduplicated and sorted.
-
-    Expects plain text. Every returned slug is in the canon; unrecognized terms
-    are dropped rather than guessed at.
-    """
-    if not text:
-        return []
-    pattern, slugs = _matcher()
-    return sorted({slugs[hit] for hit in pattern.findall(text.lower())})
+    """Return canonical skill ids named in plain ``text``."""
+    return _matcher().extract(text)

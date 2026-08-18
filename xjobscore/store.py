@@ -554,8 +554,18 @@ async def upsert_job_posting(
             source_url = EXCLUDED.source_url,
             apply_url = EXCLUDED.apply_url,
             posted_at = EXCLUDED.posted_at,
-            -- Merge rather than replace: enrichment keys written after upsert (e.g., opportunity_type) must not be clobbered on re-poll.
-            attributes = job_posting.attributes || EXCLUDED.attributes,
+            -- Gold enrichment survives an unchanged silver replay. A changed
+            -- canonical projection invalidates derived results and stamps so
+            -- the next gold pass recomputes them from current silver fields.
+            attributes = CASE
+                WHEN job_posting.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+                THEN (job_posting.attributes
+                      - 'opportunity_type' - 'opportunity_type_meta'
+                      - 'skills' - 'skills_meta'
+                      - 'degree_fields' - 'degree_fields_meta')
+                     || EXCLUDED.attributes
+                ELSE job_posting.attributes || EXCLUDED.attributes
+            END,
             status = EXCLUDED.status,
             last_seen_at = EXCLUDED.last_seen_at,
             content_hash = EXCLUDED.content_hash,

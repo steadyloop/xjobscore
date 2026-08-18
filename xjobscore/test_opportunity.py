@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from xjobscore.opportunity import OpportunityError, VERDICTS, _load, canon, classify, selftest
+from xjobscore.opportunity import OpportunityError, _load, canon, classify, selftest
 
 
 def _canon(tmp_path: Path, body: str) -> tuple:
-    path = tmp_path / "opportunity.toml"
+    path = tmp_path / "type.yaml"
     path.write_text(body, encoding="utf-8")
     return _load(path)
 
@@ -22,61 +22,61 @@ def test_shipped_canon_self_test_passes():
 
 
 def test_unmatched_posting_is_unclassified():
-    assert classify("Regional Sales Director", "Own the enterprise pipeline.") == "unclassified"
-
-
-def test_empty_description_does_not_raise():
-    assert classify("Software Engineering Intern", None) == "summer_internship"
-    assert classify("Software Engineering Intern", "") == "summer_internship"
+    assert classify("Regional Sales Director") == "unclassified"
 
 
 def test_matching_ignores_case():
-    assert classify("SOFTWARE ENGINEERING INTERN", None) == "summer_internship"
+    assert classify("SOFTWARE ENGINEERING INTERN") == "internship"
 
 
-# -- ordering: the reject-before-title contract ----------------------------
+# -- narrow shipped behavior -----------------------------------------------
 
 
-def test_seniority_overrides_every_positive_signal():
-    """A senior title is not a student role no matter what the body says."""
-    assert classify("Senior Software Engineering Intern", None) == "unclassified"
-    assert classify(
-        "Senior Backend Engineer", "Must be currently enrolled in a degree program."
-    ) == "unclassified"
+@pytest.mark.parametrize("title", ["Software Co-op", "Software Coop", "Software Co op"])
+def test_coop_title_is_classified(title: str):
+    assert classify(title) == "coop"
 
 
-def test_false_friend_stage_is_rejected_but_real_internship_survives():
-    """`stage` is French/Dutch for internship; English also uses it for company
-    maturity. The false-friends rule must reject the former without shadowing
-    a genuine posting that also happens to name a stage."""
-    assert classify("Account Executive, Early Stage", None) == "unclassified"
-    assert classify("Early Stage Investment Intern", None) == "summer_internship"
-    assert classify("Stage Fluids Engineer II", None) == "summer_internship"
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Student Researcher",
+        "Undergraduate Researcher",
+        "Research Student",
+        "Graduate Research Appointment",
+        "Undergraduate Research Associate",
+    ],
+)
+def test_student_research_title_is_classified(title: str):
+    assert classify(title) == "student_researcher"
 
 
-def test_bare_opt_is_not_a_visa_signal():
-    """`opt` alone matches `opt-in`/`opt-out` boilerplate; only the qualified
-    CPT/OPT phrasing is trustworthy evidence."""
-    assert classify("Manager, Options Trading", "We support opt-in benefit elections.") == "unclassified"
+def test_research_internship_and_coop_keep_their_program_type():
+    assert classify("Student Researcher Intern") == "internship"
+    assert classify("Undergraduate Research Co-op") == "coop"
 
 
-# -- description evidence is a fallback, not a co-signal -------------------
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("AI Research Fellowship", "fellowship"),
+        ("Working Student", "student_role"),
+        ("New Graduate Engineer", "new_grad_program"),
+        ("Software Apprentice", "apprenticeship"),
+    ],
+)
+def test_explicit_student_opportunity_titles_are_classified(title: str, expected: str):
+    assert classify(title) == expected
 
 
-def test_description_evidence_only_consulted_when_title_is_silent():
-    assert classify(
-        "Software Engineer", "Must be currently enrolled in a Bachelor's program."
-    ) == "student_role"
+def test_ambiguous_research_and_fellow_titles_remain_unclassified():
+    assert classify("Clinical Research Assistant") == "unclassified"
+    assert classify("Principal Engineering Fellow") == "unclassified"
 
 
-def test_weak_program_mention_goes_to_review_not_the_board():
-    """Boilerplate that merely mentions a company's internship program must
-    not be indistinguishable from a real internship posting."""
-    assert classify("Software Engineer", "We offer a great internship program to all new hires.") == "review"
-
-
-def test_non_english_evidence_is_strong_not_weak():
-    assert classify("Ingenieur Logiciel", "Poste en alternance, 12 mois.") == "summer_internship"
+def test_internship_wins_when_categories_overlap():
+    assert classify("AI Research Fellowship Intern") == "internship"
+    assert classify("Intern / Working Student") == "internship"
 
 
 # -- validation -------------------------------------------------------------
@@ -84,60 +84,52 @@ def test_non_english_evidence_is_strong_not_weak():
 
 def test_unknown_key_is_rejected(tmp_path: Path):
     with pytest.raises(OpportunityError, match="unknown key 'match'"):
-        _canon(tmp_path, '[intern]\nverdict = "title"\ntype = "summer_internship"\nmatch = ["intern"]\n')
+        _canon(tmp_path, 'type:\n  - name: intern\n    type: summer_internship\n    match: [intern]\n')
 
 
-def test_unknown_verdict_is_rejected(tmp_path: Path):
-    with pytest.raises(OpportunityError, match="verdict must be one of"):
-        _canon(tmp_path, '[intern]\nverdict = "maybe"\npatterns = ["intern"]\n')
+def test_scope_and_verdict_are_rejected(tmp_path: Path):
+    with pytest.raises(OpportunityError, match="unknown key 'scope'"):
+        _canon(
+            tmp_path,
+            'type:\n  - name: intern\n    type: summer_internship\n    scope: description\n    patterns: [intern]\n',
+        )
+    with pytest.raises(OpportunityError, match="unknown key 'verdict'"):
+        _canon(
+            tmp_path,
+            'type:\n  - name: intern\n    verdict: title\n    type: summer_internship\n    patterns: [intern]\n',
+        )
 
 
-def test_title_verdict_without_type_is_rejected(tmp_path: Path):
-    with pytest.raises(OpportunityError, match="requires a non-empty type"):
-        _canon(tmp_path, '[intern]\nverdict = "title"\npatterns = ["intern"]\n')
-
-
-def test_reject_verdict_with_type_is_rejected(tmp_path: Path):
-    with pytest.raises(OpportunityError, match="must not set type"):
-        _canon(tmp_path, '[senior]\nverdict = "reject"\ntype = "summer_internship"\npatterns = ["senior"]\n')
-
-
-def test_unknown_scope_is_rejected(tmp_path: Path):
-    body = '[intern]\nverdict = "title"\ntype = "summer_internship"\nscope = "body"\npatterns = ["intern"]\n'
-    with pytest.raises(OpportunityError, match="scope must be one of"):
-        _canon(tmp_path, body)
-
-
-def test_scope_defaults_to_title(tmp_path: Path):
-    rules = _canon(tmp_path, '[intern]\nverdict = "title"\ntype = "summer_internship"\npatterns = ["intern"]\n')
-    assert rules[0].scope == "title"
+def test_missing_type_is_rejected(tmp_path: Path):
+    with pytest.raises(OpportunityError, match="type must be a non-empty string"):
+        _canon(tmp_path, 'type:\n  - name: intern\n    patterns: [intern]\n')
 
 
 def test_empty_patterns_is_rejected(tmp_path: Path):
     with pytest.raises(OpportunityError, match="non-empty array"):
-        _canon(tmp_path, '[intern]\nverdict = "title"\ntype = "summer_internship"\npatterns = []\n')
+        _canon(tmp_path, 'type:\n  - name: intern\n    type: summer_internship\n    patterns: []\n')
 
 
 def test_uppercase_pattern_is_rejected(tmp_path: Path):
     """Text is lowercased before matching, so an uppercase pattern could never hit."""
-    body = '[intern]\nverdict = "title"\ntype = "summer_internship"\npatterns = ["Intern"]\n'
+    body = 'type:\n  - name: intern\n    type: summer_internship\n    patterns: [Intern]\n'
     with pytest.raises(OpportunityError, match="must be lowercase"):
         _canon(tmp_path, body)
 
 
 def test_empty_canon_is_rejected(tmp_path: Path):
     with pytest.raises(OpportunityError, match="canon is empty"):
-        _canon(tmp_path, "")
+        _canon(tmp_path, "type: []\n")
 
 
 def test_unreadable_canon_is_rejected(tmp_path: Path):
     with pytest.raises(OpportunityError):
-        _load(tmp_path / "absent.toml")
+        _load(tmp_path / "absent.yaml")
 
 
-def test_malformed_toml_is_rejected(tmp_path: Path):
+def test_malformed_yaml_is_rejected(tmp_path: Path):
     with pytest.raises(OpportunityError):
-        _canon(tmp_path, "[intern\nverdict =")
+        _canon(tmp_path, "type:\n  - name: [intern\n")
 
 
 # -- the shipped canon -------------------------------------------------------
@@ -145,28 +137,25 @@ def test_malformed_toml_is_rejected(tmp_path: Path):
 
 def test_shipped_canon_is_valid():
     rules = canon()
-    assert len(rules) > 1
+    assert [rule.name for rule in rules] == [
+        "internship",
+        "coop",
+        "fellowship",
+        "apprenticeship",
+        "new-grad",
+        "student-research",
+        "student",
+    ]
     for rule in rules:
-        assert rule.verdict in VERDICTS, rule.name
-        if rule.verdict in ("title", "evidence"):
-            assert rule.type, rule.name
-        else:
-            assert rule.type is None, rule.name
-
-
-def test_shipped_canon_rejects_seniority_before_any_title_rule():
-    names = [rule.name for rule in canon()]
-    senior_position = names.index("senior")
-    first_title_position = next(i for i, rule in enumerate(canon()) if rule.verdict == "title")
-    assert senior_position < first_title_position, names
-
-
-def test_shipped_canon_places_false_friends_between_the_internship_rules():
-    """`false-friends` must sit after `internship` (so "Early Stage Investment
-    Intern" matches `intern` first) and before `internship-intl` (so the bare
-    `stage` alias never sees an already-rejected posting)."""
-    names = [rule.name for rule in canon()]
-    assert names.index("internship") < names.index("false-friends") < names.index("internship-intl")
+        assert rule.type in {
+            "internship",
+            "coop",
+            "fellowship",
+            "apprenticeship",
+            "new_grad_program",
+            "student_researcher",
+            "student_role",
+        }, rule.name
 
 
 def test_canon_is_cached():
