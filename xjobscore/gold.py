@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from xjobscore import degrees, opportunity, skills, store
+from xjobscore import degrees, skills, store
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -40,8 +40,6 @@ __all__ = [
     "degree_fields_input_hash",
     "degree_fields_payload",
     "normalize_title",
-    "opportunity_input_hash",
-    "opportunity_payload",
     "plan_dedup",
     "skills_input_hash",
     "skills_payload",
@@ -78,10 +76,13 @@ class Step:
     rebuild: Callable[..., Awaitable[Counts]]
 
 
-# OPPORTUNITY TYPE ---------------------------------------------------------
+# TITLE NORMALIZATION ------------------------------------------------------
+#
+# `job_type` is no longer derived here. It is a parse-time, vendor-specific
+# field on `job_posting`; see xjobscore/classify.py and the per-vendor rule
+# tables in the adapters. Only the title normalizer survives, because dedup
+# and the inspector's parse preview both consume it.
 
-_OPPORTUNITY_VERSION = 1
-_OPPORTUNITY_BATCH_SIZE = 1_000
 _CONFUSABLES = str.maketrans({"ꓟ": "M", "ꓡ": "L", "ꓣ": "R"})
 
 
@@ -89,74 +90,6 @@ def normalize_title(value: str) -> str:
     """Normalize a silver title for derived grouping and classification work."""
     value = unicodedata.normalize("NFKC", value.translate(_CONFUSABLES)).casefold()
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
-
-
-def opportunity_input_hash(title: str | None) -> str:
-    """Fingerprint exactly the title consumed by the opportunity classifier."""
-    return hashlib.sha256((title or "").encode("utf-8")).hexdigest()
-
-
-def opportunity_payload(title: str | None, *, parsed_at: datetime) -> dict[str, Any]:
-    """The complete JSONB patch for one opportunity classification."""
-    return {
-        "opportunity_type": opportunity.classify(title or ""),
-        "opportunity_type_meta": {
-            "version": _OPPORTUNITY_VERSION,
-            "parsed_at": _utc_text(parsed_at),
-            "input_hash": opportunity_input_hash(title),
-        },
-    }
-
-
-async def _opportunity_rebuild(
-    conn: Connection,
-    *,
-    dry_run: bool = False,
-    parsed_at: datetime | None = None,
-) -> Counts:
-    """Classify each unstamped silver title once, in bounded batches."""
-    stamp = parsed_at or datetime.now(timezone.utc)
-    last_id = 0
-    enriched = 0
-    while True:
-        rows = await conn.fetch(
-            """
-            SELECT id, title
-            FROM job_posting
-            WHERE id > $1
-              AND attributes #>> '{opportunity_type_meta,version}' IS DISTINCT FROM $3
-            ORDER BY id
-            LIMIT $2
-            """,
-            last_id,
-            _OPPORTUNITY_BATCH_SIZE,
-            str(_OPPORTUNITY_VERSION),
-        )
-        if not rows:
-            break
-        last_id = int(rows[-1]["id"])
-        updates = [
-            (
-                int(row["id"]),
-                opportunity_payload(row["title"], parsed_at=stamp),
-                row["title"],
-                str(_OPPORTUNITY_VERSION),
-            )
-            for row in rows
-        ]
-        if not dry_run:
-            await conn.executemany(
-                """
-                UPDATE job_posting
-                SET attributes = attributes || $2::jsonb
-                WHERE id = $1
-                  AND title = $3
-                  AND attributes #>> '{opportunity_type_meta,version}' IS DISTINCT FROM $4
-                """,
-                updates,
-            )
-        enriched += len(updates)
-    return Counts(postings=enriched)
 
 
 # SKILLS -------------------------------------------------------------------
@@ -472,7 +405,6 @@ async def _dedup_rebuild(conn: Connection, *, dry_run: bool = False) -> Counts:
 # only once a step genuinely reads another's output.
 
 STEPS: tuple[Step, ...] = (
-    Step("job_type", _OPPORTUNITY_VERSION, _opportunity_rebuild),
     Step("skills", _SKILLS_VERSION, _skills_rebuild),
     Step("degrees", _DEGREES_VERSION, _degrees_rebuild),
     Step("dedup", _STRATEGY_VERSION, _dedup_rebuild),

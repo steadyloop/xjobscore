@@ -7,12 +7,14 @@ dependencies = [
     "duckdb>=1.0",
     "fastapi>=0.141.1",
     "httpx>=0.27",
+    "orjson>=3.10",
     "pyyaml>=6.0",
+    "selectolax>=0.3",
     "uvicorn>=0.52.0",
 ]
 
 [project.scripts]
-keyscan = "xjobscore.keyscan:main"
+keyscan = "keyscan:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -29,23 +31,22 @@ dev = [
 # and cc_ats/ still resolve from the repo root and are deliberately not listed.
 [tool.setuptools]
 packages = [
+    "keyscan",
     "xjobscore",
     "xjobscore.inspector",
-    "xjobscore.keyscan",
     "xjobscore.sources",
     "xjobscore.sources.planned",
-    "xjobscore.sources.registry",
     "xjobscore.sources.unified_v2",
 ]
 
-# Registry files are package data consumed by their respective loaders.
+# Registry files are package data consumed by their respective loaders. registry/
+# is data only -- no __init__.py -- so every subdirectory needs its own pattern.
 [tool.setuptools.package-data]
 xjobscore = [
     "fixtures/*.json",
     "registry/*.toml",
-    "registry/*.yaml",
-    "sources/registry/*.toml",
-    "sources/registry/ats-catalog/*.toml",
+    "registry/ats-catalog/*.toml",
+    "registry/job-posting/*.yaml",
     "inspector/static/**/*",
 ]
 

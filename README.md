@@ -66,3 +66,12 @@ Use cron or another process manager to repeat polling.
 | `--dsn DSN` | Override `XJOBSCORE_DSN` or `DATABASE_URL`. |
 | `--user-agent VALUE` | Override the outbound HTTP user agent. |
 | `--help` | Show the CLI help. |
+
+## Orchestrator
+
+```bash
+uv run python -m xjobscore.core
+```
+
+Personal entrypoint, separate from `run.py`. Fetches all sources only if the
+DB is empty, then always replays silver and runs all gold enrichments.

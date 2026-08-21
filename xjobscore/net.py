@@ -23,7 +23,27 @@ from urllib.parse import urlsplit
 
 import httpx
 
-__all__ = ["Net", "NetError", "Response", "conditional", "etag"]
+__all__ = ["DEFAULT_USER_AGENT", "Net", "NetError", "Response", "conditional", "etag"]
+
+# Declared once here rather than per entry point: the string is long enough
+# that a second copy is how production and the inspector drift into presenting
+# themselves differently, which would make any measured per-vendor ceiling
+# untransferable between them.
+#
+# A browser string, not the `xjobscore/0.1` bot token it replaces. The public
+# board endpoints this client calls are the same ones a careers page hits on
+# every page load, and a self-identifying UA is a single WAF rule away from
+# taking out every board under a vendor at once. Note what this does NOT fix:
+# the Eightfold 405 (see json-api-configs.py) hit our httpx client while curl
+# from the same host and the same UA still got 200, so that edge was matching
+# on TLS/ALPN, below the HTTP layer. Changing the UA cannot reach that.
+#
+# Keep the Chrome version roughly current when touching this -- a long-stale
+# build number is itself a signal.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+)
 
 # 429 and 5xx are transient; everything else 4xx is a final answer. Timeouts
 # and other transport failures are retried regardless of status (there is none).

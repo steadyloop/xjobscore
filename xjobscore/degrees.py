@@ -1,4 +1,4 @@
-"""Match job-description text against degree fields in ``registry/type.yaml``."""
+"""Match job-description text against degree fields in ``registry/job-posting/types.yaml``."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import yaml
 
 __all__ = ["DEGREE_PATH", "DegreeError", "DegreeField", "canon", "extract"]
 
-DEGREE_PATH = Path(__file__).parent / "registry" / "type.yaml"
+DEGREE_PATH = Path(__file__).parent / "registry" / "job-posting" / "types.yaml"
 _FIELDS = {"name", "patterns"}
 _NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 

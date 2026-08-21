@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from xjobscore.sources.registry.loader import (
+from xjobscore.registry_loader import (
     Company,
     Entry,
     companies as registry_companies,
@@ -33,7 +33,7 @@ class CompanyRow:
 class TokenRow:
     source: str
     key: str
-    company_id: int
+    company_id: int | None  # None for Boards, which resolve company per posting
     status: str
 
 
@@ -64,9 +64,11 @@ def _verified_at(company: Company) -> datetime | None:
 def _token_status(entry: Entry) -> str:
     """Registry-derived token state.
 
-    ``inactive`` is no longer reachable from the registry: it is reserved for
-    ``reconcile_registry_inventory``, which marks tokens whose feed left the
-    catalog. Polling state itself lives in PostgreSQL's ``feed.enabled``.
+    ``inactive`` is not reachable from seeding at all: PostgreSQL is the
+    ground source for inventory now, so the registry only ever adds or
+    updates rows it recognizes and never disables or deactivates rows it
+    doesn't. Only an operator or the validator (``inspector/validator.py``)
+    marks a token dead.
     """
     return "live" if entry.verified else "unverified"
 
@@ -142,10 +144,6 @@ async def feed(conn: Connection, *, dry_run: bool = False) -> Plan:
                 await store.upsert_registry_alias(
                     conn, alias_norm=alias_norm, company_id=company.id
                 )
-        await store.prune_registry_aliases(
-            conn,
-            [alias for company in import_plan.companies for alias in company.aliases],
-        )
         await store.align_company_identity(conn)
         for token in import_plan.tokens:
             await store.upsert_registry_token(
@@ -162,8 +160,4 @@ async def feed(conn: Connection, *, dry_run: bool = False) -> Plan:
                 key=row.key,
                 enabled=row.enabled,
             )
-        await store.reconcile_registry_inventory(
-            conn,
-            [{"source": row.source, "key": row.key} for row in import_plan.feeds],
-        )
     return import_plan

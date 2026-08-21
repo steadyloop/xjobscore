@@ -30,6 +30,7 @@ from datetime import datetime
 from typing import Literal
 
 __all__ = [
+    "LINK_DEAD",
     "Canonical",
     "Fact",
     "Feed",
@@ -66,6 +67,12 @@ Provenance = Literal["source", "model", "human"]
 # stores only the resulting posted_at value.
 Precision = Literal["exact", "date", "unknown"]
 
+# The `closed_evidence` string a probed dead URL carries. It is a constant, not
+# free text, because silver keys `job_posting.link_closed_at` off it: only the
+# probed channel may claim a dead link, and a vendor flag flipping must not be
+# mistaken for one.
+LINK_DEAD = "probe: origin url gone"
+
 
 @dataclass(frozen=True, slots=True)
 class Feed:
@@ -88,6 +95,8 @@ class Feed:
     enabled: bool = True
     company_id: int | None = None
     company_name: str | None = None
+    description: str = ""  # registry-owned note describing the source
+    implemented: bool = True  # a working adapter exists for this source
     source_type: str = "Other"
     etag: str | None = None
     res_hash: str | None = None
@@ -136,6 +145,10 @@ class Record:
     enumerated_item_count: int = 0
     partition_count: int = 0
     detail_fetched_count: int = 0
+    # Rows a `detail.only` gate deliberately kept out of the detail leg. Not a
+    # shortfall, so it never sets `truncated`: a targeted harvest fetched
+    # exactly what it meant to. Zero when the source declares no gate.
+    detail_skipped_count: int = 0
     result_window_truncated: bool = False
 
 
@@ -169,6 +182,19 @@ class Posting:
     requisition_id: str | None = None  # employer-assigned, cross-ATS dedup key
     employment_type: str | None = None  # raw string, unmapped
     workplace_type_raw: str | None = None  # the normalized value is a Label
+
+    # Derived here, at parse time, from vendor-specific evidence -- never in
+    # silver or gold. An adapter whose vendor has not been transcribed yet from
+    # doc/raw_postings/ leaves both at their default, which says "no signal"
+    # rather than guessing from a rule measured on some other vendor's corpus.
+    # `research` is a research-flavoured internship (e.g. "Research Intern"),
+    # not an undergraduate research position -- that phrase measures 1 row
+    # across the whole corpus, so no vendor's table treats it as its own
+    # bucket. See doc/raw_postings/{ashby,greenhouse,workday}.md's ### Research.
+    job_type: str | None = None  # intern | coop | student_program | research | part_time
+    # 'unknown', never 'no': a stated on-site signal is not reliable enough to
+    # assert, so it is left indistinguishable from no signal at all.
+    remote: str = "unknown"  # yes | hybrid | unknown
 
     published_at: datetime | None = None
     published_at_precision: Precision = "unknown"

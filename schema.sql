@@ -6,32 +6,6 @@
 
 BEGIN;
 
--- COMPANIES --
-CREATE TABLE company (
-    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name               text NOT NULL,
-    domain             text UNIQUE,
-    domain_verified_at timestamptz, -- NULL if unverified
-    description        text
-);
-
-CREATE TABLE alias (
-    alias_norm text PRIMARY KEY,
-    company_id bigint NOT NULL REFERENCES company (id) ON DELETE CASCADE,
-    alias      text NOT NULL
-);
-CREATE INDEX alias_company_idx ON alias (company_id);
-
-CREATE TABLE token (
-    ats        text NOT NULL, -- name of vendor
-    token      text NOT NULL,
-    company_id bigint REFERENCES company (id) ON DELETE SET NULL,
-    status     text NOT NULL DEFAULT 'unverified'
-        CHECK (status IN ('unverified', 'live', 'inactive')),
-
-    PRIMARY KEY (ats, token)
-);
-
 -- USERS --
 CREATE TABLE account (
     id          uuid PRIMARY KEY,   -- minted here, not by the provider: a Google
@@ -53,14 +27,41 @@ CREATE TABLE account (
 INSERT INTO account (id)
 VALUES ('00000000-0000-0000-0000-000000000001');
 
-CREATE TABLE account_company (
-    account_id    uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
-    company_id bigint NOT NULL REFERENCES company(id) ON DELETE CASCADE,
-
-    PRIMARY KEY (account_id, company_id)
+-- COMPANIES --
+CREATE TABLE company (
+    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name               text NOT NULL,
+    domain             text UNIQUE,
+    domain_verified_at timestamptz, -- NULL if unverified
+    description        text,        -- 6-8 words
+    labels             jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(labels) = 'object')
 );
 
+CREATE TABLE alias (
+    alias_norm text PRIMARY KEY,
+    company_id bigint NOT NULL REFERENCES company (id) ON DELETE CASCADE,
+    alias      text NOT NULL
+);
+CREATE INDEX alias_company_idx ON alias (company_id);
+
 -- FEEDS --
+CREATE TABLE token (
+    ats        text NOT NULL, -- name of vendor
+    token      text NOT NULL,
+    company_id bigint REFERENCES company (id) ON DELETE SET NULL,
+    -- feed (enabled|disabled)
+    status     text NOT NULL DEFAULT 'unknown'
+        CHECK (status IN ('unknown', 'live', 'dead')),
+    
+    -- discovery --
+    source text,
+    checked_at    timestamptz,
+    discovered_at timestamptz,
+    imported_at   timestamptz, -- set when a row is bulk-loaded from an external resolution (e.g. keyscan)
+
+    PRIMARY KEY (ats, token)
+);
+
 CREATE TABLE feed (
     id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     source   text NOT NULL, -- ashby, greenhouse, workable, etc.
@@ -93,49 +94,6 @@ CREATE TABLE feed (
     UNIQUE (source, key)
 );
 CREATE INDEX feed_due_idx ON feed (due_at) WHERE paused_at IS NULL;
-
-/*
--- Historical pre-collapse schema (reference only; not executed).
-
--- FEEDS --
-CREATE TABLE feed (
-    id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    -- change source to name later
-    source   text NOT NULL,      -- ashby, greenhouse, workable, etc.
-    key      text NOT NULL,      -- openai, anthropic, janestreet, etc.
-    enabled  boolean NOT NULL DEFAULT true, -- polling queue
-
-    UNIQUE (source, key)
-);
-
--- SCHEDULER --
-CREATE TABLE schedule (
-    -- Config
-    feed_id         bigint PRIMARY KEY REFERENCES feed (id) ON DELETE CASCADE,
-    interval_s      integer NOT NULL DEFAULT 900 CHECK (interval_s > 0),
-
-    -- Queue
-    due_at          timestamptz NOT NULL DEFAULT now(),  -- when the feed is next due; this column is the queue
-    hold_until      timestamptz,                         -- claim stamp so a crashed worker's feed gets retried, not lost
-
-    -- Optimization
-    etag            text,                                -- server's version token; 304 upon hit
-    res_hash        text,                                -- hash of listing response; skip parse when nothing moved
-    last_change_at  timestamptz,                         -- last poll hash moved; back off keys on to slow a dormant board
-
-    -- Health
-    strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0),          -- fail strike; drives retry backoff/disable
-    last_poll_at    timestamptz,
-    paused_at       timestamptz                          -- operator hold; the feed stays enabled and stays visible, but is never claimed
-
-    -- Potential fields
-    -- last_modified — add later if you meet a server that has no ETag. Trivial migration.
-    -- cursor — only needed for incremental pagination; skip until an adapter demands it.
-    -- last_change_at — adaptive backoff for dormant boards is an optimization, not MVP.
-    -- status, last_success_at, consecutive_failures — redundant with paused_at, last_poll_at + last_error, and strikes respectively.
-);
-CREATE INDEX schedule_due_idx ON schedule (due_at) WHERE paused_at IS NULL;
-*/
 
 -- One row per poll, append-only. Never updated or deleted: this is the history
 -- the arrival-rate estimator, the replay simulator, and the feed sparkline read.
@@ -257,49 +215,44 @@ CREATE TABLE raw_posting (
 -- JOB POSTING - SILVER
 CREATE TABLE job_posting (
     id                       bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    -- Source Specific
     source                   text NOT NULL,
     source_key               text NOT NULL,
-    -- Job Specific
-    company_id               bigint NOT NULL REFERENCES company(id),
+
+    -- JOB SPECIFICS
+    company_id               bigint NOT NULL REFERENCES company(id),  -- not in content_hash
+    ------------ CONTENT HASH -------------
+    -- 1. STABLE
     title                    text NOT NULL,
     description              text,
     location_text            text,
     source_url               text,
     apply_url                text,
     posted_at                timestamptz,
-    -- Stable OneShot enrichment contract. Keys are optional while enrichment
-    -- is pending; when present, their types and enum values are enforced.
+    -- 2. PARSED
+    remote                   text NOT NULL DEFAULT 'unknown'
+        CHECK (remote IN ('yes', 'hybrid', 'unknown')),
+    job_type                 text -- null means no signal
+        CHECK (job_type IS NULL OR job_type IN (
+            'intern',
+            'coop',
+            'student_program',
+            'research',
+            'part_time'
+        )),
+    content_hash             text NOT NULL,     -- to check if fetch updated the posting,
+    ------------- System ------------------
+    status                   text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+    first_seen_at            timestamptz NOT NULL DEFAULT now(),
+    last_seen_at             timestamptz NOT NULL DEFAULT now(),
+    ------------ Tracking ----------------
+    vendor_closed_at         timestamptz,
+    link_marked_at           timestamptz,
+    link_checked_at          timestamptz,
+    link_closed_at           timestamptz,
+    ------------- Enriched (Gold) ---------
     attributes               jsonb NOT NULL DEFAULT '{"version": 1}'::jsonb
         CHECK (jsonb_typeof(attributes) = 'object')
         CHECK (attributes -> 'version' = '1'::jsonb)
-        CHECK (
-            NOT attributes ? 'opportunity_type'
-            OR (
-                jsonb_typeof(attributes -> 'opportunity_type') = 'string'
-                AND attributes ->> 'opportunity_type' IN (
-                    'internship',
-                    'coop',
-                    'student_researcher',
-                    'student_role',
-                    'fellowship',
-                    'apprenticeship',
-                    'new_grad_program',
-                    'unclassified'
-                )
-            )
-        )
-        CHECK (
-            NOT attributes ? 'term'
-            OR jsonb_typeof(attributes -> 'term') = 'string'
-        )
-        CHECK (
-            NOT attributes ? 'workplace'
-            OR (
-                jsonb_typeof(attributes -> 'workplace') = 'string'
-                AND attributes ->> 'workplace' IN ('remote', 'hybrid', 'on_site', 'unknown')
-            )
-        )
         CHECK (
             NOT attributes ? 'skills'
             OR (
@@ -319,38 +272,35 @@ CREATE TABLE job_posting (
                     '$.degree_fields[*] ? (@.type() != "string")'
                 )
             )
-        )
-        CHECK (
-            NOT attributes ? 'deadline_at'
-            OR jsonb_typeof(attributes -> 'deadline_at') = 'string'
-        ),
-    -- Lifecycle
-    status                   text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
-    first_seen_at            timestamptz NOT NULL DEFAULT now(),
-    last_seen_at             timestamptz NOT NULL DEFAULT now(),
-    content_hash             text NOT NULL,     -- to check if fetch updated the posting
+        ), 
     -- Traceability to the unmodified input
     raw_id                   bigint NOT NULL REFERENCES raw_posting(id),  -- raw version it produced current row
     dup_group_id             uuid,              -- groups suspected duplicates together
+    -- Judgement, not a source fact: set by hand, never by the pipeline.
+    removal_marked_at        timestamptz,       -- NULL = not marked for removal
 
     UNIQUE (source, source_key)
 );
 COMMENT ON COLUMN job_posting.attributes IS
-    'OneShot enrichment v1: version, opportunity_type/meta, term, workplace, skills/meta, degree_fields/meta, deadline_at';
+    'OneShot enrichment v1: version, term, remote, skills/meta, degree_fields/meta, deadline_at';
+COMMENT ON COLUMN job_posting.removal_marked_at IS
+    'When a human marked this posting for removal; NULL means not marked. Never written by ingest.';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
 CREATE INDEX job_posting_degree_fields_active_idx
     ON job_posting USING gin ((attributes -> 'degree_fields'))
     WHERE status = 'active';
--- OneShot Opportunities filters this scalar on every list/count request. The
--- general jsonb GIN index above does not accelerate the ->> equality form.
-CREATE INDEX job_posting_opportunity_type_active_idx
-    ON job_posting ((attributes ->> 'opportunity_type'))
-    WHERE status = 'active';
+-- OneShot Opportunities filters this scalar on every list/count request.
+CREATE INDEX job_posting_job_type_active_idx
+    ON job_posting (job_type)
+    WHERE status = 'active' AND job_type IS NOT NULL;
 -- Supports the default "Newest first" page without sorting the entire active
 -- opportunity pool before applying LIMIT.
 CREATE INDEX job_posting_fresh_active_idx
     ON job_posting ((COALESCE(posted_at, first_seen_at)) DESC, id DESC)
     WHERE status = 'active';
+CREATE INDEX job_posting_removal_marked_idx
+    ON job_posting (removal_marked_at DESC)
+    WHERE removal_marked_at IS NOT NULL;
 
 -- DEDUP
 CREATE TABLE job_posting_dup_group (
