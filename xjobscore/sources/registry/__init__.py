@@ -1,1 +1,0 @@
-"""Validated source registry data."""
