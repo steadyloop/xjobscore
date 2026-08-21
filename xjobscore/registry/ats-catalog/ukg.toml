@@ -1,0 +1,39 @@
+schema_version = 1
+source = "ukg"
+
+# The key is `host/companyCode/boardGuid`. The host is load-bearing: UKG shards
+# tenants across recruiting, recruiting2, ... and a board answers on exactly one
+# of them (ARU1000ARUP is 200 on recruiting2 and 404 on recruiting), so it cannot
+# be defaulted.
+#
+# Nothing in the payload names the employer -- the key is two opaque ids and a
+# host -- so `company_raw` has to come from here. Every board below was harvested
+# end to end on 2026-08-06 (10, 149 and 328 postings, the last two across several
+# `Skip` pages).
+
+[[feed]]
+key = "recruiting.ultipro.com/UNI1076UNFI/86df2700-c124-49b9-b096-7cacea55e9dd"
+verified = true
+verified_at = "2026-08-06"
+company_id = 2313
+company_name = "United Natural Foods"
+domain = "unfi.com"
+config = { company_raw = "United Natural Foods" }
+
+[[feed]]
+key = "recruiting2.ultipro.com/ARU1000ARUP/62cc791d-612e-42e6-909f-0de27efe2038"
+verified = true
+verified_at = "2026-08-06"
+company_id = 167
+company_name = "ARUP Laboratories"
+domain = "aruplab.com"
+config = { company_raw = "ARUP Laboratories" }
+
+[[feed]]
+key = "recruiting.ultipro.com/COM1060COMOI/5cbca35a-adf1-993f-4fc9-41ad8639e2cb"
+verified = true
+verified_at = "2026-08-06"
+company_id = 476
+company_name = "Comoto Holdings"
+domain = "comoto.com"
+config = { company_raw = "Comoto Holdings" }

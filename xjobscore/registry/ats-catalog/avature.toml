@@ -1,0 +1,59 @@
+schema_version = 1
+source = "avature"
+
+[[feed]]
+key = "bloomberg"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2540
+company_name = "Bloomberg"
+domain = "bloomberg.com"
+
+[[feed]]
+key = "ea"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3116
+company_name = "Electronic Arts"
+domain = "ea.com"
+
+[[feed]]
+key = "mantech"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3281
+company_name = "ManTech"
+domain = "mantech.com"
+
+[[feed]]
+key = "sandboxea"
+verified = false
+verified_at = ""
+company_id = 3116
+company_name = "Electronic Arts"
+domain = "ea.com"
+
+# Synopsys moved its live careers site away from this legacy Avature tenant.
+[[feed]]
+key = "synopsys"
+verified = false
+verified_at = ""
+company_id = 2844
+company_name = "Synopsys"
+domain = "synopsys.com"
+
+[[feed]]
+key = "twosigma"
+verified = false
+verified_at = ""
+company_id = 2871
+company_name = "Two Sigma"
+domain = "twosigma.com"
+
+[[feed]]
+key = "dth"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3084
+company_name = "Delta Air Lines"
+domain = "delta.com"

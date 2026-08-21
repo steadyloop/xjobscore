@@ -1,0 +1,39 @@
+schema_version = 1
+source = "personio"
+
+# `key` is the Personio tenant subdomain. Verified live: /xml returns the
+# bespoke <workzag-jobs><position> feed. Only one open position at capture
+# time, with an empty <jobDescriptions> -- non-empty description content is
+# mapped but unverified.
+
+[[feed]]
+key = "personio"
+verified = true
+verified_at = "2026-08-06"
+company_id = 1639
+company_name = "Personio SE & Co. KG"
+domain = "personio.com"
+
+[[feed]]
+key = "alchemy"
+verified = true
+verified_at = "2026-08-12"
+company_id = 73
+company_name = "alchemy"
+domain = "alchemy.com"
+
+[[feed]]
+key = "trawa"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2265
+company_name = "trawa"
+domain = "trawa.de"
+
+[[feed]]
+key = "valve"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3574
+company_name = "Valve"
+domain = "valvesoftware.com"

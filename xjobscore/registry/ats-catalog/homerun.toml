@@ -1,0 +1,26 @@
+schema_version = 1
+source = "homerun"
+
+[[feed]]
+key = "ditto"
+verified = false
+verified_at = ""
+company_id = 610
+company_name = "ditto"
+domain = "ditto.com"
+
+[[feed]]
+key = "moderna"
+verified = false
+verified_at = ""
+company_id = 3310
+company_name = "Moderna"
+domain = "modernatx.com"
+
+[[feed]]
+key = "varo"
+verified = false
+verified_at = ""
+company_id = 3578
+company_name = "Varo"
+domain = "varomoney.com"

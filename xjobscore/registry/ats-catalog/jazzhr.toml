@@ -1,0 +1,22 @@
+schema_version = 1
+source = "jazzhr"
+
+# `key` is the JazzHR (applytojob.com) tenant subdomain. Verified live:
+# /apply/jobs/ lists /apply/jobs/details/{id} links, and the detail page
+# carries JobPosting JSON-LD with hiringOrganization.name = "DTEX Systems".
+
+[[feed]]
+key = "dtexsystems"
+verified = true
+verified_at = "2026-08-06"
+company_id = 629
+company_name = "DTEX Systems"
+domain = "dtexsystems.com"
+
+[[feed]]
+key = "ltv"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1254
+company_name = "ltv"
+domain = "ltv.ai"

@@ -1,0 +1,26 @@
+schema_version = 1
+source = "bamboohr"
+
+[[feed]]
+key = "defensewerx"
+verified = true
+verified_at = "2026-08-03"
+company_id = 589
+company_name = "DEFENSEWERX"
+domain = "defensewerx.org"
+
+[[feed]]
+key = "datapelago"
+verified = true
+verified_at = "2026-08-03"
+company_id = 566
+company_name = "DataPelago"
+domain = "datapelago.com"
+
+[[feed]]
+key = "caribou"
+verified = true
+verified_at = "2026-08-12"
+company_id = 376
+company_name = "caribou"
+domain = "usecaribou.com"

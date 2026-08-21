@@ -1,0 +1,64 @@
+schema_version = 1
+source = "successfactors"
+
+# `key` is the career-site host, not a company slug: SuccessFactors tenants are
+# reached by their own domain, so there is no board token to carry. The adapter
+# templates https://{key}/sitemap.xml, which serves the whole board as RSS.
+# `domain` stays the employer's corporate domain for company resolution.
+
+[[feed]]
+key = "jobs.sap.com"
+verified = true
+verified_at = "2026-08-06T09:02:05-0700"
+company_id = 1900
+company_name = "SAP"
+domain = "sap.com"
+
+[[feed]]
+key = "jobs.bayer.com"
+verified = true
+verified_at = "2026-08-06T09:02:05-0700"
+company_id = 247
+company_name = "Bayer"
+domain = "bayer.com"
+
+[[feed]]
+key = "jobs.deere.com"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3232
+company_name = "John Deere"
+domain = "deere.com"
+
+[[feed]]
+key = "jobs.exxonmobil.com"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3130
+company_name = "ExxonMobil"
+domain = "exxonmobil.com"
+
+[[feed]]
+key = "jobs.nexteraenergy.com"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4195
+company_name = "NextEra Energy"
+domain = "nexteraenergy.com"
+
+# The only tenant in this catalog whose /sitemap.xml really is a sitemap
+# (<urlset> of job URLs, no job data): the shared template parsed it to zero
+# items on every poll, silently. Its RSS lives at /rss.xml instead, and matches
+# the shared `channel/item` shape exactly -- 306 items with g:location,
+# g:employer and CDATA descriptions (verified 2026-08-20).
+[feed.config]
+url = "https://jobs.nexteraenergy.com/rss.xml"
+
+[[feed]]
+key = "jobs.ornl.gov"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2750
+company_name = "Oak Ridge National Laboratory"
+domain = "ornl.gov"
+

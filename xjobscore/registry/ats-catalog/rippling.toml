@@ -1,0 +1,99 @@
+schema_version = 1
+source = "rippling"
+
+[[feed]]
+key = "rippling"
+verified = true
+verified_at = "2026-08-03"
+company_id = 1850
+company_name = "Rippling"
+domain = "rippling.com"
+
+[[feed]]
+key = "heads-up-technologies"
+verified = true
+verified_at = "2026-08-03"
+company_id = 951
+company_name = "Heads Up Technologies"
+domain = "heads-up.com"
+
+[[feed]]
+key = "agora"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2929
+company_name = "Agora"
+domain = "agora.io"
+
+[[feed]]
+key = "amplify"
+verified = true
+verified_at = "2026-08-12"
+company_id = 105
+company_name = "amplify"
+domain = "amplify.com"
+
+[[feed]]
+key = "character-biosciences"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3956
+company_name = "Character Biosciences"
+domain = "characterbio.com"
+
+[[feed]]
+key = "column"
+verified = true
+verified_at = "2026-08-12"
+company_id = 467
+company_name = "Column"
+domain = "column.com"
+
+[[feed]]
+key = "firehydrant"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3141
+company_name = "FireHydrant"
+domain = "firehydrant.com"
+
+[[feed]]
+key = "galileo"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2632
+company_name = "Galileo"
+domain = "galileo.ai"
+
+[[feed]]
+key = "moov"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3314
+company_name = "Moov"
+domain = "moov.io"
+
+[[feed]]
+key = "porter"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3403
+company_name = "Porter"
+domain = "porter.run"
+
+[[feed]]
+key = "positron"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2770
+company_name = "Positron AI"
+domain = "positron.ai"
+
+[[feed]]
+key = "rain"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2780
+company_name = "Rain AI"
+domain = "rain.ai"
+

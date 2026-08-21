@@ -1,0 +1,99 @@
+schema_version = 1
+source = "taleo"
+
+# Temporarily disabled: the canonical Jacobs board is in Taleo zone maintenance.
+[[feed]]
+key = "jacobs"
+verified = false
+verified_at = ""
+company_id = 3227
+company_name = "Jacobs"
+domain = "jacobs.com"
+[feed.config]
+url = "https://jacobs.taleo.net/careersection/ex/jobsearch.ftl?lang=en"
+
+# This tenant now belongs to ScionHealth, not canonical company 1129.
+[[feed]]
+key = "kindred"
+verified = false
+verified_at = ""
+company_id = 1129
+company_name = "kindred"
+domain = "livekindred.com"
+[feed.config]
+url = "https://kindred.taleo.net/careersection/e/jobsearch.ftl?lang=en"
+
+# This tenant is Percepta LLC, not percepta.ai.
+[[feed]]
+key = "percepta"
+verified = false
+verified_at = ""
+company_id = 1629
+company_name = "percepta"
+domain = "percepta.ai"
+[feed.config]
+url = "https://percepta.taleo.net/careersection/10300/jobsearch.ftl?lang=en"
+
+# The former Taleo board no longer exposes a live requisition list.
+[[feed]]
+key = "starbucks"
+verified = false
+verified_at = ""
+company_id = 3499
+company_name = "Starbucks"
+domain = "starbucks.com"
+[feed.config]
+url = "https://starbucks.taleo.net/careersection/careersection/1000222/jobsearch.ftl?lang=en"
+
+# The tenant currently serves "Career Section Unavailable" and its identity is ambiguous.
+[[feed]]
+key = "tbc"
+verified = false
+verified_at = ""
+company_id = 2173
+company_name = "tbc"
+domain = "tbc.co"
+[feed.config]
+url = "https://tbc.taleo.net/careersection/ex/jobsearch.ftl?lang=en"
+
+[[feed]]
+key = "textron"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3535
+company_name = "Textron"
+domain = "textron.com"
+[feed.config]
+url = "https://textron.taleo.net/careersection/textron/moresearch.ftl?lang=en"
+
+[[feed]]
+key = "kp"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3238
+company_name = "Kaiser Permanente"
+domain = "kaiserpermanente.org"
+[feed.config]
+url = "https://kp.taleo.net/careersection/externalapplicationbackground/jobsearch.ftl?lang=en"
+
+# The Taleo career section no longer returns a requisition-list payload.
+[[feed]]
+key = "lbl"
+verified = false
+verified_at = ""
+company_id = 2691
+company_name = "Lawrence Berkeley National Laboratory"
+domain = "lbl.gov"
+[feed.config]
+url = "https://lbl.taleo.net/careersection/5/jobsearch.ftl?lang=en"
+
+# UnitedHealth now redirects this legacy tenant to its non-Taleo career site.
+[[feed]]
+key = "uhg"
+verified = false
+verified_at = ""
+company_id = 3569
+company_name = "UnitedHealth / Optum"
+domain = "unitedhealthgroup.com"
+[feed.config]
+url = "https://uhg.taleo.net/careersection/10953/jobsearch.ftl?lang=en"

@@ -1,0 +1,10 @@
+schema_version = 1
+source = "zohorecruit"
+
+[[feed]]
+key = "starburst"
+verified = false
+verified_at = ""
+company_id = 3500
+company_name = "Starburst"
+domain = "starburst.io"

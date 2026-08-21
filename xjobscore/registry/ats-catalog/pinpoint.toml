@@ -1,0 +1,40 @@
+schema_version = 1
+source = "pinpoint"
+
+# The board never states its own employer -- `company_raw` maps to the bare
+# key (json-api-configs.py:139). Hosting at workwithus.pinpointhq.com rather
+# than a client-named subdomain reads as Pinpoint's own careers page, but
+# that is an inference from the URL shape, not a fact the payload asserts.
+
+[[feed]]
+key = "workwithus"
+verified = true
+verified_at = "2026-08-06"
+company_id = 1658
+company_name = "Pinpoint"
+domain = "pinpointhq.com"
+
+[[feed]]
+key = "magic"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2703
+company_name = "Magic"
+domain = "magic.dev"
+
+[[feed]]
+key = "systematica"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3518
+company_name = "Systematica"
+domain = "systematica.com"
+
+[[feed]]
+key = "tradingtechnologies"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3549
+company_name = "Trading Technologies"
+domain = "tradingtechnologies.com"
+

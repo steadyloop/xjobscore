@@ -1,0 +1,90 @@
+schema_version = 1
+source = "jobvite"
+
+[[feed]]
+key = "egnyte"
+verified = true
+verified_at = "2026-08-04"
+company_id = 649
+company_name = "Egnyte"
+domain = "egnyte.com"
+
+[[feed]]
+key = "barracuda-networks-inc"
+verified = true
+verified_at = "2026-08-05"
+company_id = 235
+company_name = "Barracuda Networks"
+domain = "barracuda.com"
+
+[[feed]]
+key = "gigamon"
+verified = true
+verified_at = "2026-08-05"
+company_id = 856
+company_name = "Gigamon"
+domain = "gigamon.com"
+
+[[feed]]
+key = "nutanix"
+verified = true
+verified_at = "2026-08-05"
+company_id = 1496
+company_name = "Nutanix"
+domain = "nutanix.com"
+
+[[feed]]
+key = "arcusbiosciencescareers"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3760
+company_name = "Arcus Biosciences"
+domain = "arcusbio.com"
+
+[[feed]]
+key = "ardelyx"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3791
+company_name = "Ardelyx"
+domain = "ardelyx.com"
+
+[[feed]]
+key = "attention"
+verified = true
+verified_at = "2026-08-12"
+company_id = 199
+company_name = "attention"
+domain = "attention.inc"
+
+[[feed]]
+key = "fieldcore"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3162
+company_name = "GE Vernova"
+domain = "gevernova.com"
+
+[[feed]]
+key = "simaai"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2823
+company_name = "SiMa.ai"
+domain = "sima.ai"
+
+[[feed]]
+key = "spacex"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2832
+company_name = "SpaceX"
+domain = "spacex.com"
+
+[[feed]]
+key = "sutrobio"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3631
+company_name = "Sutro Biopharma"
+domain = "sutrobio.com"

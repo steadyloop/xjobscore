@@ -1,0 +1,59 @@
+schema_version = 1
+source = "oracle"
+
+[[feed]]
+key = "eeho.fa.us2/CX_45001"
+verified = true
+verified_at = "2026-07-31T18:09:25-0700"
+company_id = 1549
+company_name = "Oracle"
+domain = "oracle.com"
+
+[[feed]]
+key = "ewvl.fa.us8/CX_1"
+verified = true
+verified_at = "2026-07-31T18:09:26-0700"
+company_id = 1908
+company_name = "Savannah River National Laboratory"
+domain = "srnl.gov"
+
+[[feed]]
+key = "fa-espx-saasfaprod1.fa.ocs/cx_1007"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3061
+company_name = "Cummins"
+domain = "cummins.com"
+
+[[feed]]
+key = "fa-euwp-saasfaprod1.fa.ocs/mayo-us"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4227
+company_name = "Mayo Clinic"
+domain = "mayoclinic.org"
+
+[[feed]]
+key = "hdpc.fa.us2/cx_3001"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2644
+company_name = "Goldman Sachs"
+domain = "goldmansachs.com"
+
+[[feed]]
+key = "ibqbjb.fa.ocs/Honeywell"
+verified = true
+verified_at = "2026-08-13"
+company_id = 3191
+company_name = "Honeywell"
+domain = "honeywell.com"
+
+[[feed]]
+key = "jpmc.fa/CX_1001"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2679
+company_name = "JPMorganChase"
+domain = "jpmorgan.com"
+

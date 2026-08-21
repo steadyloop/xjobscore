@@ -1,0 +1,20 @@
+schema_version = 1
+source = "comeet"
+
+[[feed]]
+key = "26.004"
+verified = true
+verified_at = ""
+company_id = 756
+company_name = "Firebolt"
+domain = "firebolt.io"
+config = { token = "62424D80374424D824D8126C126C1EB41890" }
+
+[[feed]]
+key = "98.008"
+verified = true
+verified_at = ""
+company_id = 2273
+company_name = "TripleTen"
+domain = "tripleten.com"
+config = { token = "89833903C282AF8044C011303C283C2819C8" }

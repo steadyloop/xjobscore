@@ -1,0 +1,18 @@
+schema_version = 1
+source = "bullhorn"
+
+[[feed]]
+key = "44/CJAT1S"
+verified = false
+verified_at = "2026-08-07"
+company_id = 695
+company_name = "ESS Clinical"
+domain = "essclinical.com"
+
+[[feed]]
+key = "34/2WXP1S"
+verified = false
+verified_at = "2026-08-07"
+company_id = 1059
+company_name = "Innova Solutions"
+domain = "innovasolutions.com"

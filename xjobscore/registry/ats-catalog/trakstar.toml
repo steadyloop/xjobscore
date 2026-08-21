@@ -1,0 +1,26 @@
+schema_version = 1
+source = "trakstar"
+
+[[feed]]
+key = "locatee"
+verified = false
+verified_at = ""
+company_id = 2162
+company_name = "tango"
+domain = "tango.ai"
+
+[[feed]]
+key = "secondnature"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1932
+company_name = "second-nature"
+domain = "secondnature.com"
+
+[[feed]]
+key = "tangoanalytics"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2162
+company_name = "tango"
+domain = "tango.ai"

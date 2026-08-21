@@ -1,0 +1,18 @@
+schema_version = 1
+source = "adp"
+
+[[feed]]
+key = "4d442aa2-f6ae-4be5-8bdd-f5eafb273d07/19000101_000001"
+verified = true
+verified_at = "2026-08-07"
+company_id = 510
+company_name = "Copyright Clearance Center"
+domain = "copyright.com"
+
+[[feed]]
+key = "201ad2e7-321d-48c5-a1b2-1c16d59a7d31/19000101_000001"
+verified = true
+verified_at = "2026-08-07"
+company_id = 2270
+company_name = "Triangle Credit Union"
+domain = "trianglecu.org"

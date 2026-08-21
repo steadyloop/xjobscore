@@ -1,0 +1,26 @@
+schema_version = 1
+source = "breezy"
+
+[[feed]]
+key = "zero-hash"
+verified = true
+verified_at = "2026-08-03"
+company_id = 2482
+company_name = "Zero Hash"
+domain = "zerohash.com"
+
+[[feed]]
+key = "zetier"
+verified = true
+verified_at = "2026-08-03"
+company_id = 2483
+company_name = "Zetier"
+domain = "zetier.com"
+
+[[feed]]
+key = "ladder"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1169
+company_name = "ladder"
+domain = "joinladder.com"

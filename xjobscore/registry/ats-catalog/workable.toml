@@ -1,0 +1,155 @@
+schema_version = 1
+source = "workable"
+
+[[feed]]
+key = "huggingface"
+verified = true
+verified_at = "2026-08-03"
+company_id = 1008
+company_name = "Hugging Face"
+domain = "huggingface.co"
+
+[[feed]]
+key = "manna-1"
+verified = true
+verified_at = "2026-08-03"
+company_id = 1291
+company_name = "Manna"
+domain = "manna.aero"
+
+[[feed]]
+key = "anza-xyz"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2516
+company_name = "Anza"
+domain = "anza.xyz"
+
+[[feed]]
+key = "ascendis-pharma"
+verified = true
+verified_at = "2026-08-12"
+company_id = 4050
+company_name = "Ascendis Pharma"
+domain = "ascendispharma.com"
+
+[[feed]]
+key = "crewai"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3054
+company_name = "CrewAI"
+domain = "crewai.com"
+
+[[feed]]
+key = "floatme"
+verified = true
+verified_at = "2026-08-12"
+company_id = 777
+company_name = "FloatMe"
+domain = "floatme.com"
+
+[[feed]]
+key = "goody"
+verified = true
+verified_at = "2026-08-12"
+company_id = 879
+company_name = "goody"
+domain = "ongoody.com"
+
+[[feed]]
+key = "iceye"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1025
+company_name = "iceye"
+domain = "iceye.com"
+
+[[feed]]
+key = "neuron23"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3888
+company_name = "Neuron23"
+domain = "neuron23.com"
+
+[[feed]]
+key = "posthog"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1705
+company_name = "posthog"
+domain = "posthog.com"
+
+[[feed]]
+key = "qcp-group"
+verified = true
+verified_at = "2026-08-12"
+company_id = 3414
+company_name = "QCP Group"
+domain = "qcpgroup.com"
+
+[[feed]]
+key = "radarlabs"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1766
+company_name = "radar"
+domain = "radar.com"
+
+[[feed]]
+key = "sanity"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1899
+company_name = "Sanity"
+domain = "sanity.io"
+
+[[feed]]
+key = "secondnature"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1932
+company_name = "second-nature"
+domain = "secondnature.com"
+
+[[feed]]
+key = "signal"
+verified = true
+verified_at = "2026-08-12"
+company_id = 1979
+company_name = "signal-ai"
+domain = "signal-ai.com"
+
+[[feed]]
+key = "smallpdf"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2011
+company_name = "smallpdf"
+domain = "smallpdf.com"
+
+[[feed]]
+key = "spruce-2"
+verified = true
+verified_at = "2026-08-12"
+company_id = 2065
+company_name = "spruce"
+domain = "spruce.eco"
+
+[[feed]]
+key = "eagle-seven"
+verified = true
+verified_at = "2026-08-13"
+company_id = 4182
+company_name = "Eagle Seven"
+domain = "eagleseven.com"
+
+[[feed]]
+key = "risingwave-labs"
+verified = true
+verified_at = "2026-08-13"
+company_id = 2795
+company_name = "RisingWave"
+domain = "risingwave.com"
+
