@@ -1,4 +1,4 @@
-"""Match plain text against the canonical skills in ``registry/skills.yaml``.
+"""Match plain text against the canonical skills in ``registry/job-posting/skills.yaml``.
 
 The matcher is a pure-Python Aho--Corasick automaton. It compiles the skill
 aliases once and then scans each job description in linear time relative to the
@@ -33,7 +33,7 @@ __all__ = [
     "finditer",
 ]
 
-SKILLS_PATH = Path(__file__).parent / "registry" / "skills.yaml"
+SKILLS_PATH = Path(__file__).parent / "registry" / "job-posting" / "skills.yaml"
 CATEGORIES = ("language", "stack", "concept")
 
 _FIELDS = {

@@ -19,7 +19,7 @@ a new flag per vendor.
 
 ## 2. Validate `CONFIGS` at load time
 
-`registry/loader.py` validates every TOML entry and raises `RegistryError` on anything
+`xjobscore/registry_loader.py` validates every TOML entry and raises `RegistryError` on anything
 missing or malformed. `json-api-configs.py` / `docxtract-configs.py` — also data
 — have no schema validation. A misspelled key in a `fields` mapping silently resolves
 to `None` via `_dig`'s `.get()` chains, matching the exact silent-absence failure mode

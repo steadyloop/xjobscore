@@ -17,11 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xjobscore import feader, gold, router, silver, sources, store, work
-from xjobscore.net import Net
+from xjobscore import feader, gold, probe, router, silver, sources, store, work
+from xjobscore.net import DEFAULT_USER_AGENT, Net
 from xjobscore.records import Feed
-from xjobscore.sources.registry.loader import entries as registry_entries
-from xjobscore.sources.registry.loader import source_types
+from xjobscore.registry_loader import entries as registry_entries
+from xjobscore.registry_loader import source_types
 from xjobscore.work import Outcome
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ __all__ = [
     "main",
     "parse_all",
     "poll",
+    "reconcile",
     "run_enrichments",
     "seed_registry",
 ]
@@ -54,6 +55,7 @@ class Config:
     concurrency: int = 8
     lease_seconds: int = 3600
     enrich: str | None = None
+    reconcile: bool = False
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -102,6 +104,12 @@ def load_config(argv: Sequence[str]) -> Config:
         help="maximum simultaneous polls for --fetch-all; default: 8",
     )
     parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        default=None,
+        help="probe postings missing from a complete poll and close the dead ones",
+    )
+    parser.add_argument(
         "--seed",
         action="store_true",
         default=None,
@@ -113,7 +121,7 @@ def load_config(argv: Sequence[str]) -> Config:
         const="all",
         choices=("all", *(step.name for step in gold.steps())),
         metavar="NAME",
-        help="run all enrichments, or only job_type/skills/degrees/dedup when named",
+        help="run all enrichments, or only skills/degrees/dedup when named",
     )
     args = parser.parse_args(argv)
 
@@ -134,7 +142,7 @@ def load_config(argv: Sequence[str]) -> Config:
         parser.error("--concurrency must be at least 1")
     return Config(
         dsn=dsn,
-        user_agent=args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or "xjobscore/0.1",
+        user_agent=args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or DEFAULT_USER_AGENT,
         batch=args.batch if args.batch is not None else int(os.environ.get("XJOBSCORE_BATCH", "20")),
         lease_seconds=args.lease_seconds
         if args.lease_seconds is not None
@@ -147,11 +155,41 @@ def load_config(argv: Sequence[str]) -> Config:
         else _env_bool("XJOBSCORE_FETCH_ALL", False),
         concurrency=concurrency,
         enrich=enrich,
+        reconcile=args.reconcile
+        if args.reconcile is not None
+        else _env_bool("XJOBSCORE_RECONCILE", False),
     )
 
 
 def _registry_index() -> dict[tuple[str, str], object]:
     return {(entry.source, entry.key): entry for entry in registry_entries()}
+
+
+def _probe_url(feed: Feed) -> str | None:
+    """This feed's per-posting probe URL with `{id}` still in it, if it has one.
+
+    A vendor with no probe endpoint is not a failure -- it is a vendor whose
+    postings we cannot ask about, and the honest response is to leave its rows
+    alone rather than infer closure from absence.
+    """
+    try:
+        adapter = sources.json_api.get_adapter(feed.source)
+    except KeyError:
+        return None
+    template = (adapter.get("probe") or {}).get("url")
+    if not template:
+        return None
+    # The same context the list and detail legs build, so a vendor keyed on
+    # {tenant}/{site} rather than {key} works without a second code path.
+    parts = adapter.get("key_parts", ())
+    context = {"key": feed.key}
+    if parts:
+        context.update(zip(parts, feed.key.split("/", len(parts) - 1)))
+    context.update(feed.config or {})
+    for token, value in context.items():
+        if isinstance(value, str):
+            template = template.replace("{" + token + "}", value)
+    return template
 
 
 def _hydrate(feed: Feed, index: dict[tuple[str, str], object], types: dict[str, str]) -> Feed:
@@ -167,6 +205,8 @@ def _hydrate(feed: Feed, index: dict[tuple[str, str], object], types: dict[str, 
         config=dict(entry.config),
         company_id=entry.company_id,
         company_name=entry.company_name,
+        description=entry.description,
+        implemented=entry.implemented,
         source_type=types.get(feed.source, "Other"),
     )
 
@@ -202,8 +242,25 @@ async def _finish_failure(
 async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
     """Fetch one claimed feed and carry a changed snapshot through silver."""
     source = store.source_instance(feed)
+    prior = None
+    if feed.source in sources.REVISION_FIELDS:
+        # Read-then-harvest, not inside harvest: the source boundary bars
+        # harvest from touching the database (sources/__init__.py), so the one
+        # caller that already holds `pool` loads what a stale-safe detail
+        # request could skip and hands it in as data, not a capability.
+        #
+        # A separate try, not folded into the harvest one below: this read is
+        # new surface a working poll never depended on before. A failure here
+        # (a transient DB hiccup, not a data problem -- `router.prior_items`
+        # already treats a malformed row as a miss) should cost a fully-cold
+        # harvest, not the whole poll.
+        try:
+            async with pool.acquire() as conn:
+                prior = await router.prior_items(conn, source)
+        except Exception:
+            logger.exception("prior-item read failed source=%s", source)
     try:
-        record = await sources.get(feed.source)(feed, net)
+        record = await sources.reusing(feed.source, prior)(feed, net)
     except Exception:
         logger.exception("harvest failed source=%s", source)
         await _finish_failure(pool, feed, now, "error")
@@ -212,7 +269,7 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
     if record.http_status == 304:
         due_at = work.next_due_at(feed.interval_s, feed.strikes, "not_modified", now)
         async with pool.acquire() as conn, conn.transaction():
-            await store.touch_source_postings(conn, source, now)
+            await store.touch_source_postings(conn, source, now, feed_id=feed.id)
             ok = await store.finish_schedule_success(
                 conn,
                 feed,
@@ -241,7 +298,7 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
     if not changed and not record.truncated:
         due_at = work.next_due_at(feed.interval_s, feed.strikes, "ok", now)
         async with pool.acquire() as conn, conn.transaction():
-            await store.touch_source_postings(conn, source, now)
+            await store.touch_source_postings(conn, source, now, feed_id=feed.id)
             ok = await store.finish_schedule_success(
                 conn,
                 feed,
@@ -348,6 +405,10 @@ async def cycle(
             )
     feeds = [_hydrate(feed, index, types) for feed in claimed]
     if cfg.dry_run:
+        # Deliberately cold, not `sources.reusing`: a dry run exists to prove
+        # a feed still fetches end to end, and revision reuse would silently
+        # skip most of that proof on a warm cache -- the opposite of what
+        # "dry run" is for here.
         await asyncio.gather(*(sources.get(feed.source)(feed, net) for feed in feeds))
     else:
         await asyncio.gather(*(poll(pool, net, feed, now) for feed in feeds))
@@ -398,6 +459,7 @@ async def fetch_all(
 
     async def one(candidate: Feed) -> str:
         if cfg.dry_run:
+            # Cold on purpose -- see the matching comment in `cycle`.
             try:
                 feed = _hydrate(candidate, index, types)
                 await sources.get(feed.source)(feed, net)
@@ -436,17 +498,114 @@ async def fetch_all(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ReconcileResult:
+    candidates: int = 0
+    closed: int = 0
+    live: int = 0
+    inconclusive: int = 0
+    unprobeable: int = 0  # feeds whose adapter declares no probe endpoint
+
+
+async def reconcile(pool: Pool, net: Net, cfg: Config) -> ReconcileResult:
+    """Probe postings that stopped appearing, and close the ones that are gone.
+
+    Absence is the trigger and the origin's answer is the evidence. The two are
+    kept apart on purpose: a truncated fetch, a dead token, or a board that
+    briefly empties makes every posting in a source look absent at once, and
+    closing on that alone would manufacture closures by the hundred. Because the
+    probe is authoritative, the trigger is allowed to be cheap -- a posting
+    hidden by a bad fetch answers 200 and is left alone.
+
+    Only feeds whose adapter declares a `probe` endpoint participate. A vendor
+    we cannot ask is counted and skipped, never guessed at.
+    """
+    index = _registry_index()
+    types = source_types()
+    async with pool.acquire() as conn:
+        feeds = await store.replay_feeds(conn)
+
+    result = ReconcileResult()
+    for raw_feed in feeds:
+        feed = _hydrate(raw_feed, index, types)
+        template = _probe_url(feed)
+        if template is None:
+            result = replace(result, unprobeable=result.unprobeable + 1)
+            continue
+        source = store.source_instance(feed)
+        async with pool.acquire() as conn:
+            absent = await store.absent_postings(conn, feed, source)
+        if not absent:
+            continue
+
+        urls = [template.replace("{id}", row["source_key"]) for row in absent]
+        probed_at = datetime.now(timezone.utc)
+        results = await probe.probe_many(net, urls, concurrency=cfg.concurrency)
+        logger.info(
+            "reconcile source=%s absent=%d absent_hits=%d",
+            source,
+            len(absent),
+            sum(one.outcome == "absent" for one in results),
+        )
+        if cfg.dry_run:
+            result = replace(result, candidates=result.candidates + len(absent))
+            continue
+
+        checked = [row["id"] for row in absent]
+        async with pool.acquire() as conn, conn.transaction():
+            # Every probe moves link_checked_at, whatever it found: the column
+            # means "when we last looked". Doing it in one statement first also
+            # means an inconclusive probe is not silently re-spent next pass.
+            await store.mark_checked(conn, checked, checked_at=probed_at)
+            for row, one in zip(absent, results):
+                if one.outcome != "absent":
+                    continue
+                # Bronze first, so the closure is replayable: content
+                # addressing means re-probing an already-tombstoned posting
+                # inserts nothing, and a parser fix re-derives the closure
+                # without re-fetching a URL that is already gone.
+                data = router.wrap(probe.tombstone(one, probed_at=probed_at))
+                await store.save_raw(
+                    conn,
+                    source=source,
+                    source_key=row["source_key"],
+                    data=data,
+                    data_hash=router.encoded_hash(data),
+                )
+                await store.close_posting_by_key(
+                    conn,
+                    source=source,
+                    source_key=row["source_key"],
+                    closed_at=probed_at,
+                )
+        result = replace(
+            result,
+            candidates=result.candidates + len(absent),
+            closed=result.closed + sum(one.outcome == "absent" for one in results),
+            live=result.live + sum(one.outcome == "live" for one in results),
+            inconclusive=result.inconclusive
+            + sum(one.outcome == "inconclusive" for one in results),
+        )
+    return result
+
+
 async def parse_all(pool: Pool, cfg: Config) -> list[tuple[Feed, silver.Counts]]:
     index = _registry_index()
     types = source_types()
     async with pool.acquire() as conn:
         feeds = await store.replay_feeds(conn)
+        # Snapshot once for the whole run rather than a per-posting alias
+        # query: nothing writes aliases along this path, unlike the poll loop,
+        # which stays on the per-call lookup.
+        aliases = await store.load_alias_map(conn)
     results = []
     seen_at = datetime.now(timezone.utc)
     for raw_feed in feeds:
         feed = _hydrate(raw_feed, index, types)
         async with pool.acquire() as conn, conn.transaction():
-            counts = await silver.replay(conn, feed, seen_at=seen_at, dry_run=cfg.dry_run)
+            counts = await silver.replay(
+                conn, feed, seen_at=seen_at, dry_run=cfg.dry_run, aliases=aliases
+            )
         results.append((feed, counts))
     return results
 
@@ -487,8 +646,8 @@ async def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=os.environ.get("XJOBSCORE_LOG_LEVEL", "INFO"))
     pool = await store.connect(cfg.dsn)
     try:
-        plan = await seed_registry(pool, cfg)
         if cfg.seed:
+            plan = await seed_registry(pool, cfg)
             print(
                 f"companies={len(plan.companies)} aliases={plan.alias_count} "
                 f"tokens={len(plan.tokens)} feeds={len(plan.feeds)}"
@@ -504,6 +663,16 @@ async def main(argv: Sequence[str] | None = None) -> int:
                 f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
             )
             return 1 if result.errors else 0
+        if cfg.reconcile:
+            async with Net(user_agent=cfg.user_agent) as net:
+                outcome = await reconcile(pool, net, cfg)
+            print(
+                f"candidates={outcome.candidates} closed={outcome.closed} "
+                f"live={outcome.live} inconclusive={outcome.inconclusive} "
+                f"unprobeable={outcome.unprobeable}"
+                f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
+            )
+            return 0
         if cfg.parse:
             for feed, counts in await parse_all(pool, cfg):
                 print(

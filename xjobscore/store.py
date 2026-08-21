@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-import json
 import re
 from typing import TYPE_CHECKING, Any
 import unicodedata
 
 import asyncpg
+import orjson
 
 from xjobscore.records import Feed
 
@@ -16,12 +16,15 @@ if TYPE_CHECKING:
     from asyncpg import Connection, Pool
 
 __all__ = [
+    "alias_candidates",
+    "absent_postings",
     "align_company_identity",
     "all_feeds",
     "append_poll_observation",
     "claim_due_feeds",
     "claim_feed",
     "clear_registry_company_domains",
+    "close_posting_by_key",
     "connect",
     "dedup_candidates",
     "due_feeds",
@@ -29,10 +32,10 @@ __all__ = [
     "finish_schedule_failure",
     "finish_schedule_success",
     "latest_raw",
-    "prune_registry_aliases",
+    "load_alias_map",
+    "mark_checked",
     "replace_dup_groups",
     "replay_feeds",
-    "reconcile_registry_inventory",
     "resolve_company",
     "save_raw",
     "set_feed_enabled",
@@ -41,6 +44,7 @@ __all__ = [
     "source_instance",
     "touch_source_postings",
     "upsert_job_posting",
+    "upsert_keyscan_token",
     "upsert_registry_alias",
     "upsert_registry_company",
     "upsert_registry_feed",
@@ -48,9 +52,25 @@ __all__ = [
 ]
 
 
+def _encode_jsonb(value: Any) -> bytes:
+    # jsonb's binary wire format is a version byte (always 1) followed by the
+    # UTF-8 JSON text -- see PostgreSQL's jsonb_send/jsonb_recv. Binary format
+    # skips the str round-trip format="text" would otherwise force on every
+    # encode and decode.
+    return b"\x01" + orjson.dumps(value)
+
+
+def _decode_jsonb(data: bytes) -> Any:
+    return orjson.loads(data[1:])
+
+
 async def _install_jsonb_codec(conn: Connection) -> None:
     await conn.set_type_codec(
-        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog", format="text"
+        "jsonb",
+        encoder=_encode_jsonb,
+        decoder=_decode_jsonb,
+        schema="pg_catalog",
+        format="binary",
     )
 
 
@@ -491,7 +511,12 @@ async def set_schedule_paused(conn: Connection, feed_id: int, paused: bool) -> b
     return result == "UPDATE 1"
 
 
-async def resolve_company(conn: Connection, raw: str) -> int | None:
+def alias_candidates(raw: str) -> list[str]:
+    """Normalized alias keys for ``raw``, most specific first.
+
+    Order is resolution order: an exact casefolded match beats the slug, which
+    beats the slug with a trailing legal suffix stripped.
+    """
     exact = unicodedata.normalize("NFKC", raw).strip().casefold()
     slug = re.sub(r"[^a-z0-9]+", "-", exact).strip("-")
     without_suffix = re.sub(
@@ -499,9 +524,33 @@ async def resolve_company(conn: Connection, raw: str) -> int | None:
         "",
         slug,
     )
-    candidates = list(
-        dict.fromkeys(value for value in (exact, slug, without_suffix) if value)
-    )
+    return list(dict.fromkeys(value for value in (exact, slug, without_suffix) if value))
+
+
+async def load_alias_map(conn: Connection) -> dict[str, int]:
+    """Snapshot the whole alias table for in-memory company resolution.
+
+    A few thousand rows. Trading one query per posting for one query per run is
+    only sound while nothing writes aliases mid-pass -- true of the parse path,
+    not of the registry sync that owns ``upsert_registry_alias``.
+    """
+    rows = await conn.fetch("SELECT alias_norm, company_id FROM alias")
+    return {row["alias_norm"]: row["company_id"] for row in rows}
+
+
+async def resolve_company(
+    conn: Connection, raw: str, *, aliases: dict[str, int] | None = None
+) -> int | None:
+    candidates = alias_candidates(raw)
+    if aliases is not None:
+        # Authoritative: the map is the entire table, so a miss here is a miss
+        # in the database. Falling back to a query would reintroduce the very
+        # per-posting round trip the map exists to remove.
+        for candidate in candidates:
+            company_id = aliases.get(candidate)
+            if company_id is not None:
+                return company_id
+        return None
     row = await conn.fetchrow(
         """
         SELECT company_id
@@ -515,10 +564,42 @@ async def resolve_company(conn: Connection, raw: str) -> int | None:
     return row["company_id"] if row is not None else None
 
 
-async def touch_source_postings(conn: Connection, source: str, now: datetime) -> int:
-    result = await conn.execute(
-        "UPDATE job_posting SET last_seen_at = $2 WHERE source = $1", source, now
-    )
+async def touch_source_postings(
+    conn: Connection, source: str, now: datetime, *, feed_id: int | None = None
+) -> int:
+    """Refresh ``last_seen_at`` for postings still in an unchanged snapshot.
+
+    Called only when the response did not move -- a 304, or a snapshot hash that
+    matched. ``snapshot_hash`` covers external ids *and* content, so a match
+    proves every posting in that snapshot is still listed and a blanket touch is
+    sound for them.
+
+    It is not sound for a posting that dropped out of an *earlier* changed poll.
+    That row was never in the matching snapshot, and bumping it here erases the
+    only evidence it vanished. ``feed.last_change_at`` marks when the snapshot
+    last moved: a ``last_seen_at`` older than that means the posting was already
+    absent when the snapshot froze, so it is left alone.
+
+    ``feed_id`` is optional so callers without one keep the blunt behaviour;
+    every production caller passes it.
+    """
+    if feed_id is None:
+        result = await conn.execute(
+            "UPDATE job_posting SET last_seen_at = $2 WHERE source = $1", source, now
+        )
+    else:
+        result = await conn.execute(
+            """
+            UPDATE job_posting SET last_seen_at = $2
+            WHERE source = $1
+              AND last_seen_at >= COALESCE(
+                  (SELECT last_change_at FROM feed WHERE id = $3), last_seen_at
+              )
+            """,
+            source,
+            now,
+            feed_id,
+        )
     return int(result.rsplit(" ", 1)[-1])
 
 
@@ -532,6 +613,8 @@ async def upsert_job_posting(
     content_hash: str,
     raw_id: int,
     seen_at: datetime,
+    touch_seen: bool = True,
+    vendor_closed_at: datetime | None = None,
 ) -> tuple[int, bool, bool]:
     """Upsert the exact canonical projection declared by ``job_posting``.
 
@@ -539,45 +622,83 @@ async def upsert_job_posting(
     we already had comes back with new content: ``changed`` is true, ``created``
     is false. That gap is the whole distinction between churn and arrivals, and
     ``poll_observation.new_postings`` is defined on ``created`` alone.
+
+    ``touch_seen`` is false for replay. A replay reparses stored payloads; it
+    observes nothing about whether the posting is still listed, and stamping
+    ``last_seen_at`` from one would resurrect every posting that ever vanished.
+
+    The tracking timestamps are passed separately rather than through ``values``
+    on purpose: ``values`` feeds ``content_hash``, so folding them in there would
+    change every posting's hash and mass-invalidate gold enrichment.
     """
-    existing = await conn.fetchrow(
-        "SELECT id, content_hash FROM job_posting WHERE source = $1 AND source_key = $2",
-        source,
-        source_key,
-    )
-    changed = existing is None or existing["content_hash"] != content_hash
+    # Single round trip: ``prev`` and the ``ins`` write share one query
+    # snapshot, so ``prev`` sees the pre-upsert row even though ``ins`` may
+    # have just inserted or updated it. That is what lets the outer SELECT
+    # derive ``changed``/``created`` without a separate SELECT beforehand.
     row = await conn.fetchrow(
         """
-        INSERT INTO job_posting(
-            source, source_key, company_id, title, description, location_text,
-            source_url, apply_url, posted_at, attributes, status,
-            last_seen_at, content_hash, raw_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        ON CONFLICT (source, source_key) DO UPDATE SET
-            company_id = EXCLUDED.company_id,
-            title = EXCLUDED.title,
-            description = EXCLUDED.description,
-            location_text = EXCLUDED.location_text,
-            source_url = EXCLUDED.source_url,
-            apply_url = EXCLUDED.apply_url,
-            posted_at = EXCLUDED.posted_at,
-            -- Gold enrichment survives an unchanged silver replay. A changed
-            -- canonical projection invalidates derived results and stamps so
-            -- the next gold pass recomputes them from current silver fields.
-            attributes = CASE
-                WHEN job_posting.content_hash IS DISTINCT FROM EXCLUDED.content_hash
-                THEN (job_posting.attributes
-                      - 'opportunity_type' - 'opportunity_type_meta'
-                      - 'skills' - 'skills_meta'
-                      - 'degree_fields' - 'degree_fields_meta')
-                     || EXCLUDED.attributes
-                ELSE job_posting.attributes || EXCLUDED.attributes
-            END,
-            status = EXCLUDED.status,
-            last_seen_at = EXCLUDED.last_seen_at,
-            content_hash = EXCLUDED.content_hash,
-            raw_id = EXCLUDED.raw_id
-        RETURNING id
+        WITH prev AS (
+            SELECT content_hash FROM job_posting
+            WHERE source = $1 AND source_key = $2
+        ), ins AS (
+            INSERT INTO job_posting(
+                source, source_key, company_id, title, description, location_text,
+                source_url, apply_url, posted_at, job_type, remote, attributes, status,
+                last_seen_at, content_hash, raw_id, vendor_closed_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                      $16, $18)
+            ON CONFLICT (source, source_key) DO UPDATE SET
+                company_id = EXCLUDED.company_id,
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
+                location_text = EXCLUDED.location_text,
+                source_url = EXCLUDED.source_url,
+                apply_url = EXCLUDED.apply_url,
+                posted_at = EXCLUDED.posted_at,
+                -- Parse-time facts, not enrichment: the adapter re-derives them
+                -- from the current raw payload on every pass, so they overwrite
+                -- unconditionally rather than being invalidated like gold below.
+                job_type = EXCLUDED.job_type,
+                remote = EXCLUDED.remote,
+                -- Gold enrichment survives an unchanged silver replay. A changed
+                -- canonical projection invalidates derived results and stamps so
+                -- the next gold pass recomputes them from current silver fields.
+                attributes = CASE
+                    WHEN job_posting.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+                    THEN (job_posting.attributes
+                          - 'skills' - 'skills_meta'
+                          - 'degree_fields' - 'degree_fields_meta')
+                         || EXCLUDED.attributes
+                    ELSE job_posting.attributes || EXCLUDED.attributes
+                END,
+                -- status is monotonic, not write-once: a stated closure lands,
+                -- and nothing reopens the row. A list harvest projects 'active'
+                -- for every row it returns, so a symmetric overwrite would
+                -- reactivate every closed posting on the very next poll.
+                status = CASE
+                    WHEN EXCLUDED.status = 'closed' THEN 'closed'
+                    ELSE job_posting.status
+                END,
+                -- Only an observation of the live listing may advance this;
+                -- replay passes touch_seen false. See the docstring.
+                last_seen_at = CASE
+                    WHEN $17 THEN EXCLUDED.last_seen_at
+                    ELSE job_posting.last_seen_at
+                END,
+                -- First statement wins: the earliest poll that saw the vendor's
+                -- own flag flip is the tightest bound we have on when it did.
+                vendor_closed_at = COALESCE(
+                    job_posting.vendor_closed_at, EXCLUDED.vendor_closed_at
+                ),
+                content_hash = EXCLUDED.content_hash,
+                raw_id = EXCLUDED.raw_id
+            RETURNING id
+        )
+        SELECT
+            ins.id AS id,
+            (SELECT content_hash FROM prev) IS DISTINCT FROM $15 AS changed,
+            NOT EXISTS (SELECT 1 FROM prev) AS created
+        FROM ins
         """,
         source,
         source_key,
@@ -588,16 +709,115 @@ async def upsert_job_posting(
         values.get("source_url"),
         values.get("apply_url"),
         values.get("posted_at"),
+        values.get("job_type"),
+        values.get("remote", "unknown"),
         values["attributes"],
         values["status"],
         seen_at,
         content_hash,
         raw_id,
+        touch_seen,
+        vendor_closed_at,
     )
-    return row["id"], changed, existing is None
+    return row["id"], row["changed"], row["created"]
 
 
 # Gold projection -----------------------------------------------------------
+
+
+async def absent_postings(
+    conn: Connection, feed: Feed, source: str
+) -> list[asyncpg.Record]:
+    """Active postings this feed stopped returning, as of its last whole fetch.
+
+    Absence is only meaningful against a *complete* poll. A truncated listing, a
+    dead token, or a half-failed pagination makes every posting in the source
+    look absent at once, so the cutoff comes from ``poll_observation`` --
+    append-only, and ``run.poll`` records 'ok' only for a fetch that finished
+    (``truncated`` becomes 'partial'). ``feed.last_poll_at`` cannot stand in for
+    it: that column records the attempt, not the outcome.
+
+    This reports absence, never closure. The caller probes each row and decides.
+    """
+    return await conn.fetch(
+        """
+        SELECT p.id, p.source, p.source_key, p.source_url, p.apply_url,
+               p.last_seen_at
+        FROM job_posting p
+        WHERE p.source = $1
+          AND p.status = 'active'
+          AND p.last_seen_at < (
+              SELECT max(polled_at) FROM poll_observation
+              WHERE feed_id = $2 AND status = 'ok'
+          )
+        ORDER BY p.id
+        """,
+        source,
+        feed.id,
+    )
+
+
+async def close_posting_by_key(
+    conn: Connection, *, source: str, source_key: str, closed_at: datetime
+) -> bool:
+    """Record a probed dead link. True when this call is what closed the row.
+
+    Deliberately not routed through ``upsert_job_posting``: that refreshes every
+    canonical column from the projection it is handed, and a probe carries no
+    title, body, or URL to refresh them with. Running a tombstone through it
+    would blank the very row we are trying to annotate.
+
+    ``link_closed_at`` keeps the *first* death. Re-probing an already-dead link
+    says nothing new about when it died, and moving the timestamp forward would
+    discard resolution already paid for.
+
+    Keyed by ``(source, source_key)`` rather than id so replay can reach it: a
+    reparse of a stored tombstone knows the posting's source identity, not the
+    row id silver assigned it.
+    """
+    row = await conn.fetchrow(
+        """
+        WITH prev AS (
+            SELECT status FROM job_posting
+            WHERE source = $1 AND source_key = $2
+        ), upd AS (
+            UPDATE job_posting
+            SET status = 'closed',
+                link_closed_at = COALESCE(link_closed_at, $3),
+                link_checked_at = $3
+            WHERE source = $1 AND source_key = $2
+            RETURNING id
+        )
+        SELECT (SELECT status FROM prev) = 'active' AS closed FROM upd
+        """,
+        source,
+        source_key,
+        closed_at,
+    )
+    return bool(row and row["closed"])
+
+
+async def mark_checked(
+    conn: Connection, posting_ids: list[int], *, checked_at: datetime
+) -> int:
+    """Record that these postings were probed, whatever the probe found.
+
+    A probe that came back live, blocked, or timed out still moves
+    ``link_checked_at``: the point of the column is when we last looked, not
+    what we concluded. Without it an inconclusive probe is indistinguishable
+    from never having probed at all, and the next pass re-spends the request.
+
+    ``last_seen_at`` is untouched on purpose even for a live result. That column
+    means "present in a listing", and a probe is not a listing.
+    """
+    if not posting_ids:
+        return 0
+    result = await conn.execute(
+        "UPDATE job_posting SET link_checked_at = $2 WHERE id = ANY($1::bigint[])",
+        posting_ids,
+        checked_at,
+    )
+    return int(result.rsplit(" ", 1)[-1])
 
 
 async def dedup_candidates(conn: Connection) -> list[asyncpg.Record]:
@@ -702,10 +922,6 @@ async def upsert_registry_alias(
     )
 
 
-async def prune_registry_aliases(conn: Connection, aliases: list[str]) -> None:
-    await conn.execute("DELETE FROM alias WHERE alias_norm <> ALL($1::text[])", aliases)
-
-
 async def align_company_identity(conn: Connection) -> None:
     await conn.execute(
         """
@@ -740,6 +956,47 @@ async def upsert_registry_token(
     )
 
 
+async def upsert_keyscan_token(
+    conn: Connection,
+    *,
+    ats: str,
+    token: str,
+    company_id: int,
+    status: str,
+    checked_at: datetime | None,
+    discovered_at: datetime,
+    imported_at: datetime,
+) -> bool:
+    """Write one keyscan-discovered token row. Returns whether a row was written.
+
+    Scoped to rows this importer owns: the ``WHERE`` on the conflict branch
+    means a token now owned by the registry sync (``upsert_registry_token``,
+    ``source`` left NULL there) is left untouched even if keyscan later
+    reports a different status for the same ``(ats, token)`` -- the caller
+    must check the return value rather than assume the write took effect.
+    """
+    result = await conn.execute(
+        """
+        INSERT INTO token(ats, token, company_id, status, source, checked_at, discovered_at, imported_at)
+        VALUES ($1, $2, $3, $4, 'keyscan', $5, $6, $7)
+        ON CONFLICT (ats, token) DO UPDATE SET
+            company_id = EXCLUDED.company_id,
+            status = EXCLUDED.status,
+            checked_at = EXCLUDED.checked_at,
+            imported_at = EXCLUDED.imported_at
+        WHERE token.source = 'keyscan'
+        """,
+        ats,
+        token,
+        company_id,
+        status,
+        checked_at,
+        discovered_at,
+        imported_at,
+    )
+    return result != "INSERT 0 0"
+
+
 async def upsert_registry_feed(
     conn: Connection, *, source: str, key: str, enabled: bool
 ) -> int:
@@ -767,29 +1024,34 @@ async def upsert_registry_feed(
     return int(feed_id)
 
 
-async def reconcile_registry_inventory(
-    conn: Connection, identities: list[dict[str, str]]
-) -> None:
-    """Disable feeds and tokens no longer present without deleting history."""
-    await conn.execute(
+async def upsert_registry_feeds(
+    conn: Connection, identities: list[tuple[str, str]], *, enabled: bool
+) -> tuple[int, int]:
+    """Bulk :func:`upsert_registry_feed`; returns (inserted, existing).
+
+    Same seeding contract as the single-row version -- ``enabled`` is the birth
+    default and the conflict branch is a no-op write on ``source``, so
+    promoting a token that already has a feed row can never flip an operator's
+    switch. Unlike :func:`set_feeds_enabled`, which resurrects, this one is
+    deliberately inert on rows that already exist.
+
+    ``xmax = 0`` distinguishes the two branches: PostgreSQL leaves it zero on a
+    genuine insert and non-zero on the update path, which is the only way to
+    tell them apart when both return a row.
+    """
+    if not identities:
+        return (0, 0)
+    rows = await conn.fetch(
         """
-        UPDATE feed f SET enabled = false
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM jsonb_to_recordset($1::jsonb) AS incoming(source text, key text)
-            WHERE incoming.source = f.source AND incoming.key = f.key
-        )
+        INSERT INTO feed(source, key, enabled)
+        SELECT source, key, $3
+        FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
+        ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
+        RETURNING id, (xmax = 0) AS inserted
         """,
-        identities,
+        [source for source, _ in identities],
+        [key for _, key in identities],
+        enabled,
     )
-    await conn.execute(
-        """
-        UPDATE token t SET status = 'inactive'
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM jsonb_to_recordset($1::jsonb) AS incoming(source text, key text)
-            WHERE incoming.source = t.ats AND incoming.key = t.token
-        )
-        """,
-        identities,
-    )
+    inserted = sum(1 for row in rows if row["inserted"])
+    return (inserted, len(rows) - inserted)
