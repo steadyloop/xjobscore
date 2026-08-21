@@ -18,8 +18,9 @@ from functools import partial
 from importlib import import_module
 from typing import Any
 
+from xjobscore import classify
 from xjobscore.net import Net, NetError, etag
-from xjobscore.records import Canonical, Feed, Item, Posting, Record
+from xjobscore.records import LINK_DEAD, Canonical, Feed, Item, Posting, Record
 CONFIGS = import_module(".json-api-configs", __package__).CONFIGS
 
 SPECS = CONFIGS
@@ -116,6 +117,12 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
         rows = _value(spec["map"], payload, context) or []
         if not isinstance(rows, list):
             return []
+        if "where" in spec:
+            # A tenant-defined name/value bag (Greenhouse `metadata`) carries its
+            # key in a sibling field rather than in the path, so selecting one
+            # entry needs a predicate rather than a deeper `@path`. The predicate
+            # is an ordinary expression resolved against the row.
+            rows = [row for row in rows if _value(spec["where"], row, context)]
         values = [_value(spec.get("value", "@"), row, context) for row in rows]
         return [value for value in values if value is not None]
     if "sections" in spec:
@@ -134,6 +141,20 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
     if "eq" in spec:
         left, right = (_value(value, payload, context) for value in spec["eq"])
         return left == right
+    if "classify" in spec:
+        # An ordered rule table, first match wins. Each rule reads one already
+        # resolved field and tests it on whole-word boundaries; a rule whose
+        # `not` pattern matches is skipped rather than ending the scan, so a
+        # documented false positive falls through to the next signal.
+        for rule in spec["classify"]:
+            text = _value(rule["from"], payload, context)
+            if not isinstance(text, str) or not text:
+                continue
+            if "not" in rule and classify.hit(text, rule["not"]):
+                continue
+            if classify.hit(text, rule["re"]):
+                return rule["is"]
+        return spec.get("default")
     return {key: _value(value, payload, context) for key, value in spec.items()}
 
 
@@ -517,7 +538,9 @@ async def harvest(
     context.update(zip(key_parts, feed.key.split("/", len(key_parts) - 1)))
     context.update(settings)
     try:
-        response = await _request(list_config, feed, net, context, first=True)
+        response = await _request(
+            list_config, feed, net, context, first=True, concurrency=list_config.get("concurrency", 1)
+        )
     except NetError:
         if list_config.get("catch_first_error"):
             return Record(truncated=True)
@@ -644,8 +667,15 @@ async def harvest(
     items: list[Item] = []
     reused_item_count = 0
     detail_fetched_count = 0
+    detail_skipped_count = 0
+    skipped_rows: list[dict] = []
     seen: set[str] = set()
     pending: list[tuple[str, dict]] = []
+    # A source may fetch detail for only the rows it actually wants. `only` is
+    # an ordinary field spec evaluated against the list row, so it accepts every
+    # form the config language already has -- `classify`, `eq`, a bare `@field`.
+    # Absent (every source today), the loop below is unchanged.
+    gate = detail.get("only")
     for row in rows:
         detail_id = _item_id(detail.get("id", list_config["id"]), row, context)
         dedupe = _item_id(detail.get("dedupe"), row, context) if detail.get("dedupe") else detail_id
@@ -653,6 +683,12 @@ async def harvest(
             continue
         if dedupe:
             seen.add(dedupe)
+        # Gated after dedupe so a skipped row still claims its identity: two
+        # list rows sharing one detail page must not both count as skipped.
+        if gate is not None and _value(gate, row, context) is not True:
+            detail_skipped_count += 1
+            skipped_rows.append(row)
+            continue
         pending.append((detail_id, row))
 
     # `max` is to the detail leg what `page.max` is to the list: a ceiling on
@@ -676,12 +712,18 @@ async def harvest(
     def _finish(*, truncated: bool = False) -> Record:
         truncated = truncated or detail_capped or pagination_truncated or detail_failed
         return Record(
-            items=items, envelope=context["envelope"], truncated=truncated,
+            # Gated rows carry their list payload, exactly as a source with no
+            # detail leg emits every row. Appended rather than interleaved:
+            # detail items keep list-row order among themselves, which the
+            # concurrency path depends on.
+            items=items + _record_items(config, skipped_rows, context),
+            envelope=context["envelope"], truncated=truncated,
             http_status=last_status if config.get("last_status") else first_status, etag=first_etag,
             reused_item_count=reused_item_count,
             enumerated_item_count=len(rows),
             partition_count=partition_count,
             detail_fetched_count=detail_fetched_count,
+            detail_skipped_count=detail_skipped_count,
             result_window_truncated=result_window_truncated,
         )
 
@@ -815,6 +857,8 @@ async def harvest(
 
 def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     config = CONFIGS[name]
+    if isinstance(item.payload, dict) and "_probe" in item.payload:
+        return _parse_probe(item, item.payload["_probe"])
     settings = getattr(feed, "config", None) or {}
     context = {"key": feed.key, "envelope": envelope}
     context.update(zip(config.get("key_parts", ()), feed.key.split("/", len(config.get("key_parts", ())) - 1)))
@@ -833,6 +877,32 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         key: _value(value, item.payload, context) for key, value in config.get("extra", {}).items()
     }
     return [Posting(external_id=item.external_id, **fields)]
+
+
+def _parse_probe(item: Item, evidence: dict) -> list[Canonical]:
+    """Turn a stored probe result into a closure, or into nothing at all.
+
+    A probe payload is not a job -- there is no title, no body, nothing to
+    project -- so this reads the one fact it carries and stops. Only `absent`
+    produces a Posting, carrying `LINK_DEAD`, which is silver's signal to route
+    it to a narrow closure write instead of the canonical upsert. The empty
+    fields here are never stored.
+
+    A `live` or `inconclusive` probe returns nothing. Both are worth keeping in
+    bronze -- they are what a later analysis measures the probe channel's own
+    reliability against -- but neither changes what silver believes.
+    """
+    if evidence.get("outcome") != "absent":
+        return []
+    return [
+        Posting(
+            external_id=item.external_id,
+            title="",
+            url_posting=evidence.get("url") or "",
+            state="closed",
+            closed_evidence=LINK_DEAD,
+        )
+    ]
 
 
 def harvester(name: str):

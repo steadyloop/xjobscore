@@ -439,8 +439,6 @@ def _simplify(config: dict, item: Item) -> Posting:
     payload = item.payload
     assert isinstance(payload, dict)
     locations = payload.get("locations") or []
-    active = payload.get("active")
-    closed = active is False
     updated = payload.get("date_updated")
     source_updated_at = datetime.fromtimestamp(updated, tz=timezone.utc) if updated is not None else None
     return Posting(
@@ -448,12 +446,13 @@ def _simplify(config: dict, item: Item) -> Posting:
         title=payload["title"],
         url_posting=payload["url"],
         fidelity="secondhand",
-        state="closed" if closed else "open",
-        closed_evidence="simplify: active=false" if closed else None,
         company_raw=payload.get("company_name"),
         location_raw=locations[0] if locations else None,
         source_updated_at=source_updated_at,
-        source_active=active,
+        # Only the positive signal is carried through. `active: false` is
+        # deliberately dropped rather than passed on as a closure: no adapter
+        # asserts closure, and job_posting.status is write-once at insert.
+        source_active=True if payload.get("active") is True else None,
         locations_extra=locations[1:],
         source_extra={key: payload.get(key) for key in config["source_extra"]},
         origin_url=payload["url"],

@@ -176,3 +176,40 @@ async def test_nested_location_shape_still_resolves():
     # instead of silently becoming a tag.
     assert posting.description_html == "use &lt;b&gt; for bold"
     assert posting.apply_url is None
+
+
+async def test_successfactors_per_feed_url_override_is_honoured():
+    """One tenant (NextEra) serves a real sitemap at /sitemap.xml -- a <urlset>
+    of bare job URLs that the shared `channel/item` path parses to zero items,
+    silently. Its RSS lives at /rss.xml, so that feed overrides the template
+    URL; the others must keep using it.
+    """
+    net = successfactors_net()
+    feed = Feed(
+        id=1, source="successfactors", key="jobs.nexteraenergy.com",
+        config={"url": "https://jobs.nexteraenergy.com/rss.xml"},
+    )
+
+    record = await docxtract.harvest("successfactors", feed, net)
+
+    assert net.get_calls[0]["url"] == "https://jobs.nexteraenergy.com/rss.xml"
+    assert [item.external_id for item in record.items] == ["1415037233", "1404797833"]
+
+
+async def test_successfactors_sitemap_shape_yields_nothing():
+    """The failure this override exists for: a <urlset> parses clean and
+    returns zero items, so a broken feed looks like an empty board rather than
+    an error. Pinned so the shape is recognisable if it turns up again.
+    """
+    sitemap = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<urlset xmlns="http://www.google.com/schemas/sitemap/0.9">'
+        b"<url><loc>https://jobs.nexteraenergy.com/job/x/1415396900/</loc>"
+        b"<lastmod>2026-08-19</lastmod></url></urlset>"
+    )
+    feed = feed_for("jobs.nexteraenergy.com")
+
+    record = await docxtract.harvest("successfactors", feed, FixtureNet(sitemap))
+
+    assert record.http_status == 200
+    assert record.items == []

@@ -14,7 +14,7 @@ from pathlib import Path
 from xjobscore.net import Response
 from xjobscore.records import Feed
 from xjobscore.sources import json_api
-from xjobscore.sources.registry.loader import entries as registry_entries, feeds as registry_feeds
+from xjobscore.registry_loader import entries as registry_entries, feeds as registry_feeds
 
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "fountain.json"
