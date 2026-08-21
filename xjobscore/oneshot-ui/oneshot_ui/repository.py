@@ -16,19 +16,25 @@ from uuid import UUID
 import asyncpg
 
 from xjobscore.degrees import canon as degree_canon
-from xjobscore.opportunity import canon as opportunity_canon
 from xjobscore.skills import canon
+
+
+def _remote(column: str | None, attributes: dict[str, Any]) -> str:
+    """Prefer the parse-time column; fall back while vendors are migrated."""
+    if column and column != "unknown":
+        return column
+    return attributes.get("remote") or "unknown"
 
 
 LOCAL_ACCOUNT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
-# Keep the API contract tied to the registry rather than maintaining a second
-# hand-written enum. ``dict.fromkeys`` preserves the registry's rule order and
-# collapses multiple rules that intentionally produce the same type.
-DEFAULT_OPPORTUNITY_TYPES = tuple(
-    dict.fromkeys(rule.type for rule in opportunity_canon())
-)
-VALID_OPPORTUNITY_TYPES = frozenset((*DEFAULT_OPPORTUNITY_TYPES, "unclassified"))
+# `job_type` is a parse-time column now, not a registry-derived enrichment, so
+# the contract is spelled out here and pinned to schema.sql's CHECK by test.
+DEFAULT_JOB_TYPES = ("intern", "coop", "student_program", "research", "part_time")
+# API-only token: storage says NULL for "no signal", but the query parameter
+# keeps a name so the unclassified pool stays addressable.
+UNCLASSIFIED = "unclassified"
+VALID_JOB_TYPES = frozenset((*DEFAULT_JOB_TYPES, UNCLASSIFIED))
 VALID_DEGREE_FIELDS = frozenset(field.name for field in degree_canon())
 VALID_APPLICATION_STAGES = frozenset(
     {"considering", "applied", "assessment", "interview", "offer", "closed"}
@@ -179,6 +185,12 @@ class PostgresRepository:
             "first_seen_at": _iso(row.get("first_seen_at")),
             "last_seen_at": _iso(row.get("last_seen_at")),
             "status": row.get("status"),
+            # Parse-time columns. `remote` falls back to the legacy
+            # attributes.remote for vendors whose parse-time rules have not
+            # been transcribed yet, so the UI keeps its signal during the
+            # per-vendor migration.
+            "job_type": row.get("job_type"),
+            "remote": _remote(row.get("remote"), attributes),
             "attributes": attributes,
             # Derived API presentation; attributes.skills remains the durable
             # JSONB array of canonical ids.
@@ -188,7 +200,7 @@ class PostgresRepository:
     async def list_jobs(
         self,
         *,
-        opportunity_types: Iterable[str] = (),
+        job_types: Iterable[str] = (),
         degree_fields: Iterable[str] = (),
         exclude_job_ids: Iterable[int] = (),
         hide_tracked: bool = True,
@@ -210,10 +222,17 @@ class PostgresRepository:
                 "NOT EXISTS (SELECT 1 FROM job_application a "
                 f"WHERE a.account_id = {account_marker} AND a.job_posting_id = j.id)"
             )
-        types = tuple(dict.fromkeys(opportunity_types))
+        types = tuple(dict.fromkeys(job_types))
         if types:
-            marker = bind(list(types))
-            clauses.append(f"j.attributes ->> 'opportunity_type' = ANY({marker}::text[])")
+            # `unclassified` is not a stored value -- it is the NULL pool, so it
+            # cannot ride along in the ANY() list and needs its own disjunct.
+            named = [value for value in types if value != UNCLASSIFIED]
+            wanted = []
+            if named:
+                wanted.append(f"j.job_type = ANY({bind(named)}::text[])")
+            if UNCLASSIFIED in types:
+                wanted.append("j.job_type IS NULL")
+            clauses.append(f"({' OR '.join(wanted)})")
         fields = tuple(dict.fromkeys(degree_fields))
         if fields:
             marker = bind(list(fields))
@@ -252,7 +271,8 @@ class PostgresRepository:
             SELECT
                 j.id, j.source, c.name AS company_name, j.title, j.description,
                 j.location_text, j.source_url, j.apply_url, j.posted_at,
-                j.first_seen_at, j.last_seen_at, j.status, j.attributes
+                j.first_seen_at, j.last_seen_at, j.status, j.attributes,
+                j.job_type, j.remote
             FROM job_posting j
             JOIN company c ON c.id = j.company_id
             WHERE {where}

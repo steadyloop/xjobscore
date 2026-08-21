@@ -35,7 +35,7 @@ The unique indexes are separate statements because `ADD COLUMN ... UNIQUE` has n
 `IF NOT EXISTS` form, so inlining it would make a re-run fail instead of no-op.
 
 To align an existing database with the canonical opportunity types in
-`registry/type.yaml`, run the checked-in migration from the repository
+`registry/job-posting/types.yaml`, run the checked-in migration from the repository
 root before replaying:
 
 ```bash
@@ -164,7 +164,7 @@ Opportunities UI. Skills are stored as canonical taxonomy ids:
 ```json
 {
   "version": 1,
-  "opportunity_type": "internship",
+  "job_type": "internship",
   "term": "Summer 2027",
   "workplace": "hybrid",
   "skills": ["python", "postgresql"],

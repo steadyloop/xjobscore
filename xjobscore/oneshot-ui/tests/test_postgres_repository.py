@@ -33,28 +33,29 @@ async def test_schema_sql_repository_round_trip() -> None:
             """
             INSERT INTO job_posting(
                 source, source_key, company_id, title, description, location_text,
-                source_url, apply_url, content_hash, raw_id, attributes
+                source_url, apply_url, content_hash, raw_id, job_type, remote,
+                attributes
             ) VALUES (
                 $1, 'job-1', $2, 'Summer Platform Intern', 'Build Python services',
                 'Remote, United States', 'https://repository.test/job',
                 'https://repository.test/apply', 'content-hash', $3,
-                $4::jsonb
+                'intern', 'yes', $4::jsonb
             ) RETURNING id
             """,
             posting_source,
             company_id,
             raw_id,
-            '{"version":1,"opportunity_type":"internship","term":"Summer 2027","workplace":"remote","skills":["Python","PostgreSQL"]}',
+            '{"version":1,"term":"Summer 2027","skills":["Python","PostgreSQL"]}',
         )
         feed_id = await pool.fetchval(
             "INSERT INTO feed(source, key) VALUES ($1, 'board') RETURNING id", source
         )
 
-        jobs = await repository.list_jobs(opportunity_types=["internship"])
+        jobs = await repository.list_jobs(job_types=["intern"])
         assert jobs["total"] == 1
         assert jobs["jobs"][0]["source"] == posting_source
         assert jobs["jobs"][0]["source_url"] == "https://repository.test/job"
-        assert jobs["jobs"][0]["attributes"]["workplace"] == "remote"
+        assert jobs["jobs"][0]["attributes"]["remote"] == "yes"
         application = await repository.create_application(job_id)
         assert application is not None
         assert application["stage"] == "considering"

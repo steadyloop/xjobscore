@@ -19,11 +19,11 @@ from .auth import AuthStore, current_account, session_account
 from .auth_api import router as auth_router
 from .config import Settings, load_settings
 from .repository import (
-    DEFAULT_OPPORTUNITY_TYPES,
+    DEFAULT_JOB_TYPES,
     LOCAL_ACCOUNT_ID,
     PostgresRepository,
     VALID_DEGREE_FIELDS,
-    VALID_OPPORTUNITY_TYPES,
+    VALID_JOB_TYPES,
 )
 from .resume_api import router as resume_router
 from .resume_store import PostgresResumeStore
@@ -154,7 +154,7 @@ def create_app(
     @application.get("/api/jobs")
     async def jobs(
         request: Request,
-        opportunity_type: list[str] = Query(default=[]),
+        job_type: list[str] = Query(default=[]),
         degree_field: list[str] = Query(default=[]),
         q: str = "",
         sort: str = "fresh",
@@ -163,11 +163,11 @@ def create_app(
         exclude_job_id: list[int] = Query(default=[]),
         store: Any = Depends(public_store),
     ) -> dict[str, Any]:
-        unknown = [value for value in opportunity_type if value not in VALID_OPPORTUNITY_TYPES]
+        unknown = [value for value in job_type if value not in VALID_JOB_TYPES]
         if unknown:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown opportunity_type: {unknown[0]}",
+                detail=f"Unknown job_type: {unknown[0]}",
             )
         unknown_degree = [value for value in degree_field if value not in VALID_DEGREE_FIELDS]
         if unknown_degree:
@@ -178,7 +178,7 @@ def create_app(
         # No filter does not mean "everything": it means the classified default
         # scope. The unclassified pool is opt-in via an explicit parameter.
         return await store.list_jobs(
-            opportunity_types=opportunity_type or list(DEFAULT_OPPORTUNITY_TYPES),
+            job_types=job_type or list(DEFAULT_JOB_TYPES),
             degree_fields=degree_field,
             q=q,
             sort=sort,

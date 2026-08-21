@@ -38,11 +38,11 @@ class FakeRepository:
                 "description": "Build Python services.",
                 "location": "Remote, United States",
                 "apply_url": "https://jobs.example.test/41/apply",
+                "job_type": "intern",
+                "remote": "yes",
                 "attributes": {
                     "version": 1,
-                    "opportunity_type": "internship",
                     "term": "Summer 2027",
-                    "workplace": "remote",
                     "skills": ["python", "postgresql"],
                     "degree_fields": ["computer_science"],
                 },
@@ -70,9 +70,9 @@ class FakeRepository:
     async def list_jobs(self, **options):
         application_job_ids = {row["job_id"] for row in self.applications if row["job_id"]}
         rows = [row for row in self.jobs if row["id"] not in application_job_ids]
-        types = set(options["opportunity_types"])
+        types = set(options["job_types"])
         if types:
-            rows = [row for row in rows if row["attributes"]["opportunity_type"] in types]
+            rows = [row for row in rows if row.get("job_type") in types]
         degree_fields = set(options["degree_fields"])
         if degree_fields:
             rows = [
@@ -238,7 +238,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
                     "status": "active",
                     "attributes": {
                         "version": 1,
-                        "opportunity_type": "internship",
+                        "job_type": "intern",
                     },
                 }
             ]
@@ -248,7 +248,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
 
     result = await asyncio.wait_for(
         repository.list_jobs(
-            opportunity_types=["internship"],
+            job_types=["intern"],
             degree_fields=["computer_science"],
             exclude_job_ids=[99],
             limit=25,
@@ -273,7 +273,7 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
         assert client.get("/api/health").json() == {"ok": True}
         jobs = client.get(
             "/api/jobs",
-            params={"opportunity_type": "internship", "degree_field": "computer_science"},
+            params={"job_type": "intern", "degree_field": "computer_science"},
         ).json()
         assert jobs["total"] == 1
         assert jobs["jobs"][0]["attributes"]["skills"] == ["python", "postgresql"]
@@ -312,7 +312,10 @@ def test_jobs_default_scope_excludes_the_unclassified_pool() -> None:
             "description": "4+ years of experience.",
             "location": "New York",
             "apply_url": "https://jobs.example.test/77/apply",
-            "attributes": {"version": 1, "opportunity_type": "unclassified"},
+            # NULL is how storage says "no vendor rule matched"; the API keeps
+            # the `unclassified` token as the way to ask for that pool.
+            "job_type": None,
+            "attributes": {"version": 1},
         }
     )
     application = signed_in_app(repository=repository)
@@ -320,11 +323,11 @@ def test_jobs_default_scope_excludes_the_unclassified_pool() -> None:
         default = client.get("/api/jobs").json()
         assert [job["id"] for job in default["jobs"]] == [41]
         review = client.get(
-            "/api/jobs", params={"opportunity_type": "unclassified"}
+            "/api/jobs", params={"job_type": "unclassified"}
         ).json()
         assert [job["id"] for job in review["jobs"]] == [77]
         assert client.get(
-            "/api/jobs", params={"opportunity_type": "review"}
+            "/api/jobs", params={"job_type": "review"}
         ).status_code == 400
 
 
@@ -334,13 +337,13 @@ def test_api_rejects_unknown_job_filter_and_invalid_application_mutation() -> No
         assert client.get(
             "/api/jobs",
             params=[
-                ("opportunity_type", "internship"),
-                ("opportunity_type", "coop"),
-                ("opportunity_type", "apprenticeship"),
-                ("opportunity_type", "new_grad_program"),
+                ("job_type", "intern"),
+                ("job_type", "coop"),
+                ("job_type", "student_program"),
+                ("job_type", "research"),
             ],
         ).status_code == 200
-        assert client.get("/api/jobs", params={"opportunity_type": "made_up"}).status_code == 400
+        assert client.get("/api/jobs", params={"job_type": "made_up"}).status_code == 400
         assert client.get("/api/jobs", params={"degree_field": "made_up"}).status_code == 400
         created = client.post("/api/jobs/41/applications").json()
         assert client.patch(
