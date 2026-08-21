@@ -1,0 +1,20 @@
+# Degree fields extracted from posting text.
+#
+# The `type:` block that lived here classified job_type from the posting
+# title. That is now derived per vendor at parse() time from measured
+# evidence in doc/raw_postings/, so the canon no longer exists.
+
+degree:
+  - name: computer_science
+    patterns:
+      - '(?i)\b(?:computer\s+science|comp\s*sci|computer\s+engineering|c\.?s\.?)\b'
+
+  - name: mathematics
+    patterns:
+      - '(?i)\b(?:math(?:ematics)?|applied\s+math(?:ematics)?|mathematical\s+sciences?)\b'
+
+  - name: bioengineering
+    patterns:
+      - '(?i)\b(?:bio[- ]?engineering|bio[- ]?medical\s+engineering|b\.?m\.?e\.?)\b'
+      - (?i)\b(?:medical\s+device|clinical|bioinformatics|computational\s+bio(?:logy|engineering)?|bio[\s\-]?process(?:ing)?|bio[\s\-]?materials|tissue|rehabilitation)\s+(?:engineer|scientist|developer|specialist)\b
+      - (?i)\b(biomedical\s+engineer(ing)?|clinical\s+engineer(ing)?|cce|abet|tjc|the\s+joint\s+commission|nfpa|smda|medical\s+device(s)?|healthcare\s+technology|visn(\s*12)?|gs-1[34]|preventative\s+maintenance|recall\s+management)\b
