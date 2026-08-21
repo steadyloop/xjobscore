@@ -10,11 +10,11 @@ from uuid import uuid4
 
 import pytest
 
-from xjobscore import run, sources, store
-from xjobscore.records import Item, Posting, Record
+from xjobscore import router, run, sources, store
+from xjobscore.records import Feed, Item, Posting, Record
 
 
-ONESHOT_PACKAGE = Path(__file__).parent / "oneshot-ui"
+ONESHOT_PACKAGE = Path(__file__).parent.parent / "oneshot-ui"
 if str(ONESHOT_PACKAGE) not in sys.path:
     sys.path.insert(0, str(ONESHOT_PACKAGE))
 
@@ -74,7 +74,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
             company_id,
         )
         feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, due_at, hold_until) VALUES ($1, $2, $3, $3) RETURNING id",
+            "INSERT INTO feed(source, key, enabled, due_at, hold_until) VALUES ($1, $2, true, $3, $3) RETURNING id",
             source,
             key,
             now,
@@ -140,7 +140,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
             company_id,
         )
         second_feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, due_at) VALUES ($1, $2, $3) RETURNING id",
+            "INSERT INTO feed(source, key, enabled, due_at) VALUES ($1, $2, true, $3) RETURNING id",
             source,
             second_key,
             now,
@@ -214,3 +214,49 @@ async def test_claim_feed_leases_one_feed_regardless_of_due_at(core_schema):
         assert await store.finish_schedule_success(
             conn, feed, now=now, due_at=now, etag=None, res_hash=None, changed=False
         )
+
+
+@pytest.mark.asyncio
+async def test_prior_items_round_trips_the_newest_bronze_revision_per_posting(core_schema):
+    """`router.prior_items` feeds `run.poll`'s revision-checked detail skip
+    (`sources.reusing`). It must survive a real write/read round trip byte for
+    byte, return only the newest of several stored revisions per posting, and
+    never raise on a row `unwrap` cannot parse -- a cache miss there must cost
+    one posting's reuse, not the whole poll."""
+    suffix = uuid4().hex
+    source = f"prior_items_test_{suffix}"
+    key = "board"
+    pool = core_schema.pool
+    feed = Feed(id=1, source=source, key=key, config={})
+    full_source = store.source_instance(feed)
+
+    async def write(item: Item) -> None:
+        prepared = router.prepare(feed, Record(items=[item]))
+        async with pool.acquire() as conn:
+            await router.persist(conn, feed, prepared)
+
+    await write(Item("1", {"id": "1", "rev": "a", "body": "first"}))
+    # A second, later revision of the same posting -- prior_items must return
+    # only the newest, never the stale one and never both.
+    await write(Item("1", {"id": "1", "rev": "b", "body": "second"}))
+    await write(Item("2", {"id": "2", "rev": "z", "body": "untouched"}))
+
+    async with pool.acquire() as conn:
+        # A row router.unwrap cannot parse (unversioned, pre-dating the bronze
+        # wrapper) must be skipped, not crash a read every poll now runs.
+        await conn.execute(
+            "INSERT INTO raw_posting(source, source_key, data, data_hash) "
+            "VALUES ($1, $2, $3, $4)",
+            full_source,
+            "3",
+            {"unversioned": True},
+            "deadbeef",
+        )
+
+    async with pool.acquire() as conn:
+        prior = await router.prior_items(conn, full_source)
+
+    assert set(prior) == {"1", "2"}
+    assert prior["1"].external_id == "1"
+    assert prior["1"].payload["body"] == "second"
+    assert prior["2"].payload["body"] == "untouched"

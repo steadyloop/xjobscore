@@ -69,7 +69,7 @@ def test_word_boundaries_reject_substrings():
 
 
 def test_leftmost_longest_alias_wins_over_nested_skills():
-    assert extract("CUDA C++") == ["cuda-cpp"]
+    assert extract("CUDA C++") == ["cuda"]
     assert extract("numerical linear algebra") == ["numerical-linear-algebra"]
     assert extract("NVIDIA Triton Inference Server") == ["triton-inference-server"]
 
@@ -128,7 +128,7 @@ def test_ambiguity_is_declared_separately_from_matchable_aliases():
     assert entries["go"].aliases == ("golang",)
     assert entries["go"].ambiguous_aliases == ("go",)
     assert entries["c"].patterns == ()
-    assert entries["triton"].patterns == ()
+    assert entries["triton-kernel-language"].ambiguous_aliases == ("triton",)
 
 
 # -- shipped canon -------------------------------------------------------

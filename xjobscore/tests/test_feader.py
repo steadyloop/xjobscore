@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from xjobscore import feader, store
-from xjobscore.sources.registry.loader import Company, Entry
+from xjobscore.registry_loader import Company, Entry, source_types
 
 SCHEMA = """
 CREATE TABLE company (
@@ -37,6 +37,7 @@ def _company(**overrides) -> Company:
         "aliases": ("acme",),
         "domain": "unknown",
         "industry": "unknown",
+        "stage": "unknown",
         "desc": "",
         "verified": False,
         "domain_verified_at": None,
@@ -50,9 +51,9 @@ def _entry(**overrides) -> Entry:
         "key": "acme",
         "company_id": 1,
         "company_name": "Acme",
-        "domain": "unknown",
+        "description": "Demo source.",
+        "implemented": True,
         "verified": True,
-        "verified_at": "2026-08-04",
         "config": {},
     }
     return Entry(**{**base, **overrides})
@@ -137,10 +138,18 @@ def test_real_registry_loads_under_schema_constraints(db):
     assert db.execute("SELECT count(*) FROM company").fetchone()[0] == len(import_plan.companies)
     assert db.execute("SELECT count(*) FROM alias").fetchone()[0] == import_plan.alias_count
     assert db.execute("SELECT count(*) FROM token").fetchone()[0] == len(import_plan.tokens)
-    assert db.execute("SELECT count(*) FROM token WHERE company_id IS NULL").fetchone()[0] == 0
-    assert {token.company_id for token in import_plan.tokens} <= {
-        company.id for company in import_plan.companies
+    # A Board resolves its employer per posting, so its token carries no
+    # company. Every other token must still resolve to a canonical one.
+    board_sources = {
+        source for source, kind in source_types().items() if kind == "Board"
     }
+    null_tokens = {
+        token.source for token in import_plan.tokens if token.company_id is None
+    }
+    assert null_tokens <= board_sources
+    assert {
+        token.company_id for token in import_plan.tokens if token.company_id is not None
+    } <= {company.id for company in import_plan.companies}
 
 
 @pytest.mark.asyncio
@@ -183,11 +192,6 @@ async def test_feed_upserts_new_companies_aliases_then_tokens(monkeypatch):
     )
     monkeypatch.setattr(
         store,
-        "prune_registry_aliases",
-        lambda conn, aliases: record("prune_aliases", conn, aliases),
-    )
-    monkeypatch.setattr(
-        store,
         "align_company_identity",
         lambda conn: record("identity", conn),
     )
@@ -201,11 +205,6 @@ async def test_feed_upserts_new_companies_aliases_then_tokens(monkeypatch):
         "upsert_registry_feed",
         lambda conn, **kwargs: record("feed", conn, **kwargs),
     )
-    monkeypatch.setattr(
-        store,
-        "reconcile_registry_inventory",
-        lambda conn, identities: record("reconcile", conn, identities),
-    )
 
     result = await feader.feed(Connection())
 
@@ -216,11 +215,9 @@ async def test_feed_upserts_new_companies_aliases_then_tokens(monkeypatch):
         "company",
         "alias",
         "alias",
-        "prune_aliases",
         "identity",
         "token",
         "feed",
-        "reconcile",
         "commit",
     ]
     assert calls[2][2]["company_id"] == 2494
@@ -228,8 +225,8 @@ async def test_feed_upserts_new_companies_aliases_then_tokens(monkeypatch):
         "new-company",
         "newco",
     ]
-    assert calls[7][2]["company_id"] == 2494
-    assert calls[8][2]["enabled"] is True
+    assert calls[6][2]["company_id"] == 2494
+    assert calls[7][2]["enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -278,20 +275,3 @@ async def test_feed_seed_preserves_existing_feed_tuning():
     assert "ON CONFLICT (source, key) DO UPDATE SET source" in calls[0][0]
     assert "SET enabled" not in calls[0][0]
     assert "interval_s" not in calls[0][0]
-
-
-@pytest.mark.asyncio
-async def test_registry_reconciliation_disables_without_deleting_history():
-    queries = []
-
-    class Connection:
-        async def execute(self, query, *args):
-            queries.append(query)
-
-    await store.reconcile_registry_inventory(
-        Connection(), [{"source": "greenhouse", "key": "acme"}]
-    )
-
-    assert "UPDATE feed f SET enabled = false" in queries[0]
-    assert "UPDATE token t SET status = 'inactive'" in queries[1]
-    assert all("DELETE" not in query for query in queries)

@@ -9,8 +9,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from xjobscore import router, run, silver, store, work
+from xjobscore import router, run, silver, sources, store, work
+from xjobscore.records import LINK_DEAD
 from xjobscore.records import Fact, Feed, Item, Label, Posting, Record, Target
+
+json_api = sources.json_api
 
 
 NOW = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
@@ -20,7 +23,6 @@ NOW = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
     ("arguments", "expected"),
     [
         (["--enrich"], "all"),
-        (["--enrich", "job_type"], "job_type"),
         (["--enrich", "skills"], "skills"),
         (["--enrich", "degrees"], "degrees"),
         (["--enrich", "dedup"], "dedup"),
@@ -64,30 +66,40 @@ def test_sync_registry_cli_flag_is_rejected():
 
 
 def test_schema_indexes_the_opportunities_filter_and_default_sort():
-    schema = (Path(__file__).parent.parent / "schema.sql").read_text()
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
 
-    assert "job_posting_opportunity_type_active_idx" in schema
-    assert "((attributes ->> 'opportunity_type'))" in schema
-    assert "'internship'" in schema
-    assert "'coop'" in schema
+    assert "job_posting_job_type_active_idx" in schema
+    assert "(job_type)" in schema
     assert "job_posting_fresh_active_idx" in schema
     assert "((COALESCE(posted_at, first_seen_at)) DESC, id DESC)" in schema
 
 
-def test_schema_opportunity_types_match_the_registry():
-    root = Path(__file__).parent.parent
+def test_schema_job_types_match_the_api_contract():
+    """job_type has no registry canon any more -- the column CHECK is the
+    contract. oneshot-ui is a separate sub-project with its own suite, so it
+    pins its DEFAULT_JOB_TYPES against this same CHECK from its own side."""
+    root = Path(__file__).parent.parent.parent
     schema = (root / "schema.sql").read_text()
-    registry = yaml.safe_load(
-        (root / "xjobscore" / "registry" / "type.yaml").read_text()
+    declared = re.search(
+        r"CHECK \(job_type IS NULL OR job_type IN \((.*?)\)\)", schema, re.DOTALL
     )
-    constraint = re.search(
-        r"attributes ->> 'opportunity_type' IN \((.*?)\)", schema, re.DOTALL
-    )
+    assert declared is not None, "schema.sql must CHECK the job_type column"
+    schema_types = set(re.findall(r"'([a-z_]+)'", declared.group(1)))
+    # `research` has no vendor emitting it yet; it is still part of the contract.
+    assert schema_types == {"intern", "coop", "student_program", "research", "part_time"}
 
-    assert constraint is not None
-    schema_types = set(re.findall(r"'([^']+)'", constraint.group(1)))
-    registry_types = {rule["type"] for rule in registry["type"]}
-    assert schema_types == registry_types | {"unclassified"}
+
+def test_schema_remote_domain_has_no_negative():
+    """A stated on-site signal is not reliable enough to assert, so the domain
+    carries 'unknown' and deliberately has no 'no'."""
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
+    declared = re.search(r"CHECK \(remote IN \((.*?)\)\)", schema, re.DOTALL)
+    assert declared is not None
+    assert set(re.findall(r"'([a-z]+)'", declared.group(1))) == {
+        "yes",
+        "hybrid",
+        "unknown",
+    }
 
 
 class _AsyncContext:
@@ -228,8 +240,33 @@ async def test_company_resolution_checks_exact_and_slug_aliases():
     assert captured == ["ambient ai, inc.", "ambient-ai-inc", "ambient-ai"]
 
 
+@pytest.mark.asyncio
+async def test_company_resolution_from_alias_map_skips_the_database():
+    class Connection:
+        async def fetchrow(self, query, candidates):
+            raise AssertionError("aliases map should make this call unreachable")
+
+    aliases = {"ambient-ai-inc": 97}
+
+    # Falls back through candidates in the same exact -> slug -> stripped-suffix
+    # order the query form uses; only the slug entry is present here.
+    assert await store.resolve_company(Connection(), "Ambient AI, Inc.", aliases=aliases) == 97
+    # A miss is authoritative -- the map is the whole table, so no DB fallback.
+    assert await store.resolve_company(Connection(), "Nobody Here LLC", aliases=aliases) is None
+
+
+def test_alias_candidates_matches_inspector_persistence_mirror():
+    # inspector/persistence.py keeps its own copy of this normalization by
+    # design (its store is deliberately independent of schema.sql), but the
+    # two must still agree on what an alias key looks like.
+    from xjobscore.inspector.persistence import alias_candidates as mirrored
+
+    for raw in ("Ambient AI, Inc.", "Foo & Bar Co.", "  Baz Ltd  ", ""):
+        assert store.alias_candidates(raw) == mirrored(raw)
+
+
 def test_raw_wrapper_is_replayable_and_hash_ignores_volatile_fields():
-    feed = Feed(id=1, source="workday", key="acme")
+    feed = Feed(id=1, source="workday-list", key="acme")
     first = Record(
         items=[Item("job-1", {"title": "Engineer", "postedOn": "Posted today"})],
         envelope={"company": "Acme"},
@@ -338,8 +375,8 @@ async def test_poll_304_touches_postings_and_preserves_etag(monkeypatch):
     async def harvest(feed, net):
         return Record(http_status=304)
 
-    async def touch(conn, source, now):
-        calls.append(("touch", source, now))
+    async def touch(conn, source, now, *, feed_id=None):
+        calls.append(("touch", source, now, feed_id))
         return 2
 
     async def success(conn, claimed, **kwargs):
@@ -355,7 +392,9 @@ async def test_poll_304_touches_postings_and_preserves_etag(monkeypatch):
     monkeypatch.setattr(store, "append_poll_observation", observe)
 
     assert await run.poll(_Pool(), object(), feed, NOW) == "not_modified"
-    assert calls[0] == ("touch", "greenhouse:acme", NOW)
+    # feed_id is what scopes the touch to postings still in the snapshot; a
+    # blanket touch would re-stamp postings that vanished on an earlier poll.
+    assert calls[0] == ("touch", "greenhouse:acme", NOW, feed.id)
     assert calls[1][1]["etag"] == '"old"'
     assert calls[1][1]["res_hash"] is None
     assert calls[1][1]["changed"] is False
@@ -375,8 +414,8 @@ async def test_poll_unchanged_hash_skips_raw_and_silver(monkeypatch):
     async def harvest(feed, net):
         return record
 
-    async def touch(conn, source, now):
-        calls.append("touch")
+    async def touch(conn, source, now, *, feed_id=None):
+        calls.append(("touch", feed_id))
         return 1
 
     async def success(conn, claimed, **kwargs):
@@ -397,7 +436,7 @@ async def test_poll_unchanged_hash_skips_raw_and_silver(monkeypatch):
     monkeypatch.setattr(silver, "process", unexpected)
 
     assert await run.poll(_Pool(), object(), feed, NOW) == "ok"
-    assert calls[0] == "touch"
+    assert calls[0] == ("touch", feed.id)
     assert calls[1][1]["etag"] == '"new"'
     assert calls[1][1]["changed"] is False
     # A body we already had is still a successful fetch, and it discovered nothing.
@@ -599,7 +638,7 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
 
     monkeypatch.setattr(silver.sources, "parser", lambda name: lambda feed, item, envelope: [posting])
 
-    async def unresolved(conn, raw):
+    async def unresolved(conn, raw, **kwargs):
         return None
 
     async def write(conn, **kwargs):
@@ -623,13 +662,70 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
         "source_url": "https://example.test/jobs/123",
         "apply_url": "https://example.test/apply/123",
         "posted_at": None,
+        # Parse-time, vendor-specific: this fixture's adapter derives neither,
+        # so silver carries the "no signal" defaults through untouched.
+        "job_type": None,
+        "remote": "unknown",
         "attributes": {
             "version": 1,
-            "workplace": "remote",
+            "remote": "yes",
             "deadline_at": deadline.isoformat(),
         },
         "status": "active",
     }
+
+
+_BASE_HASH_VALUES = {
+    "title": "Platform Intern",
+    "description": "Build Python services.",
+    "location_text": "Remote, United States",
+    "source_url": "https://example.test/jobs/123",
+    "apply_url": "https://example.test/apply/123",
+    "posted_at": None,
+    "job_type": None,
+    "remote": "unknown",
+    "attributes": {"version": 1, "remote": "yes"},
+    "status": "active",
+}
+
+
+def test_content_hash_ignores_status():
+    """status is write-once in the upsert; hashing it would report a change
+    the stored row can never reflect."""
+    active = silver._content_hash(_BASE_HASH_VALUES)
+    closed = silver._content_hash({**_BASE_HASH_VALUES, "status": "closed"})
+
+    assert active == closed
+
+
+def test_content_hash_ignores_attributes():
+    """No gold step reads deadline_at or attributes' silver-derived remote --
+    both skills and degree_fields enrichment hash `description` alone."""
+    without_deadline = silver._content_hash(_BASE_HASH_VALUES)
+    with_deadline = silver._content_hash(
+        {
+            **_BASE_HASH_VALUES,
+            "attributes": {
+                "version": 1,
+                "remote": "yes",
+                "deadline_at": "2027-02-01T00:00:00+00:00",
+            },
+        }
+    )
+
+    assert without_deadline == with_deadline
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["title", "description", "location_text", "source_url", "apply_url",
+     "posted_at", "job_type", "remote"],
+)
+def test_content_hash_covers_tracked_fields(field):
+    base = silver._content_hash(_BASE_HASH_VALUES)
+    changed = silver._content_hash({**_BASE_HASH_VALUES, field: "changed-value"})
+
+    assert base != changed
 
 
 def test_silver_leaves_derived_enrichment_to_gold():
@@ -643,12 +739,50 @@ def test_silver_leaves_derived_enrichment_to_gold():
     values = silver._projection(posting)
 
     assert values["description"] is None
-    assert "opportunity_type" not in values["attributes"]
-    assert "opportunity_type_meta" not in values["attributes"]
+    assert "job_type" not in values["attributes"]
+    assert "job_type_meta" not in values["attributes"]
     assert "skills" not in values["attributes"]
     assert "skills_meta" not in values["attributes"]
     assert "degree_fields" not in values["attributes"]
     assert "degree_fields_meta" not in values["attributes"]
+
+
+@pytest.mark.parametrize(
+    ("location_raw", "remote"),
+    [
+        ("New York, NY (Remote)", "yes"),
+        ("Hybrid - San Francisco", "hybrid"),
+        # An explicit on-site statement is still not "no" -- it stays absent,
+        # same as a location string with no signal at all.
+        ("On-site - Austin, TX", None),
+        ("New York, NY", None),
+    ],
+)
+def test_silver_falls_back_to_location_text_for_remote(location_raw, remote):
+    posting = Posting(
+        external_id="loc",
+        title="Engineer",
+        url_posting="https://example.test/jobs/loc",
+        location_raw=location_raw,
+    )
+
+    values = silver._projection(posting)
+
+    assert values["attributes"].get("remote") == remote
+
+
+def test_silver_prefers_structured_remote_over_location_text():
+    posting = Posting(
+        external_id="both",
+        title="Engineer",
+        url_posting="https://example.test/jobs/both",
+        workplace_type_raw="Hybrid",
+        location_raw="Fully Remote, US",
+    )
+
+    values = silver._projection(posting)
+
+    assert values["attributes"]["remote"] == "hybrid"
 
 
 @pytest.mark.asyncio
@@ -658,9 +792,10 @@ async def test_changed_silver_posting_invalidates_gold_enrichments():
     class Connection:
         async def fetchrow(self, query, *args):
             queries.append(query)
-            if query.lstrip().startswith("SELECT"):
-                return {"id": 9, "content_hash": "old"}
-            return {"id": 9}
+            # A single WITH-based upsert: `prev` sees the pre-upsert row, so
+            # the fake reports the same "existing row, different hash" case
+            # the two-query form used to, just from one call.
+            return {"id": 9, "changed": True, "created": False}
 
     _, changed, created = await store.upsert_job_posting(
         Connection(),
@@ -679,10 +814,145 @@ async def test_changed_silver_posting_invalidates_gold_enrichments():
 
     assert changed is True
     assert created is False
-    upsert = queries[1]
-    assert "- 'opportunity_type' - 'opportunity_type_meta'" in upsert
+    upsert = queries[0]
+    # job_type is no longer a gold artifact, so it is not invalidated here --
+    # it is overwritten unconditionally from the adapter on every upsert.
+    assert "job_type = EXCLUDED.job_type" in upsert
+    assert "remote = EXCLUDED.remote" in upsert
+    assert "job_type_meta" not in upsert
     assert "- 'skills' - 'skills_meta'" in upsert
     assert "- 'degree_fields' - 'degree_fields_meta'" in upsert
+
+
+@pytest.mark.asyncio
+async def test_status_is_monotonic_not_write_once():
+    """A stated closure must land; nothing may reopen the row.
+
+    Both halves matter and they pull in opposite directions. Without the first,
+    the pipeline can never close anything it did not close on insert. With a
+    symmetric `status = EXCLUDED.status`, the next list harvest -- which
+    projects 'active' for every row it returns -- would reopen every closed
+    posting. Only the CASE satisfies both.
+    """
+    queries = []
+
+    class Connection:
+        async def fetchrow(self, query, *args):
+            queries.append(query)
+            return {"id": 9, "changed": True, "created": False}
+
+    await store.upsert_job_posting(
+        Connection(),
+        source="greenhouse:acme",
+        source_key="123",
+        company_id=42,
+        values={"title": "Intern", "attributes": {"version": 1}, "status": "closed"},
+        content_hash="new",
+        raw_id=7,
+        seen_at=NOW,
+    )
+
+    upsert = queries[0]
+    assert "WHEN EXCLUDED.status = 'closed' THEN 'closed'" in upsert
+    assert "ELSE job_posting.status" in upsert
+    assert "status = EXCLUDED.status" not in upsert
+
+
+@pytest.mark.asyncio
+async def test_replay_never_advances_last_seen_at():
+    """`last_seen_at` means "was in a listing", and a replay reads no listing.
+
+    `latest_raw` returns every source key the feed has *ever* produced, so a
+    replay that stamped `last_seen_at` would mark every vanished posting as
+    freshly seen and leave the absence signal permanently empty.
+    """
+    queries = []
+    captured = []
+
+    class Connection:
+        async def fetchrow(self, query, *args):
+            queries.append(query)
+            captured.append(args)
+            return {"id": 9, "changed": True, "created": False}
+
+    await store.upsert_job_posting(
+        Connection(),
+        source="greenhouse:acme",
+        source_key="123",
+        company_id=42,
+        values={"title": "Intern", "attributes": {"version": 1}, "status": "active"},
+        content_hash="new",
+        raw_id=7,
+        seen_at=NOW,
+        touch_seen=False,
+    )
+
+    assert "WHEN $17 THEN EXCLUDED.last_seen_at" in queries[0]
+    assert "ELSE job_posting.last_seen_at" in queries[0]
+    assert captured[0][16] is False
+
+
+@pytest.mark.asyncio
+async def test_probed_closure_never_touches_canonical_columns(monkeypatch):
+    """A tombstone annotates a row; it must not rewrite one.
+
+    A probe carries no title, body, or URL. The canonical upsert refreshes all
+    three from whatever projection it is handed, so routing a tombstone through
+    it would blank the real posting -- which is exactly why silver branches to
+    a narrow closure write instead.
+    """
+    tombstone = Posting(
+        external_id="123",
+        title="",
+        url_posting="",
+        state="closed",
+        closed_evidence=LINK_DEAD,
+    )
+    feed = _claimed_feed()
+    stored = [router.StoredRaw(Item("123", {"_probe": {"outcome": "absent"}}), 7, "raw", True)]
+    monkeypatch.setattr(
+        silver.sources, "parser", lambda name: lambda feed, item, envelope: [tombstone]
+    )
+
+    closed = []
+
+    async def close_posting_by_key(conn, *, source, source_key, closed_at):
+        closed.append((source, source_key, closed_at))
+        return True
+
+    async def unexpected(*args, **kwargs):
+        raise AssertionError("a probed closure must not run the canonical upsert")
+
+    monkeypatch.setattr(store, "close_posting_by_key", close_posting_by_key)
+    monkeypatch.setattr(store, "upsert_job_posting", unexpected)
+
+    counts = await silver.process(
+        _Connection(), feed, stored, {}, seen_at=NOW, touch_seen=False
+    )
+
+    assert closed == [("greenhouse:acme", "123", NOW)]
+    assert counts.postings == 1
+
+
+def test_a_live_or_blocked_probe_parses_to_nothing():
+    """Only `absent` becomes a closure. The other two stay bronze-only.
+
+    Both are worth storing -- they are what a later analysis measures the probe
+    channel's own reliability against -- but neither changes what silver
+    believes, and an `inconclusive` that closed a posting would be the exact
+    fabricated closure the taxonomy exists to prevent.
+    """
+    feed = Feed(id=1, source="greenhouse", key="acme")
+
+    for outcome in ("live", "inconclusive"):
+        item = Item("123", {"_probe": {"outcome": outcome, "url": "https://x.test"}})
+        assert json_api.parse("greenhouse", feed, item, {}) == []
+
+    gone = Item("123", {"_probe": {"outcome": "absent", "url": "https://x.test"}})
+    postings = json_api.parse("greenhouse", feed, gone, {})
+    assert len(postings) == 1
+    assert postings[0].state == "closed"
+    assert postings[0].closed_evidence == LINK_DEAD
 
 
 @pytest.mark.asyncio
@@ -703,7 +973,7 @@ async def test_unresolved_board_posting_stays_bronze(monkeypatch):
     stored = [router.StoredRaw(Item("comment-1", {}), 7, "raw", True)]
     monkeypatch.setattr(silver.sources, "parser", lambda name: lambda feed, item, envelope: [posting])
 
-    async def unresolved(conn, raw):
+    async def unresolved(conn, raw, **kwargs):
         return None
 
     async def unexpected_write(conn, **kwargs):

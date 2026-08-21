@@ -196,64 +196,6 @@ def test_description_hash_ignores_the_boilerplate_tail() -> None:
     assert gold.description_hash(body) == gold.description_hash(f"{body} equal opportunity employer")
 
 
-# Opportunity enrichment ---------------------------------------------------
-
-
-def test_opportunity_payload_records_classification_hash_and_version() -> None:
-    payload = gold.opportunity_payload("Platform Intern", parsed_at=NOW)
-
-    assert payload == {
-        "opportunity_type": "internship",
-        "opportunity_type_meta": {
-            "version": 1,
-            "parsed_at": "2026-08-17T21:34:00Z",
-            "input_hash": gold.opportunity_input_hash("Platform Intern"),
-        },
-    }
-
-
-class _OpportunityConnection:
-    def __init__(self) -> None:
-        self.rows = {
-            1: {"id": 1, "title": "Platform Intern", "attributes": {}},
-            2: {"id": 2, "title": "Software Engineer", "attributes": {}},
-        }
-        self.update_calls = 0
-
-    async def fetch(self, query: str, last_id: int, limit: int, version: str):
-        return [
-            {"id": row["id"], "title": row["title"]}
-            for row in self.rows.values()
-            if row["id"] > last_id
-            and str(row["attributes"].get("opportunity_type_meta", {}).get("version"))
-            != version
-        ][:limit]
-
-    async def executemany(self, query: str, updates):
-        self.update_calls += 1
-        for posting_id, payload, title, version in updates:
-            row = self.rows[posting_id]
-            current_version = str(
-                row["attributes"].get("opportunity_type_meta", {}).get("version")
-            )
-            if row["title"] == title and current_version != version:
-                row["attributes"].update(payload)
-
-
-@pytest.mark.asyncio
-async def test_opportunity_step_classifies_each_unstamped_posting_once() -> None:
-    connection = _OpportunityConnection()
-
-    first = await gold._opportunity_rebuild(connection, parsed_at=NOW)
-    second = await gold._opportunity_rebuild(connection, parsed_at=NOW)
-
-    assert first == gold.Counts(postings=2)
-    assert second == gold.Counts()
-    assert connection.update_calls == 1
-    assert connection.rows[1]["attributes"]["opportunity_type"] == "internship"
-    assert connection.rows[2]["attributes"]["opportunity_type"] == "unclassified"
-
-
 # Skill enrichment ---------------------------------------------------------
 
 
@@ -399,8 +341,9 @@ async def test_skills_step_reprocesses_a_posting_after_silver_invalidates_it() -
 
 
 def test_steps_selects_all_or_one() -> None:
-    assert [step.name for step in gold.steps()] == ["job_type", "skills", "degrees", "dedup"]
-    assert [step.name for step in gold.steps("job_type")] == ["job_type"]
+    # job_type is deliberately absent: it is a parse-time column derived per
+    # vendor in the adapter, not a rebuildable gold artifact.
+    assert [step.name for step in gold.steps()] == ["skills", "degrees", "dedup"]
     assert [step.name for step in gold.steps("degrees")] == ["degrees"]
     assert [step.name for step in gold.steps("skills")] == ["skills"]
     assert [step.name for step in gold.steps("dedup")] == ["dedup"]
