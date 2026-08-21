@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Opportunities · OneShot</title>
-  <link rel="stylesheet" href="/static/opportunities-v2/styles.css?v=degree-fields-20260818">
+  <link rel="stylesheet" href="/static/opportunities-v2/styles.css?v=compact-card-20260818b">
   <link rel="stylesheet" href="/static/navigation.css?v=stable-nav-20260817">
-  <!-- First: api-client.js and nav-count.js both read window.OneShotSampleData
-       as they initialise. The switch itself is rendered by app.js, not written
-       here — this page's header is built into #view once the API answers. -->
+  <!-- No sample-data toggle on this page, but api-client.js and nav-count.js
+       both read window.OneShotVisitorData (the guest workspace) as they
+       initialise, so the module that defines it still has to load first. -->
   <script defer src="/static/sample-data.js?v=visitor-local-20260816"></script>
   <script defer src="/static/api-client.js?v=visitor-local-20260816"></script>
   <script defer src="/static/nav-count.js?v=visitor-local-20260816"></script>
-  <script defer src="/static/opportunities-v2/app.js?v=degree-fields-20260818"></script>
+  <script defer src="/static/opportunities-v2/app.js?v=compact-card-20260818b"></script>
 </head>
 <body>
   <a class="skip-link" href="#view">Skip to opportunities</a>
@@ -23,6 +23,10 @@
     <symbol id="icon-pipeline" viewBox="0 0 24 24"><path d="M5 4v16M5 7h5a3 3 0 0 1 3 3v4a3 3 0 0 0 3 3h3"/><path d="m16 14 3 3-3 3"/></symbol>
     <symbol id="icon-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 3a9 9 0 0 1 9 9M12 7a5 5 0 0 1 5 5M5.6 5.6a9 9 0 1 0 12.8 12.8"/></symbol>
     <symbol id="icon-doc" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+    <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M12 21s7-7.2 7-12.5A7 7 0 0 0 5 8.5C5 13.8 12 21 12 21Z"/><circle cx="12" cy="8.5" r="2.4"/></symbol>
+    <symbol id="icon-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></symbol>
+    <symbol id="icon-briefcase" viewBox="0 0 24 24"><rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M8 7.5V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1.5M3 12.5h18"/></symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
   </svg>
   <div class="shell">
     <aside class="sidebar" aria-label="Primary navigation">

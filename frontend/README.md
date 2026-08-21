@@ -34,10 +34,13 @@ works with no server and no database — useful for design work and for previewi
 a deploy before a backend exists. `transport()` short-circuits to the fake before
 `fetch` is reached, so nothing in sample mode reaches the network.
 
-**The switch is per page, and three pages have one:** Opportunities,
-Applications, and Resume. Source coverage is the one page without, because it is
-a read-only report on the harvest itself and a demo mode there would only hide
-what the page exists to show. It does not even load `sample-data.js`.
+**The switch is per page, and two pages have one:** Applications and Resume.
+Opportunities does not have one — it always talks to the real API. Source
+coverage does not either, because it is a read-only report on the harvest itself
+and a demo mode there would only hide what the page exists to show. Opportunities
+still loads `sample-data.js`, but only for `OneShotVisitorData`, the separate
+browser-local guest workspace it shares with Applications and Resume — see
+Sign-in below. Source coverage loads neither.
 
 **It lives in the page it applies to**, never in the sidebar. The sidebar moves
 you between pages; this changes what one page is showing, so it belongs next to
@@ -48,32 +51,15 @@ rendering fixtures needs to say so — the brand lime would only have read as
 
 **Where exactly depends on the shell.** Applications and Resume hand-write the
 button into `.workspace-actions` inside a static `workspace-header`, beside "Add
-application" and the Typst badge respectively. Opportunities has no static
-header — `app.js` renders the whole page, `<h1>` included, into `#view` once the
-API answers — so its switch is emitted by `sampleToggle()` in `app.js` into
-`.discover-page-head`.
-
-That difference has two consequences:
-
-- The button appears *after* `sample-data.js` has run its one-shot `syncToggle()`,
-  so it would be stuck reading "Off" on a page already serving fixtures. The
-  module therefore exports that function as `sync()`, and every write to `#view`
-  goes through `paint()` in `app.js`, which calls it. One write to `view.innerHTML`
-  in the whole file, and a test pins that.
-- `errorState()` carries a second copy. Turning fixtures on with no backend is
-  half of what the feature is for, and the switch would be missing exactly when
-  it is wanted if it only existed on the success path. `.discover-page-head`
-  gives that head the same row as the loaded page; the switch is pushed right
-  with `margin-left: auto` rather than the flex parent's `space-between`, because
-  the error head has no title beside it.
+application" and the Typst badge respectively.
 
 `PAGES` in `sample-data.js` maps a pathname to a storage key
-(`oneshot.sample-data.enabled.opportunities`, `…​.application`, `…​.resume`), so
-Applications can run on fixtures while Opportunities shows the real feed, or any
-other combination. Every caller is unchanged by this: a page only ever requests
-its own data, so "is sample mode on" and "is it on for this page" are the same
-question at the two places that ask — `transport()` in `api-client.js` and the
-private `api()` in `resume/app.js`.
+(`oneshot.sample-data.enabled.application`, `…​.resume`), so Applications can run
+on fixtures while Resume shows real data, or any other combination. Every caller
+is unchanged by this: a page only ever requests its own data, so "is sample mode
+on" and "is it on for this page" are the same question at the two places that
+ask — `transport()` in `api-client.js` and the private `api()` in
+`resume/app.js`.
 
 The fixture *store* stays shared (one `oneshot.sample-data.state.v6` key), since
 an application created from a sample job has to be the same record on every page.

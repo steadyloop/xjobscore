@@ -2,11 +2,13 @@
   "use strict";
 
   const FILTERS = [
-    { key: "internships", label: "Internships", types: ["internship"] },
+    { key: "internships", label: "Internships", types: ["intern"] },
     { key: "coops", label: "Co-ops", types: ["coop"] },
-    { key: "student_programs", label: "Student Programs", types: ["student_researcher", "fellowship", "apprenticeship", "new_grad_program", "student_role"] },
+    { key: "student_programs", label: "Student Programs", types: ["student_program"] },
+    { key: "research", label: "Research", types: ["research"] },
+    { key: "part_time", label: "Part Time", types: ["part_time"] },
   ];
-  const opportunityTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
+  const jobTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
   const relativeTime = (value, now = new Date()) => {
     if (!value) return "Never polled";
     const date = new Date(value);
@@ -35,7 +37,7 @@
   };
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { FILTERS, opportunityTypes, relativeTime, postedPresentation };
+    module.exports = { FILTERS, jobTypes, relativeTime, postedPresentation };
   }
   if (!root.document) return;
 
@@ -48,7 +50,7 @@
   const attributes = job => job.attributes || {};
   const skills = job => attributes(job).skills || [];
   const initials = job => job.company.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "?";
-  const workplace = job => ({ remote: "Remote", hybrid: "Hybrid", on_site: "On-site" })[attributes(job).workplace] || "";
+  const workplace = job => ({ yes: "Remote", hybrid: "Hybrid" })[job?.remote] || "";
 
   function announce(message, action) {
     flash.replaceChildren();
@@ -135,7 +137,7 @@
   function render() {
     const search = $("#discover-search"), restoreFocus = search && document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
     const jobs = state.jobs || [], selected = jobs.find(job => String(job.id) === String(state.selected));
-    paint(`<section class="discover-page"><header class="discover-page-head"><button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button><div><a class="preview-link" href="/opportunities-v2/" target="_blank" rel="noopener noreferrer">Preview redesigned Opportunities ↗</a><div class="section-kicker">Multi-source intelligence</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><div class="discover-search-surface"><label class="discover-search"><svg class="discover-search-icon" aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="discover-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Opportunity types">${filtersMarkup()}</div></section><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
+    paint(`<section class="discover-page"><header class="discover-page-head"><button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button><div><a class="preview-link" href="/opportunities-v2/" target="_blank" rel="noopener noreferrer">Preview redesigned Opportunities ↗</a><div class="section-kicker">Multi-source intelligence</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><div class="discover-search-surface"><label class="discover-search"><svg class="discover-search-icon" aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="discover-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div></section><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
     if (restoreFocus) {
       const next = $("#discover-search");
       next.focus();
@@ -152,7 +154,7 @@
     }
     try {
       const offset = append ? (state.jobs || []).length : 0;
-      const payload = await root.OneShotAPI.jobs.list({ q: state.query, sort: state.sort, opportunity_type: opportunityTypes(state.filters), limit: PAGE_SIZE, offset });
+      const payload = await root.OneShotAPI.jobs.list({ q: state.query, sort: state.sort, job_type: jobTypes(state.filters), limit: PAGE_SIZE, offset });
       state.total = payload.total;
       state.jobs = append ? [...(state.jobs || []), ...payload.jobs] : payload.jobs;
       state.loadingMore = false;

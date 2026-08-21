@@ -1,22 +1,24 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const { FILTERS, opportunityTypes, relativeTime, postedPresentation } = require("./app.js");
+const { FILTERS, jobTypes, relativeTime, postedPresentation } = require("./app.js");
 const opportunitiesV2 = require("./opportunities-v2/app.js");
 const sampleData = require("./sample-data.js");
 const { ROUTES, query } = require("./api-client.js");
 const { opportunityTotal } = require("./nav-count.js");
 
-test("visible filters map to PostgreSQL opportunity types", () => {
-  const labels = ["Internships", "Co-ops", "Student Programs"];
-  const keys = ["internships", "coops", "student_programs"];
-  const types = ["internship", "coop", "student_researcher", "fellowship", "apprenticeship", "new_grad_program", "student_role"];
+test("visible filters map to PostgreSQL job types", () => {
+  const labels = ["Internships", "Co-ops", "Student Programs", "Research", "Part Time"];
+  const keys = ["internships", "coops", "student_programs", "research", "part_time"];
+  // One tab per stored value now: the old taxonomy's fellowship, apprenticeship,
+  // new_grad_program and student_role all collapsed into student_program.
+  const types = ["intern", "coop", "student_program", "research", "part_time"];
 
   assert.deepEqual(FILTERS.map(filter => filter.label), labels);
-  assert.deepEqual(opportunityTypes(keys), types);
+  assert.deepEqual(jobTypes(keys), types);
   assert.deepEqual(opportunitiesV2.FILTERS.map(filter => filter.label), labels);
-  assert.deepEqual(opportunitiesV2.opportunityTypes(keys), types);
-  assert.deepEqual(opportunityTypes([]), [], "no tab active defers to the API's default scope");
+  assert.deepEqual(opportunitiesV2.jobTypes(keys), types);
+  assert.deepEqual(jobTypes([]), [], "no tab active defers to the API's default scope");
 });
 
 test("opportunity tabs expose exclusive selection state", () => {
@@ -41,11 +43,13 @@ test("sample jobs match the live list contract", async () => {
   for (const job of listing.jobs) {
     assert.deepEqual(
       Object.keys(job).sort(),
-      ["apply_url", "attributes", "company", "description", "first_seen_at", "id", "last_seen_at", "location", "posted_at", "source", "source_url", "status", "title"],
+      ["apply_url", "attributes", "company", "description", "first_seen_at", "id", "job_type", "last_seen_at", "location", "posted_at", "remote", "source", "source_url", "status", "title"],
     );
     assert.equal(job.attributes.version, 1);
-    assert.ok(job.attributes.opportunity_type);
-    assert.ok(["remote", "hybrid", "on_site", "unknown"].includes(job.attributes.workplace));
+    // Parse-time columns, alongside attributes rather than inside it. job_type
+    // is NULL when no vendor rule matched; remote always states a value.
+    assert.ok(job.job_type === null || ["intern", "coop", "student_program", "research", "part_time"].includes(job.job_type));
+    assert.ok(["yes", "hybrid", "unknown"].includes(job.remote));
   }
 });
 
@@ -146,7 +150,7 @@ test("visitor workspace starts blank and stays separate from sample fixtures", a
 test("frontend client builds current API routes", () => {
   assert.equal(ROUTES.addToApplications("job 1"), "/jobs/job%201/applications");
   assert.equal(ROUTES.application("app 1"), "/applications/app%201");
-  assert.equal(query({ q: "python", opportunity_type: ["internship", "student_role"] }), "?q=python&opportunity_type=internship&opportunity_type=student_role");
+  assert.equal(query({ q: "python", job_type: ["intern", "student_program"] }), "?q=python&job_type=intern&job_type=student_program");
   assert.equal(query({ exclude_job_id: [41, 42] }), "?exclude_job_id=41&exclude_job_id=42");
   assert.equal(query({ degree_field: ["computer_science", "mathematics"] }), "?degree_field=computer_science&degree_field=mathematics");
   const source = fs.readFileSync(require.resolve("./api-client.js"), "utf8");
@@ -176,13 +180,13 @@ test("Opportunities exposes its action and workspace navigation", () => {
   assert.match(html, /href=\"\/application\/\"/);
   assert.match(html, /href=\"\/source-coverage\/\"/);
   assert.doesNotMatch(html, /href=\"\/static\/[a-z-]+\/index\.html\"/);
-  assert.match(html, /href=\"\/static\/opportunities-v2\/styles\.css\?v=degree-fields-/);
-  assert.match(html, /src=\"\/static\/opportunities-v2\/app\.js\?v=degree-fields-/);
+  assert.match(html, /href=\"\/static\/opportunities-v2\/styles\.css\?v=compact-card-/);
+  assert.match(html, /src=\"\/static\/opportunities-v2\/app\.js\?v=compact-card-/);
   assert.match(html, /href=\"\/static\/navigation\.css\?v=stable-nav-/);
 });
 
-test("the sample switch is per page, guest-only, and absent only from Source coverage", () => {
-  assert.deepEqual(sampleData.PAGES, { "/": "opportunities", "/opportunities-v2/": "opportunities-v2", "/application/": "application", "/resume/": "resume" });
+test("the sample switch is per page, guest-only, and present only on Applications and Resume", () => {
+  assert.deepEqual(sampleData.PAGES, { "/application/": "application", "/resume/": "resume" });
 
   const shellFor = page => fs.readFileSync(require.resolve(page), "utf8");
   const sidebarOf = shell => shell.slice(shell.indexOf("<aside"), shell.indexOf("</aside>"));
@@ -199,33 +203,26 @@ test("the sample switch is per page, guest-only, and absent only from Source cov
     assert.match(header, /data-action="sample-toggle"/);
   }
 
-  // Opportunities renders its whole header into #view, so its shell loads the
-  // fixture script but carries no button — app.js emits it, into the loaded
-  // page and into the error state, and re-syncs it on every paint because
-  // sample-data.js's own sync runs long before the markup exists.
+  // Opportunities has no fixture mode: it always talks to the real API. It
+  // still loads sample-data.js, but only for the OneShotVisitorData export
+  // api-client.js and nav-count.js depend on — not for a switch.
   const opportunities = shellFor("./index.html");
   assert.match(opportunities, /sample-data\.js/);
-  assert.doesNotMatch(sidebarOf(opportunities), /sample-toggle/);
+  assert.doesNotMatch(opportunities, /sample-toggle/);
   const page = fs.readFileSync(require.resolve("./opportunities-v2/app.js"), "utf8");
-  assert.match(page, /data-action="sample-toggle"/);
-  assert.match(page, /class="discover-page-head">[\s\S]*?\$\{sampleToggle\(\)\}/);
-  assert.match(page, /OneShotSampleData\?\.sync\?\.\(\)/);
-  // One write to #view, inside paint(). A second would be a paint that skipped
-  // the re-sync, leaving a switch reading "Off" on a page serving fixtures.
-  assert.equal(page.match(/view\.innerHTML/g).length, 1);
+  assert.doesNotMatch(page, /sample-toggle|sampleToggle|OneShotSampleData/);
 
   // Source coverage is a read-only report on the harvest, so a demo mode there
   // would only hide what the page exists to show.
   assert.doesNotMatch(shellFor("./source-coverage/index.html"), /sample-toggle/);
   assert.doesNotMatch(shellFor("./source-coverage/index.html"), /sample-data\.js/);
 
-  // Hidden until nav-count.js confirms nobody is signed in — on both header
-  // shapes, and on the rendered one especially, since it would otherwise paint
-  // straight into a signed-in view.
+  // Hidden until nav-count.js confirms nobody is signed in.
   const navigation = fs.readFileSync(require.resolve("./navigation.css"), "utf8");
-  assert.match(navigation, /\.workspace-header \.sample-toggle,\s*\.discover-page-head \.sample-toggle \{\s*display: none/);
-  assert.match(navigation, /body\.is-guest \.workspace-header \.sample-toggle,\s*body\.is-guest \.discover-page-head \.sample-toggle \{\s*display: inline-flex/);
+  assert.match(navigation, /\.workspace-header \.sample-toggle \{\s*display: none/);
+  assert.match(navigation, /body\.is-guest \.workspace-header \.sample-toggle \{\s*display: inline-flex/);
   assert.doesNotMatch(navigation, /\.sidebar \.sample-toggle/);
+  assert.doesNotMatch(navigation, /\.discover-page-head \.sample-toggle/);
   const helper = fs.readFileSync(require.resolve("./nav-count.js"), "utf8");
   assert.match(helper, /classList\.add\("is-guest"\)/);
   // A session clears any switch left on from browsing as a guest.

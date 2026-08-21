@@ -121,17 +121,13 @@
    here because navigation.css loads after each page stylesheet, which is what
    lets it override their display.
 
-   Two header classes, because the shells differ: Applications and Resume write
-   their switch into a static .workspace-header, while Opportunities renders
-   .discover-page-head from app.js. Hidden-by-default matters more on the second
-   one, not less — a rendered switch would paint straight into view. */
-.workspace-header .sample-toggle,
-.discover-page-head .sample-toggle {
+   Applications and Resume write their switch into a static .workspace-header —
+   the only shell that still has one. */
+.workspace-header .sample-toggle {
   display: none;
 }
 
-body.is-guest .workspace-header .sample-toggle,
-body.is-guest .discover-page-head .sample-toggle {
+body.is-guest .workspace-header .sample-toggle {
   display: inline-flex;
 }
 

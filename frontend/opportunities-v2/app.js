@@ -2,9 +2,11 @@
   "use strict";
 
   const FILTERS = [
-    { key: "internships", label: "Internships", types: ["internship"] },
+    { key: "internships", label: "Internships", types: ["intern"] },
     { key: "coops", label: "Co-ops", types: ["coop"] },
-    { key: "student_programs", label: "Student Programs", types: ["student_researcher", "fellowship", "apprenticeship", "new_grad_program", "student_role"] },
+    { key: "student_programs", label: "Student Programs", types: ["student_program"] },
+    { key: "research", label: "Research", types: ["research"] },
+    { key: "part_time", label: "Part Time", types: ["part_time"] },
   ];
   const DEGREE_FILTERS = [
     { key: "computer_science", label: "CS" },
@@ -19,9 +21,10 @@
     lever: "Lever",
     smartrecruiters: "SmartRecruiters",
     workday: "Workday",
+    "workday-list": "Workday (list)",
   };
   const PAGE_SIZE = 100;
-  const opportunityTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
+  const jobTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
   const degreeFields = filters => filters.filter(key => DEGREE_FILTERS.some(filter => filter.key === key));
   const esc = value => String(value == null ? "" : value).replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
   const safeHref = value => /^https?:\/\//i.test(String(value || "")) ? String(value) : "";
@@ -48,8 +51,12 @@
     const chips = values.map(skill => `<span class="skill" data-skill-id="${esc(skill.id)}"${skill.category ? ` data-skill-category="${esc(skill.category)}"` : ""}>${esc(skill.name)}</span>`).join("");
     return `<section><div class="section-kicker">Skills</div><div class="skill-list">${chips}</div></section>`;
   }
-  const initials = job => String(job?.company || "").split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "?";
-  const workplaceLabel = value => ({ remote: "Remote", hybrid: "Hybrid", on_site: "On-site" })[value] || "";
+  function initials(job) {
+    const words = String(job?.company || "").split(/\s+/).filter(Boolean);
+    if (!words.length) return "?";
+    return (words.length > 1 ? words.slice(0, 2).map(word => word[0]).join("") : words[0].slice(0, 2)).toUpperCase();
+  }
+  const workplaceLabel = value => ({ yes: "Remote", hybrid: "Hybrid" })[value] || "";
 
   function sourceLabel(value) {
     const provider = String(value || "").split(":", 1)[0].trim().toLowerCase();
@@ -81,15 +88,53 @@
     return added === null ? "Date unavailable" : phrase("Added", added);
   }
 
+  const freshness = (job, now = new Date()) => postedPresentation(job.posted_at, now, job.first_seen_at);
+
+  function deadlineLabel(value) {
+    const date = new Date(value || "");
+    return Number.isNaN(date.getTime()) ? "" : `Apply by ${date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}`;
+  }
+
+  function metaFacts(job) {
+    const attrs = attributes(job);
+    return [
+      { icon: "icon-pin", label: job.location || "Location not listed" },
+      { icon: "icon-calendar", label: attrs.term },
+      { icon: "icon-briefcase", label: workplaceLabel(job.remote) },
+      { icon: "icon-clock", label: deadlineLabel(attrs.deadline_at) },
+    ].filter(fact => fact.label);
+  }
+
+  const listFacts = job => metaFacts(job).filter(fact => fact.icon !== "icon-clock").map(fact => fact.label);
+
+  const factMarkup = (fact, className = "detail-fact") => `<span class="${className}"><svg aria-hidden="true"><use href="#${fact.icon}"/></svg>${esc(fact.label)}</span>`;
+
+  // Location leads the detail header, so the meta row below carries what is left:
+  // term, workplace, deadline. Most jobs have none of those and it renders nothing.
+  const detailPlace = job => metaFacts(job).find(fact => fact.icon === "icon-pin");
+
+  function detailMetaMarkup(job) {
+    const facts = metaFacts(job).filter(fact => fact.icon !== "icon-pin");
+    if (!facts.length) return "";
+    return `<div class="detail-meta">${facts.map(fact => factMarkup(fact)).join("")}</div>`;
+  }
+
+  // Polling keeps every listing live, so liveness is a constant and says nothing.
+  // The card footline states the one date that separates one job from another.
+  const cardStatusLine = (job, now = new Date()) => freshness(job, now);
+
+  const openPostingLabel = job => String(job?.source || "").trim() ? `Open on ${sourceLabel(job.source)}` : "Open posting";
+  const detailHeadMarkup = job => `<div class="detail-headline"><span class="detail-company">${esc(job.company)}</span><span class="detail-headline-sep" aria-hidden="true">·</span>${factMarkup(detailPlace(job), "detail-fact detail-place")}</div>`;
+  const detailPostedMarkup = (job, now = new Date()) => `<div class="detail-posted"><span class="posted-when">${esc(freshness(job, now))}</span>${job.last_seen_at ? `<span class="posted-sep" aria-hidden="true">·</span><span class="posted-checked">checked ${esc(relativeTime(job.last_seen_at, now))}</span>` : ""}</div>`;
+
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { FILTERS, DEGREE_FILTERS, opportunityTypes, degreeFields, safeHref, sourceLabel, relativeTime, postedPresentation, detailSkillsMarkup, skillDetails, workplaceLabel };
+    module.exports = { FILTERS, DEGREE_FILTERS, jobTypes, degreeFields, safeHref, sourceLabel, relativeTime, postedPresentation, detailSkillsMarkup, skillDetails, workplaceLabel, freshness, listFacts, deadlineLabel, metaFacts, detailMetaMarkup, openPostingLabel, detailHeadMarkup, detailPostedMarkup, initials, cardStatusLine };
   }
   if (!root.document) return;
 
   const $ = selector => root.document.querySelector(selector);
   const view = $("#view"), flash = $("#flash");
   const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: ["internships"], degreeFilters: [], sort: "fresh", query: "", expandedDescriptions: new Set() };
-  const sampleToggle = () => '<button class="sample-toggle" type="button" data-action="sample-toggle" role="switch" aria-checked="false" aria-label="Turn on sample data"><span class="sample-toggle-copy">Sample data<small>Off</small></span><span class="sample-switch" aria-hidden="true"><i></i></span></button>';
 
   function syncDescriptionOverflow() {
     root.document.querySelectorAll("[data-description-shell]").forEach(shell => {
@@ -105,7 +150,6 @@
 
   const paint = html => {
     view.innerHTML = html;
-    root.OneShotSampleData?.sync?.();
     root.requestAnimationFrame?.(syncDescriptionOverflow);
   };
 
@@ -128,10 +172,8 @@
     announce.timer = setTimeout(() => flash.classList.remove("show", "has-action"), action ? 6000 : 3200);
   }
 
-  const errorState = (title, error) => `<header class="discover-page-head">${sampleToggle()}</header><div class="state"><h1>${esc(title)}</h1><p>${esc(error.message || error)}</p><button class="button primary" data-action="retry">Try again</button></div>`;
+  const errorState = (title, error) => `<div class="state"><h1>${esc(title)}</h1><p>${esc(error.message || error)}</p><button class="button primary" data-action="retry">Try again</button></div>`;
   const loading = () => paint('<div class="state loading"><i></i><h1>Loading Opportunities</h1><p>Reading the latest API data.</p></div>');
-  const freshness = job => postedPresentation(job.posted_at, new Date(), job.first_seen_at);
-  const listFacts = job => [job.location || "Location not listed", attributes(job).term, workplaceLabel(attributes(job).workplace)].filter(Boolean);
   const listTags = job => {
     const values = skillDetails(job);
     return values.slice(0, 3).map(skill => `<span class="tag">${esc(skill.name)}</span>`).join("") + (values.length > 3 ? `<span class="tag">+${values.length - 3}</span>` : "");
@@ -154,7 +196,8 @@
   function opportunity(job) {
     const recent = new Date(job.posted_at || job.first_seen_at).getTime() > Date.now() - 3 * 86400000;
     const selected = String(job.id) === String(state.selected);
-    return `<article class="opportunity ${selected ? "selected" : ""}" data-job="${esc(job.id)}" tabindex="0" role="button" aria-selected="${selected}"><div class="job-logo">${esc(initials(job))}</div><div class="opportunity-main"><div class="job-title-line"><h3>${esc(job.title)}</h3>${recent ? '<span class="new-badge">New</span>' : ""}</div><div class="job-company">${esc(job.company)}</div><div class="meta">${esc(listFacts(job).join(" · "))}</div>${listTags(job) ? `<div class="tags">${listTags(job)}</div>` : ""}<div class="job-footline">${esc(freshness(job))}</div></div></article>`;
+    const tags = listTags(job);
+    return `<article class="opportunity ${selected ? "selected" : ""}" data-job="${esc(job.id)}" tabindex="0" role="button" aria-selected="${selected}"><div class="job-logo">${esc(initials(job))}</div><div class="opportunity-main"><div class="job-company-line"><div class="job-company">${esc(job.company)}</div>${recent ? '<span class="new-badge">New</span>' : ""}</div><h3>${esc(job.title)}</h3><div class="meta">${esc(listFacts(job).join(" · "))}</div>${tags ? `<div class="tags">${tags}</div>` : ""}<div class="job-footline">${esc(cardStatusLine(job))}</div></div></article>`;
   }
 
   const BULLETS = /\s*[•●▪‣]\s*/;
@@ -179,7 +222,7 @@
   function detail(job) {
     if (!job) return '<aside class="detail"><div class="section-kicker">Selection</div><h2>Choose a job</h2><p>Select a role to review its details and add it to Applications.</p></aside>';
     const applyUrl = safeHref(job.apply_url);
-    return `<aside class="detail"><div class="detail-topline"><div class="detail-head-row"><div class="job-logo large">${esc(initials(job))}</div><div class="detail-company">${esc(job.company)}</div></div></div><h2>${esc(job.title)}</h2><div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(job.id)}">Add to Applications</button>${applyUrl ? `<a class="button" href="${esc(applyUrl)}" target="_blank" rel="noopener noreferrer">Open posting ↗</a>` : ""}</div>${detailSkillsMarkup(job)}<section><div class="section-kicker">Job description</div>${descriptionMarkup(job)}</section><div class="detail-freshness">${esc(freshness(job))}${job.last_seen_at ? ` · Last confirmed active ${esc(relativeTime(job.last_seen_at))}` : ""}</div></aside>`;
+    return `<aside class="detail">${detailHeadMarkup(job)}<h2>${esc(job.title)}</h2>${detailMetaMarkup(job)}${detailPostedMarkup(job)}<div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(job.id)}">Add to Applications</button>${applyUrl ? `<a class="button" href="${esc(applyUrl)}" target="_blank" rel="noopener noreferrer">${esc(openPostingLabel(job))} ↗</a>` : ""}</div>${detailSkillsMarkup(job)}<section><div class="section-kicker">Job description</div>${descriptionMarkup(job)}</section></aside>`;
   }
 
   function pagerMarkup(jobs) {
@@ -191,7 +234,7 @@
   function render() {
     const search = $("#opportunities-v2-search"), restoreFocus = search && root.document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
     const jobs = state.jobs || [], selected = jobs.find(job => String(job.id) === String(state.selected));
-    paint(`<section class="discover-page"><header class="discover-page-head"><div><div class="section-kicker">Opportunity discovery</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Opportunity types">${filtersMarkup()}</div><div class="degree-filterbar" role="group" aria-label="Degree field mentioned"><span class="degree-filter-label">Degree field mentioned</span>${degreeFiltersMarkup()}</div></section><div class="discover-search-surface"><label class="discover-search"><svg aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="opportunities-v2-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘ K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
+    paint(`<section class="discover-page"><header class="discover-page-head"><div><div class="section-kicker">Discover</div><h1>Opportunities</h1></div></header><div class="discover-grid"><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div><div class="degree-filterbar" role="group" aria-label="Degree field mentioned"><span class="degree-filter-label">Degree field mentioned</span>${degreeFiltersMarkup()}</div></section><div class="discover-search-surface"><label class="discover-search"><svg aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="opportunities-v2-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘ K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
     if (restoreFocus) {
       const next = $("#opportunities-v2-search");
       next?.focus();
@@ -204,7 +247,7 @@
     else if (state.jobs === null) loading();
     try {
       const offset = append ? (state.jobs || []).length : 0;
-      const payload = await root.OneShotAPI.jobs.list({ q: state.query, sort: state.sort, opportunity_type: opportunityTypes(state.filters), degree_field: degreeFields(state.degreeFilters), limit: PAGE_SIZE, offset });
+      const payload = await root.OneShotAPI.jobs.list({ q: state.query, sort: state.sort, job_type: jobTypes(state.filters), degree_field: degreeFields(state.degreeFilters), limit: PAGE_SIZE, offset });
       state.total = payload.total;
       state.jobs = append ? [...(state.jobs || []), ...payload.jobs] : payload.jobs;
       state.loadingMore = false;
