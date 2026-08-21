@@ -359,6 +359,38 @@ class PolicyStore:
             )
         return {"feed_id": feed_id, "enabled": enabled}
 
+    async def import_feeds(
+        self, identities: list[tuple[str, str]], *, enabled: bool = False
+    ) -> dict[str, Any]:
+        """Enable many tokens into ``feed`` in one statement.
+
+        The Tokens page's backlog is hundreds of rows at a time, so this does
+        not loop over :meth:`import_feed` -- that would be one round trip and
+        one pool acquire per token. Duplicate identities are collapsed first
+        because ``ON CONFLICT DO UPDATE`` cannot touch the same row twice in
+        one statement, the same constraint :meth:`set_feeds_enabled` works
+        around.
+
+        A token that already has a feed row -- enabled or disabled -- is left
+        exactly as it is; ``enabled`` only ever applies to a genuinely new
+        row. That inertness is what makes sending the same token twice safe:
+        there is no path here that flips an existing row's switch, so the
+        caller never needs to check "is this already there" itself.
+        """
+        deduped = list(dict.fromkeys(identities))
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                imported, existing = await store.upsert_registry_feeds(
+                    conn, deduped, enabled=enabled
+                )
+        return {
+            "requested": len(deduped),
+            "imported": imported,
+            "existing": existing,
+            "enabled": enabled,
+        }
+
     async def scheduler_control(self) -> dict[str, Any] | None:
         """The global run/pause switch; None when degraded, matching snapshot().
 

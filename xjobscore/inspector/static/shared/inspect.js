@@ -33,7 +33,7 @@ const ARCHETYPE_HINTS = {
 };
 const EXPENSIVE_ARCHETYPES = new Set(["detail", "link-discovery"]);
 
-export function createInspector(container, { standalone = false, onClose } = {}) {
+export function createInspector(container, { standalone = false, onClose, onDrop } = {}) {
   const state = {
     ref: null,
     feed: null,
@@ -43,6 +43,7 @@ export function createInspector(container, { standalone = false, onClose } = {})
     parsed: null,
     network: null,
     history: [],
+    parsedOnly: false,
   };
 
   /* Skeleton ------------------------------------------------------------- */
@@ -55,9 +56,10 @@ export function createInspector(container, { standalone = false, onClose } = {})
     style: "display:inline-flex;align-items:center;gap:12px",
   });
   els.fetchBtn = el("button", { class: "btn primary", type: "button" }, "Fetch");
+  els.dropBtn = el("button", { class: "btn danger", type: "button" }, "Drop");
   els.stats = el("div", { class: "stat-row" });
 
-  const headerRight = [els.badges, els.controls, els.fetchBtn];
+  const headerRight = [els.badges, els.controls, els.fetchBtn, els.dropBtn];
   if (!standalone) {
     const closeBtn = el(
       "button",
@@ -78,6 +80,21 @@ export function createInspector(container, { standalone = false, onClose } = {})
   // One item list drives two synchronized panes: raw harvest payload on the
   // left, the parsed canonicals for the same item on the right.
   els.parseStats = el("div", { class: "stat-row", style: "padding:0 0 12px 0" });
+  els.parsedOnlyToggle = el("input", { type: "checkbox" });
+  els.parsedOnlyLabel = el(
+    "label",
+    {
+      class: "muted",
+      style: "display:none;align-items:center;gap:6px;padding:0 0 12px 0;font-size:13px",
+      title: "Only items the parser produced a canonical for — limited to the parsed window loaded above (first 500 items)",
+    },
+    els.parsedOnlyToggle,
+    "Show parsed only"
+  );
+  els.parsedOnlyToggle.addEventListener("change", () => {
+    state.parsedOnly = els.parsedOnlyToggle.checked;
+    loadResult();
+  });
   els.itemList = el("div", { class: "card item-list item-list-compact" });
   els.harvestPane = el(
     "div",
@@ -90,6 +107,7 @@ export function createInspector(container, { standalone = false, onClose } = {})
     "div",
     { class: "body", role: "tabpanel" },
     els.parseStats,
+    els.parsedOnlyLabel,
     els.itemList,
     el(
       "div",
@@ -168,6 +186,7 @@ export function createInspector(container, { standalone = false, onClose } = {})
   );
 
   els.fetchBtn.addEventListener("click", () => fetchNow());
+  els.dropBtn.addEventListener("click", () => dropFeed());
 
   /* Data loading ---------------------------------------------------------- */
 
@@ -191,7 +210,8 @@ export function createInspector(container, { standalone = false, onClose } = {})
 
   async function loadResult() {
     try {
-      const payload = await api(`/api/results/${state.ref}?limit=${PAGE_SIZE}`);
+      const parsedOnlyParam = state.parsedOnly ? "&parsed_only=true" : "";
+      const payload = await api(`/api/results/${state.ref}?limit=${PAGE_SIZE}${parsedOnlyParam}`);
       state.result = payload;
       state.items = payload.items;
       state.hasMore = payload.has_more;
@@ -242,6 +262,32 @@ export function createInspector(container, { standalone = false, onClose } = {})
     }
   }
 
+  async function dropFeed() {
+    const feed = state.feed;
+    const feedId = feed?.policy?.feed_id;
+    if (!feedId) return;
+    const label = feed.company_name || feed.key;
+    const proceed = window.confirm(
+      `Drop ${label} (${feed.source}/${feed.key}) from the feed table? ` +
+        "This unschedules it in production. Fetch history and any staged " +
+        "payload are kept, not deleted."
+    );
+    if (!proceed) return;
+    const button = els.dropBtn;
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Dropping…";
+    try {
+      await api("/api/feeds/bulk-delete", { body: { feed_ids: [feedId] } });
+      if (onDrop) await onDrop();
+      else onClose?.();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      window.alert(`Failed to drop feed: ${error.message ?? error}`);
+    }
+  }
+
   /* Header ---------------------------------------------------------------- */
 
   function renderHeader() {
@@ -249,6 +295,18 @@ export function createInspector(container, { standalone = false, onClose } = {})
     els.title.textContent = feed.company_name || feed.key;
     els.description.textContent = feed.company_description || "";
     els.description.hidden = !feed.company_description;
+
+    els.dropBtn.disabled = !feed.policy?.feed_id;
+    els.dropBtn.title = feed.policy?.feed_id
+      ? "Remove this feed from the feed table"
+      : "Not in the feed table — nothing to drop";
+
+    const showParsedOnlyToggle = feed.source === "simplify";
+    els.parsedOnlyLabel.style.display = showParsedOnlyToggle ? "inline-flex" : "none";
+    if (!showParsedOnlyToggle) {
+      state.parsedOnly = false;
+      els.parsedOnlyToggle.checked = false;
+    }
 
     const profile = feed.profile ?? {};
     const badges = [el("span", { class: "badge" }, feed.category)];
@@ -365,6 +423,10 @@ export function createInspector(container, { standalone = false, onClose } = {})
       ...(run.network?.detail_fetched_count != null
         ? [stat("Details fetched", String(run.network.detail_fetched_count),
             "Detail payloads requested instead of reused")]
+        : []),
+      ...(run.network?.detail_skipped_count
+        ? [stat("Details skipped", String(run.network.detail_skipped_count),
+            "Rows a detail.only gate kept out of the detail leg — a deliberate skip, not a shortfall")]
         : []),
       ...(run.network?.retry_count
         ? [stat("Retries", String(run.network.retry_count),
@@ -582,6 +644,10 @@ export function createInspector(container, { standalone = false, onClose } = {})
     });
     rows.push(envelopeRow);
 
+    if (state.parsedOnly && state.items.length === 0) {
+      rows.push(el("div", { class: "empty-state" }, "No parsed items for this feed."));
+    }
+
     for (const item of state.items) {
       const row = el(
         "button",
@@ -605,8 +671,11 @@ export function createInspector(container, { standalone = false, onClose } = {})
     // Land on the first real item so both panes populate immediately.
     (rows[1] ?? rows[0]).click();
 
+    const totalCount = state.result.total_count ?? state.result.result.item_count;
     els.harvestPager.replaceChildren(
-      el("span", {}, `${state.items.length} of ${state.result.result.item_count} items loaded`),
+      el("span", {}, state.parsedOnly
+        ? `${state.items.length} of ${totalCount} parsed items loaded`
+        : `${state.items.length} of ${totalCount} items loaded`),
       state.hasMore
         ? el("button", { class: "btn small", type: "button", onclick: loadMoreItems }, "Load more")
         : null
@@ -632,7 +701,6 @@ export function createInspector(container, { standalone = false, onClose } = {})
       stat("Resolved", String(s.resolved)),
       stat("Fallback", String(s.fallback_company)),
       stat("Would park", String(s.would_park)),
-      stat("Secondhand", String(s.secondhand)),
       stat("Unsupported", String(s.unsupported))
     );
   }
@@ -664,11 +732,13 @@ export function createInspector(container, { standalone = false, onClose } = {})
   }
 
   async function loadMoreItems() {
+    const parsedOnlyParam = state.parsedOnly ? "&parsed_only=true" : "";
     const payload = await api(
-      `/api/results/${state.ref}?offset=${state.items.length}&limit=${PAGE_SIZE}`
+      `/api/results/${state.ref}?offset=${state.items.length}&limit=${PAGE_SIZE}${parsedOnlyParam}`
     );
     state.items = [...state.items, ...payload.items];
     state.hasMore = payload.has_more;
+    state.result.total_count = payload.total_count;
     renderItems();
   }
 
@@ -779,6 +849,9 @@ export function createInspector(container, { standalone = false, onClose } = {})
         : []),
       ...(summary.detail_fetched_count != null
         ? [stat("Fetched details", String(summary.detail_fetched_count))]
+        : []),
+      ...(summary.detail_skipped_count
+        ? [stat("Skipped details", String(summary.detail_skipped_count))]
         : []),
       ...(netMs == null
         ? []

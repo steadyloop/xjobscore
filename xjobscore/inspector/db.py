@@ -1,19 +1,22 @@
-"""Database-free feed surface for the standalone inspector."""
+"""Feed surface for the inspector: PostgreSQL when reachable, TOML otherwise."""
 
 from __future__ import annotations
 
 import hashlib
 import threading
 import time
+from typing import Any
 
 from xjobscore import sources
 from xjobscore.inspector import config
 from xjobscore.records import Feed
 from xjobscore.sources import docxtract, json_api
-from xjobscore.sources.registry.loader import (
+from xjobscore.registry_loader import (
+    _feed_id,
     entries as registry_entries,
     feed_ref,
     feeds as registry_feeds,
+    source_types,
 )
 
 
@@ -45,23 +48,48 @@ def _source_feeds() -> list[Feed]:
     ]
 
 
-class CatalogDB:
-    """Read-only transient feeds: registry-backed sources and local others.
+# `feed` is the operator's inventory; `token` is where a feed's company lives
+# (they are joined loosely on (ats, token) = (source, key), with no foreign
+# key). This is the same join store._FEED_SELECT uses, so the inspector resolves
+# a feed exactly the way the pipeline does.
+_PG_FEEDS = """
+    SELECT f.source, f.key, f.enabled, f.interval_s, f.etag, f.res_hash,
+           f.strikes, f.due_at, f.hold_until,
+           t.company_id, c.name AS company_name
+    FROM feed f
+    LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
+    LEFT JOIN company c ON c.id = t.company_id
+    ORDER BY f.source, f.key
+"""
 
-    Materializing the registry parses ~54k TOML entries (~5s), so the catalog
-    is cached and indexed by id and feed_ref. Restarting (or waiting out the
-    TTL) picks up registry edits.
+
+class CatalogDB:
+    """Read-only feeds, preferring what PostgreSQL actually polls.
+
+    PostgreSQL owns feed inventory; the TOML registry is the fallback for a
+    standalone inspector with no database, and is still the only source of
+    adapter `config`, so a row present in both is merged rather than replaced.
+    Materializing the registry parses ~54k TOML entries (~5s), so both catalogs
+    are cached and indexed by id and feed_ref.
+
+    Feed ids stay `_feed_id(source, key)` in both modes rather than becoming
+    PostgreSQL's `feed.id`. They are an inspector-internal handle -- every
+    mutating route addresses a feed by (source, key) -- so deriving them keeps
+    a URL meaning the same thing whether or not the database is up.
     """
 
     _TTL_S = 300.0
 
-    def __init__(self) -> None:
+    def __init__(self, policy: Any | None = None) -> None:
         self._cached_at = float("-inf")
         self._feeds: list[Feed] = []
         self._by_id: dict[int, Feed] = {}
         self._by_ref: dict[str, Feed] = {}
         self._lock = threading.Lock()
         self._refreshing = False
+        self._policy = policy
+        self._pg: list[Feed] | None = None
+        self._pg_cached_at = float("-inf")
 
     def _install(self, feeds: list[Feed]) -> None:
         self._feeds = feeds
@@ -95,6 +123,71 @@ class CatalogDB:
         finally:
             self._refreshing = False
 
+    def invalidate(self) -> None:
+        """Force the next ``all_feeds()`` call to re-query PostgreSQL.
+
+        Called after a mutation (e.g. deleting a feed) that must be visible
+        immediately rather than waiting out ``_TTL_S``. Leaves ``_pg`` itself
+        alone so a re-query that fails right after still falls back to the
+        last-known list, same as ordinary TTL expiry.
+        """
+        self._pg_cached_at = float("-inf")
+
+    async def _postgres_feeds(self) -> list[Feed] | None:
+        """Feeds as PostgreSQL sees them, or None when it is unreachable."""
+        if self._policy is None:
+            return None
+        if self._pg is not None and time.monotonic() - self._pg_cached_at <= self._TTL_S:
+            return self._pg
+        pool = await self._policy.pool_or_none()
+        if pool is None:
+            return None
+        try:
+            rows = await pool.fetch(_PG_FEEDS)
+        except Exception:
+            # Degraded mode is the whole point of the fallback: a database that
+            # is up but mid-migration must not empty the Feeds page.
+            return self._pg
+        # `config`, `description` and `implemented` have no columns -- they are
+        # registry-owned adapter parameters -- so they are carried over from the
+        # TOML entry of the same identity when one exists.
+        declared = {(entry.source, entry.key): entry for entry in registry_entries()}
+        types = source_types()
+        feeds = []
+        for row in rows:
+            entry = declared.get((row["source"], row["key"]))
+            feeds.append(
+                Feed(
+                    id=_feed_id(row["source"], row["key"]),
+                    source=row["source"],
+                    key=row["key"],
+                    config=entry.config if entry else {},
+                    enabled=row["enabled"],
+                    company_id=row["company_id"],
+                    company_name=row["company_name"],
+                    description=entry.description if entry else "",
+                    implemented=entry.implemented if entry else True,
+                    source_type=types.get(row["source"], "Other"),
+                    etag=row["etag"],
+                    res_hash=row["res_hash"],
+                    interval_s=row["interval_s"],
+                    strikes=row["strikes"],
+                    due_at=row["due_at"],
+                    hold_until=row["hold_until"],
+                )
+            )
+        self._pg = feeds
+        self._pg_cached_at = time.monotonic()
+        return feeds
+
+    async def _resolve(self) -> list[Feed]:
+        postgres = await self._postgres_feeds()
+        if postgres is None:
+            return list(self._catalog())
+        # Adapters whose endpoint is not registry-owned have no feed row and
+        # never will; they are local to the inspector in either mode.
+        return [*postgres, *_source_feeds()]
+
     async def connect(self) -> None:
         return None
 
@@ -102,12 +195,12 @@ class CatalogDB:
         return None
 
     async def all_feeds(self) -> list[Feed]:
-        return list(self._catalog())
+        return await self._resolve()
 
     async def get_feed(self, feed_id: int) -> Feed | None:
-        self._catalog()
-        return self._by_id.get(feed_id)
+        return next((f for f in await self._resolve() if f.id == feed_id), None)
 
     async def get_feed_ref(self, ref: str) -> Feed | None:
-        self._catalog()
-        return self._by_ref.get(ref)
+        return next(
+            (f for f in await self._resolve() if feed_ref(f.source, f.key) == ref), None
+        )

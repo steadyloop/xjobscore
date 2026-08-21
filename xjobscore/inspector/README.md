@@ -41,6 +41,12 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   header's **Enable all visible** button uses that same import-and-enable
   operation for every feed matching the current filters, guarded by a second
   confirmation click.
+
+  Each ATS row also carries a **Drop** button — a hard `DELETE` of the feed
+  row, which cascades to remove its `poll_observation` history too
+  (`ON DELETE CASCADE`). It's the only way a feed leaves `public.feed` once
+  created; disabling just flips the switch, Drop actually removes the row.
+  Direct/Board rows have no Drop control — out of scope for now.
 - **Feed detail** (`/feed?ref=…`) — the three-tab view:
   - *Harvest*: item picker + verbatim payload JSON, with the response envelope
     as a synthetic first row.
@@ -83,6 +89,26 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   skipped client-side. A harvest that runs and fails is a 200 whose
   `status: "error"` the progress counter reports as failed. The button doubles
   as Stop while running.
+
+  **Request budget by vendor** sits between the tiles and the table: one row
+  per platform with its feed count, the requests/day its configured tiers ask
+  for, what the same feeds would cost at the tiers λ recommends, and the
+  percentage between them. Rate limits are a vendor-level resource — `net.py`
+  caps concurrency per hostname suffix, and a board's tolerance belongs to the
+  vendor rather than to any one tenant — but every column in the table below is
+  per feed, so a thousand Ashby tenants at a 5m tier is a decision nobody makes
+  explicitly and no row shows. Clicking a vendor filters the table to it.
+
+  The totals are computed over every scheduled feed and deliberately ignore the
+  filters below: the question is what the vendor actually receives, and that
+  does not shrink because the table is narrowed to stale rows. Paused feeds are
+  excluded from both cost columns and counted in the caption instead — a held
+  feed issues no requests, so billing the vendor for its configured interval
+  would overstate the load. A feed λ cannot rank yet carries its current cost
+  into the recommended column, so the delta reads as "what retiering would
+  change" rather than "what we failed to estimate", and the caption says how
+  many rows that covers. The card is hidden when PostgreSQL is down, where
+  every cost would be a dash the degraded banner has already explained.
 
   λ is an EWMA (half-life 21 d) over `poll_observation.new_postings`, shrunk
   toward the median λ of the same platform. It *recommends* a tier and never
@@ -143,6 +169,111 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   from the poll loop: the rebuild is a destructive full-table recompute, too
   heavy to run on every tick. A completed rebuild refreshes Duplicate review
   automatically; Inspector reviews are not stored in the replaced gold table.
+- **Review** (`/review`) — triage queue over every `job_posting` carrying an
+  `attributes.opus` key: the CS-internship recon set, first tagged by a
+  title-only regex pass into `tech` / `non-tech` / `ambiguous` / `other`.
+  Unlike Postings' hand labels, the decision here lives inside
+  `job_posting.attributes` itself, with a small provenance trio —
+  `opus_by` (`machine` or `human`), `opus_at`, and `opus_machine` (the
+  original regex guess, never overwritten by a review) — so a corrected row
+  and its prior guess both stay visible. Same keyboard idiom as Postings:
+  `j`/`k` moves the cursor, `1`–`4` writes a bucket and advances, `u` undoes
+  the last write, `o` opens the posting. The default filter is
+  **Unreviewed**, so the queue has somewhere to drain to; a **Changed**
+  filter isolates rows where a human decision differs from the machine
+  guess, which is what makes the correction rate visible. Press `?` for the
+  keymap.
+- **Query** (`/query`) — ad-hoc SQL over the pipeline database (`public`, via
+  the same borrowed pool as Postings), for questions no purpose-built page
+  answers. A schema sidebar (live from `information_schema`, with an
+  approximate row count per table), a few starter snippets, and a
+  browser-local history of past queries sit alongside a plain SQL editor;
+  `⌘/Ctrl+Enter` runs, and clicking a result row expands its full JSON.
+
+  Strictly read-only, enforced in `query.py` by three independent layers, not
+  by inspecting the SQL string: (1) the statement must start with
+  `SELECT`/`WITH`/`TABLE`/`EXPLAIN`; (2) it runs through asyncpg's extended
+  query protocol, which PostgreSQL itself refuses to run more than one
+  command through; (3) the whole thing executes inside a `START TRANSACTION
+  READ ONLY` that is always rolled back, never committed — so even a
+  data-modifying CTE that passes layer 1 fails at the database. A 10s
+  `statement_timeout` and a 500-row cap (enforced by only ever fetching that
+  many from the portal) keep a runaway query from hanging the page.
+- **Fields** (`/fields`) — bronze field recon: what an adapter's payloads
+  actually contain, and what each field collapses to downstream. It replaces
+  the hand-written surveys under `doc/raw_postings/`, which were generated by
+  ad-hoc SQL and went stale the moment a board changed.
+
+  Pick an adapter to get a **path census** over `raw_posting.data->'payload'`
+  — every JSON path, its type(s), coverage, fill rate, distinct count, and the
+  canonical `Posting` field the adapter's config reads it into. Click a path
+  for its **exact value histogram** across every current posting, the collapse
+  chain (`workplaceType → Posting.workplace_type_raw → silver._remote() →
+  attributes.remote ∈ {yes, hybrid}`), and — where the collapse is a pure
+  function of the value alone — what each observed value actually becomes.
+  Clicking a value shows whole payloads that carry it. The whole selection
+  lives in the query string, so a finding is a link.
+
+  **The census is sampled and the histogram is exact, and the page always says
+  which.** That split is a measurement, not a preference: on the live database
+  a full depth-3 walk of the largest adapter takes ~108 s, the same walk over
+  2,000 payloads takes ~2 s, and an exact histogram of one chosen path takes
+  ~1–4 s. The cost is detoasting `data` (a 69 MB heap in front of >1 GB of
+  TOAST), not finding rows, so **no index helps** and none is proposed —
+  filtering by adapter is ~100 ms of a query that runs for seconds. What does
+  help is choosing *before* detoasting: every statement starts from a heap-only
+  `DISTINCT ON` that resolves the latest revision per posting while touching no
+  jsonb, and the sample is drawn by hashed id rather than by `LIMIT` on that
+  `DISTINCT ON` — a bare limit would take whichever tenants sort first
+  alphabetically and report one company's schema as the adapter's.
+
+  Two honesty requirements the code enforces. The nine `xml`/`html` adapters
+  store a document in a string, not a JSON object; they get an explicit "no
+  field tree" state and their configured extraction paths, never an empty
+  table. And an adapter whose parser is hand-written Python
+  (`taleo`, `avature`, `hn`, …) reports that its mapping is not introspectable
+  rather than reporting that it maps nothing.
+
+  `mapping.py` is pure — it reads the config tables and the `registry/
+  job-posting` canons, no database — so `/api/fields/mapping` keeps answering
+  while PostgreSQL is down. `fields.py` never writes: every statement runs
+  inside a rolled-back read-only transaction, and a path from the browser
+  reaches SQL only as bind parameters (the parse decides *how many* laterals to
+  emit, never any of the text).
+- **Tokens** (`/tokens`) — the discovery inventory, and the one place an ATS
+  board becomes a pollable one. `public.token` holds every `(ats, token)`
+  pair ever seen, live or dead, across every registry type — ATS, Direct,
+  and Board alike; `public.feed` is the curated set the scheduler polls.
+  Nothing joins them — there is no foreign key — so a token can sit in the
+  inventory with no feed row, and until this page there was no way to see
+  that or act on it.
+
+  Every row carries a derived **feed state** (*not in feed* / *disabled* /
+  *enabled*) and a **category** (ATS/Direct/Board/Other, from the same
+  registry taxonomy the Feeds page uses) that gates Enable-eligibility. The
+  default view is `status=live` + *not in feed*, which is exactly the enable
+  backlog; filters cover vendor, status, feed state, and a search over
+  token/company/vendor.
+
+  **Enable** creates a feed row with polling **on**, ATS tokens only — a
+  Direct or Board row's checkbox is disabled, and if a non-ATS identity ever
+  reaches the backend anyway it is silently skipped and reported separately
+  (`skipped_non_ats`). It goes through `store.upsert_registry_feeds`, whose
+  conflict branch is a no-op write on `source`, so a token that already has
+  a feed row — enabled or disabled — is never touched again; sending it a
+  second time is always safe. Selection survives pagination, so a
+  multi-page backlog is one request.
+
+  The page is read + enable only — no delete. `token.status` belongs to the
+  liveness prober here, separate from `feed.enabled`; removing a feed
+  entirely is **Drop**, on the Feeds page (see above) — a hard delete that
+  also erases the feed's `poll_observation` history.
+
+  One caveat the page states inline: `run.py` fills `Feed.config` from the TOML
+  registry, so an enabled token absent from the registry polls with no adapter
+  config. That is correct for key-only vendors (Greenhouse, Lever, Ashby,
+  Workable, BambooHR, SmartRecruiters) and not for the config-driven ones
+  (Workday, Taleo, Oracle, iCIMS, Dayforce, Avature).
 
 ## Architecture
 
@@ -241,7 +372,7 @@ pollers still double the outbound request rate against every ATS.
 | `XJOBSCORE_INSPECTOR_DSN` / `XJOBSCORE_DSN` / `DATABASE_URL` | — | PostgreSQL DSN; **required** — the result store no longer has a file fallback |
 | `XJOBSCORE_INSPECTOR_STORE_DSN` | the DSN above | Separate database for inspector staging data |
 | `XJOBSCORE_INSPECTOR_SCHEMA` | `inspector` | Schema owning the staging tables; may not be `public` |
-| `XJOBSCORE_INSPECTOR_USER_AGENT` | `xjobscore-inspector/0.1` | Outbound UA |
+| `XJOBSCORE_INSPECTOR_USER_AGENT` | `net.DEFAULT_USER_AGENT` (a Chrome browser string) | Outbound UA |
 | `XJOBSCORE_INSPECTOR_{SOURCE}_CONFIG` | — | JSON feed config for a credentialed local source, e.g. `XJOBSCORE_INSPECTOR_WORKATASTARTUP_CONFIG` with captured `headers`/`body`; never placed in the shared registry |
 | `XJOBSCORE_INSPECTOR_RUNNER` | `false` | Allow this process to run `run.cycle` in-process; see "Running the scheduler in-process" |
 | `XJOBSCORE_INSPECTOR_RUNNER_TICK_S` | `60` | Seconds between scheduler ticks |
@@ -265,6 +396,11 @@ network and no real registry parse. `create_app()`'s defaults leave the runner
 disabled, so nothing in this suite (or a bare `uv run python -m
 xjobscore.inspector`) polls production without `XJOBSCORE_INSPECTOR_RUNNER`
 set explicitly.
+
+`test_mapping.py` and `test_fields.py` need neither a database nor fixtures:
+the first asserts against the real source configs and canons, so a config edit
+that changes an adapter's reads surfaces there; the second pins the path
+compiler's contract, including that no path text ever reaches the SQL string.
 
 Store tests need a real PostgreSQL: each builds a throwaway `inspector_test_*`
 schema and drops it on teardown, so they never see the pipeline's tables.

@@ -41,7 +41,10 @@ def test_known_source_shapes():
     assert source_profile("greenhouse") == {
         "adapter": "json-api", "formats": ["json"], "flavor": None, "archetypes": ["single"],
     }
-    assert source_profile("workday")["archetypes"] == ["paginated", "detail"]
+    # No "detail": the list leg is the only Workday source now. smartrecruiters
+    # keeps the paginated+detail shape covered, which workday used to carry.
+    assert source_profile("workday-list")["archetypes"] == ["paginated"]
+    assert source_profile("smartrecruiters")["archetypes"] == ["paginated", "detail"]
     assert source_profile("oracle")["archetypes"] == ["paginated", "batch-detail"]
     assert source_profile("jobvite") == {
         "adapter": "docxtract",

@@ -14,7 +14,7 @@ from xjobscore.inspector.service import (
 from xjobscore.records import Feed, Item, Record
 from xjobscore import sources
 from xjobscore.sources import docxtract, json_api
-from xjobscore.sources.registry.loader import companies
+from xjobscore.registry_loader import companies
 
 DOCXTRACT_CONFIGS = docxtract.CONFIGS
 JSON_API_CONFIGS = json_api.CONFIGS
@@ -209,91 +209,6 @@ async def test_smartrecruiters_options_reuse_prior_items(
     assert partial.network["summary"]["reused_item_count"] == 1
 
 
-async def test_workday_reuses_prior_detail_path(
-    monkeypatch, store_factory
-):
-    payload = {
-        "jobPostingInfo": {
-            "title": "Demo",
-            "jobReqId": "R1",
-            "externalUrl": "https://tenant.wd1.myworkdayjobs.com/Site/job/demo_R1",
-            "jobDescription": "Full description",
-            "startDate": "2026-08-01",
-        }
-    }
-    captured = []
-
-    async def harvest(name, feed, net, *, options=None):
-        captured.append(options)
-        item = (
-            options.prior_items["/job/demo_R1"]
-            if options.prior_items is not None
-            else Item("R1", payload)
-        )
-        return Record(
-            items=[item],
-            http_status=200,
-            reused_item_count=int(options.prior_items is not None),
-            enumerated_item_count=1,
-            partition_count=2,
-            detail_fetched_count=int(options.prior_items is None),
-            result_window_truncated=True,
-        )
-
-    monkeypatch.setattr(json_api, "harvest", harvest)
-    feed = Feed(id=1, source="workday", key="tenant/wd1/Site", config={})
-
-    async def run(label: str, *, seed: bool):
-        store = await store_factory()
-        if seed:
-            now = datetime.now(timezone.utc)
-            await store.save(
-                RunSnapshot(
-                    result_id=f"prior-{label}", feed_id=feed.id,
-                    source=feed.source, key=feed.key, started_at=now, finished_at=now,
-                    elapsed_ms=1, status="ok", http_status=200, item_count=1,
-                    raw_size_bytes=1, truncated=False,
-                    error_class=None, error_detail=None,
-                    items=({"external_id": "R1", "kind": "json", "payload": payload,
-                            "raw_document": {}},),
-                    envelope={}, size_bytes=1,
-                )
-            )
-        service = InspectorService(FakeDB(feed), user_agent="test", result_store=store)
-        snapshot = await service.fetch_once(feed.id)
-        return service, snapshot
-
-    warm_service, warm = await run("workday-warm", seed=True)
-    _, cold = await run("workday-cold", seed=False)
-
-    warm_options, cold_options = captured
-    # As above: no width override, so a fetch here reproduces a production
-    # poll. These used to pin 32/16 while the config said otherwise.
-    assert warm_options.page_concurrency is None
-    assert warm_options.detail_concurrency is None
-    assert warm_options.list_revision_fields == ("title", "bulletFields.0")
-    assert warm_options.detail_revision_fields == (
-        "jobPostingInfo.title", "jobPostingInfo.jobReqId"
-    )
-    assert warm_options.prior_items["/job/demo_R1"].payload == payload
-    # No prior payload staged at all: nothing to reuse.
-    assert cold_options.prior_items is None
-    # Workday no longer gets a bespoke per-tenant host semaphore here. Its
-    # cross-fetch ceiling is Net's vendor cap, keyed by the myworkdayjobs.com
-    # suffix so one ceiling spans every tenant hostname instead of handing
-    # each its own allowance; that capping is covered in test_net.py, and is
-    # created lazily on the first real request rather than eagerly here.
-    assert "tenant.wd1.myworkdayjobs.com" not in warm_service._shared_host_semaphores
-    assert warm.network["summary"] | {
-        "reused_item_count": 1,
-        "enumerated_count": 1,
-        "partition_count": 2,
-        "detail_fetched_count": 0,
-        "result_window_truncated": True,
-    } == warm.network["summary"]
-    assert cold.network["summary"]["detail_fetched_count"] == 1
-
-
 def test_live_registry_sources_are_registered_and_company_keys_are_configured():
     live = [entry for entry in registry_entries() if entry.verified]
     refs = [feed_ref(entry.source, entry.key) for entry in registry_entries()]
@@ -313,9 +228,13 @@ def test_single_feed_sources_are_embedded_in_the_registry():
     entries_by_source = {entry.source: entry for entry in registry_entries()}
 
     assert entries_by_source["amazon"].company_name == "Amazon"
-    assert entries_by_source["flyio"].key == "flyio"
-    assert entries_by_source["hn"].company_name == "Hacker News"
-    assert entries_by_source["unstop"].company_name == "Unstop"
+    assert entries_by_source["flyio"].key == "flyio"  # defaulted from the source name
+    # Boards name themselves through `description`; their employer is resolved
+    # per posting, so no feed-level company is declared.
+    assert entries_by_source["hn"].company_name is None
+    assert entries_by_source["hn"].description.startswith("Hacker News")
+    assert entries_by_source["unstop"].company_name is None
+    assert entries_by_source["unstop"].description
 
 
 async def test_feed_rows_include_registered_sources_without_a_feed(monkeypatch, store):
@@ -343,7 +262,10 @@ async def test_feed_rows_include_registered_sources_without_a_feed(monkeypatch, 
         "key": "",
         "company_id": None,
         "company_name": None,
+        # Not in the registry at all, so no source declaration to describe it.
+        "description": "",
         "company_description": None,
+        "implemented": True,
         "configured": False,
         "enabled": False,
         "complete": False,

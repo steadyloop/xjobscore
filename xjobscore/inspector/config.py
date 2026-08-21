@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from xjobscore.net import DEFAULT_USER_AGENT
+
 
 def _load_dotenv(path: Path) -> None:
     """Load simple KEY=VALUE files without adding a dotenv dependency."""
@@ -89,7 +91,7 @@ def _validate_dsn(value: str) -> None:
 
 
 def user_agent() -> str:
-    return os.environ.get("XJOBSCORE_INSPECTOR_USER_AGENT", "xjobscore-inspector/0.1")
+    return os.environ.get("XJOBSCORE_INSPECTOR_USER_AGENT", DEFAULT_USER_AGENT)
 
 
 def _env_bool(name: str, default: bool) -> bool:

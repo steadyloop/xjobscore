@@ -1,0 +1,477 @@
+/* Tokens page: the discovery inventory, and enabling live ATS tokens into feed.
+ *
+ * `token` holds every board key ever seen; `feed` is the set the scheduler
+ * polls. The default view is the gap between them -- live tokens with no feed
+ * row -- because that is the only list anyone comes here to act on.
+ */
+
+import { api, isDegraded } from "/static/shared/api.js";
+import { el, formatCount, relativeTime } from "/static/shared/format.js";
+import { renderNav } from "/static/shared/nav.js";
+
+// Show all tokens without pagination
+const ROW_LIMIT = 5000;
+
+// A vendor's tokens are validated a chunk at a time. The server probes three
+// boards at once with a 10s timeout each, so a whole vendor in one request
+// would outlive any browser or proxy patience; a chunk also gives the progress
+// counter something real to count.
+const VALIDATE_CHUNK = 20;
+
+const state = {
+  filter: "all",
+  // Vendor to narrow to, client-side (the whole inventory is already on
+  // screen -- see ROW_LIMIT). Empty string = all vendors.
+  ats: "",
+  total: 0,
+  // Identity keys, kept across filter changes within an enable. Cleared
+  // whenever the filters change, because the set on screen no longer
+  // describes what is checked.
+  selected: new Map(),
+  // Vendor names collapsed by the user. Absent = expanded, so a fresh load
+  // reads the same as the old flat table until someone collapses one.
+  collapsed: new Set(),
+  rows: [],
+  firstLoad: true,
+  groupValidate: new Map(), // vendor -> {completed, total}
+  validateAllRunning: false,
+};
+
+const COLUMN_COUNT = 10;
+
+const nodes = {
+  filter: document.getElementById("status-feed-filter"),
+  atsFilter: document.getElementById("ats-filter"),
+  counts: document.getElementById("counts"),
+  degraded: document.getElementById("degraded-banner"),
+  error: document.getElementById("error-banner"),
+  errorText: document.getElementById("error-text"),
+  body: document.getElementById("tokens-body"),
+  empty: document.getElementById("tokens-empty"),
+  selectAll: document.getElementById("select-all"),
+  selectionCount: document.getElementById("selection-count"),
+  promote: document.getElementById("promote-btn"),
+  validateAll: document.getElementById("validate-all-btn"),
+  range: document.getElementById("range"),
+  truncated: document.getElementById("truncated-banner"),
+};
+
+const identity = (row) => `${row.ats} ${row.token}`;
+
+const visibleRows = () => (state.ats ? state.rows.filter((row) => row.ats === state.ats) : state.rows);
+
+renderNav("Tokens");
+
+/* --- data ---------------------------------------------------------------- */
+
+async function load() {
+  const params = new URLSearchParams({
+    filter: state.filter,
+    limit: String(ROW_LIMIT),
+    offset: "0",
+  });
+  try {
+    const payload = await api(`/api/tokens?${params}`);
+    showError(null);
+    nodes.degraded.hidden = true;
+    render(payload);
+  } catch (error) {
+    if (isDegraded(error)) {
+      nodes.degraded.hidden = false;
+      render({ rows: [], total: 0, counts: {}, ats_options: [] });
+    } else {
+      showError(error);
+    }
+  }
+}
+
+/* The counts header is served alongside the list, so re-ask for it with the
+   smallest page the API will give rather than reloading the table underneath
+   someone who is still working through it. */
+async function refreshCounts() {
+  const params = new URLSearchParams({ filter: state.filter, limit: "1", offset: "0" });
+  try {
+    const payload = await api(`/api/tokens?${params}`);
+    renderCounts(payload.counts ?? {});
+  } catch {
+    // A stale header is not worth an error banner over a probe that worked.
+  }
+}
+
+async function enableTokens() {
+  const tokens = [...state.selected.values()].filter(t => {
+    const row = state.rows.find(r => r.ats === t.ats && r.token === t.token);
+    return row && row.status !== "dead" && row.category === "ATS";
+  });
+  if (!tokens.length) return;
+  nodes.promote.disabled = true;
+  try {
+    const result = await api("/api/tokens/enable", { body: { tokens } });
+    showError(null);
+    state.selected.clear();
+    await load();
+    note(
+      `Enabled ${formatCount(result.imported)} to feed` +
+        (result.existing ? `, ${formatCount(result.existing)} already there` : "") +
+        (result.skipped_non_ats ? `, ${formatCount(result.skipped_non_ats)} skipped (non-ATS)` : "")
+    );
+  } catch (error) {
+    showError(error);
+  } finally {
+    syncPromote();
+  }
+}
+
+async function validateToken(row) {
+  const tokens = [{ ats: row.ats, token: row.token }];
+  try {
+    const result = await api("/api/tokens/validate", { body: { tokens } });
+    if (result.results && result.results[0]) {
+      const validation = result.results[0];
+      Object.assign(row, { status: validation.status, checked_at: validation.checked_at });
+      renderRows();
+      syncPromote();
+      await refreshCounts();
+    }
+  } catch (error) {
+    showError(error);
+  }
+}
+
+/* Validates exactly the rows on screen for this vendor -- the number on the
+   button. The identities travel with the request rather than a bare vendor
+   name, because the server has no idea which filter is in force and would
+   otherwise probe every token the vendor has ever had. */
+async function validateVendor(vendor, rows) {
+  const identities = rows.map((row) => ({ ats: row.ats, token: row.token }));
+  const progress = { completed: 0, total: identities.length };
+  state.groupValidate.set(vendor, progress);
+  renderRows();
+
+  const byKey = new Map(state.rows.map((row) => [identity(row), row]));
+  try {
+    for (let i = 0; i < identities.length; i += VALIDATE_CHUNK) {
+      const chunk = identities.slice(i, i + VALIDATE_CHUNK);
+      const result = await api("/api/tokens/validate", { body: { tokens: chunk } });
+      // Validation only records liveness. Dropping a feed is a deliberate,
+      // separate action on the Feeds page -- a probe can be wrong (a
+      // transient block, a markup change), so it must never delete on its own.
+      for (const validation of result.results ?? []) {
+        const row = byKey.get(`${validation.ats} ${validation.token}`);
+        if (row) {
+          Object.assign(row, {
+            status: validation.status,
+            checked_at: validation.checked_at,
+          });
+        }
+      }
+      progress.completed += chunk.length;
+      renderRows();
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.groupValidate.delete(vendor);
+    renderRows();
+    syncPromote();
+    await refreshCounts();
+  }
+}
+
+/* --- render -------------------------------------------------------------- */
+
+function render(payload) {
+  state.total = payload.total ?? 0;
+  renderCounts(payload.counts ?? {});
+  state.rows = payload.rows ?? [];
+  populateAtsFilter();
+  renderRows();
+  nodes.empty.hidden = state.rows.length > 0;
+  renderRange();
+  syncPromote();
+}
+
+/* Grouped by vendor. Vendors are ordered alphabetically regardless of the
+   row sort, so a group never splits across two positions in the table; rows
+   keep whatever order the API returned. */
+/* Rebuilds the vendor dropdown from whatever is loaded. Preserves the current
+   selection unless the newly loaded set no longer has that vendor (e.g. the
+   status filter changed underneath it), in which case it falls back to all. */
+function populateAtsFilter() {
+  const vendors = [...new Set(state.rows.map((row) => row.ats))].sort();
+  const current = nodes.atsFilter.value;
+  nodes.atsFilter.replaceChildren(
+    el("option", { value: "" }, "All vendors"),
+    ...vendors.map((vendor) => el("option", { value: vendor }, vendor))
+  );
+  if (vendors.includes(current)) {
+    nodes.atsFilter.value = current;
+  } else {
+    state.ats = "";
+    nodes.atsFilter.value = "";
+  }
+}
+
+function renderRows() {
+  const groups = new Map();
+  for (const row of visibleRows()) {
+    if (!groups.has(row.ats)) groups.set(row.ats, []);
+    groups.get(row.ats).push(row);
+  }
+  const vendors = [...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length);
+  // Collapse all vendors only on first load
+  if (state.firstLoad) {
+    for (const vendor of vendors) {
+      state.collapsed.add(vendor);
+    }
+    state.firstLoad = false;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const vendor of vendors) {
+    const vendorRows = groups.get(vendor);
+    const collapsed = state.collapsed.has(vendor);
+    fragment.append(groupRow(vendor, vendorRows, collapsed));
+    if (!collapsed) {
+      for (const row of vendorRows) fragment.append(renderRow(row));
+    }
+  }
+  nodes.body.replaceChildren(fragment);
+}
+
+function validateButton(row) {
+  const button = el(
+    "button",
+    { class: "btn small", type: "button", title: "Check if this token is still live" },
+    "Check"
+  );
+  if (state.validateAllRunning || state.groupValidate.size) button.disabled = true;
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    button.disabled = true;
+    button.textContent = "…";
+    try {
+      await validateToken(row);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Check";
+    }
+  });
+  return button;
+}
+
+function groupRow(vendor, rows, collapsed) {
+  const progress = state.groupValidate.get(vendor);
+  const validateLabel = progress
+    ? `Validating ${progress.completed}/${progress.total}…`
+    : `Validate ${formatCount(rows.length)}`;
+  const validateButton = el(
+    "button",
+    {
+      class: "btn small",
+      type: "button",
+      onclick: (event) => {
+        event.stopPropagation();
+        validateVendor(vendor, rows);
+      },
+      title: `Validate all ${rows.length} tokens in this vendor`,
+    },
+    validateLabel
+  );
+  if (progress || state.validateAllRunning) {
+    validateButton.disabled = true;
+  }
+
+  const row = el(
+    "tr",
+    { class: "group-row" },
+    el(
+      "td",
+      { colspan: COLUMN_COUNT },
+      el(
+        "span",
+        { style: "display:flex;align-items:center;gap:12px" },
+        validateButton,
+        el("span", {}, `${collapsed ? "▸" : "▾"} ${vendor}`),
+        el("span", { class: "secondary" }, `(${formatCount(rows.length)})`)
+      )
+    )
+  );
+  row.addEventListener("click", (e) => {
+    if (e.target !== validateButton) {
+      if (collapsed) state.collapsed.delete(vendor);
+      else state.collapsed.add(vendor);
+      renderRows();
+      syncPromote();
+    }
+  });
+  return row;
+}
+
+function renderCounts(counts) {
+  if (counts.total == null) {
+    nodes.counts.textContent = "";
+    return;
+  }
+  nodes.counts.textContent = [
+    `${formatCount(counts.total)} tokens`,
+    `${formatCount(counts.live)} live`,
+    `${formatCount(counts.dead)} dead`,
+    `${formatCount(counts.promotable)} live and unpromoted`,
+  ].join(" · ");
+}
+
+function renderRow(row) {
+  const key = identity(row);
+  const check = el("input", {
+    type: "checkbox",
+    // Enable is ATS-only, and never touches a token that already has a feed
+    // row -- dropping that row is a Feeds page action, not this checkbox.
+    disabled: row.status === "dead" || row.category !== "ATS",
+    onchange: (event) => {
+      if (event.target.checked) {
+        state.selected.set(key, { ats: row.ats, token: row.token });
+      } else {
+        state.selected.delete(key);
+      }
+      syncPromote();
+    },
+  });
+  check.checked = state.selected.has(key);
+
+  const actionTd = el("td", {});
+  actionTd.append(validateButton(row));
+
+  return el(
+    "tr",
+    {},
+    el("td", { class: "tok-check" }, check),
+    actionTd,
+    el("td", { class: "mono" }, row.ats),
+    el("td", { class: "mono" }, row.token),
+    el("td", {}, row.company ?? el("span", { class: "muted" }, "—")),
+    el("td", {}, chip(row.status)),
+    el("td", {}, chip(row.feed_state)),
+    el("td", { class: "muted" }, row.source ?? "registry"),
+    el("td", { class: "secondary" }, row.discovered_at ? relativeTime(row.discovered_at) : "—"),
+    el("td", { class: "secondary" }, row.checked_at ? relativeTime(row.checked_at) : "—")
+  );
+}
+
+/* Namespaced rather than reusing .chip[data-status], whose vocabulary is the
+   poll outcomes (ok / partial / error) and means something else entirely. */
+function chip(value) {
+  return el(
+    "span",
+    { class: "chip tok-chip", "data-state": value },
+    el("span", { class: "dot" }),
+    value === "none" ? "not in feed" : value
+  );
+}
+
+function renderRange() {
+  const shown = visibleRows().length;
+  // Truncation is about what the server handed over (state.rows vs.
+  // state.total), independent of the vendor dropdown narrowing it further.
+  const truncated = state.rows.length < state.total;
+  nodes.range.textContent = state.ats
+    ? `${formatCount(shown)} matching tokens for ${state.ats}`
+    : truncated
+      ? `Showing ${formatCount(shown)} of ${formatCount(state.total)} matching tokens`
+      : `${formatCount(shown)} matching tokens`;
+  nodes.truncated.hidden = !truncated;
+  if (truncated) {
+    nodes.truncated.textContent =
+      `Only the first ${formatCount(state.rows.length)} of ${formatCount(state.total)} matching tokens are shown — narrow the filters above to see the rest.`;
+  }
+}
+
+function syncPromote() {
+  const liveSelected = [...state.selected.values()].filter(t => {
+    const row = state.rows.find(r => r.ats === t.ats && r.token === t.token);
+    return row && row.status !== "dead" && row.category === "ATS";
+  });
+  const count = liveSelected.length;
+  nodes.promote.disabled = count === 0;
+  nodes.promote.textContent = count
+    ? `Enable ${formatCount(count)} → feed`
+    : "Enable → feed";
+  nodes.selectionCount.textContent = state.selected.size ? `${formatCount(state.selected.size)} selected (${formatCount(count)} promotable)` : "";
+  // Based on all selectable rows in view, not just the ones currently
+  // rendered -- collapsed vendor groups have no checkboxes in the DOM at all.
+  const selectable = visibleRows().filter((row) => row.status !== "dead");
+  const allSelected = selectable.length > 0 && selectable.every((row) => state.selected.has(identity(row)));
+  nodes.selectAll.checked = allSelected;
+  nodes.selectAll.indeterminate = !allSelected && selectable.some((row) => state.selected.has(identity(row)));
+}
+
+function showError(error) {
+  nodes.error.hidden = !error;
+  nodes.error.classList.add("error");
+  if (error) nodes.errorText.textContent = error.message ?? String(error);
+}
+
+/* Same banner, without the error styling -- one place for the page to talk. */
+let noteTimer = null;
+function note(message) {
+  nodes.errorText.textContent = message;
+  nodes.error.classList.remove("error");
+  nodes.error.hidden = false;
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => {
+    nodes.error.hidden = true;
+    nodes.error.classList.add("error");
+  }, 4000);
+}
+
+/* --- wiring -------------------------------------------------------------- */
+
+nodes.selectAll.addEventListener("change", (event) => {
+  const checked = event.target.checked;
+  for (const row of visibleRows()) {
+    if (row.status === "dead") continue;
+    const key = identity(row);
+    if (checked) state.selected.set(key, { ats: row.ats, token: row.token });
+    else state.selected.delete(key);
+  }
+  renderRows();
+  syncPromote();
+});
+
+nodes.atsFilter.addEventListener("change", (event) => {
+  state.ats = event.target.value;
+  renderRows();
+  renderRange();
+  syncPromote();
+});
+
+nodes.filter.addEventListener("change", (event) => {
+  state.filter = event.target.value;
+  state.firstLoad = true;
+  load();
+});
+
+nodes.promote.addEventListener("click", enableTokens);
+
+nodes.validateAll.addEventListener("click", async () => {
+  if (!state.rows.length) return;
+  state.validateAllRunning = true;
+  nodes.validateAll.disabled = true;
+  const original = nodes.validateAll.textContent;
+  try {
+    const vendorGroups = new Map();
+    for (const row of state.rows) {
+      if (!vendorGroups.has(row.ats)) vendorGroups.set(row.ats, []);
+      vendorGroups.get(row.ats).push(row);
+    }
+    for (const [vendor, vendorRows] of vendorGroups) {
+      nodes.validateAll.textContent = `Validating ${vendor}…`;
+      await validateVendor(vendor, vendorRows);
+    }
+  } finally {
+    state.validateAllRunning = false;
+    nodes.validateAll.disabled = false;
+    nodes.validateAll.textContent = original;
+  }
+});
+
+load();

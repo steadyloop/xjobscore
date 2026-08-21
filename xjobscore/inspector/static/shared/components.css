@@ -259,6 +259,16 @@ table.data th.num {
   filter: brightness(1.08);
 }
 
+.btn.danger {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.btn.danger:hover {
+  background: var(--err);
+  color: #fff;
+}
+
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -713,13 +723,13 @@ select:focus-visible,
 
 .master {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(640px, var(--list-width, 420px));
   gap: var(--space-4);
   align-items: start;
 }
 
 .master.split-open {
-  grid-template-columns: minmax(320px, var(--list-width, 420px)) 8px 1fr;
+  grid-template-columns: minmax(640px, var(--list-width, 420px)) 8px 1fr;
   gap: var(--space-3);
 }
 
@@ -835,16 +845,6 @@ table.data tbody tr.flat-source .feed-name {
     position: static;
     max-height: none;
   }
-}
-
-/* Pager -------------------------------------------------------------------- */
-
-.pager {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 12px;
-  color: var(--text-secondary);
 }
 
 /* Scheduler page -------------------------------------------------------------
@@ -1044,6 +1044,39 @@ table.data tbody tr.flat-source .feed-name {
   font-size: 12px;
   color: var(--ok-text);
   padding-bottom: 3px;
+}
+
+/* Per-vendor request budget, above the feed table. Costed in the same green as
+   the latency delta, but the opposite sign is a real cost rather than merely
+   "not an improvement", so it gets its own colour instead of falling back to
+   .secondary the way latencyDelta does. */
+.sched-delta-cost {
+  font-size: 12px;
+  color: var(--serious);
+  padding-bottom: 3px;
+}
+
+.sched-vendors {
+  margin-top: var(--space-3);
+}
+
+.sched-vendors > header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Recommended total and its percentage delta share one right-aligned cell, so
+   the numbers stay in a single tabular column with the delta trailing. */
+.sched-budget-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+/* A totals row is a summary, not a control: it borrows the group-row shading
+   for weight but must not read as clickable the way a vendor row does. */
+table.data tr.sched-vendor-total td {
+  cursor: default;
 }
 
 /* ---- Postings labeling queue (.plist-*) --------------------------------
@@ -1346,4 +1379,624 @@ table.data tbody tr.flat-source .feed-name {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 5px;
+}
+
+/* Query page ----------------------------------------------------------------- */
+
+.query-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .query-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.query-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.query-sidebar-body {
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.query-sidebar-body input[type="search"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.query-schema-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.query-schema-table summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.query-schema-table summary:hover {
+  background: var(--surface-2);
+}
+
+.query-schema-table summary::-webkit-details-marker {
+  display: none;
+}
+
+.query-schema-table summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.query-schema-table[open] > summary::before {
+  content: "▾";
+}
+
+.query-schema-table .table-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-schema-table .table-name:hover {
+  color: var(--accent);
+}
+
+.query-schema-table .row-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.query-schema-columns {
+  padding: 2px 0 4px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.query-schema-columns button {
+  appearance: none;
+  border: none;
+  width: 100%;
+  background: none;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.query-schema-columns button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.query-schema-columns .col-type {
+  color: var(--text-muted);
+}
+
+.query-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 28vh;
+  overflow: auto;
+}
+
+.query-history-list button {
+  appearance: none;
+  border: none;
+  width: 100%;
+  background: none;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.query-history-list button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.query-history-empty[hidden] {
+  display: none;
+}
+
+.query-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.query-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: var(--space-3) var(--space-4);
+  resize: vertical;
+  min-height: 9em;
+  border-radius: var(--radius);
+}
+
+.query-editor:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.query-cell {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-cell.null {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.query-foot {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.query-foot[hidden] {
+  display: none;
+}
+
+.query-row-detail {
+  border-top: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+}
+
+.query-row-detail[hidden] {
+  display: none;
+}
+
+.query-row-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+/* Fields page ---------------------------------------------------------------- */
+
+/* Two columns until a field is selected, so the survey uses the whole width
+   rather than holding a gap open for a pane that is not there. */
+.fields-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.fields-layout.with-detail {
+  grid-template-columns: 220px minmax(0, 1fr) 400px;
+}
+
+@media (max-width: 1400px) {
+  .fields-layout.with-detail {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .fields-detail {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .fields-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fields-sidebar-body {
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fields-sidebar-body input[type="search"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fields-adapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.fields-adapter {
+  appearance: none;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.fields-adapter:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.fields-adapter[aria-current="true"] {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.fields-adapter .name {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fields-adapter .count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An xml/html adapter has no JSON tree to walk; dim it so the difference is
+   legible before the click, not only after. */
+.fields-adapter[data-surveyable="false"] .name {
+  color: var(--text-muted);
+}
+
+.fields-survey > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fields-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.fields-notice {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.fields-notice[hidden] {
+  display: none;
+}
+
+.fields-notice p {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+}
+
+/* Six columns share the middle grid track, which narrows to ~760px once the
+   detail pane opens. Tighter than the shared table so they all fit without
+   the horizontal scroll taking over ordinary browsing. */
+.fields-survey table.data {
+  font-size: 12px;
+}
+
+.fields-survey table.data th,
+.fields-survey table.data td {
+  white-space: nowrap;
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.fields-path {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fields-canon {
+  display: inline-block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent);
+}
+
+/* Inherited: the exact path is not named by the config, it rides along inside
+   a mapped ancestor. A different weight, because it is a weaker claim. */
+.fields-canon.inherited {
+  color: var(--text-muted);
+}
+
+/* Five stats in a 400px pane: the shared 18px value is a headline size. */
+.fields-detail .stat-row {
+  gap: var(--space-2) var(--space-4);
+}
+
+.fields-detail .stat .value {
+  font-size: 15px;
+}
+
+.fields-detail-body {
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 72vh;
+  overflow: auto;
+}
+
+.fields-subhead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+}
+
+.fields-chain {
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.fields-chain[data-projected="false"] {
+  border-left-color: var(--border);
+}
+
+.fields-chain-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.fields-chain-steps code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.fields-chain-steps .arrow {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.fields-chain p {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+}
+
+.fields-domain .pill {
+  margin-right: 4px;
+}
+
+.fields-values {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fields-value {
+  position: relative;
+  appearance: none;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.fields-value:hover {
+  background: var(--surface-2);
+}
+
+.fields-value .bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--viz-series);
+  opacity: 0.16;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+.fields-value .label {
+  position: relative;
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fields-value[data-null="true"] .label {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.fields-value .collapsed {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ok-text);
+}
+
+.fields-value .collapsed[data-none="true"] {
+  color: var(--text-muted);
+}
+
+.fields-value .count,
+.fields-value .share {
+  position: relative;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fields-value .share {
+  min-width: 3.4em;
+  text-align: right;
+}
+
+.fields-examples {
+  border-top: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+}
+
+.fields-examples[hidden] {
+  display: none;
+}
+
+.fields-examples .json-pane {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* Tokens page ----------------------------------------------------------------
+   Namespaced .tok-*. The status chip gets its own attribute rather than
+   reusing .chip[data-status], whose vocabulary is poll outcomes -- a token's
+   "live" and a poll's "ok" are unrelated states that happen to share a color. */
+
+.tok-note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  max-width: 78ch;
+}
+
+.tok-check {
+  width: 1px;
+  padding-right: 0;
+}
+
+.tok-check input {
+  display: block;
+  cursor: pointer;
+}
+
+.tok-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.tok-chip[data-state="live"] .dot { background: var(--ok); }
+.tok-chip[data-state="dead"] .dot { background: var(--err); }
+.tok-chip[data-state="unknown"] .dot { background: var(--text-muted); }
+.tok-chip[data-state="enabled"] .dot { background: var(--ok); }
+.tok-chip[data-state="disabled"] .dot { background: var(--warn); }
+.tok-chip[data-state="none"] .dot { background: var(--text-muted); }
+
+/* Review page ---------------------------------------------------------------
+   The opus triage queue. Reuses .plist-*/.master/.detail-pane wholesale
+   (same list/detail split as Postings); only the bucket chip and the
+   machine-vs-human diff line are page-specific. */
+
+/* Bucket chip. Colors ride the shared status tokens, same idea as
+   .plist-label: tech=ok, non-tech=muted, ambiguous=warn, other=accent. */
+.rev-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.rev-label[data-label="tech"] { color: var(--ok-text); }
+.rev-label[data-label="non-tech"] { color: var(--text-muted); }
+.rev-label[data-label="ambiguous"] { color: var(--warn); }
+.rev-label[data-label="other"] { color: var(--accent); }
+
+.rev-diff {
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.rev-diff[hidden] {
+  display: none;
+}
+
+.rev-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.rev-actions button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }

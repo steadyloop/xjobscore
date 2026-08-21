@@ -32,6 +32,7 @@ const ARM_TIMEOUT_MS = 4000;
 // so this only has to cover one HTTP fetch of a job board plus the write.
 const POLL_NOW_SETTLE_MS = 3000;
 const DETAIL_WIDTH_KEY = "inspector-scheduler-detail-width";
+const VENDOR_OPEN_KEY = "inspector-scheduler-vendors-open";
 const LATENCY_TARGET_S = 1800;
 // Worker count for Fetch all. Same reasoning as the feeds page: this only
 // bounds in-flight browser requests -- the server-side shared Net (per-host
@@ -119,6 +120,7 @@ async function loadOverview() {
   renderRunToggle();
   renderStats();
   renderBanners();
+  renderVendors();
 }
 
 async function loadFeeds() {
@@ -128,6 +130,7 @@ async function loadFeeds() {
   state.telemetryAvailable = Boolean(view.telemetry_available);
   populateFilters();
   renderBanners();
+  renderVendors();
   renderTable();
 }
 
@@ -260,6 +263,236 @@ function renderStats() {
         ? `${formatCount(worst.errors)} of ${formatCount(tiles.errors_24h)} from ${worst.source}`
         : "no failed polls",
     })
+  );
+}
+
+/* --------------------------------------------------------- vendor rollup */
+
+/* What production is asking each vendor to absorb.
+ *
+ * Rate limits are a vendor-level resource -- net.py caps concurrency per
+ * hostname suffix, and a job board's tolerance is a property of the vendor, not
+ * of any one tenant feed -- but every number on the table below is per feed. A
+ * thousand Ashby tenants at a 5m tier is a decision nobody makes explicitly and
+ * that no row shows; this is where it becomes visible.
+ *
+ * Computed over every scheduled feed, deliberately NOT over the filtered set:
+ * the question is what the vendor actually receives, and that total does not
+ * shrink because the table below is narrowed to stale rows. Clicking a row is
+ * what narrows the table -- the roll-up stays whole.
+ *
+ * Paused feeds are excluded from both cost columns and counted separately. A
+ * held feed issues no requests, so folding its configured interval into the
+ * total would bill the vendor for polls that are not happening.
+ */
+function vendorRollup() {
+  const errorsBySource = new Map(
+    (state.overview?.tiles?.error_sources ?? []).map((row) => [row.source, row.errors])
+  );
+
+  const vendors = new Map();
+  for (const feed of state.feeds) {
+    let agg = vendors.get(feed.source);
+    if (!agg) {
+      agg = {
+        source: feed.source,
+        feeds: 0,
+        paused: 0,
+        current: 0,
+        recommended: 0,
+        unpriced: 0, // active feeds with no interval — cost unknown, not zero
+        unrated: 0, // active feeds λ has no opinion on yet
+        attention: new Map(),
+      };
+      vendors.set(feed.source, agg);
+    }
+    agg.feeds += 1;
+
+    const status = feed.sched.status.state;
+    if (status === "backing_off" || status === "stale") {
+      agg.attention.set(status, (agg.attention.get(status) ?? 0) + 1);
+    }
+    if (feed.policy?.paused_at) {
+      agg.paused += 1;
+      continue;
+    }
+
+    const current = feed.sched.requests_per_day;
+    if (current == null) {
+      agg.unpriced += 1;
+      continue;
+    }
+    agg.current += current;
+    // A feed λ cannot rank yet carries its current cost into the recommended
+    // column, so the two totals compare like for like: the delta then reads as
+    // "what retiering would change", not "what we failed to estimate".
+    const ideal = feed.sched.ideal_interval_s;
+    if (ideal == null) {
+      agg.unrated += 1;
+      agg.recommended += current;
+    } else {
+      agg.recommended += 86_400 / ideal;
+    }
+  }
+
+  for (const agg of vendors.values()) {
+    agg.errors = errorsBySource.get(agg.source) ?? 0;
+  }
+  // Biggest consumer first: the vendor most worth looking at is the one being
+  // asked for the most, not the one earliest in the alphabet.
+  return [...vendors.values()].sort(
+    (a, b) => b.current - a.current || a.source.localeCompare(b.source)
+  );
+}
+
+/* Signed change against the current cost, shown only when it is worth acting
+   on. Under 5% is retiering noise and would read as a to-do that isn't one. */
+function budgetDelta(agg) {
+  if (!agg.current) return null;
+  const change = agg.recommended - agg.current;
+  const ratio = change / agg.current;
+  if (Math.abs(ratio) < 0.05) return el("span", { class: "secondary" }, "flat");
+  const cheaper = change < 0;
+  return el(
+    "span",
+    {
+      class: cheaper ? "sched-delta-good" : "sched-delta-cost",
+      title: cheaper
+        ? `${formatCount(Math.round(-change))} fewer requests/day at the recommended tiers`
+        : `${formatCount(Math.round(change))} more requests/day at the recommended tiers`,
+    },
+    `${cheaper ? "−" : "+"}${Math.abs(Math.round(ratio * 100))}%`
+  );
+}
+
+/* The caveats that keep a total honest, as one line under the vendor name. */
+function vendorNote(agg) {
+  const parts = [];
+  if (agg.paused) parts.push(`${formatCount(agg.paused)} paused, not counted`);
+  if (agg.unpriced) parts.push(`${formatCount(agg.unpriced)} without a tier`);
+  if (agg.unrated) parts.push(`${formatCount(agg.unrated)} λ can't rank yet`);
+  return parts.length ? el("div", { class: "secondary" }, parts.join(" · ")) : null;
+}
+
+function vendorRow(agg, totalErrors) {
+  const selected = state.platform === agg.source;
+  const attention = [...agg.attention].map(([name, count]) =>
+    el(
+      "span",
+      { class: "badge", "data-kind": name === "backing_off" ? "error" : "would_park" },
+      `${formatCount(count)} ${name.replace("_", " ")}`
+    )
+  );
+
+  return el(
+    "tr",
+    {
+      class: "row-link",
+      tabindex: "0",
+      "aria-selected": selected ? "true" : "false",
+      title: selected
+        ? "Showing only this vendor — click to clear the filter"
+        : `Filter the table below to ${agg.source}`,
+      onclick: () => filterToVendor(selected ? "" : agg.source),
+      onkeydown: (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          filterToVendor(selected ? "" : agg.source);
+        }
+      },
+    },
+    el(
+      "td",
+      {},
+      el("span", { class: "feed-name" }, agg.source),
+      vendorNote(agg)
+    ),
+    el("td", { class: "num" }, formatCount(agg.feeds)),
+    el("td", { class: "num" }, formatCount(Math.round(agg.current))),
+    el(
+      "td",
+      { class: "num" },
+      el(
+        "span",
+        { class: "sched-budget-cell" },
+        formatCount(Math.round(agg.recommended)),
+        budgetDelta(agg)
+      )
+    ),
+    el("td", {}, attention.length ? attention : el("span", { class: "muted" }, "—")),
+    el(
+      "td",
+      { class: "num" },
+      agg.errors
+        ? el(
+            "span",
+            {
+              title: totalErrors
+                ? `${formatCount(agg.errors)} of ${formatCount(totalErrors)} failed polls in the last 24 h`
+                : null,
+            },
+            formatCount(agg.errors)
+          )
+        : el("span", { class: "muted" }, "—")
+    )
+  );
+}
+
+function totalsRow(vendors) {
+  const sum = (key) => vendors.reduce((total, agg) => total + agg[key], 0);
+  return el(
+    "tr",
+    { class: "group-row sched-vendor-total" },
+    el("td", {}, `${vendors.length} vendors`),
+    el("td", { class: "num" }, formatCount(sum("feeds"))),
+    el("td", { class: "num" }, formatCount(Math.round(sum("current")))),
+    el("td", { class: "num" }, formatCount(Math.round(sum("recommended")))),
+    el("td", {}),
+    el("td", { class: "num" }, formatCount(sum("errors")))
+  );
+}
+
+function renderVendors() {
+  const card = document.getElementById("vendor-rollup");
+  // With PostgreSQL down there are no intervals, so every cost here would be a
+  // column of dashes; the degraded banner already says why. Nothing scheduled
+  // is the empty-state the table below owns.
+  if (!state.connected || !state.feeds.length) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+
+  const vendors = vendorRollup();
+  const totalErrors = state.overview?.tiles?.errors_24h ?? 0;
+  document.getElementById("vendor-scope").textContent =
+    `${formatCount(state.feeds.length)} scheduled feeds · totals ignore the filters below`;
+
+  document.getElementById("vendor-body").replaceChildren(
+    ...vendors.map((agg) => vendorRow(agg, totalErrors)),
+    // One vendor is its own total; a second row of identical numbers is noise.
+    vendors.length > 1 ? totalsRow(vendors) : null
+  );
+}
+
+function filterToVendor(source) {
+  state.platform = source;
+  document.getElementById("filter-platform").value = source;
+  renderVendors();
+  renderTable();
+}
+
+function wireVendorToggle(button) {
+  const wrap = document.getElementById("vendor-wrap");
+  const apply = (open) => {
+    wrap.hidden = !open;
+    button.textContent = open ? "Hide" : "Show";
+    button.setAttribute("aria-expanded", String(open));
+    localStorage.setItem(VENDOR_OPEN_KEY, open ? "1" : "0");
+  };
+  apply(localStorage.getItem(VENDOR_OPEN_KEY) !== "0");
+  button.addEventListener("click", () =>
+    apply(button.getAttribute("aria-expanded") !== "true")
   );
 }
 
@@ -864,11 +1097,13 @@ for (const [id, key] of [
 ]) {
   document.getElementById(id).addEventListener("change", (event) => {
     state[key] = event.target.value;
+    if (key === "platform") renderVendors();
     renderTable();
   });
 }
 
 wireFetchAllButton(document.getElementById("fetch-all"));
+wireVendorToggle(document.getElementById("vendor-toggle"));
 
 const runToggleEl = document.getElementById("run-toggle");
 runToggleEl.addEventListener("click", () => toggleRun(runToggleEl));

@@ -163,9 +163,9 @@ button {
 /* Page layout ------------------------------------------------------------- */
 
 .page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4);
+  max-width: none;
+  margin: 0;
+  padding: 107px;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -198,6 +198,10 @@ button {
 
 .banner[hidden] {
   display: none;
+}
+
+.banner.error {
+  border-left-color: var(--err);
 }
 
 .muted {

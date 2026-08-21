@@ -21,7 +21,7 @@ from typing import Any
 LABELS = ("relevant", "irrelevant", "unsure")
 LABEL_STATES = ("all", "unlabeled", "labeled") + LABELS
 ORDERS = ("newest", "company", "random")
-STATUSES = ("active", "closed", "duplicates")
+STATUSES = ("active", "closed", "duplicates", "removal")
 
 # POSIX character classes, not \b: PostgreSQL ARE word boundaries ([[:<:]])
 # read poorly and \b means backspace inside a bracket expression.
@@ -51,7 +51,7 @@ WITH lab AS (
 )
 SELECT p.id, p.source, p.source_key, c.name AS company, p.title,
        p.location_text, p.source_url, p.apply_url, p.posted_at, p.status,
-       p.first_seen_at, p.last_seen_at, p.attributes, p.dup_group_id,
+       p.first_seen_at, p.last_seen_at, p.attributes, p.job_type, p.dup_group_id,
        (p.description IS NOT NULL) AS has_description,
        count(*) OVER () AS total
 FROM job_posting AS p
@@ -60,7 +60,8 @@ LEFT JOIN lab AS l
   ON l.source = p.source AND l.source_key = p.source_key
 WHERE ($4::text IS NULL OR split_part(p.source, ':', 1) = $4)
   AND (($5::text IN ('active', 'closed') AND p.status = $5)
-       OR ($5::text = 'duplicates' AND p.dup_group_id IS NOT NULL))
+       OR ($5::text = 'duplicates' AND p.dup_group_id IS NOT NULL)
+       OR ($5::text = 'removal' AND p.removal_marked_at IS NOT NULL))
   AND ($6::text = '' OR p.title ILIKE '%' || $6 || '%'
        OR c.name ILIKE '%' || $6 || '%'
        OR p.location_text ILIKE '%' || $6 || '%'
@@ -78,7 +79,7 @@ _DETAIL = """
 SELECT p.id, p.source, p.source_key, c.name AS company, p.title,
        p.description, p.location_text, p.source_url, p.apply_url,
        p.posted_at, p.status, p.first_seen_at, p.last_seen_at,
-       p.attributes, p.content_hash, p.raw_id, p.dup_group_id
+       p.attributes, p.job_type, p.content_hash, p.raw_id, p.dup_group_id
 FROM job_posting AS p
 JOIN company AS c ON c.id = p.company_id
 WHERE p.id = $1

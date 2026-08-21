@@ -3,7 +3,7 @@
    panel (shared/inspect.js); this page only owns the on/off switch. */
 
 import { api, isDegraded } from "/static/shared/api.js";
-import { setFeedEnabled, setFeedsEnabled } from "/static/shared/feed-policy.js";
+import { setFeedEnabled, setFeedsEnabled, dropFeed } from "/static/shared/feed-policy.js";
 import {
   el,
   formatMs,
@@ -13,7 +13,7 @@ import {
 import { createInspector } from "/static/shared/inspect.js";
 import { renderNav } from "/static/shared/nav.js";
 
-const CATEGORIES = ["All", "ATS", "Direct", "Board"];
+const CATEGORIES = ["ATS", "Direct", "Board"];
 const RENDER_CHUNK = 200;
 const ARM_TIMEOUT_MS = 4000;
 // Workers just bound in-flight requests from the browser; the backend's
@@ -25,7 +25,7 @@ const BULK_FETCH_CONCURRENCY = 8;
 const state = {
   feeds: [],
   postgres: null,
-  category: "All",
+  category: "ATS",
   search: "",
   enabledOnly: false,
   errorsOnly: false,
@@ -39,7 +39,13 @@ const state = {
 const masterEl = document.getElementById("master");
 const paneEl = document.getElementById("detail-pane");
 const handleEl = document.getElementById("split-handle");
-const inspector = createInspector(paneEl, { onClose: closeDetail });
+const inspector = createInspector(paneEl, {
+  onClose: closeDetail,
+  onDrop: async () => {
+    closeDetail();
+    await load();
+  },
+});
 
 const LIST_WIDTH_KEY = "inspector-list-width";
 const storedWidth = Number(localStorage.getItem(LIST_WIDTH_KEY));
@@ -284,7 +290,6 @@ function matches(feed) {
 function renderCategoryPills() {
   const counts = new Map(CATEGORIES.map((c) => [c, 0]));
   for (const feed of state.feeds) {
-    counts.set("All", counts.get("All") + 1);
     counts.set(feed.category, (counts.get(feed.category) ?? 0) + 1);
   }
   document.getElementById("category-pills").replaceChildren(
@@ -358,6 +363,39 @@ function fetchButton(feed) {
   return button;
 }
 
+/* Hard delete -- Direct/Board sources are out of scope, and a feed that was
+   never imported has nothing to drop. */
+function dropButton(feed) {
+  const button = el(
+    "button",
+    { class: "btn small", type: "button", title: "Drop this feed (permanent)" },
+    "Drop"
+  );
+  if (feed.category !== "ATS" || !feed.policy?.in_postgres) {
+    button.disabled = true;
+    button.title =
+      feed.category !== "ATS"
+        ? "Drop is ATS-only"
+        : "Not imported into the feed table yet";
+    return button;
+  }
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    button.disabled = true;
+    button.textContent = "…";
+    try {
+      await dropFeed(feed);
+      if (state.selectedRef === feed.feed_ref) closeDetail();
+      await load();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Drop";
+      console.error(error);
+    }
+  });
+  return button;
+}
+
 function feedToggle(feed) {
   const input = el("input", { type: "checkbox" });
   if (feed.policy) {
@@ -396,7 +434,8 @@ function feedRow(feed) {
       "span",
       { style: "display:inline-flex;align-items:center;gap:6px" },
       feedToggle(feed),
-      fetchButton(feed)
+      fetchButton(feed),
+      dropButton(feed)
     )
   );
 
@@ -414,6 +453,10 @@ function feedRow(feed) {
   return row;
 }
 
+function isEnabled(feed) {
+  return Boolean(feed.policy?.in_postgres && feed.policy.enabled);
+}
+
 /* Whole-vendor switch. Scope is every feed in the group, not just the ones
    already in Postgres: enabling a catalog-only vendor is precisely how its
    feeds get imported, and gating on in_postgres made the switch dead on the
@@ -422,9 +465,7 @@ function feedRow(feed) {
    /api/feeds/bulk-policy. */
 function groupToggle(source, feeds) {
   const eligible = feeds.filter((feed) => feed.policy && feed.feed_ref);
-  const enabledCount = eligible.filter(
-    (feed) => feed.policy.in_postgres && feed.policy.enabled
-  ).length;
+  const enabledCount = eligible.filter(isEnabled).length;
   const busy = state.groupToggle.has(source);
 
   const input = el("input", { type: "checkbox" });
@@ -476,9 +517,12 @@ function groupToggle(source, feeds) {
 
 function groupRow(source, feeds, expanded) {
   const progress = state.groupFetch.get(source);
+  // Vendor fetch runs the enabled feeds only -- the disabled ones are off on
+  // purpose, and a 2,591-feed vendor would otherwise fetch its whole catalog.
+  const enabledFeeds = feeds.filter(isEnabled);
   const fetchLabel = progress
     ? `Fetching ${progress.completed}/${progress.total}…`
-    : "Fetch";
+    : `Fetch ${enabledFeeds.length}`;
   const errors = feeds.filter((feed) => feed.last_result?.status === "error").length;
   const medianElapsed = median(
     feeds.map((feed) => feed.last_result?.elapsed_ms).filter((value) => value != null)
@@ -491,12 +535,17 @@ function groupRow(source, feeds, expanded) {
       type: "button",
       onclick: (event) => {
         event.stopPropagation();
-        fetchGroup(source, feeds);
+        fetchGroup(source, enabledFeeds);
       },
+      title: enabledFeeds.length
+        ? `Fetch the ${enabledFeeds.length} enabled feeds in this source`
+        : "No enabled feeds in this source",
     },
     fetchLabel
   );
-  if (progress || state.bulkFetch) fetchButton.disabled = true;
+  if (progress || state.bulkFetch || !enabledFeeds.length) {
+    fetchButton.disabled = true;
+  }
 
   const row = el(
     "tr",
@@ -590,7 +639,7 @@ function render() {
     else atsGroups.push([source, feeds]);
   }
   flatFeeds.sort((a, b) => feedSortKey(a).localeCompare(feedSortKey(b)));
-  atsGroups.sort(([a], [b]) => a.localeCompare(b));
+  atsGroups.sort(([, a], [, b]) => b.length - a.length);
 
   body.replaceChildren();
   const work = [];

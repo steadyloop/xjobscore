@@ -72,6 +72,8 @@ export function el(tag, attrs = {}, ...children) {
       node.addEventListener(name.slice(2), value);
     } else if (name === "dataset") {
       Object.assign(node.dataset, value);
+    } else if (typeof value === "boolean") {
+      if (value) node.setAttribute(name, "");
     } else {
       node.setAttribute(name, value);
     }

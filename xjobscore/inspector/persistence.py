@@ -25,7 +25,7 @@ from uuid import UUID
 import asyncpg
 
 from xjobscore.inspector.cache import RunSnapshot
-from xjobscore.sources.registry.loader import (
+from xjobscore.registry_loader import (
     Company,
     companies as registry_companies,
     feed_ref as compute_feed_ref,

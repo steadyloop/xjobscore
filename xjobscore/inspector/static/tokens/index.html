@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xJobscore</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body>
+  <header id="topnav"></header>
+  <main class="page">
+    <div class="page-header">
+      <select id="status-filter" title="Token status" aria-label="Token status" hidden>
+        <option value="live">Live</option>
+        <option value="dead">Dead</option>
+        <option value="unknown">Unknown</option>
+        <option value="all">Any status</option>
+      </select>
+      <select id="status-feed-filter" title="Status" aria-label="Status">
+        <option value="all">All tokens</option>
+        <option value="alive-active">Alive - Active</option>
+        <option value="alive-inactive">Alive - Inactive</option>
+        <option value="dead">Dead</option>
+      </select>
+      <select id="ats-filter" title="Vendor" aria-label="Vendor">
+        <option value="">All vendors</option>
+      </select>
+      <select id="order-filter" title="Sort order" aria-label="Sort order" hidden>
+        <option value="discovered">Newest discovery</option>
+        <option value="company">Company</option>
+        <option value="token">Vendor, token</option>
+      </select>
+      <input type="search" id="search" placeholder="Filter token or company…" autocomplete="off" hidden>
+      <div class="grow"></div>
+      <button class="btn small" type="button" id="validate-all-btn" title="Validate all visible tokens">Validate all</button>
+      <span class="secondary" id="counts"></span>
+    </div>
+
+    <div class="banner" id="degraded-banner" hidden>
+      PostgreSQL is unreachable — the token inventory cannot be read.
+    </div>
+    <div class="banner" id="truncated-banner" hidden></div>
+    <div class="banner error" id="error-banner" hidden>
+      <span id="error-text"></span>
+    </div>
+
+    <section class="card">
+      <header>
+        <h1>Tokens</h1>
+        <span class="secondary" id="selection-count"></span>
+        <div class="grow"></div>
+        <button class="btn primary" type="button" id="promote-btn" disabled>Enable → feed</button>
+      </header>
+      <div class="table-wrap">
+        <table class="data" id="tokens-table">
+          <thead>
+            <tr>
+              <th class="tok-check"><input type="checkbox" id="select-all" title="Select this page"></th>
+              <th></th>
+              <th>Vendor</th>
+              <th>Token</th>
+              <th>Company</th>
+              <th>Status</th>
+              <th>Feed</th>
+              <th>Found via</th>
+              <th>Discovered</th>
+              <th>Checked</th>
+            </tr>
+          </thead>
+          <tbody id="tokens-body"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="tokens-empty" hidden>No tokens match these filters.</div>
+      <div class="tok-foot">
+        <span id="range" class="secondary"></span>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/static/tokens/app.js"></script>
+</body>
+</html>

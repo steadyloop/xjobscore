@@ -22,3 +22,12 @@ export async function setFeedsEnabled(feeds, enabled) {
   if (!refs.length) return { affected: 0 };
   return api("/api/feeds/bulk-policy", { body: { refs, enabled } });
 }
+
+/* Hard delete -- the row and its poll history are gone, not just paused.
+   Only meaningful once a feed has actually been imported into Postgres. */
+export async function dropFeed(feed) {
+  if (!feed.policy?.in_postgres || !feed.policy?.feed_id) {
+    throw new Error("feed was never imported");
+  }
+  return api("/api/feeds/bulk-delete", { body: { feed_ids: [feed.policy.feed_id] } });
+}

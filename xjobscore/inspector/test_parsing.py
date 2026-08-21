@@ -76,6 +76,19 @@ def test_per_item_errors_do_not_hide_other_items(register):
     assert outcome["summary"]["item_errors"] == 1
 
 
+def test_items_parsed_excludes_rows_with_no_canonicals(register):
+    def parse(_feed, item, _envelope):
+        return [] if item.external_id == "filtered" else [posting(external_id=item.external_id)]
+
+    register(parse)
+    outcome = parse_record(
+        ats_feed(), [Item("kept", {}), Item("filtered", {})], {}, no_alias
+    )
+
+    assert outcome["summary"]["items_parsed"] == 1
+    assert outcome["summary"]["item_errors"] == 0
+
+
 def test_non_posting_canonicals_are_unsupported_but_rendered(register):
     def parse(_feed, _item, _envelope):
         return [
@@ -107,7 +120,7 @@ def test_secondhand_postings_never_reach_resolution(register):
     entry = outcome["items"][0]["canonicals"][0]
     assert entry["classification"] == "secondhand"
     assert "company_resolution" not in entry
-    assert outcome["summary"]["secondhand"] == 1
+    assert "secondhand" not in outcome["summary"]
     assert outcome["summary"]["postings"] == 0
 
 

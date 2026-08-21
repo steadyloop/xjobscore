@@ -18,6 +18,8 @@ from xjobscore.inspector.cache import now_utc
 from xjobscore.inspector.db import CatalogDB
 from xjobscore.inspector.duplicate_groups import current_fingerprint
 from xjobscore.inspector.duplicate_groups import query as duplicate_group_query
+from xjobscore.inspector import fields as fields_recon
+from xjobscore.inspector import mapping as field_mapping
 from xjobscore.inspector.persistence import ResultStore
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
@@ -28,9 +30,17 @@ from xjobscore.inspector.policy import (
 from xjobscore.inspector.postings import detail as posting_detail
 from xjobscore.inspector.postings import query as posting_query
 from xjobscore.inspector.profile import source_profile, wire_content_type
+from xjobscore.inspector.query import format_error as query_format_error
+from xjobscore.inspector.query import run as query_run_sql
+from xjobscore.inspector.query import schema as query_schema_sql
+from xjobscore.inspector.review import detail as review_detail
+from xjobscore.inspector.review import query as review_query
+from xjobscore.inspector.review import set_labels as review_set_labels
 from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.inspector.service import InspectorService
-from xjobscore.sources import UnknownSource
+from xjobscore.inspector.tokens import query as tokens_query
+from xjobscore.inspector import validator
+from xjobscore.sources import UnknownSource, source_type
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -74,9 +84,49 @@ class PostingLabelsBody(BaseModel):
     labels: list[PostingLabel]
 
 
+class ReviewLabel(BaseModel):
+    """One opus-bucket decision for a single ``job_posting`` row."""
+
+    id: int
+    label: Literal["tech", "non-tech", "ambiguous", "other"]
+
+
+class ReviewLabelsBody(BaseModel):
+    labels: list[ReviewLabel]
+
+
 class DuplicateReviewBody(BaseModel):
     decision: Literal["correct", "incorrect", "needs_review", "hidden"] | None = None
     note: str | None = None
+
+
+class QueryBody(BaseModel):
+    sql: str
+
+
+class TokenIdentity(BaseModel):
+    """One ``(ats, token)`` pair, the natural key of a board."""
+
+    ats: str
+    token: str
+
+
+class TokenEnableBody(BaseModel):
+    tokens: list[TokenIdentity]
+
+
+class TokenValidateBody(BaseModel):
+    """Validate specific tokens, or every token stored for one vendor."""
+    tokens: list[TokenIdentity] | None = None
+    # Unfiltered on purpose -- the server does not know which filter the page
+    # is showing, so a caller that means "the rows on screen" must name them
+    # in ``tokens``. Either way the batch cap below applies.
+    vendor: str | None = None
+
+
+class FeedsDeleteBody(BaseModel):
+    """Delete feeds by ID (e.g., after tokens are marked dead)."""
+    feed_ids: list[int]
 
 
 def _policy_error(exc: Exception) -> HTTPException:
@@ -111,11 +161,14 @@ def create_app(
 ) -> FastAPI:
     """Build an inspector app, optionally with injected test collaborators."""
 
-    database = catalog if catalog is not None else CatalogDB()
     store = store if store is not None else ResultStore(
         config.persistence_dsn(), schema=config.persistence_schema()
     )
     policy_store = policy if policy is not None else PolicyStore(config.dsn_or_none())
+    # The catalog borrows the policy pool rather than opening its own, same as
+    # the other read-only companions, so feed inventory comes from PostgreSQL
+    # when it is up and falls back to the TOML registry when it is not.
+    database = catalog if catalog is not None else CatalogDB(policy_store)
     inspector = InspectorService(
         database,
         user_agent=user_agent or config.user_agent(),
@@ -250,19 +303,31 @@ def create_app(
         feed_ref: str,
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=50, ge=1, le=500),
+        parsed_only: bool = Query(default=False),
     ) -> dict[str, Any]:
         snapshot = await inspector.get_result_ref(feed_ref)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="No result for this feed")
-        end = min(offset + limit, snapshot.item_count)
+        # parse_items is always derived in full by get_result_ref (see
+        # service._with_parse) regardless of how many rows a caller later
+        # pages through, so filtering against it here is safe even for a
+        # feed the size of Simplify's.
+        indices = (
+            [i for i, row in enumerate(snapshot.parse_items) if row.get("canonicals")]
+            if parsed_only
+            else range(snapshot.item_count)
+        )
+        total = len(indices) if parsed_only else snapshot.item_count
+        end = min(offset + limit, total)
         return {
             "result": snapshot.summary,
             "network": snapshot.network,
             "envelope": snapshot.envelope,
-            "items": [snapshot.item_summary(i) for i in range(offset, end)],
+            "items": [snapshot.item_summary(i) for i in indices[offset:end]],
             "offset": offset,
             "limit": limit,
-            "has_more": end < snapshot.item_count,
+            "has_more": end < total,
+            "total_count": total,
             "profile": source_profile(snapshot.source),
             "wire_content_type": wire_content_type(snapshot.network),
         }
@@ -398,6 +463,25 @@ def create_app(
         except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
         return {**result, "unknown": unknown}
+
+    @application.post("/api/feeds/bulk-delete")
+    async def delete_feeds(body: FeedsDeleteBody) -> dict[str, Any]:
+        """Delete feeds by ID (e.g., after tokens are marked dead)."""
+        if not body.feed_ids:
+            raise HTTPException(status_code=400, detail="No feeds requested")
+        pool = await _public_pool()
+        try:
+            # Delete the feeds and any associated policies
+            await pool.execute(
+                "DELETE FROM feed WHERE id = ANY($1)",
+                body.feed_ids,
+            )
+            database.invalidate()
+            return {"deleted": len(body.feed_ids)}
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
 
     @application.post("/api/feeds/{feed_ref}/import")
     async def import_feed(
@@ -625,13 +709,13 @@ def create_app(
         except (PolicyUnavailable, PollNowRefused, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
 
-    async def _postings_pool():
+    async def _public_pool():
         """The borrowed public pool, or a 503 naming what is unreachable."""
         pool = await policy_store.pool_or_none()
         if pool is None:
             raise HTTPException(
                 status_code=503,
-                detail="PostgreSQL unavailable; postings read public.job_posting",
+                detail="PostgreSQL unavailable",
             )
         return pool
 
@@ -647,7 +731,7 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
-        pool = await _postings_pool()
+        pool = await _public_pool()
         try:
             labels = await store.posting_labels()
             return {
@@ -694,10 +778,70 @@ def create_app(
 
     @application.get("/api/postings/{posting_id}")
     async def posting_item(posting_id: int) -> dict[str, Any]:
-        pool = await _postings_pool()
+        pool = await _public_pool()
         try:
             labels = await store.posting_labels()
             value = await posting_detail(pool, labels, posting_id)
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        if value is None:
+            raise HTTPException(status_code=404, detail="Posting not found")
+        return value
+
+    @application.get("/api/review")
+    async def review(
+        source: str | None = None,
+        label: str = "all",
+        state: str = "unreviewed",
+        search: str = "",
+        order: str = "newest",
+        limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return {
+                "postgres": policy_store.status(),
+                **await review_query(
+                    pool,
+                    source=source,
+                    label=label,
+                    state=state,
+                    search=search,
+                    order=order,
+                    limit=limit,
+                    offset=offset,
+                ),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.post("/api/review/labels")
+    async def review_labels_write(body: ReviewLabelsBody) -> dict[str, Any]:
+        if not body.labels:
+            raise HTTPException(status_code=400, detail="labels must not be empty")
+        pool = await _public_pool()
+        try:
+            written = await review_set_labels(
+                pool, [entry.model_dump() for entry in body.labels]
+            )
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        return {"written": written}
+
+    @application.get("/api/review/{posting_id}")
+    async def review_item(posting_id: int) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            value = await review_detail(pool, posting_id)
         except (OSError, asyncpg.PostgresError) as exc:
             raise HTTPException(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
@@ -717,7 +861,7 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
-        pool = await _postings_pool()
+        pool = await _public_pool()
         try:
             reviews = await store.duplicate_group_reviews()
             return {
@@ -746,7 +890,7 @@ def create_app(
     async def duplicate_group_review(
         group_id: UUID, body: DuplicateReviewBody
     ) -> dict[str, Any]:
-        pool = await _postings_pool()
+        pool = await _public_pool()
         try:
             fingerprint = await current_fingerprint(pool, group_id)
             if fingerprint is None:
@@ -777,6 +921,257 @@ def create_app(
                 status_code=503, detail=f"Duplicate review unavailable: {exc}"
             ) from exc
 
+    @application.post("/api/query")
+    async def query_run(body: QueryBody) -> dict[str, Any]:
+        """Run one read-only SQL statement against the pipeline database.
+
+        POST, not GET with a query string: SQL does not belong in a URL, and
+        the answer must not be cached. See ``query.run`` for the three layers
+        that keep this from ever writing.
+        """
+        pool = await _public_pool()
+        try:
+            return await query_run_sql(pool, body.sql)
+        except ValueError as exc:
+            # The admin's SQL failed the allowlist -- not a database problem.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except asyncpg.PostgresError as exc:
+            # Syntax error, the READ ONLY transaction refusing a write,
+            # statement_timeout firing -- all the admin's SQL being wrong,
+            # unlike the postings routes above where a PostgresError means
+            # the database itself is unhealthy.
+            raise HTTPException(status_code=400, detail=query_format_error(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.get("/api/query/schema")
+    async def query_schema() -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return await query_schema_sql(pool)
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    # ------ fields (raw_posting field recon)
+    #
+    # Read-only throughout, and split by cost on purpose: /survey is a
+    # sampled census that answers in ~2s, /values is an exact full scan of
+    # one chosen path. See fields.py for the measurements behind the split.
+
+    @application.get("/api/fields/adapters")
+    async def fields_adapters(force: bool = False) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return await fields_recon.adapters(pool, force=force)
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.get("/api/fields/feeds")
+    async def fields_feeds(adapter: str) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return await fields_recon.feeds(pool, adapter)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.get("/api/fields/mapping")
+    async def fields_mapping(adapter: str) -> dict[str, Any]:
+        """How the adapter's config reads its payload. No database at all."""
+        try:
+            fields_recon._validate_adapter(adapter)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {**field_mapping.adapter_map(adapter), "domains": field_mapping.domains()}
+
+    @application.get("/api/fields/survey")
+    async def fields_survey(
+        adapter: str,
+        feed: str | None = None,
+        sample: int = fields_recon.DEFAULT_SAMPLE,
+        depth: int = Query(default=fields_recon.DEFAULT_DEPTH, ge=1, le=fields_recon.MAX_DEPTH),
+        seed: str = "",
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            result = await fields_recon.survey(
+                pool, adapter, feed=feed, sample=sample, depth=depth, seed=seed
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        # Annotated here rather than in fields.py so the SQL layer stays
+        # ignorant of the source configs, and so a config that fails to
+        # introspect can never break the census itself.
+        annotations = field_mapping.annotate(
+            [row["path"] for row in result["paths"]], adapter
+        )
+        for row in result["paths"]:
+            row["mapped"] = annotations.get(row["path"], {"fields": [], "inherited": None})
+        return result
+
+    @application.get("/api/fields/values")
+    async def fields_values(
+        adapter: str,
+        path: str,
+        feed: str | None = None,
+        limit: int = Query(default=fields_recon.VALUE_LIMIT, ge=1, le=fields_recon.MAX_VALUE_LIMIT),
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            result = await fields_recon.values(
+                pool, adapter, path, feed=feed, limit=limit
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+        annotation = field_mapping.annotate([path], adapter)[path]
+        chains = [field_mapping.chain(name) for name in annotation["fields"]]
+        # The collapse preview only runs for a field whose narrowing is a
+        # pure function of the value alone; everything else reports the chain
+        # without pretending to evaluate it.
+        collapsed: dict[str, dict[str, str | None]] = {}
+        observed = [entry["value"] for entry in result["values"]]
+        for name in annotation["fields"]:
+            preview = field_mapping.preview(name, observed)
+            if preview:
+                collapsed[name] = preview
+        return {**result, "mapped": annotation, "chains": chains, "collapsed": collapsed}
+
+    @application.get("/api/fields/examples")
+    async def fields_examples(
+        adapter: str,
+        path: str,
+        value: str | None = None,
+        feed: str | None = None,
+        limit: int = Query(default=fields_recon.EXAMPLE_LIMIT, ge=1, le=fields_recon.EXAMPLE_LIMIT),
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return await fields_recon.examples(
+                pool, adapter, path, value, feed=feed, limit=limit
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    # --- Tokens: the discovery inventory and its promotion into feed -------
+    # public.token holds every board key ever seen; public.feed is the curated
+    # set the scheduler polls. Promotion is the one write, and it creates
+    # candidates -- enabling them stays a Feeds page decision.
+
+    @application.get("/api/tokens")
+    async def tokens(
+        filter: str = "all",
+        limit: int = Query(default=50, ge=1, le=10000),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return {
+                "postgres": policy_store.status(),
+                **await tokens_query(
+                    pool,
+                    filter=filter,
+                    limit=limit,
+                    offset=offset,
+                ),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.post("/api/tokens/enable")
+    async def enable_tokens(body: TokenEnableBody) -> dict[str, Any]:
+        """Create an enabled feed row for each ATS token, leaving existing ones be.
+
+        Non-ATS identities (Direct, Board) are out of scope here -- they are
+        dropped before ever reaching the store, and counted separately, so a
+        stray one in the request can't silently create a feed row.
+        """
+        if not body.tokens:
+            raise HTTPException(status_code=400, detail="tokens must not be empty")
+        ats_identities = [
+            (entry.ats, entry.token)
+            for entry in body.tokens
+            if source_type(entry.ats) == "ATS"
+        ]
+        skipped_non_ats = len(body.tokens) - len(ats_identities)
+        try:
+            result = await policy_store.import_feeds(ats_identities, enabled=True)
+        except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
+            raise _policy_error(exc) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        return {**result, "skipped_non_ats": skipped_non_ats}
+
+    @application.post("/api/tokens/validate")
+    async def validate_tokens_endpoint(body: TokenValidateBody) -> dict[str, Any]:
+        """Validate one or more tokens and update their status in the database."""
+        pool = await _public_pool()
+        identities = []
+        if body.tokens:
+            identities = [(entry.ats, entry.token) for entry in body.tokens]
+        elif body.vendor:
+            try:
+                records = await pool.fetch(
+                    "SELECT DISTINCT ats, token FROM token WHERE ats = $1 ORDER BY token",
+                    body.vendor,
+                )
+                identities = [(r["ats"], r["token"]) for r in records]
+            except (OSError, asyncpg.PostgresError) as exc:
+                raise HTTPException(
+                    status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+                ) from exc
+        else:
+            raise HTTPException(status_code=400, detail="provide tokens or vendor")
+
+        if len(identities) > validator.MAX_BATCH:
+            # Better a refusal the caller can see than a request that runs for
+            # minutes and dies in a proxy with the work half done.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{len(identities)} tokens is more than one request can "
+                    f"validate (max {validator.MAX_BATCH}) -- send them in batches"
+                ),
+            )
+
+        try:
+            results = await validator.validate_tokens(identities, pool=pool)
+            return {
+                "total": len(identities),
+                "results": results,
+            }
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
     @application.get("/")
     async def index():
         return FileResponse(STATIC_DIR / "index.html")
@@ -792,6 +1187,22 @@ def create_app(
     @application.get("/postings")
     async def postings_page():
         return FileResponse(STATIC_DIR / "postings" / "index.html")
+
+    @application.get("/review")
+    async def review_page():
+        return FileResponse(STATIC_DIR / "review" / "index.html")
+
+    @application.get("/query")
+    async def query_page():
+        return FileResponse(STATIC_DIR / "query" / "index.html")
+
+    @application.get("/fields")
+    async def fields_page():
+        return FileResponse(STATIC_DIR / "fields" / "index.html")
+
+    @application.get("/tokens")
+    async def tokens_page():
+        return FileResponse(STATIC_DIR / "tokens" / "index.html")
 
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return application

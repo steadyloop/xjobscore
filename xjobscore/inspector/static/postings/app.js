@@ -214,8 +214,8 @@ function postingEntryNode(row, index) {
     el("div", { class: "plist-line1" },
       el("span", { class: "plist-title" }, row.title),
       labelBadge(row.label),
-      attrs.opportunity_type
-        ? el("span", { class: "badge" }, attrs.opportunity_type)
+      row.job_type
+        ? el("span", { class: "badge" }, row.job_type)
         : null,
       row.status === "closed" ? el("span", { class: "badge" }, "closed") : null),
     el("div", { class: "plist-line2 muted" },

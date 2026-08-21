@@ -12,5 +12,10 @@ if (!ref) {
   root.textContent = "Missing ?ref=";
 } else {
   // Top-level await keeps the load event behind the first full render.
-  await createInspector(root, { standalone: true }).show(ref);
+  await createInspector(root, {
+    standalone: true,
+    onDrop: () => {
+      location.href = "/";
+    },
+  }).show(ref);
 }

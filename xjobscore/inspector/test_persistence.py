@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from xjobscore.inspector.cache import RunSnapshot
-from xjobscore.sources.registry.loader import Company, feed_ref
+from xjobscore.registry_loader import Company, feed_ref
 
 NOW = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
 REF = feed_ref("lever", "acme")
@@ -347,7 +347,7 @@ async def test_initialize_projects_the_registry_into_its_own_schema(
         lambda: (
             Company(
                 id=1, name="Acme", aliases=("acme",), domain="acme.test",
-                industry="test", desc="Makes anvils.", verified=True,
+                industry="test", stage="unknown", desc="Makes anvils.", verified=True,
                 domain_verified_at="2026-01-01",
             ),
         ),
@@ -377,11 +377,11 @@ async def test_initialize_is_idempotent_and_drops_departed_companies(
 
     acme = Company(
         id=1, name="Acme", aliases=("acme",), domain="acme.test", industry="test",
-        desc="", verified=False, domain_verified_at=None,
+        stage="unknown", desc="", verified=False, domain_verified_at=None,
     )
     gone = Company(
         id=2, name="Gone", aliases=("gone",), domain="gone.test", industry="test",
-        desc="", verified=False, domain_verified_at=None,
+        stage="unknown", desc="", verified=False, domain_verified_at=None,
     )
     monkeypatch.setattr(
         "xjobscore.inspector.persistence.registry_companies", registry(acme, gone)
@@ -394,7 +394,8 @@ async def test_initialize_is_idempotent_and_drops_departed_companies(
         registry(
             Company(
                 id=1, name="Acme", aliases=("acme",), domain="gone.test",
-                industry="test", desc="", verified=False, domain_verified_at=None,
+                industry="test", stage="unknown", desc="", verified=False,
+                domain_verified_at=None,
             )
         ),
     )
@@ -417,7 +418,8 @@ async def test_alias_lookup_matches_store_normalization(monkeypatch, store):
         lambda: (
             Company(
                 id=1, name="Acme", aliases=("acme",), domain="unknown",
-                industry="test", desc="", verified=False, domain_verified_at=None,
+                industry="test", stage="unknown", desc="", verified=False,
+                domain_verified_at=None,
             ),
         ),
     )

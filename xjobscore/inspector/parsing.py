@@ -27,7 +27,6 @@ SUMMARY_KEYS = (
     "labels",
     "facts",
     "unsupported",
-    "secondhand",
     "resolved",
     "fallback_company",
     "would_park",
@@ -80,7 +79,6 @@ def _canonical_entry(
         entry["classification"] = "unsupported"
         return entry
     if canonical.fidelity != "origin":
-        summary["secondhand"] += 1
         entry["classification"] = "secondhand"
         return entry
 
@@ -139,7 +137,8 @@ def parse_record(
             row["error_class"] = type(exc).__name__
             row["error_detail"] = str(exc)
         else:
-            summary["items_parsed"] += 1
+            if canonicals:
+                summary["items_parsed"] += 1
             row["canonicals"] = [
                 _canonical_entry(feed, canonical, resolve_alias, summary)
                 for canonical in canonicals

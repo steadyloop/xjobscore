@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scheduler · xjobscore inspector</title>
+  <title>xJobscore</title>
   <link rel="stylesheet" href="/static/shared/tokens.css">
   <link rel="stylesheet" href="/static/shared/base.css">
   <link rel="stylesheet" href="/static/shared/components.css">
@@ -35,6 +35,32 @@
     <section class="card">
       <header><h1>Production poll telemetry</h1></header>
       <div class="stat-row" id="sched-stats"></div>
+    </section>
+
+    <section class="card sched-vendors" id="vendor-rollup" hidden>
+      <header>
+        <h2>Request budget by vendor</h2>
+        <span class="secondary" id="vendor-scope"></span>
+        <div class="grow"></div>
+        <button class="btn small" type="button" id="vendor-toggle" aria-expanded="true">
+          Hide
+        </button>
+      </header>
+      <div class="table-wrap" id="vendor-wrap">
+        <table class="data" id="vendor-table">
+          <thead>
+            <tr>
+              <th>Vendor</th>
+              <th class="num">Feeds</th>
+              <th class="num" title="Polls per day the configured tiers ask this vendor for, excluding paused feeds">Requests / day</th>
+              <th class="num" title="What the same feeds would cost at the tier λ recommends">At recommended tiers</th>
+              <th>Needs attention</th>
+              <th class="num">Errors, 24 h</th>
+            </tr>
+          </thead>
+          <tbody id="vendor-body"></tbody>
+        </table>
+      </div>
     </section>
 
     <div class="page-header">

@@ -6,10 +6,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import importlib
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
 from xjobscore import sources
+from xjobscore.inspector import validator
 from xjobscore.inspector.app import create_app
 from xjobscore.inspector.db import feed_ref
 from xjobscore.inspector.policy import (
@@ -79,6 +81,16 @@ class FakePolicy:
     async def import_feed(self, source: str, key: str, enabled: bool = True) -> dict:
         self.calls.append(("import_feed", source, key, enabled))
         return {"feed_id": 11, "enabled": enabled}
+
+    async def import_feeds(self, identities: list[tuple], *, enabled: bool = False) -> dict:
+        self.calls.append(("import_feeds", tuple(identities), enabled))
+        deduped = list(dict.fromkeys(identities))
+        return {
+            "requested": len(deduped),
+            "imported": len(deduped),
+            "existing": 0,
+            "enabled": enabled,
+        }
 
     async def poll_now(self, source: str, key: str) -> dict:
         self.calls.append(("poll_now", source, key))
@@ -273,6 +285,16 @@ def test_feeds_lists_configured_rows(client):
     }
 
 
+def test_feeds_carry_last_result_after_a_fetch(client):
+    client.post(f"/api/feeds/{REF}/fetch")
+    rows = client.get("/api/feeds").json()["feeds"]
+    row = next(row for row in rows if row["feed_ref"] == REF)
+
+    assert row["last_result"]["item_count"] == 1
+    assert row["last_result"]["status"] == "ok"
+    assert row["last_result"]["elapsed_ms"] is not None
+
+
 def test_fetch_result_item_envelope_round_trip(client):
     summary = client.post(f"/api/feeds/{REF}/fetch").json()
     assert summary["status"] == "ok"
@@ -312,6 +334,52 @@ def test_parsed_round_trip(client):
     assert canonical["title_normalized"] == "demo"
 
     assert client.get(f"/api/results/{REF}/parsed/9").status_code == 404
+
+
+def test_result_parsed_only_filters_and_paginates_server_side(client, monkeypatch):
+    async def harvest(_feed, _net):
+        return Record(
+            items=[
+                Item("job-1", {"title": "Kept"}),
+                Item("job-2", {"title": "Filtered"}),
+                Item("job-3", {"title": "Kept too"}),
+            ],
+            envelope={"company": "Acme"},
+            http_status=200,
+        )
+
+    def parse(_feed, item, _envelope):
+        if item.external_id == "job-2":
+            return []
+        return [
+            Posting(
+                external_id=item.external_id,
+                title=item.payload["title"],
+                url_posting="https://jobs.example/1",
+                company_raw="Acme",
+            )
+        ]
+
+    monkeypatch.setitem(sources.SOURCES, "route-test", harvest)
+    monkeypatch.setitem(sources.PARSERS, "route-test", parse)
+    client.post(f"/api/feeds/{REF}/fetch")
+
+    unfiltered = client.get(f"/api/results/{REF}").json()
+    assert [item["external_id"] for item in unfiltered["items"]] == ["job-1", "job-2", "job-3"]
+    assert unfiltered["total_count"] == 3
+
+    filtered = client.get(f"/api/results/{REF}?parsed_only=true").json()
+    assert [item["external_id"] for item in filtered["items"]] == ["job-1", "job-3"]
+    assert filtered["total_count"] == 2
+    assert filtered["has_more"] is False
+
+    first_page = client.get(f"/api/results/{REF}?parsed_only=true&limit=1").json()
+    assert [item["external_id"] for item in first_page["items"]] == ["job-1"]
+    assert first_page["has_more"] is True
+
+    second_page = client.get(f"/api/results/{REF}?parsed_only=true&limit=1&offset=1").json()
+    assert [item["external_id"] for item in second_page["items"]] == ["job-3"]
+    assert second_page["has_more"] is False
 
 
 def test_run_history_and_network_endpoints(client):
@@ -720,6 +788,7 @@ def test_postings_page_offers_duplicates_instead_of_any_status(client):
 
     assert response.status_code == 200
     assert '<option value="duplicates">Duplicate review</option>' in response.text
+    assert '<option value="removal">Marked for removal</option>' in response.text
     assert "Any status" not in response.text
 
 
@@ -736,20 +805,90 @@ def test_retired_postings_old_routes_are_not_found(client):
 
 # --------------------------------------------------------------- postings
 
+class _FakeQueryTransaction:
+    """Records whether the query page's connection was ever taken to a
+    read-only, always-rolled-back transaction -- see query.run()."""
+
+    def __init__(self, *, readonly):
+        self.readonly = readonly
+        self.started = False
+        self.rolled_back = False
+        self.committed = False
+
+    async def start(self):
+        self.started = True
+
+    async def rollback(self):
+        self.rolled_back = True
+
+    async def commit(self):  # pragma: no cover -- must never be called
+        self.committed = True
+
+
+class _FakeQueryCursor:
+    def __init__(self, records):
+        self._records = records
+
+    async def fetch(self, n):
+        return self._records[:n]
+
+
+class _FakeAttr:
+    def __init__(self, name, type_name):
+        self.name = name
+        self.type = type("Type", (), {"name": type_name})
+
+
+class _FakeQueryPrepared:
+    def __init__(self, columns, records):
+        self._attrs = [_FakeAttr(name, "text") for name in columns]
+        self._records = records
+
+    def get_attributes(self):
+        return self._attrs
+
+    async def cursor(self):
+        return _FakeQueryCursor(self._records)
+
+
 class FakePublicPool:
     """Canned job_posting pool: first fetch answers the vendor list, the
-    second the page itself; fetchrow answers the detail query."""
+    second the page itself; fetchrow answers the detail query.
 
-    def __init__(self, rows=(), row=None, fingerprint=None):
+    Doubles as the Query page's connection (``acquire()`` yields ``self``,
+    same as everywhere else here) -- ``transaction``/``execute``/``prepare``
+    below stand in for the read-only-transaction protocol ``query.run()``
+    drives.
+    """
+
+    def __init__(
+        self,
+        rows=(),
+        row=None,
+        fingerprint=None,
+        schema_rows=(),
+        query_columns=(),
+        query_rows=(),
+        prepare_error=None,
+    ):
         self.fetches = [[{"vendor": "route-test"}], list(rows)]
         self.row = row
         self.fingerprint = fingerprint
+        self.schema_rows = list(schema_rows)
+        self.query_columns = list(query_columns)
+        self.query_rows = list(query_rows)
+        self.prepare_error = prepare_error
+        self.transactions: list[_FakeQueryTransaction] = []
+        self.executed: list[str] = []
+        self.prepared_sql: str | None = None
 
     @asynccontextmanager
     async def acquire(self):
         yield self
 
     async def fetch(self, sql, *args):
+        if "information_schema" in sql:
+            return self.schema_rows
         return self.fetches.pop(0) if self.fetches else []
 
     async def fetchrow(self, sql, *args):
@@ -757,6 +896,20 @@ class FakePublicPool:
 
     async def fetchval(self, sql, *args):
         return self.fingerprint
+
+    def transaction(self, *, readonly=False, **kwargs):
+        tr = _FakeQueryTransaction(readonly=readonly)
+        self.transactions.append(tr)
+        return tr
+
+    async def execute(self, sql, *args):
+        self.executed.append(sql)
+
+    async def prepare(self, sql):
+        self.prepared_sql = sql
+        if self.prepare_error is not None:
+            raise self.prepare_error
+        return _FakeQueryPrepared(self.query_columns, self.query_rows)
 
 
 def posting_row(**overrides):
@@ -836,6 +989,14 @@ def test_postings_list_shape(postings_client):
     assert body["label_counts"]["total"] == 0
 
 
+def test_postings_removal_status_is_accepted(postings_client):
+    with postings_client(FakePublicPool(rows=[posting_row()])) as test_client:
+        response = test_client.get("/api/postings", params={"status": "removal"})
+
+    assert response.status_code == 200
+    assert response.json()["filters"]["status"] == "removal"
+
+
 def test_posting_detail_404_when_unknown(postings_client):
     with postings_client(FakePublicPool(row=None)) as test_client:
         assert test_client.get("/api/postings/999").status_code == 404
@@ -880,6 +1041,149 @@ def test_posting_labels_rejects_empty_and_unknown_values(client):
         json={"labels": [{"source": "s", "source_key": "k", "label": "great"}]},
     )
     assert bad.status_code == 422
+
+
+# ------------------------------------------------------------- Review page
+
+class FakeReviewPool:
+    """Canned opus-review pool.
+
+    review.query() makes three fetches in order -- vendor list, the
+    unfiltered _COUNTS rows, then the page itself -- one more than
+    FakePublicPool's two, so this is a separate double rather than a reuse.
+    """
+
+    def __init__(self, rows=(), counts=(), row=None):
+        self.fetches = [[{"vendor": "route-test"}], list(counts), list(rows)]
+        self.row = row
+        self.transactions: list[bool] = []
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self
+
+    async def fetch(self, sql, *args):
+        return self.fetches.pop(0) if self.fetches else []
+
+    async def fetchrow(self, sql, *args):
+        return self.row
+
+    @asynccontextmanager
+    async def transaction(self):
+        self.transactions.append(True)
+        yield
+
+
+def review_row(**overrides):
+    row = {
+        "id": 1,
+        "source": "route-test:demo",
+        "source_key": "job-1",
+        "company": "Etched",
+        "title": "ML Systems Intern",
+        "location_text": "SF",
+        "source_url": "https://jobs.example/1",
+        "apply_url": None,
+        "posted_at": None,
+        "status": "active",
+        "job_type": "intern",
+        "cs_field": True,
+        "ck_list": "ai:infra",
+        "has_description": False,
+        "attributes": {
+            "version": 1,
+            "opus": "tech",
+            "opus_by": "machine",
+            "opus_machine": "tech",
+        },
+        "total": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def review_count_row(**overrides):
+    row = {"label": "tech", "opus_by": "machine", "changed": False}
+    row.update(overrides)
+    return row
+
+
+def test_review_page_is_served(client):
+    assert client.get("/review").status_code == 200
+
+
+def test_review_503_without_public_pool(client):
+    # The default FakePolicy has no pool: both reads must answer degraded,
+    # not empty -- an unreachable database is not "nothing to review".
+    assert client.get("/api/review").status_code == 503
+    assert client.get("/api/review/1").status_code == 503
+    assert client.post(
+        "/api/review/labels", json={"labels": [{"id": 1, "label": "tech"}]}
+    ).status_code == 503
+
+
+def test_review_rejects_unknown_enums(postings_client):
+    with postings_client(FakeReviewPool()) as test_client:
+        for params in (
+            {"label": "bogus"},
+            {"state": "bogus"},
+            {"order": "bogus"},
+        ):
+            assert test_client.get("/api/review", params=params).status_code == 400
+
+
+def test_review_labels_rejects_unknown_bucket(client):
+    bad = client.post(
+        "/api/review/labels",
+        json={"labels": [{"id": 1, "label": "great"}]},
+    )
+    assert bad.status_code == 422
+
+
+def test_review_labels_rejects_empty(client):
+    assert client.post("/api/review/labels", json={"labels": []}).status_code == 400
+
+
+def test_review_defaults_to_unreviewed(postings_client):
+    with postings_client(FakeReviewPool()) as test_client:
+        response = test_client.get("/api/review")
+    assert response.json()["filters"]["state"] == "unreviewed"
+
+
+def test_review_list_shape(postings_client):
+    pool = FakeReviewPool(rows=[review_row()], counts=[review_count_row()])
+    with postings_client(pool) as test_client:
+        body = test_client.get("/api/review").json()
+
+    assert body["total"] == 1
+    assert body["sources"] == ["route-test"]
+    (row,) = body["rows"]
+    assert row["title"] == "ML Systems Intern"
+    assert row["opus"] == "tech"
+    assert row["opus_by"] == "machine"
+    assert row["opus_machine"] == "tech"
+    assert row["cs_field"] is True
+    assert row["ck_list"] == "ai:infra"
+    assert "attributes" not in row
+    assert "total" not in row
+    assert body["label_counts"]["tech"] == 1
+    assert body["state_counts"]["unreviewed"] == 1
+
+
+def test_review_detail_404_when_unknown(postings_client):
+    with postings_client(FakeReviewPool(row=None)) as test_client:
+        assert test_client.get("/api/review/999").status_code == 404
+
+
+def test_review_labels_write_reaches_the_pool(postings_client):
+    pool = FakeReviewPool(row={"id": 1})
+    with postings_client(pool) as test_client:
+        response = test_client.post(
+            "/api/review/labels", json={"labels": [{"id": 1, "label": "non-tech"}]}
+        )
+    assert response.status_code == 200
+    assert response.json() == {"written": 1}
+    assert pool.transactions  # went through conn.transaction()
 
 
 def test_duplicate_group_list_contract(monkeypatch, postings_client):
@@ -948,3 +1252,573 @@ def test_duplicate_group_review_rejects_unknown_and_missing(postings_client):
             f"/api/duplicate-groups/{group_id}/review",
             json={"decision": "confirmed"},
         ).status_code == 422
+
+
+# --------------------------------------------------------------------- query
+
+def test_query_page_is_served(client):
+    assert client.get("/query").status_code == 200
+
+
+def test_query_503_without_public_pool(client):
+    assert client.post("/api/query", json={"sql": "select 1"}).status_code == 503
+    assert client.get("/api/query/schema").status_code == 503
+
+
+def test_query_run_returns_columns_and_rows(postings_client):
+    pool = FakePublicPool(query_columns=["id", "title"], query_rows=[(1, "ML Intern")])
+    with postings_client(pool) as test_client:
+        response = test_client.post(
+            "/api/query", json={"sql": "select id, title from job_posting"}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["columns"] == ["id", "title"]
+    assert body["rows"] == [[1, "ML Intern"]]
+    assert body["row_count"] == 1
+    assert body["truncated"] is False
+    # The read-only-transaction contract, exercised end to end through the route.
+    [transaction] = pool.transactions
+    assert transaction.readonly is True
+    assert transaction.rolled_back is True
+    assert transaction.committed is False
+
+
+def test_query_rejects_writes_before_touching_the_pool(postings_client):
+    pool = FakePublicPool()
+    with postings_client(pool) as test_client:
+        response = test_client.post(
+            "/api/query", json={"sql": "update job_posting set status = 'closed'"}
+        )
+
+    assert response.status_code == 400
+    assert pool.transactions == []
+    assert pool.prepared_sql is None
+
+
+def test_query_postgres_error_is_400_not_503(postings_client):
+    """A PostgresError from the admin's own SQL is their mistake, not an
+    outage -- unlike the postings routes, which treat the same exception as
+    the database being unhealthy."""
+    pool = FakePublicPool(prepare_error=asyncpg.PostgresSyntaxError("syntax error"))
+    with postings_client(pool) as test_client:
+        response = test_client.post("/api/query", json={"sql": "select bad syntax"})
+
+    assert response.status_code == 400
+    assert "syntax error" in response.json()["detail"]["message"]
+    # Even a failed prepare must have rolled back, never committed.
+    [transaction] = pool.transactions
+    assert transaction.rolled_back is True
+    assert transaction.committed is False
+
+
+def test_query_schema_shapes_tables(postings_client):
+    pool = FakePublicPool(
+        schema_rows=[
+            {
+                "table_name": "company",
+                "column_name": "id",
+                "data_type": "bigint",
+                "ordinal_position": 1,
+                "approx_rows": 42,
+            },
+            {
+                "table_name": "company",
+                "column_name": "name",
+                "data_type": "text",
+                "ordinal_position": 2,
+                "approx_rows": 42,
+            },
+        ]
+    )
+    with postings_client(pool) as test_client:
+        response = test_client.get("/api/query/schema")
+
+    assert response.status_code == 200
+    assert response.json()["tables"] == [
+        {
+            "name": "company",
+            "approx_rows": 42,
+            "columns": [
+                {"name": "id", "type": "bigint"},
+                {"name": "name", "type": "text"},
+            ],
+        }
+    ]
+
+
+# ---------------------------------------------------------------- fields
+
+class FakeFieldsPool:
+    """Canned raw_posting pool for the Fields routes.
+
+    ``fields.py`` issues six different statements; this dispatches on a
+    marker unique to each rather than on call order, so a test can exercise
+    one route without pretending to know how many queries the others made.
+    """
+
+    def __init__(
+        self,
+        *,
+        adapters=(),
+        kinds=(),
+        feeds=(),
+        survey=(),
+        values=(),
+        examples=(),
+        sampled=0,
+        postings=0,
+    ):
+        self.adapters = list(adapters)
+        self.kinds = list(kinds)
+        self.feeds = list(feeds)
+        self.survey = list(survey)
+        self.values = list(values)
+        self.examples = list(examples)
+        self.sampled = sampled
+        self.postings = postings
+        self.transactions: list[_FakeQueryTransaction] = []
+        self.executed: list[str] = []
+        self.params: list[tuple] = []
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self
+
+    async def fetch(self, sql, *args):
+        self.params.append(args)
+        if "first_ids" in sql:
+            return self.kinds
+        if "pg_column_size" in sql:
+            return self.adapters
+        if "count(DISTINCT source_key) AS postings" in sql:
+            return self.feeds
+        if "WITH RECURSIVE" in sql:
+            return self.survey
+        if "IS NOT DISTINCT FROM" in sql:
+            return self.examples
+        return self.values
+
+    async def fetchval(self, sql, *args):
+        self.params.append(args)
+        return self.postings if "SELECT count(*) FROM (" in sql else self.sampled
+
+    def transaction(self, *, readonly=False, **kwargs):
+        tr = _FakeQueryTransaction(readonly=readonly)
+        self.transactions.append(tr)
+        return tr
+
+    async def execute(self, sql, *args):
+        self.executed.append(sql)
+
+
+def survey_row(**overrides):
+    row = {
+        "path": "departments[].name",
+        "occurrences": 400,
+        "postings": 180,
+        "filled": 380,
+        "distinct_values": 42,
+        "kinds": ["string"],
+        "example": "Engineering",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_fields_page_is_served(client):
+    assert client.get("/fields").status_code == 200
+
+
+def test_fields_503_without_public_pool(client):
+    for path in (
+        "/api/fields/adapters",
+        "/api/fields/feeds?adapter=greenhouse",
+        "/api/fields/survey?adapter=greenhouse",
+        "/api/fields/values?adapter=greenhouse&path=title",
+        "/api/fields/examples?adapter=greenhouse&path=title",
+    ):
+        assert client.get(path).status_code == 503, path
+
+
+def test_fields_mapping_needs_no_database(client):
+    """Config introspection is pure, so it must keep answering while
+    PostgreSQL is down -- the `client` fixture has no public pool."""
+    response = client.get("/api/fields/mapping?adapter=greenhouse")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["engine"] == "json-api"
+    assert body["paths"]["title"] == ["title", "job_type"]
+    assert body["domains"]["attributes.remote"] == ["yes", "hybrid"]
+
+
+def test_fields_mapping_rejects_a_bad_adapter(client):
+    assert client.get("/api/fields/mapping?adapter=a'b").status_code == 400
+
+
+def test_fields_adapters_marks_document_payloads_unsurveyable(postings_client):
+    pool = FakeFieldsPool(
+        adapters=[
+            {
+                "adapter": "greenhouse",
+                "revisions": 32_753,
+                "postings": 17_935,
+                "feeds": 165,
+                "payload_bytes": 185_436_616,
+                "last_fetched_at": None,
+            },
+            {
+                "adapter": "taleo",
+                "revisions": 2_162,
+                "postings": 1_168,
+                "feeds": 4,
+                "payload_bytes": 57_000_000,
+                "last_fetched_at": None,
+            },
+        ],
+        kinds=[
+            {"adapter": "greenhouse", "kind": "json"},
+            {"adapter": "taleo", "kind": "html"},
+        ],
+    )
+    with postings_client(pool) as test_client:
+        response = test_client.get("/api/fields/adapters?force=true")
+
+    assert response.status_code == 200
+    rows = {row["adapter"]: row for row in response.json()["adapters"]}
+    assert rows["greenhouse"]["surveyable"] is True
+    # An html payload is a document in a string: there is no field tree, and
+    # the page must say so rather than render an empty survey.
+    assert rows["taleo"]["surveyable"] is False
+    assert rows["taleo"]["kind"] == "html"
+
+
+def test_fields_survey_is_labelled_approximate_and_annotated(postings_client):
+    pool = FakeFieldsPool(
+        survey=[survey_row(path="metadata[].value_type"),
+                survey_row(path="title", distinct_values=1_881)],
+        sampled=2_000,
+    )
+    with postings_client(pool) as test_client:
+        response = test_client.get("/api/fields/survey?adapter=greenhouse&sample=2000")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["exact"] is False
+    assert body["sampled"] == 2_000
+    rows = {row["path"]: row for row in body["paths"]}
+    assert rows["title"]["mapped"] == {"fields": ["title", "job_type"], "inherited": None}
+    # Carried inside a mapped ancestor rather than read by name.
+    assert rows["metadata[].value_type"]["mapped"] == {
+        "fields": ["source_extra.metadata"],
+        "inherited": "metadata",
+    }
+    [transaction] = pool.transactions
+    assert transaction.readonly is True
+    assert transaction.rolled_back is True
+    assert transaction.committed is False
+
+
+def test_fields_survey_rejects_an_unoffered_sample_size(postings_client):
+    with postings_client(FakeFieldsPool()) as test_client:
+        assert (
+            test_client.get("/api/fields/survey?adapter=greenhouse&sample=999").status_code
+            == 400
+        )
+
+
+def test_fields_survey_rejects_a_feed_from_another_adapter(postings_client):
+    with postings_client(FakeFieldsPool()) as test_client:
+        response = test_client.get(
+            "/api/fields/survey?adapter=greenhouse&feed=ashby:acme"
+        )
+    assert response.status_code == 400
+
+
+def test_fields_values_is_exact_and_carries_the_collapse_chain(postings_client):
+    pool = FakeFieldsPool(
+        values=[
+            {"value": "Remote", "n": 3_711, "total": 18_111, "distinct_values": 3},
+            {"value": "OnSite", "n": 7_267, "total": 18_111, "distinct_values": 3},
+            {"value": "Hybrid", "n": 4_273, "total": 18_111, "distinct_values": 3},
+        ],
+        postings=18_111,
+    )
+    with postings_client(pool) as test_client:
+        response = test_client.get(
+            "/api/fields/values?adapter=ashby&path=workplaceType&limit=10"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["exact"] is True
+    assert body["postings"] == 18_111
+    assert body["total"] == 18_111
+    # ashby reads workplaceType twice: raw for the legacy silver attribute, and
+    # again in the parse-time `remote` rules that will eventually replace it.
+    assert body["mapped"]["fields"] == ["workplace_type_raw", "remote"]
+    legacy, parsed = body["chains"]
+    assert legacy["target"] == "attributes.remote"
+    assert legacy["domain"] == ["yes", "hybrid"]
+    assert parsed["target"] == "remote"
+    assert parsed["domain"] == ["yes", "hybrid", "unknown"]
+    chain = legacy
+    # The point of the page: OnSite is stated by 7,267 postings and collapses
+    # to nothing, because silver never records a negative remote signal.
+    assert body["collapsed"]["workplace_type_raw"] == {
+        "Remote": "yes",
+        "OnSite": None,
+        "Hybrid": "hybrid",
+    }
+
+
+def test_fields_values_reports_an_unmapped_path_as_bronze_only(postings_client):
+    pool = FakeFieldsPool(
+        values=[{"value": "Engineering", "n": 741, "total": 17_935, "distinct_values": 2_747}],
+        postings=17_935,
+    )
+    with postings_client(pool) as test_client:
+        response = test_client.get(
+            "/api/fields/values?adapter=greenhouse&path=metadata[].value_type&limit=1"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["truncated"] is True
+    assert body["chains"][0]["projected"] is False
+    assert body["collapsed"] == {}
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "adapter=greenhouse&path=",
+        "adapter=greenhouse&path=a';drop table raw_posting--",
+        "adapter=greenhouse&path=a.b.c.d.e.f.g.h.i.j.k.l.m.n",
+        "adapter=green'house&path=title",
+    ],
+)
+def test_fields_values_rejects_a_bad_request(postings_client, query):
+    with postings_client(FakeFieldsPool()) as test_client:
+        assert test_client.get(f"/api/fields/values?{query}").status_code == 400
+
+
+def test_fields_examples_returns_whole_payloads(postings_client):
+    pool = FakeFieldsPool(
+        examples=[
+            {
+                "id": 12,
+                "source": "greenhouse:acme",
+                "source_key": "job-1",
+                "fetched_at": None,
+                "p": {"title": "ML Intern", "departments": [{"name": "Engineering"}]},
+            }
+        ]
+    )
+    with postings_client(pool) as test_client:
+        response = test_client.get(
+            "/api/fields/examples?adapter=greenhouse&path=departments[].name&value=Engineering"
+        )
+
+    assert response.status_code == 200
+    [example] = response.json()["examples"]
+    # A 63-bit id must survive as a string, matching RunSnapshot.summary.
+    assert example["id"] == "12"
+    assert example["payload"]["title"] == "ML Intern"
+
+
+# ------------------------------------------------------------------ tokens
+
+
+class FakeTokensPool:
+    """Canned token pool: the counts header, then the page of rows.
+
+    tokens.query runs one fetchrow (the counts) then one fetch (the page).
+    """
+
+    def __init__(self, rows=(), counts=None):
+        self.rows = list(rows)
+        self.counts = counts or {
+            "total": 1,
+            "live": 1,
+            "dead": 0,
+            "unknown": 0,
+            "unpromoted": 1,
+            "promotable": 1,
+        }
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self
+
+    async def fetch(self, sql, *args):
+        return self.rows
+
+    async def fetchrow(self, sql, *args):
+        return self.counts
+
+
+def token_row(**overrides):
+    row = {
+        "ats": "workable",
+        "token": "snap",
+        "company_id": 12,
+        "company": "Snap",
+        "status": "live",
+        "source": "slug",
+        "discovered_at": datetime(2026, 8, 19, tzinfo=timezone.utc),
+        "checked_at": datetime(2026, 8, 19, tzinfo=timezone.utc),
+        "feed_id": None,
+        "feed_state": "none",
+        "total": 1,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_tokens_page_is_served(client):
+    assert client.get("/tokens").status_code == 200
+
+
+def test_tokens_503_without_public_pool(client):
+    # The default FakePolicy has no pool. An unreachable database is not an
+    # empty inventory, and promoting into one must not report success either.
+    assert client.get("/api/tokens").status_code == 503
+
+
+def test_tokens_rejects_unknown_enums(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        # Only the four FILTERS keys are legal; the stored status vocabulary
+        # ("live") and the feed-state words ("none") are not filter values.
+        for value in ("bogus", "live", "none"):
+            assert test_client.get(
+                "/api/tokens", params={"filter": value}
+            ).status_code == 400
+
+
+def test_tokens_list_shape(postings_client):
+    with postings_client(FakeTokensPool(rows=[token_row()])) as test_client:
+        body = test_client.get("/api/tokens").json()
+
+    assert body["postgres"]["connected"] is False
+    assert body["counts"]["promotable"] == 1
+    assert body["total"] == 1
+    (row,) = body["rows"]
+    assert (row["ats"], row["token"]) == ("workable", "snap")
+    assert row["feed_state"] == "none"
+    assert row["discovered_at"] == "2026-08-19T00:00:00+00:00"
+
+
+def test_enable_forwards_identities_and_always_enables(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post(
+            "/api/tokens/enable",
+            json={"tokens": [{"ats": "workable", "token": "snap"}]},
+        )
+        policy = test_client.app.state.policy
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 1
+    assert body["skipped_non_ats"] == 0
+    # enabled=True is the new contract: Enable is the one place a feed row
+    # gets created active, and it never touches a row that already exists.
+    assert policy.calls[-1] == ("import_feeds", (("workable", "snap"),), True)
+
+
+def test_enable_skips_non_ats_identities(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post(
+            "/api/tokens/enable",
+            json={
+                "tokens": [
+                    {"ats": "workable", "token": "snap"},
+                    {"ats": "hn", "token": "some-post"},
+                ]
+            },
+        )
+        policy = test_client.app.state.policy
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["skipped_non_ats"] == 1
+    # Only the ATS identity ever reaches the store.
+    assert policy.calls[-1] == ("import_feeds", (("workable", "snap"),), True)
+
+
+def test_enable_rejects_an_empty_list(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        assert test_client.post(
+            "/api/tokens/enable", json={"tokens": []}
+        ).status_code == 400
+
+
+def test_validate_probes_exactly_the_identities_it_is_given(postings_client, monkeypatch):
+    seen = []
+
+    async def fake_validate(identities, **kwargs):
+        seen.append(list(identities))
+        return [
+            {"ats": ats, "token": token, "status": "live", "checked_at": "now", "details": {}}
+            for ats, token in identities
+        ]
+
+    monkeypatch.setattr(
+        "xjobscore.inspector.validator.validate_tokens", fake_validate
+    )
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post(
+            "/api/tokens/validate",
+            json={"tokens": [{"ats": "workable", "token": "snap"}]},
+        )
+
+    assert response.status_code == 200
+    # The page sends the rows it is showing; nothing may be added to them.
+    assert seen == [[("workable", "snap")]]
+    assert response.json()["total"] == 1
+
+
+def test_validate_by_vendor_expands_to_every_stored_token(postings_client, monkeypatch):
+    seen = []
+
+    async def fake_validate(identities, **kwargs):
+        seen.append(list(identities))
+        return []
+
+    monkeypatch.setattr(
+        "xjobscore.inspector.validator.validate_tokens", fake_validate
+    )
+    pool = FakeTokensPool(rows=[token_row(), token_row(token="other")])
+    with postings_client(pool) as test_client:
+        response = test_client.post(
+            "/api/tokens/validate", json={"vendor": "workable"}
+        )
+
+    assert response.status_code == 200
+    assert seen == [[("workable", "snap"), ("workable", "other")]]
+
+
+def test_validate_refuses_a_batch_too_big_for_one_request(postings_client, monkeypatch):
+    async def fake_validate(identities, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("oversized batch reached the prober")
+
+    monkeypatch.setattr(
+        "xjobscore.inspector.validator.validate_tokens", fake_validate
+    )
+    oversized = [
+        {"ats": "workable", "token": f"t{n}"}
+        for n in range(validator.MAX_BATCH + 1)
+    ]
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post("/api/tokens/validate", json={"tokens": oversized})
+
+    # A refusal the caller can see beats a request that dies in a proxy with
+    # the work half done.
+    assert response.status_code == 400
+    assert str(validator.MAX_BATCH) in response.json()["detail"]
+
+
+def test_validate_needs_tokens_or_a_vendor(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        assert test_client.post("/api/tokens/validate", json={}).status_code == 400

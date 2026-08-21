@@ -4,9 +4,13 @@ import { api } from "/static/shared/api.js";
 import { el } from "/static/shared/format.js";
 
 const LINKS = [
+  ["Tokens", "/tokens"],
   ["Feeds", "/"],
   ["Scheduler", "/scheduler"],
   ["Postings", "/postings"],
+  ["Review", "/review"],
+  ["Query", "/query"],
+  ["Fields", "/fields"],
 ];
 
 const THEME_KEY = "inspector-theme";
@@ -40,7 +44,7 @@ export function renderNav(active) {
   );
 
   header.replaceChildren(
-    el("div", { class: "brand" }, "xjobscore", el("span", {}, "inspector")),
+    el("div", { class: "brand" }, "xJobscore"),
     el(
       "nav",
       {},

@@ -40,6 +40,7 @@ def posting_row(**overrides):
         "status": "active",
         "first_seen_at": NOW,
         "last_seen_at": NOW,
+        "job_type": "intern",
         "attributes": {"version": 1},
         "dup_group_id": None,
         "has_description": True,
@@ -91,6 +92,16 @@ async def test_duplicates_status_filters_on_group_membership():
     assert "p.dup_group_id IS NOT NULL" in sql
     assert args[4] == "duplicates"
     assert body["filters"]["status"] == "duplicates"
+
+
+async def test_removal_status_filters_on_the_removal_mark():
+    pool = pool_with([])
+    body = await postings.query(pool, {}, status="removal")
+
+    sql, args = pool.calls[-1]
+    assert "p.removal_marked_at IS NOT NULL" in sql
+    assert args[4] == "removal"
+    assert body["filters"]["status"] == "removal"
 
 
 async def test_unknown_label_state_rejected():
@@ -145,7 +156,8 @@ async def test_rows_are_shaped_and_labels_merged():
         posting_row(total=2),
         posting_row(
             id=2, source_key="j3", title="Chef", posted_at=None,
-            attributes='{"version": 1, "opportunity_type": "summer_internship"}',
+            job_type="student_program",
+            attributes='{"version": 1}',
             dup_group_id=UUID("00000000-0000-0000-0000-000000000001"),
             total=2,
         ),
@@ -161,7 +173,7 @@ async def test_rows_are_shaped_and_labels_merged():
     assert labeled["posted_at"] == NOW.isoformat()
     assert unlabeled["label"] is None
     assert unlabeled["posted_at"] is None
-    assert unlabeled["attributes"]["opportunity_type"] == "summer_internship"
+    assert unlabeled["job_type"] == "student_program"
     assert unlabeled["dup_group_id"] == "00000000-0000-0000-0000-000000000001"
 
 

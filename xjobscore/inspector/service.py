@@ -9,7 +9,6 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
-from urllib.parse import urlsplit
 
 from xjobscore import router, sources
 from xjobscore.sources import json_api, source_type
@@ -21,6 +20,7 @@ from xjobscore.inspector.network import InspectorNet, StageTimer, telemetry
 from xjobscore.inspector.profile import source_profile
 from xjobscore.net import NetError
 from xjobscore.records import Feed, Item, Record
+from xjobscore.registry_loader import source_descriptions
 
 
 SOURCE_CATEGORIES = ("all", "ATS", "Direct", "Board", "Other")
@@ -28,6 +28,7 @@ SOURCE_CATEGORIES = ("all", "ATS", "Direct", "Board", "Other")
 # sources a user can select or fetch directly.
 HIDDEN_SOURCES = frozenset({"jsonld"})
 SMARTRECRUITERS_HOST = "api.smartrecruiters.com"
+ASHBY_HOST = "api.ashbyhq.com"
 
 
 def _detail_concurrency(source: str) -> int:
@@ -37,6 +38,11 @@ def _detail_concurrency(source: str) -> int:
     is how the inspector drifted into measuring 8 while production ran 4.
     """
     return json_api.CONFIGS[source].get("detail", {}).get("concurrency", 1)
+
+
+def _list_concurrency(source: str) -> int:
+    """The source's own configured list width (Ashby has no detail stage)."""
+    return json_api.CONFIGS[source].get("list", {}).get("concurrency", 1)
 
 
 def display_source(source: str) -> str:
@@ -58,12 +64,13 @@ class InspectorService:
         # viewed. Parse previews are recomputed on demand, so retaining more
         # than the current pane trades memory for nothing.
         self._parse_slot: tuple[str, dict[str, Any]] | None = None
-        # Every SmartRecruiters feed shares one host, but InspectorService
+        # Every SmartRecruiters/Ashby feed shares one host, but InspectorService
         # builds a fresh InspectorNet per feed, so Net's own per-host semaphore
         # would hand each concurrent fetch its own allowance. Width comes from
         # the config so this stays a binding, not a second opinion.
         self._shared_host_semaphores = {
-            SMARTRECRUITERS_HOST: asyncio.Semaphore(_detail_concurrency("smartrecruiters"))
+            SMARTRECRUITERS_HOST: asyncio.Semaphore(_detail_concurrency("smartrecruiters")),
+            ASHBY_HOST: asyncio.Semaphore(_list_concurrency("ashby")),
         }
         # Rate-limit adaptation outlives the per-fetch InspectorNet: a host
         # that 429ed a minute ago is still throttled for the next run.
@@ -152,23 +159,6 @@ class InspectorService:
 
         return self._locks.setdefault(feed_id, asyncio.Lock())
 
-    @staticmethod
-    def _workday_detail_path(payload: Any) -> str | None:
-        if not isinstance(payload, dict):
-            return None
-        info = payload.get("jobPostingInfo")
-        external_url = info.get("externalUrl") if isinstance(info, dict) else None
-        if not external_url:
-            return None
-        path = urlsplit(str(external_url)).path
-        marker = path.find("/job/")
-        return path[marker:] if marker >= 0 else None
-
-    @staticmethod
-    def _workday_host(feed: Feed) -> str | None:
-        parts = feed.key.split("/", 2)
-        return f"{parts[0]}.{parts[1]}.myworkdayjobs.com" if len(parts) == 3 else None
-
     def _parse_with_alias_scope(
         self, feed: Feed, items: Sequence[Item], envelope: dict
     ) -> dict[str, Any]:
@@ -232,11 +222,6 @@ class InspectorService:
                 if feed.source == "smartrecruiters"
                 else None
             )
-            workday_stored_items = (
-                await self.result_store.load_latest_items_ref(feed.source, feed.key)
-                if feed.source == "workday"
-                else ()
-            )
             validator = etag
             if feed.source == "smartrecruiters":
                 # A partial SmartRecruiters run may contain a useful prefix for
@@ -276,57 +261,32 @@ class InspectorService:
                     shared_vendor_semaphores=self._shared_vendor_semaphores,
                 )
                 async with net:
-                    if feed.source in {"smartrecruiters", "workday"}:
+                    if feed.source == "smartrecruiters":
                         prior_items = (
                             {
-                                (
-                                    self._workday_detail_path(item["payload"])
-                                    if feed.source == "workday"
-                                    else item["external_id"]
-                                ): Item(
+                                item["external_id"]: Item(
                                     external_id=item["external_id"],
                                     payload=item["payload"],
                                     kind=item["kind"],
                                 )
-                                for item in (
-                                    workday_stored_items
-                                    if feed.source == "workday"
-                                    else stored.items
-                                )
-                                if feed.source != "workday"
-                                or self._workday_detail_path(item["payload"]) is not None
+                                for item in stored.items
                             }
-                            if (
-                                bool(workday_stored_items)
-                                if feed.source == "workday"
-                                else stored is not None and bool(stored.items)
-                            )
+                            if stored is not None and bool(stored.items)
                             else None
                         )
                         # Deliberately no page_concurrency/detail_concurrency
                         # here: widths belong to the config, so the inspector
                         # measures exactly what a production poll runs. It used
-                        # to force 32/16 for workday and 8/8 for
-                        # smartrecruiters, which silently overrode the config
+                        # to force 8/8 for smartrecruiters, which
+                        # silently overrode the config
                         # and made every stored measurement describe a width
                         # production never used. Only revision reuse -- which
                         # needs the stored payload the inspector alone has --
                         # is passed.
-                        harvest_options = (
-                            json_api.JsonApiHarvestOptions(
-                                list_revision_fields=("title", "bulletFields.0"),
-                                detail_revision_fields=(
-                                    "jobPostingInfo.title",
-                                    "jobPostingInfo.jobReqId",
-                                ),
-                                prior_items=prior_items,
-                            )
-                            if feed.source == "workday"
-                            else json_api.JsonApiHarvestOptions(
-                                page_step=100,
-                                revision_fields=("jobAdId", "releasedDate"),
-                                prior_items=prior_items,
-                            )
+                        harvest_options = json_api.JsonApiHarvestOptions(
+                            page_step=100,
+                            revision_fields=("jobAdId", "releasedDate"),
+                            prior_items=prior_items,
                         )
                         record = await json_api.harvest(
                             feed.source,
@@ -402,6 +362,7 @@ class InspectorService:
                     enumerated_count=record.enumerated_item_count,
                     partition_count=record.partition_count,
                     detail_fetched_count=record.detail_fetched_count,
+                    detail_skipped_count=record.detail_skipped_count,
                     result_window_truncated=record.result_window_truncated,
                 )
             size_bytes = raw_size_bytes + estimate_size(envelope) + estimate_size(network)
@@ -443,6 +404,9 @@ class InspectorService:
         descriptions = await self.result_store.company_descriptions(
             {feed.company_id for feed in feeds if feed.company_id is not None}
         )
+        # A registered source with no feed has no Feed to carry its description,
+        # so read it straight off the source declaration.
+        descriptions_by_source = source_descriptions()
         summaries = {
             int(result["feed_id"]): result
             for group in await self.source_groups()
@@ -458,6 +422,9 @@ class InspectorService:
                 "company_id": feed.company_id,
                 "company_name": feed.company_name,
                 "company_description": descriptions.get(feed.company_id),
+                # Boards declare no company, so this is what labels them.
+                "description": feed.description,
+                "implemented": feed.implemented,
                 "configured": True,
                 "enabled": feed.enabled,
                 "complete": False,
@@ -492,6 +459,8 @@ class InspectorService:
                 "company_id": None,
                 "company_name": None,
                 "company_description": None,
+                "description": descriptions_by_source.get(source, ""),
+                "implemented": True,
                 "configured": False,
                 "enabled": False,
                 "complete": False,
