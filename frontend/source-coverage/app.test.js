@@ -2,46 +2,45 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const {
-  sourceLabel,
-  sourceMark,
-  boardLabel,
-  healthKey,
-  needsAttention,
-  summarize,
   relativeTime,
   withTimeout,
+  stateKey,
+  fleetTotals,
+  cellTitle,
 } = require("./app.js");
 
-test("source presentation stays compact and readable", () => {
-  assert.equal(sourceLabel("smart_recruiters"), "Smart Recruiters");
-  assert.equal(sourceMark("greenhouse"), "GR");
-  assert.equal(boardLabel("ATS", 1), "1 board");
-  assert.equal(boardLabel("ATS", 2), "2 boards");
-  assert.equal(boardLabel("Board", 1), "");
+test("every backend board state has a stable visual key", () => {
+  assert.equal(stateKey("ok"), "ok");
+  assert.equal(stateKey("degraded"), "degraded");
+  assert.equal(stateKey("failing"), "failing");
+  assert.equal(stateKey("stale"), "stale");
+  assert.equal(stateKey("paused"), "paused");
+  assert.equal(stateKey("never"), "never");
+  assert.equal(stateKey("Unexpected"), "unknown");
 });
 
-test("every backend health state has a stable visual key", () => {
-  assert.equal(healthKey("Healthy"), "healthy");
-  assert.equal(healthKey("Partial"), "partial");
-  assert.equal(healthKey("Needs attention"), "needs-attention");
-  assert.equal(healthKey("Not polled"), "not-polled");
-  assert.equal(healthKey("Disabled"), "disabled");
-  assert.equal(healthKey("Unexpected"), "unknown");
-  assert.equal(needsAttention({ health: "Partial" }), true);
-  assert.equal(needsAttention({ health: "Disabled" }), false);
+test("fleet totals sum board coverage into roles", () => {
+  const providers = [
+    { source: "greenhouse", boards: [{ state: "ok", coverage: 100 }, { state: "degraded", coverage: 50 }, { state: "failing", coverage: 0 }] },
+    { source: "lever", boards: [{ state: "stale", coverage: 25 }, { state: "paused", coverage: 30 }, { state: "never", coverage: 0 }] },
+  ];
+  const computed = fleetTotals({ providers });
+  assert.equal(computed.boards, 6);
+  assert.equal(computed.providers, 2);
+  assert.equal(computed.roles, 205);
+  assert.equal(computed.ok, 1);
+  assert.equal(computed.erroring, 2);
 });
 
-test("summary uses only existing source coverage response fields", () => {
-  const summary = summarize({
-    sources: [{ health: "Healthy" }, { health: "Needs attention" }],
-    source_count: 2,
-    total_coverage: 428,
-    total_added_today: 31,
-  });
-  assert.equal(summary.sourceCount, 2);
-  assert.equal(summary.totalCoverage, 428);
-  assert.equal(summary.totalAddedToday, 31);
-  assert.equal(summary.attentionCount, 1);
+test("cell tooltips show the canonical company name, falling back to the board key", () => {
+  assert.equal(
+    cellTitle("greenhouse", { key: "openai", company: "OpenAI", coverage: 123 }),
+    "OpenAI (123 roles)",
+  );
+  assert.equal(
+    cellTitle("lever", { key: "acme", company: null, coverage: 0 }),
+    "acme (0 roles)",
+  );
 });
 
 test("polling freshness has concise labels", () => {
@@ -60,6 +59,7 @@ test("source coverage is the canonical read-only page", () => {
   const mainNavigation = fs.readFileSync(require.resolve("../index.html"), "utf8");
   assert.match(page, /<title>Source coverage · OneShot<\/title>/);
   assert.match(page, /id="coverage-content"/);
+  assert.match(page, /id="fleet-stats"/);
   assert.doesNotMatch(page, /type="search"|<select|data-filter|data-sort/);
   assert.match(mainNavigation, /href="\/source-coverage\/"/);
   assert.match(page, /navigation\.css\?v=stable-nav-/);

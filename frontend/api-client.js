@@ -9,6 +9,7 @@
     application: id => `/applications/${encodeURIComponent(id)}`,
     externalApplications: "/applications/external",
     sourceCoverage: "/source-coverage",
+    sourceBoards: "/source-coverage/boards",
   });
 
   const remoteTransport = (path, options = {}) => root.fetch(`/api${path}`, {
@@ -84,7 +85,10 @@
       update: (id, body) => request(ROUTES.application(id), { method: "PATCH", body: JSON.stringify(body) }, true),
       remove: id => request(ROUTES.application(id), { method: "DELETE" }, true),
     },
-    sources: { coverage: () => request(ROUTES.sourceCoverage) },
+    sources: {
+      coverage: () => request(ROUTES.sourceCoverage),
+      boards: () => request(ROUTES.sourceBoards),
+    },
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = { ROUTES, query };

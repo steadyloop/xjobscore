@@ -12,6 +12,17 @@
   // NULL when no vendor rule matched, and that pool is opt-in via the
   // "unclassified" token.
   const DEFAULT_JOB_TYPES = ["intern", "coop", "student_program", "research", "part_time"];
+  // The fixture mirrors the live read-time policy for the normalized cities it
+  // contains. The full production metro map remains server-side.
+  const SAMPLE_US_HUBS = new Set([
+    "NY|New York City", "CA|San Francisco", "CA|San Diego", "TX|Austin",
+    "MA|Boston", "MA|Cambridge", "DC|Washington", "IL|Chicago",
+    "WA|Seattle",
+  ]);
+  const SAMPLE_US_SUBURBS = new Set(["CA|Berkeley"]);
+  const SAMPLE_NORCAL = new Set(["CA|San Francisco", "CA|Berkeley"]);
+  const SAMPLE_SOCAL = new Set(["CA|San Diego"]);
+  const SAMPLE_SEATTLE = new Set(["WA|Seattle"]);
   // Mirrors repository.list_jobs: `unclassified` is not a stored value, it is
   // the NULL pool, so it is matched separately from the named types.
   const matchesType = (types, job) =>
@@ -22,6 +33,34 @@
   const isoIn = (days = 0, hours = 0) => new Date(Date.now() + days * 86400000 + hours * 3600000).toISOString();
   const dateIn = (days = 0) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
   const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const locationBucket = job => {
+    const locations = Array.isArray(job?.locations) ? job.locations : [];
+    if (!locations.length) return 4;
+    const us = locations.filter(location => String(location?.country || "").toUpperCase() === "US");
+    if (!us.length) return null;
+    const keys = us.map(location => `${String(location.state || "").toUpperCase()}|${location.city || ""}`);
+    if (keys.some(key => SAMPLE_US_HUBS.has(key))) return 1;
+    if (keys.some(key => SAMPLE_US_SUBURBS.has(key))) return 2;
+    return 3;
+  };
+  const proximityPriority = job => {
+    const keys = (Array.isArray(job?.locations) ? job.locations : [])
+      .filter(location => String(location?.country || "").toUpperCase() === "US")
+      .map(location => `${String(location.state || "").toUpperCase()}|${location.city || ""}`);
+    if (keys.some(key => SAMPLE_NORCAL.has(key))) return 1;
+    if (keys.some(key => SAMPLE_SOCAL.has(key))) return 2;
+    if (keys.some(key => SAMPLE_SEATTLE.has(key))) return 3;
+    return 4;
+  };
+  const recencyDay = job => {
+    const value = job?.posted_at || job?.first_seen_at;
+    const date = new Date(value || "");
+    if (Number.isNaN(date.getTime())) return "";
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(date).filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
 
   // Mirrors oneshot_ui/resume_workspace.py's TECH_VOCABULARY — kept in sync by hand.
   const TECH_VOCABULARY = [
@@ -490,13 +529,14 @@
         company: "Northwind Robotics",
         title: "Student Researcher, Distributed Training",
         location: "Remote, United States",
+        locations: [{ country: "US", state: null, city: null }],
         posted_at: isoIn(0, -2),
         first_seen_at: isoIn(0, -2),
         last_seen_at: isoIn(0, -1),
         status: "active",
         source: "greenhouse:northwind-robotics",
         source_url: "https://example.com/jobs/sample-research",
-        description: "Research sharded optimizer state and fault-tolerant training for multi-node machine-learning workloads. You will prototype ideas, evaluate them on production-scale clusters, and present results to the research systems team.",
+        summary: "Research sharded optimizer state and fault-tolerant training for multi-node machine-learning workloads. You will prototype ideas, evaluate them on production-scale clusters, and present results to the research systems team.",
         job_type: "research",
         remote: "yes",
         attributes: { version: 1, term: "Spring 2027", skills: ["JAX", "Python", "Ray"], degree_fields: ["computer_science", "mathematics"], deadline_at: dateIn(18) },
@@ -507,16 +547,17 @@
         company: "Vantage Quant",
         title: "Summer Quant Systems Intern",
         location: "New York, NY",
+        locations: [{ country: "US", state: "NY", city: "New York City" }],
         posted_at: isoIn(-1),
         first_seen_at: isoIn(-1),
         last_seen_at: isoIn(0, -3),
         status: "active",
         source: "lever:vantage-quant",
         source_url: "https://example.com/jobs/sample-quant",
-        description: "Build research infrastructure used to test and deploy systematic trading strategies. Projects include low-latency data processing, simulation tooling, and production monitoring.",
+        summary: "Build research infrastructure used to test and deploy systematic trading strategies. Projects include low-latency data processing, simulation tooling, and production monitoring.",
         job_type: "intern",
         remote: "unknown",
-        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "C++", "Linux"], degree_fields: ["mathematics"] },
+        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "C++", "Linux", "Microsoft Excel", "FIX Protocol"], degree_fields: ["mathematics"] },
         apply_url: "https://example.com/apply/sample-quant",
       },
       {
@@ -524,13 +565,14 @@
         company: "Halcyon Systems",
         title: "Software Engineering Intern",
         location: "San Diego, CA",
+        locations: [{ country: "US", state: "CA", city: "San Diego" }],
         posted_at: isoIn(-2),
         first_seen_at: isoIn(-2),
         last_seen_at: isoIn(0, -4),
         status: "active",
         source: "ashby:halcyon-systems",
         source_url: "https://example.com/jobs/sample-software",
-        description: "Join the platform team building services for fleet operations. You will own a scoped backend project, write production code, and work with engineers across infrastructure and product.",
+        summary: "Join the platform team building services for fleet operations. You will own a scoped backend project, write production code, and work with engineers across infrastructure and product.",
         job_type: "intern",
         remote: "hybrid",
         attributes: { version: 1, skills: ["Go", "Kubernetes", "PostgreSQL"], degree_fields: ["computer_science"] },
@@ -541,16 +583,17 @@
         company: "Cobalt Foundry",
         title: "Fall Embedded Software Co-op",
         location: "Austin, TX",
+        locations: [{ country: "US", state: "TX", city: "Austin" }],
         posted_at: isoIn(-3),
         first_seen_at: isoIn(-3),
         last_seen_at: isoIn(-1),
         status: "active",
         source: "workday:cobalt-foundry",
         source_url: "https://example.com/jobs/sample-embedded",
-        description: "Develop firmware and systems software for industrial control hardware. The role includes driver development, hardware bring-up, automated testing, and debugging real-time systems.",
+        summary: "Develop firmware and systems software for industrial control hardware. The role includes driver development, hardware bring-up, automated testing, and debugging real-time systems.",
         job_type: "coop",
         remote: "unknown",
-        attributes: { version: 1, term: "Fall 2027", skills: ["C++", "RTOS", "Linux"], degree_fields: ["computer_science"] },
+        attributes: { version: 1, term: "Fall 2027", skills: ["C++", "FreeRTOS", "Linux", "FPGA"], degree_fields: ["computer_science"] },
         apply_url: "https://example.com/apply/sample-embedded",
       },
       {
@@ -558,16 +601,17 @@
         company: "Arbor Signal",
         title: "Backend Platform Intern",
         location: "Boston, MA",
+        locations: [{ country: "US", state: "MA", city: "Boston" }],
         posted_at: isoIn(-4),
         first_seen_at: isoIn(-4),
         last_seen_at: isoIn(0, -5),
         status: "active",
         source: "smartrecruiters:arbor-signal",
         source_url: "https://example.com/jobs/sample-platform",
-        description: "Build internal APIs and data services for a growing observability platform. You will ship a production project with the infrastructure team.",
+        summary: "Build internal APIs and data services for a growing observability platform. You will ship a production project with the infrastructure team.",
         job_type: "intern",
         remote: "hybrid",
-        attributes: { version: 1, term: "Summer 2027", skills: ["TypeScript", "PostgreSQL", "AWS"] },
+        attributes: { version: 1, term: "Summer 2027", skills: ["TypeScript", "PostgreSQL", "AWS", "Docker", "JSON"] },
         apply_url: "https://example.com/apply/sample-platform",
       },
       {
@@ -575,16 +619,17 @@
         company: "Kepler Bio",
         title: "Machine Learning Research Intern",
         location: "Cambridge, MA",
+        locations: [{ country: "US", state: "MA", city: "Cambridge" }],
         posted_at: isoIn(-5),
         first_seen_at: isoIn(-5),
         last_seen_at: isoIn(0, -6),
         status: "active",
         source: "icims:kepler-bio",
         source_url: "https://example.com/jobs/sample-ml-research",
-        description: "Develop evaluation methods for biological foundation models and collaborate with research scientists on reproducible experiments.",
+        summary: "Develop evaluation methods for biological foundation models and collaborate with research scientists on reproducible experiments.",
         job_type: "intern",
         remote: "unknown",
-        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "PyTorch", "Transformers"], degree_fields: ["bioengineering"] },
+        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "PyTorch", "Hugging Face Transformers", "Model evaluation", "Artificial intelligence"], degree_fields: ["biotech"] },
         apply_url: "https://example.com/apply/sample-ml-research",
       },
       {
@@ -592,13 +637,14 @@
         company: "Pacific Materials Lab",
         title: "Graduate Research Appointment",
         location: "Berkeley, CA",
+        locations: [{ country: "US", state: "CA", city: "Berkeley" }],
         posted_at: isoIn(-6),
         first_seen_at: isoIn(-6),
         last_seen_at: isoIn(0, -7),
         status: "active",
         source: "greenhouse:pacific-materials",
         source_url: "https://example.com/jobs/sample-graduate-research",
-        description: "Investigate efficient simulation methods with the computational materials group and publish reproducible results.",
+        summary: "Investigate efficient simulation methods with the computational materials group and publish reproducible results.",
         job_type: "research",
         remote: "hybrid",
         attributes: { version: 1, skills: ["Python", "JAX"] },
@@ -609,13 +655,14 @@
         company: "Civic AI Institute",
         title: "AI Policy Fellowship",
         location: "Washington, DC",
+        locations: [{ country: "US", state: "DC", city: "Washington" }],
         posted_at: isoIn(-7),
         first_seen_at: isoIn(-7),
         last_seen_at: isoIn(-1),
         status: "active",
         source: "lever:civic-ai",
         source_url: "https://example.com/jobs/sample-fellowship",
-        description: "Join a twelve-week cohort studying practical governance approaches for deployed AI systems.",
+        summary: "Join a twelve-week cohort studying practical governance approaches for deployed AI systems.",
         job_type: "student_program",
         remote: "hybrid",
         attributes: { version: 1, term: "Summer 2027", skills: ["Policy research", "Python"] },
@@ -626,13 +673,14 @@
         company: "Forge Automation",
         title: "Software Engineering Apprentice",
         location: "Chicago, IL",
+        locations: [{ country: "US", state: "IL", city: "Chicago" }],
         posted_at: isoIn(-8),
         first_seen_at: isoIn(-8),
         last_seen_at: isoIn(-1),
         status: "active",
         source: "workday:forge-automation",
         source_url: "https://example.com/jobs/sample-apprentice",
-        description: "Learn production software development through mentored rotations across platform and automation teams.",
+        summary: "Learn production software development through mentored rotations across platform and automation teams.",
         job_type: "student_program",
         remote: "unknown",
         attributes: { version: 1, skills: ["Java", "SQL"] },
@@ -643,13 +691,14 @@
         company: "Atlas Compute",
         title: "Software Engineer, New Grad",
         location: "San Francisco, CA",
+        locations: [{ country: "US", state: "CA", city: "San Francisco" }],
         posted_at: isoIn(-9),
         first_seen_at: isoIn(-9),
         last_seen_at: isoIn(-2),
         status: "active",
         source: "ashby:atlas-compute",
         source_url: "https://example.com/jobs/sample-new-grad",
-        description: "Start in a structured engineering cohort with rotations through distributed systems and developer infrastructure.",
+        summary: "Start in a structured engineering cohort with rotations through distributed systems and developer infrastructure.",
         job_type: "student_program",
         remote: "unknown",
         attributes: { version: 1, skills: ["Go", "Linux"] },
@@ -660,13 +709,14 @@
         company: "Helix Cloud",
         title: "Working Student, Developer Infrastructure",
         location: "Berlin, Germany",
+        locations: [{ country: "DE", state: "16", city: "Berlin" }],
         posted_at: isoIn(-10),
         first_seen_at: isoIn(-10),
         last_seen_at: isoIn(-2),
         status: "active",
         source: "smartrecruiters:helix-cloud",
         source_url: "https://example.com/jobs/sample-working-student",
-        description: "Support build tooling and internal developer workflows alongside your university studies.",
+        summary: "Support build tooling and internal developer workflows alongside your university studies.",
         job_type: "student_program",
         remote: "hybrid",
         attributes: { version: 1, skills: ["TypeScript", "CI/CD"] },
@@ -679,19 +729,58 @@
         company: "Bellwether Analytics",
         title: "Senior Data Platform Manager",
         location: "New York, NY",
+        locations: [{ country: "US", state: "NY", city: "New York City" }],
         posted_at: isoIn(-11),
         first_seen_at: isoIn(-11),
         last_seen_at: isoIn(0, -12),
         status: "active",
         source: "greenhouse:bellwether-analytics",
         source_url: "https://example.com/jobs/sample-unclassified",
-        description: "4+ years of experience leading data platform initiatives across engineering and product.",
+        summary: null,
         job_type: null,
         remote: "hybrid",
-        attributes: { version: 1, skills: ["SQL", "Spark"] },
+        attributes: { version: 1, skills: ["SQL", "Apache Spark"] },
         apply_url: "https://example.com/apply/sample-unclassified",
       },
     ];
+
+    const jobSkillDetails = {
+      "Apache Spark": { id: "apache-spark", category: "platform" },
+      "Artificial intelligence": { id: "artificial-intelligence", name: "Artificial intelligence (AI)", label: "AI", category: "concept" },
+      AWS: { id: "amazon-web-services", name: "Amazon Web Services (AWS)", label: "AWS", category: "platform" },
+      "C++": { id: "cpp", category: "language" },
+      "CI/CD": { id: "ci-cd", category: "method" },
+      Docker: { id: "docker", category: "tool" },
+      FPGA: { id: "fpga", category: "hardware" },
+      "FIX Protocol": { id: "fix-protocol", category: "protocol" },
+      FreeRTOS: { id: "freertos", category: "platform" },
+      Go: { id: "go", category: "language" },
+      "Hugging Face Transformers": { id: "hugging-face-transformers", label: "HF Transformers", category: "library" },
+      Java: { id: "java", category: "language" },
+      JAX: { id: "jax", category: "library" },
+      JSON: { id: "json", category: "format" },
+      Kubernetes: { id: "kubernetes", category: "platform" },
+      Linux: { id: "linux", category: "platform" },
+      "Microsoft Excel": { id: "microsoft-excel", label: "Excel", category: "tool" },
+      "Model evaluation": { id: "model-evaluation", category: "method" },
+      PostgreSQL: { id: "postgresql", category: "datastore" },
+      Python: { id: "python", category: "language" },
+      PyTorch: { id: "pytorch", category: "library" },
+      Ray: { id: "ray", category: "framework" },
+      SQL: { id: "sql", category: "language" },
+      TypeScript: { id: "typescript", category: "language" },
+    };
+
+    for (const job of jobs) {
+      job.other_sources = [];
+      job.skills = (job.attributes.skills || []).map(name => ({
+        id: jobSkillDetails[name]?.id || String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+        ...jobSkillDetails[name],
+        name: jobSkillDetails[name]?.name || name,
+        label: jobSkillDetails[name]?.label || name,
+        category: jobSkillDetails[name]?.category || null,
+      }));
+    }
 
     const applications = [
       {
@@ -808,22 +897,35 @@
       const requested = url.searchParams.getAll("job_type");
       const types = requested.length ? requested : DEFAULT_JOB_TYPES;
       const degreeFields = url.searchParams.getAll("degree_field");
+      const excludedJobIds = new Set(url.searchParams.getAll("exclude_job_id"));
       const applicationJobIds = new Set(state.applications.map(application => application.job_id).filter(Boolean));
-      const filtered = state.jobs.filter(job => {
-        const searchable = `${job.title} ${job.company} ${job.location} ${job.attributes.skills.join(" ")}`.toLowerCase();
-        const matchesDegree = !degreeFields.length || degreeFields.some(field => job.attributes.degree_fields?.includes(field));
-        return !applicationJobIds.has(job.id) && (!q || searchable.includes(q)) && matchesType(types, job) && matchesDegree;
+      const available = state.jobs.filter(job => {
+        if (locationBucket(job) === null) return false;
+        const searchable = `${job.title} ${job.company} ${(job.skills || []).map(skill => skill.name).join(" ")}`.toLowerCase();
+        const postingFields = job.attributes.degree_fields || [];
+        const matchesDegree = !degreeFields.length || degreeFields.some(field =>
+          field === "bioengineering"
+            ? ["biotech", "med_device", "clinical_affairs"].some(value => postingFields.includes(value))
+            : postingFields.includes(field));
+        return !applicationJobIds.has(job.id) && !excludedJobIds.has(String(job.id)) && (!q || searchable.includes(q)) && matchesDegree;
       });
+      const job_type_counts = Object.fromEntries(DEFAULT_JOB_TYPES.map(type => [
+        type, available.filter(job => job.job_type === type).length,
+      ]));
+      const filtered = available.filter(job => matchesType(types, job));
       const sort = url.searchParams.get("sort") || "fresh";
       filtered.sort((a, b) => sort === "company"
         ? a.company.localeCompare(b.company)
         : sort === "title"
           ? a.title.localeCompare(b.title)
-          : b.posted_at.localeCompare(a.posted_at));
+          : recencyDay(b).localeCompare(recencyDay(a))
+            || locationBucket(a) - locationBucket(b)
+            || proximityPriority(a) - proximityPriority(b)
+            || String(b.posted_at || b.first_seen_at || "").localeCompare(String(a.posted_at || a.first_seen_at || "")));
       const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit")) || 100));
       const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
       const page = filtered.slice(offset, offset + limit);
-      return jsonResponse({ jobs: clone(page), total: filtered.length, limit, offset });
+      return jsonResponse({ jobs: clone(page), total: filtered.length, job_type_counts, limit, offset });
     }
 
     const addMatch = path.match(/^\/jobs\/([^/]+)\/applications$/);
@@ -1138,18 +1240,15 @@
   let accountPromise;
   const storageAvailable = () => Boolean(root.localStorage);
 
-  // Which page you are on decides which switch you are flipping. Source coverage
-  // is the one page left without one: it is a read-only report on the harvest
-  // itself, and a demo mode there would only hide the thing the page exists to
-  // show.
+  // Which page you are on decides which switch you are flipping. Only the two
+  // stateful workspaces expose fixture mode: Opportunities remains a live job
+  // feed, and Source Coverage remains a live report on the harvest itself.
   //
   // Scoping by pathname rather than by an argument is what keeps every caller
   // unchanged — a page only ever requests its own data, so "is sample mode on"
   // and "is sample mode on for this page" are the same question at every call
   // site (api-client.js's transport, resume/app.js's private api()).
   const PAGES = Object.freeze({
-    "/": "opportunities",
-    "/opportunities-v2/": "opportunities-v2",
     "/application/": "application",
     "/resume/": "resume",
   });
@@ -1241,10 +1340,7 @@
   const applicationJobIds = () => loadVisitorState().applications
     .map(application => application.job_id)
     .filter(id => id != null);
-  // Called once below for the shells that write their switch into the HTML, and
-  // again by any page that paints one later — Opportunities renders its whole
-  // header from app.js, so its button does not exist yet when this file runs and
-  // would otherwise be stuck reading "Off" while sample mode was on.
+  // Called once below for the shells that write their switch into the HTML.
   const syncToggle = () => {
     const toggle = root.document?.querySelector('[data-action="sample-toggle"]');
     if (!toggle) return;
@@ -1270,8 +1366,8 @@
   root.document.addEventListener("click", event => {
     const toggle = event.target.closest('[data-action="sample-toggle"]');
     // A switch on a page with no scope stores nothing, so reloading would only
-    // look like a failure. Only the three scoped pages carry one today, so this
-    // is a guard against a stray copy, not a live case.
+    // look like a failure. Only the two scoped pages carry one today, so this is
+    // a guard against a stray copy, not a live case.
     if (!toggle || !enabledKey()) return;
     event.preventDefault();
     event.stopImmediatePropagation();

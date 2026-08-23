@@ -9,6 +9,7 @@
     jobs: [],
     resumes: [],
     typstAvailable: false,
+    browserLocal: false,
     tab: "bank",
     resumeId: null,
     coverage: null,
@@ -98,10 +99,12 @@
     // Sample mode has a pre-rendered file. Browser-local resumes deliberately
     // never upload their content, so server-side Typst export requires sign-in.
     const badge = document.getElementById("typst-badge");
-    const browserLocal = !sampleModeOn() && window.OneShotVisitorData
-      && await window.OneShotVisitorData.isLocal();
+    state.browserLocal = Boolean(
+      !sampleModeOn() && window.OneShotVisitorData
+      && await window.OneShotVisitorData.isLocal()
+    );
     badge.hidden = state.typstAvailable || sampleModeOn();
-    badge.textContent = browserLocal
+    badge.textContent = state.browserLocal
       ? "Saved in this browser — sign in for PDF export"
       : "Typst not installed — PDF export disabled";
   }
@@ -275,7 +278,10 @@
         ${esc(skill.name)}</label>`).join("");
       return rows ? `<h4>${SKILL_TITLES[category]}</h4>${rows}` : "";
     }).join("");
-    const canExport = state.typstAvailable || sampleModeOn();
+    // Source generation is built into the API; only PDF compilation needs the
+    // Typst executable. Browser-local content cannot be sent to either route.
+    const canSource = sampleModeOn() || !state.browserLocal;
+    const canPdf = sampleModeOn() || (!state.browserLocal && state.typstAvailable);
 
     view.innerHTML = `
       <div class="builder-grid">
@@ -297,8 +303,8 @@
           <div class="builder-actions">
             <button class="button primary" data-action="save-resume"><svg aria-hidden="true"><use href="#icon-check"/></svg>Save selection</button>
             <button class="button" data-action="check-resume">Run checks</button>
-            <button class="button" data-action="download-typ" ${canExport ? "" : "disabled title='Sign in to export browser-local resumes'"}><svg aria-hidden="true"><use href="#icon-download"/></svg>.typ source</button>
-            <button class="button" data-action="open-pdf" ${canExport ? "" : "disabled title='Sign in to export browser-local resumes'"}>Open PDF</button>
+            <button class="button" data-action="download-typ" ${canSource ? "" : "disabled title='Sign in to export browser-local resumes'"}><svg aria-hidden="true"><use href="#icon-download"/></svg>.typ source</button>
+            <button class="button" data-action="open-pdf" ${canPdf ? "" : `disabled title='${state.browserLocal ? "Sign in to export browser-local resumes" : "Install Typst to export PDF"}'`}>Open PDF</button>
           </div>
           ${entryPicks || '<p class="empty">The content bank is empty — add entries first.</p>'}
         </div>

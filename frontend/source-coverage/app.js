@@ -6,25 +6,7 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
   };
-  const sourceLabel = value => String(value || "Source").split(/[_-]/).map(part => part ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
-  const sourceMark = value => String(value || "?").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?";
   const number = value => new Intl.NumberFormat().format(Number(value) || 0);
-  const boardLabel = (type, count) => String(type || "").toLowerCase() === "ats" && Number(count) > 0 ? `${number(count)} ${Number(count) === 1 ? "board" : "boards"}` : "";
-  const healthKey = value => {
-    const key = String(value || "unknown").trim().toLowerCase().replace(/\s+/g, "-");
-    return ["healthy", "partial", "needs-attention", "not-polled", "disabled"].includes(key) ? key : "unknown";
-  };
-  const needsAttention = source => ["partial", "needs-attention", "not-polled"].includes(healthKey(source.health));
-  const summarize = payload => {
-    const sources = Array.isArray(payload?.sources) ? payload.sources : [];
-    return {
-      sources,
-      sourceCount: Number(payload?.source_count) || sources.length,
-      totalCoverage: Number(payload?.total_coverage) || 0,
-      totalAddedToday: Number(payload?.total_added_today) || 0,
-      attentionCount: sources.filter(needsAttention).length,
-    };
-  };
   const relativeTime = (value, now = new Date()) => {
     const date = safeDate(value);
     if (!date) return "Never polled";
@@ -47,69 +29,110 @@
     );
   });
 
-  const exported = { sourceLabel, sourceMark, boardLabel, healthKey, needsAttention, summarize, relativeTime, withTimeout };
+  const CELL_STATES = ["ok", "degraded", "failing", "stale", "paused", "never"];
+  const stateKey = value => {
+    const key = String(value || "").trim().toLowerCase();
+    return CELL_STATES.includes(key) ? key : "unknown";
+  };
+  const fleetTotals = payload => {
+    const providers = Array.isArray(payload?.providers) ? payload.providers : [];
+    const counts = { boards: 0, providers: providers.length, ok: 0, erroring: 0, stale: 0, paused: 0, never: 0, roles: 0 };
+    for (const provider of providers) {
+      for (const board of Array.isArray(provider.boards) ? provider.boards : []) {
+        counts.boards += 1;
+        counts.roles += Number(board.coverage) || 0;
+        const state = stateKey(board.state);
+        if (state === "ok") counts.ok += 1;
+        else if (state === "failing" || state === "degraded") counts.erroring += 1;
+        else if (state === "stale") counts.stale += 1;
+        else if (state === "paused") counts.paused += 1;
+        else counts.never += 1;
+      }
+    }
+    const totals = payload?.totals;
+    return totals && Number.isFinite(Number(totals.boards)) ? { ...counts, ...totals, roles: counts.roles } : counts;
+  };
+  const cellTitle = (source, board) => {
+    const name = board?.company || board?.key || "?";
+    return `${name} (${number(board?.coverage)} roles)`;
+  };
+
+  const exported = { relativeTime, withTimeout, stateKey, fleetTotals, cellTitle };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (!root.document) return;
 
   const $ = selector => document.querySelector(selector);
   const content = $("#coverage-content");
   const esc = value => String(value == null ? "" : value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
-  const exactTime = value => {
-    const date = safeDate(value);
-    return date ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date) : "No successful poll recorded";
-  };
 
-  function renderSummary(summary) {
-    $("#header-total").textContent = number(summary.totalCoverage);
-    $("#source-count").textContent = number(summary.sourceCount);
-    $("#role-count").textContent = number(summary.totalCoverage);
-    $("#added-count").textContent = summary.totalAddedToday ? `+${number(summary.totalAddedToday)}` : "—";
-    const attention = $("#attention-summary");
-    attention.hidden = !summary.attentionCount;
-    attention.querySelector("span").textContent = `${number(summary.attentionCount)} ${summary.attentionCount === 1 ? "source needs" : "sources need"} attention`;
+  function renderStats(totals) {
+    $("#fleet-stats").innerHTML = [
+      `<strong>${esc(number(totals.boards))}</strong> boards / <strong>${esc(number(totals.providers))}</strong> providers`,
+      `<strong>${esc(number(totals.roles))}</strong> roles`,
+    ].join('<span class="stat-sep" aria-hidden="true"> · </span>');
   }
 
-  function sourceRow(source) {
-    const type = String(source.type || "Other"), boards = boardLabel(type, source.board_count), metadata = [type, boards].filter(Boolean).join(" · ");
-    const status = String(source.health || "Unknown"), statusKey = healthKey(status), attention = needsAttention(source);
-    const polledAt = safeDate(source.last_poll_at), additions = Number(source.added_today) || 0;
-    return `<div class="source-row ${attention ? "attention-row" : ""}" role="row">
-      <div class="source-cell" data-label="Source" role="cell"><span class="source-mark">${esc(sourceMark(source.source))}</span><div><strong>${esc(sourceLabel(source.source))}</strong><small>${esc(metadata)}</small></div></div>
-      <div class="coverage-cell" data-label="Coverage" role="cell"><strong>${esc(number(source.coverage))}</strong><span>roles</span></div>
-      <div class="poll-cell" data-label="Last poll" role="cell">${polledAt ? `<time datetime="${esc(polledAt.toISOString())}" title="${esc(exactTime(polledAt))}">${esc(relativeTime(polledAt))}</time>` : `<span>Never polled</span>`}<small>${esc(exactTime(polledAt))}</small></div>
-      <div data-label="Health" role="cell"><span class="health-pill ${esc(statusKey)}"><i aria-hidden="true"></i>${esc(status)}</span></div>
-      <div class="change-cell ${additions ? "positive" : "zero"}" data-label="Today" role="cell">${additions ? `+${esc(number(additions))}` : "—"}</div>
-    </div>`;
+  function fleetRow(provider) {
+    const boards = Array.isArray(provider.boards) ? provider.boards : [];
+    const cells = boards.map(board =>
+      `<i class="cell ${esc(stateKey(board.state))}" title="${esc(cellTitle(provider.source, board))}"></i>`).join("");
+    return `<section class="fleet-row" aria-label="${esc(provider.source)}: ${esc(number(provider.board_count))} boards, ${esc(number(provider.err_count))} erroring">
+      <div class="fleet-label"><strong>${esc(provider.source)}</strong></div>
+      <div class="fleet-cells" aria-hidden="true">${cells}</div>
+    </section>`;
   }
 
   function render(payload) {
-    const summary = summarize(payload);
-    renderSummary(summary);
-    if (!summary.sources.length) {
+    const providers = Array.isArray(payload?.providers) ? payload.providers : [];
+    renderStats(fleetTotals(payload));
+    if (!providers.length) {
       content.innerHTML = `<div class="state"><span class="state-icon"><svg aria-hidden="true"><use href="#icon-sources"/></svg></span><h2>No source coverage yet</h2><p>Configured sources will appear here after coverage data becomes available.</p></div>`;
       return;
     }
-    content.innerHTML = `<div class="source-table" role="table" aria-label="Source coverage">
-      <div class="table-head" role="row"><span role="columnheader">Source</span><span role="columnheader">Coverage</span><span role="columnheader">Last poll</span><span role="columnheader">Health</span><span role="columnheader">Today</span></div>
-      <div class="table-body" role="rowgroup">${summary.sources.map(sourceRow).join("")}</div>
-    </div>`;
+    content.innerHTML = `<div class="fleet-map">${providers.map(fleetRow).join("")}</div>`;
   }
 
   function renderError(error) {
     content.innerHTML = `<div class="state"><span class="state-icon error"><svg aria-hidden="true"><use href="#icon-alert"/></svg></span><h2>Source coverage could not load</h2><p>${esc(error?.message || error || "The coverage service is unavailable.")}</p><button type="button" data-action="retry">Try again</button></div>`;
   }
 
-  async function loadCoverage() {
-    content.innerHTML = `<div class="state loading-state"><span class="spinner"></span><p>Loading source coverage…</p></div>`;
+  function setStale(stale) {
+    const note = $("#stale-note");
+    if (note) note.hidden = !stale;
+  }
+
+  const REFRESH_MS = 60000;
+  let lastGoodAt = 0, inFlight = false;
+
+  async function refresh({ initial = false } = {}) {
+    if (inFlight) return;
+    inFlight = true;
+    if (initial) content.innerHTML = `<div class="state loading-state"><span class="spinner"></span><p>Loading source coverage…</p></div>`;
     try {
-      render(await withTimeout(root.OneShotAPI.sources.coverage()));
+      render(await withTimeout(root.OneShotAPI.sources.boards()));
+      lastGoodAt = Date.now();
+      setStale(false);
     } catch (error) {
-      renderError(error);
+      if (initial || !lastGoodAt) renderError(error);
+      else setStale(true);
+    } finally {
+      inFlight = false;
     }
   }
 
+  function updateClock() {
+    const clock = $("#clock");
+    if (clock) clock.textContent = `${new Date().toISOString().slice(11, 19)} UTC`;
+  }
+
   document.addEventListener("click", event => {
-    if (event.target.closest('[data-action="retry"]')) loadCoverage();
+    if (event.target.closest('[data-action="retry"]')) refresh({ initial: true });
   });
-  loadCoverage();
+  setInterval(updateClock, 1000);
+  setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Date.now() - lastGoodAt > REFRESH_MS) refresh();
+  });
+  updateClock();
+  refresh({ initial: true });
 })(typeof window !== "undefined" ? window : globalThis);

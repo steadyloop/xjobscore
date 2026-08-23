@@ -8,16 +8,16 @@ const { ROUTES, query } = require("./api-client.js");
 const { opportunityTotal } = require("./nav-count.js");
 
 test("visible filters map to PostgreSQL job types", () => {
-  const labels = ["Internships", "Co-ops", "Student Programs", "Research", "Part Time"];
-  const keys = ["internships", "coops", "student_programs", "research", "part_time"];
-  // One tab per stored value now: the old taxonomy's fellowship, apprenticeship,
-  // new_grad_program and student_role all collapsed into student_program.
-  const types = ["intern", "coop", "student_program", "research", "part_time"];
+  const labels = ["All", "Internships", "Co-ops", "Student Programs", "Part Time"];
+  const keys = ["all", "internships", "coops", "student_programs", "part_time"];
+  const types = ["intern", "coop", "student_program", "part_time"];
 
   assert.deepEqual(FILTERS.map(filter => filter.label), labels);
   assert.deepEqual(jobTypes(keys), types);
   assert.deepEqual(opportunitiesV2.FILTERS.map(filter => filter.label), labels);
   assert.deepEqual(opportunitiesV2.jobTypes(keys), types);
+  assert.equal(FILTERS.some(filter => filter.types.includes("research")), false);
+  assert.equal(opportunitiesV2.FILTERS.some(filter => filter.types.includes("research")), false);
   assert.deepEqual(jobTypes([]), [], "no tab active defers to the API's default scope");
 });
 
@@ -38,19 +38,74 @@ test("job freshness labels stay concise", () => {
 
 test("sample jobs match the live list contract", async () => {
   const state = sampleData.createState();
+  assert.deepEqual(
+    [...new Set(state.jobs.flatMap(job => job.skills.map(skill => skill.category)).filter(Boolean))].sort(),
+    ["concept", "datastore", "format", "framework", "hardware", "language", "library", "method", "platform", "protocol", "tool"],
+  );
   const listing = await (await sampleData.handle("/jobs?limit=100", {}, state)).json();
-  assert.equal(listing.total, 9);
+  assert.equal(listing.total, 8);
   for (const job of listing.jobs) {
     assert.deepEqual(
       Object.keys(job).sort(),
-      ["apply_url", "attributes", "company", "description", "first_seen_at", "id", "job_type", "last_seen_at", "location", "posted_at", "remote", "source", "source_url", "status", "title"],
+      ["apply_url", "attributes", "company", "first_seen_at", "id", "job_type", "last_seen_at", "location", "locations", "other_sources", "posted_at", "remote", "skills", "source", "source_url", "status", "summary", "title"],
     );
+    assert.ok(Array.isArray(job.locations));
+    assert.ok(job.locations.every(location =>
+      Object.keys(location).sort().join(",") === "city,country,state"));
+    assert.ok(Array.isArray(job.skills));
     assert.equal(job.attributes.version, 1);
     // Parse-time columns, alongside attributes rather than inside it. job_type
     // is NULL when no vendor rule matched; remote always states a value.
     assert.ok(job.job_type === null || ["intern", "coop", "student_program", "research", "part_time"].includes(job.job_type));
     assert.ok(["yes", "hybrid", "unknown"].includes(job.remote));
   }
+});
+
+test("sample job search uses title, company, and precomputed skills only", async () => {
+  const state = sampleData.createState();
+  const bySkill = await (await sampleData.handle("/jobs?q=Kubernetes&limit=100", {}, state)).json();
+  assert.ok(bySkill.jobs.some(job => job.id === "sample-software"));
+
+  const bySummary = await (await sampleData.handle("/jobs?q=reproducible%20experiments&limit=100", {}, state)).json();
+  assert.equal(bySummary.total, 0);
+  const byLocation = await (await sampleData.handle("/jobs?q=San%20Diego&limit=100", {}, state)).json();
+  assert.equal(byLocation.total, 0);
+});
+
+test("sample fresh order is day first, then US location bucket", async () => {
+  const state = sampleData.createState();
+  state.applications = [];
+  const copy = id => structuredClone(state.jobs.find(job => job.id === id));
+  const norcalHub = copy("sample-new-grad");
+  const socalHub = copy("sample-software");
+  const seattleHub = {
+    ...copy("sample-software"), id: "sample-seattle", location: "Seattle, WA",
+    locations: [{ country: "US", state: "WA", city: "Seattle" }],
+  };
+  const otherHub = copy("sample-platform");
+  const suburb = copy("sample-graduate-research");
+  const rest = copy("sample-research");
+  const foreign = copy("sample-working-student");
+  const missing = { ...copy("sample-research"), id: "sample-no-location", locations: [], location: null };
+  for (const job of [norcalHub, socalHub, seattleHub, otherHub, suburb, rest, foreign, missing]) {
+    job.posted_at = "2026-08-21T12:00:00Z";
+    job.first_seen_at = job.posted_at;
+  }
+  state.jobs = [missing, foreign, rest, suburb, otherHub, seattleHub, socalHub, norcalHub];
+
+  const listing = await (await sampleData.handle("/jobs?sort=fresh&limit=100", {}, state)).json();
+  assert.deepEqual(listing.jobs.map(job => job.id), [
+    "sample-new-grad", "sample-software", "sample-seattle", "sample-platform",
+    "sample-graduate-research", "sample-research", "sample-no-location",
+  ]);
+});
+
+test("Typst source export does not depend on PDF compiler availability", () => {
+  const source = fs.readFileSync(require.resolve("./resume/app.js"), "utf8");
+  assert.match(source, /const canSource = sampleModeOn\(\) \|\| !state\.browserLocal;/);
+  assert.match(source, /const canPdf = sampleModeOn\(\) \|\| \(!state\.browserLocal && state\.typstAvailable\);/);
+  assert.match(source, /data-action="download-typ" \$\{canSource/);
+  assert.match(source, /data-action="open-pdf" \$\{canPdf/);
 });
 
 test("sample jobs honor limit and offset like the live API", async () => {
@@ -62,6 +117,9 @@ test("sample jobs honor limit and offset like the live API", async () => {
   const second = await (await sampleData.handle("/jobs?limit=2&offset=2", {}, state)).json();
   assert.equal(second.jobs.length, 2);
   assert.equal(second.total, first.total);
+  assert.deepEqual(first.job_type_counts, {
+    intern: 3, coop: 1, student_program: 3, research: 1, part_time: 0,
+  });
   assert.deepEqual(
     second.jobs.map(job => job.id).filter(id => first.jobs.some(job => job.id === id)),
     [],
@@ -82,7 +140,7 @@ test("sample Add to Applications creates one Considering record", async () => {
   assert.equal(firstResponse.status, 201);
   assert.equal(first.stage, "considering");
   assert.equal(first.job_id, "sample-software");
-  assert.equal((await (await sampleData.handle("/jobs", {}, state)).json()).total, 8);
+  assert.equal((await (await sampleData.handle("/jobs", {}, state)).json()).total, 7);
 
   const duplicate = await (await sampleData.handle("/jobs/sample-software/applications", { method: "POST" }, state)).json();
   assert.equal(duplicate.id, first.id);
@@ -180,8 +238,8 @@ test("Opportunities exposes its action and workspace navigation", () => {
   assert.match(html, /href=\"\/application\/\"/);
   assert.match(html, /href=\"\/source-coverage\/\"/);
   assert.doesNotMatch(html, /href=\"\/static\/[a-z-]+\/index\.html\"/);
-  assert.match(html, /href=\"\/static\/opportunities-v2\/styles\.css\?v=compact-card-/);
-  assert.match(html, /src=\"\/static\/opportunities-v2\/app\.js\?v=compact-card-/);
+  assert.match(html, /href=\"\/static\/opportunities-v2\/styles\.css\?v=skill-bundles-/);
+  assert.match(html, /src=\"\/static\/opportunities-v2\/app\.js\?v=skill-bundles-/);
   assert.match(html, /href=\"\/static\/navigation\.css\?v=stable-nav-/);
 });
 

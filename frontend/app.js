@@ -2,10 +2,10 @@
   "use strict";
 
   const FILTERS = [
+    { key: "all", label: "All", types: [] },
     { key: "internships", label: "Internships", types: ["intern"] },
     { key: "coops", label: "Co-ops", types: ["coop"] },
     { key: "student_programs", label: "Student Programs", types: ["student_program"] },
-    { key: "research", label: "Research", types: ["research"] },
     { key: "part_time", label: "Part Time", types: ["part_time"] },
   ];
   const jobTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
@@ -44,7 +44,7 @@
   const $ = selector => document.querySelector(selector);
   const view = $("#view"), flash = $("#flash");
   const PAGE_SIZE = 100;
-  const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: ["internships"], sort: "fresh", query: "" };
+  const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: ["all"], sort: "fresh", query: "" };
   const esc = value => String(value == null ? "" : value).replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
   const safeHref = value => /^https?:\/\//i.test(String(value || "")) ? String(value) : "";
   const attributes = job => job.attributes || {};
@@ -99,9 +99,9 @@
   // Not the middle dot: boards use it as ordinary punctuation often enough that
   // splitting on it would shred prose rather than reveal a list.
   const BULLETS = /\s*[•●▪‣]\s*/;
-  function descriptionMarkup(job) {
-    const text = String(job.description || "").trim();
-    if (!text) return '<p class="detail-description">No description is available yet.</p>';
+  function summaryMarkup(job) {
+    const text = String(job.summary || "").trim();
+    if (!text) return '<p class="detail-description">Summary unavailable. View the original posting for complete details.</p>';
     const [lead, ...rest] = text.split(BULLETS);
     const items = rest.map(item => item.trim()).filter(Boolean);
     if (!items.length) return `<p class="detail-description">${esc(text)}</p>`;
@@ -124,7 +124,7 @@
   function detail(job) {
     if (!job) return '<aside class="detail"><div class="section-kicker">Selection</div><h2>Choose a job</h2><p>Select a role to review its details and add it to Applications.</p></aside>';
     const applyUrl = safeHref(job.apply_url);
-    return `<aside class="detail"><div class="detail-head-row"><div class="job-logo large">${esc(initials(job))}</div><div><div class="detail-company">${esc(job.company)}</div><div class="meta">${esc(facts(job).join(" · "))}</div></div></div><h2>${esc(job.title)}</h2><div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(job.id)}">Add to Applications</button>${applyUrl ? `<a class="button" href="${esc(applyUrl)}" target="_blank" rel="noopener noreferrer">Open posting ↗</a>` : ""}</div><section><div class="section-kicker">Job details</div><div class="tags">${tags(job) || '<span class="meta">No structured details available</span>'}</div></section><section><div class="section-kicker">Role overview</div>${descriptionMarkup(job)}</section><div class="detail-freshness">${esc(freshness(job))}${job.last_seen_at ? ` · Last confirmed active ${esc(relativeTime(job.last_seen_at))}` : ""}</div></aside>`;
+    return `<aside class="detail"><div class="detail-head-row"><div class="job-logo large">${esc(initials(job))}</div><div><div class="detail-company">${esc(job.company)}</div><div class="meta">${esc(facts(job).join(" · "))}</div></div></div><h2>${esc(job.title)}</h2><div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(job.id)}">Add to Applications</button>${applyUrl ? `<a class="button" href="${esc(applyUrl)}" target="_blank" rel="noopener noreferrer">Open posting ↗</a>` : ""}</div><section><div class="section-kicker">Job details</div><div class="tags">${tags(job) || '<span class="meta">No structured details available</span>'}</div></section><section><div class="section-kicker">Role summary</div>${summaryMarkup(job)}</section><div class="detail-freshness">${esc(freshness(job))}${job.last_seen_at ? ` · Last confirmed active ${esc(relativeTime(job.last_seen_at))}` : ""}</div></aside>`;
   }
 
   function pagerMarkup(jobs) {
