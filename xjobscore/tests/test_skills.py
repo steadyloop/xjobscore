@@ -30,7 +30,7 @@ def _skill(
     return Skill(
         id=skill_id,
         name=skill_id,
-        category="stack",
+        category="tool",
         aliases=aliases,
         ambiguous_aliases=(),
         case_sensitive=case_sensitive,
@@ -42,6 +42,16 @@ def _skill(
 
 def test_names_resolve_through_their_declared_aliases():
     assert extract("We build kernels with CUTLASS and NCCL.") == ["cutlass", "nccl"]
+
+
+def test_polars_product_name_is_not_treated_as_ambiguous():
+    assert extract("Experience with Polars dataframes") == ["polars"]
+
+
+def test_corpus_discovered_vectorized_execution_alias():
+    assert extract("The engine uses vectorized execution") == [
+        "vectorized-query-execution"
+    ]
 
 
 def test_aliases_collapse_onto_one_id():
@@ -69,9 +79,11 @@ def test_word_boundaries_reject_substrings():
 
 
 def test_leftmost_longest_alias_wins_over_nested_skills():
-    assert extract("CUDA C++") == ["cuda"]
+    assert extract("CUDA C++") == ["cuda-cpp"]
     assert extract("numerical linear algebra") == ["numerical-linear-algebra"]
-    assert extract("NVIDIA Triton Inference Server") == ["triton-inference-server"]
+    assert extract("NVIDIA Triton Inference Server") == [
+        "nvidia-triton-inference-server"
+    ]
 
 
 def test_failure_links_find_alias_after_a_partial_prefix():
@@ -125,10 +137,12 @@ def test_ambiguous_skills_remain_reachable_through_safe_aliases():
 
 def test_ambiguity_is_declared_separately_from_matchable_aliases():
     entries = canon()
-    assert entries["go"].aliases == ("golang",)
+    assert entries["go"].aliases == ("Golang", "Go language", "Go programming")
     assert entries["go"].ambiguous_aliases == ("go",)
-    assert entries["c"].patterns == ()
-    assert entries["triton-kernel-language"].ambiguous_aliases == ("triton",)
+    assert entries["c"].aliases == ("C language", "C programming")
+    assert entries["c"].ambiguous_aliases == ("c",)
+    assert entries["javascript"].case_sensitive_aliases == ("JS",)
+    assert "JS" in entries["javascript"].patterns
 
 
 # -- shipped canon -------------------------------------------------------
@@ -152,11 +166,67 @@ def test_canon_is_cached():
 def test_optional_alias_fields_and_case_sensitivity_default(tmp_path: Path):
     entries = _canon(
         tmp_path,
-        "skill:\n  - id: duckdb\n    name: DuckDB\n    category: stack\n",
+        "skill:\n  - id: duckdb\n    name: DuckDB\n    category: datastore\n",
     )
     assert entries["duckdb"].aliases == ()
+    assert entries["duckdb"].case_sensitive_aliases == ()
     assert entries["duckdb"].ambiguous_aliases == ()
     assert entries["duckdb"].case_sensitive is False
+
+
+def test_per_alias_case_sensitivity_is_loaded_and_matched(tmp_path: Path):
+    entries = _canon(
+        tmp_path,
+        "skill:\n"
+        "  - id: javascript\n"
+        "    name: JavaScript\n"
+        "    category: language\n"
+        "    aliases: [JavaScript]\n"
+        "    case_sensitive_aliases: [JS]\n",
+    )
+    matcher = SkillMatcher(entries.values())
+
+    assert matcher.extract("javascript and JS") == ["javascript"]
+    assert matcher.extract("lowercase js") == []
+
+
+def test_display_groups_are_validated_but_not_matched(tmp_path: Path):
+    entries = _canon(
+        tmp_path,
+        "skill_group:\n"
+        "  - id: data-stack\n"
+        "    name: Data Stack\n"
+        "    skill_ids: [python, sql]\n"
+        "skill:\n"
+        "  - id: python\n"
+        "    name: Python\n"
+        "    category: language\n"
+        "    aliases: [Python]\n"
+        "  - id: sql\n"
+        "    name: SQL\n"
+        "    category: language\n"
+        "    aliases: [SQL]\n",
+    )
+    matcher = SkillMatcher(entries.values())
+
+    assert matcher.extract("Data Stack") == []
+    assert matcher.extract("Python and SQL") == ["python", "sql"]
+
+
+def test_display_group_rejects_unknown_skill_id(tmp_path: Path):
+    body = """\
+skill_group:
+  - id: data-stack
+    name: Data Stack
+    skill_ids: [python, missing]
+skill:
+  - id: python
+    name: Python
+    category: language
+    aliases: [Python]
+"""
+    with pytest.raises(SkillsError, match="unknown skill id 'missing'"):
+        _canon(tmp_path, body)
 
 
 def test_unknown_key_is_rejected(tmp_path: Path):
@@ -170,7 +240,7 @@ def test_unknown_key_is_rejected(tmp_path: Path):
 
 def test_unknown_or_missing_category_is_rejected(tmp_path: Path):
     with pytest.raises(SkillsError, match="category must be one of"):
-        _canon(tmp_path, "skill:\n  - id: rust\n    name: Rust\n    category: framework\n")
+        _canon(tmp_path, "skill:\n  - id: rust\n    name: Rust\n    category: stack\n")
     with pytest.raises(SkillsError, match="category must be one of"):
         _canon(tmp_path, "skill:\n  - id: rust\n    name: Rust\n")
 
@@ -195,7 +265,7 @@ skill:
     aliases: [triton]
   - id: triton-server
     name: Triton Server
-    category: stack
+    category: platform
     aliases: [TRITON]
 """
     with pytest.raises(SkillsError, match="claimed by both"):
@@ -207,11 +277,11 @@ def test_ambiguous_spelling_cannot_be_claimed_by_another_skill(tmp_path: Path):
 skill:
   - id: ray
     name: Ray
-    category: stack
+    category: framework
     ambiguous_aliases: [ray]
   - id: ray-tracer
     name: Ray Tracer
-    category: stack
+    category: tool
     aliases: [ray]
 """
     with pytest.raises(SkillsError, match="claimed by both"):
@@ -253,7 +323,7 @@ def test_empty_canon_is_rejected(tmp_path: Path):
 
 
 def test_wrong_root_is_rejected(tmp_path: Path):
-    with pytest.raises(SkillsError, match="root must contain exactly"):
+    with pytest.raises(SkillsError, match="invalid root"):
         _canon(tmp_path, "skills: []\n")
 
 

@@ -94,7 +94,8 @@ async def test_only_resolvable_rows_are_written_with_full_field_mapping(tmp_path
             "SELECT * FROM token WHERE ats = 'greenhouse' AND token = $1", resolvable_token
         )
         workday_row = await conn.fetchrow(
-            "SELECT * FROM token WHERE ats = 'workday-list' AND token = $1", workday_token
+            "SELECT * FROM token WHERE ats = 'workday-list' AND token = $1",
+            workday_token.lower(),
         )
         missing = await conn.fetchrow(
             "SELECT * FROM token WHERE ats = 'greenhouse' AND token = $1", unresolvable_token
@@ -148,11 +149,8 @@ async def test_rerun_is_idempotent(tmp_path, core_schema):
 
 
 @pytest.mark.asyncio
-async def test_a_row_owned_by_the_native_feeder_pipeline_is_never_overwritten(tmp_path, core_schema):
-    """A token with source IS NULL (or any non-'keyscan' source) belongs to
-    feader.py's registry sync. keyscan reporting a conflicting status for the
-    same (ats, token) must not touch it.
-    """
+async def test_a_row_not_owned_by_keyscan_is_never_overwritten(tmp_path, core_schema):
+    """Keyscan must not overwrite a token with NULL or another source."""
     suffix = uuid4().hex[:8]
     db_path = _keyscan_db(tmp_path)
     token = f"acme-{suffix}"

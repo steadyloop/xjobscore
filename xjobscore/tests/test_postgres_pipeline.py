@@ -74,7 +74,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
             company_id,
         )
         feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, enabled, due_at, hold_until) VALUES ($1, $2, true, $3, $3) RETURNING id",
+            "INSERT INTO feed(source, key, polling, due_at, hold_until) VALUES ($1, $2, true, $3, $3) RETURNING id",
             source,
             key,
             now,
@@ -94,7 +94,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
         claimable = await conn.fetchval(
             """
             SELECT count(*) FROM feed f
-            WHERE f.enabled AND f.paused_at IS NULL AND f.due_at <= $1
+            WHERE f.polling AND f.paused_at IS NULL AND f.due_at <= $1
               AND (f.hold_until IS NULL OR f.hold_until <= $1)
             """,
             now,
@@ -106,7 +106,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     claimed = next(result for result in attempts if result)
 
     assert len(claimed) == 1
-    feed = replace(claimed[0], source_type="ATS")
+    feed = replace(claimed[0], type="ATS")
     # The claim must carry the lease it just took, not the value the row
     # held beforehand. A data-modifying CTE's writes are invisible to the
     # rest of its own query, so reading hold_until off `feed` instead
@@ -140,7 +140,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
             company_id,
         )
         second_feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, enabled, due_at) VALUES ($1, $2, true, $3) RETURNING id",
+            "INSERT INTO feed(source, key, polling, due_at) VALUES ($1, $2, true, $3) RETURNING id",
             source,
             second_key,
             now,
@@ -149,7 +149,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
 
     assert len(second_claim) == 1
     assert await run.poll(
-        pool, object(), replace(second_claim[0], source_type="ATS"), now
+        pool, object(), replace(second_claim[0], type="ATS"), now
     ) == "ok"
 
     await repository.connect()
@@ -158,7 +158,8 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     assert {job["title"] for job in result["jobs"]} == {title}
     listing = result["jobs"][0]
     assert listing["title"] == title
-    assert listing["description"] == "Build the ingestion pipeline."
+    assert listing["summary"] is None
+    assert "description" not in listing
 
 
 @pytest.mark.asyncio
@@ -173,17 +174,19 @@ async def test_claim_feed_leases_one_feed_regardless_of_due_at(core_schema):
 
     async with pool.acquire() as conn:
         feed_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, due_at) VALUES ($1, 'board', $2) RETURNING id",
+            "INSERT INTO feed(source, key, polling, due_at) "
+            "VALUES ($1, 'board', true, $2) RETURNING id",
             source,
             now + timedelta(days=1),
         )
         disabled_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, enabled, due_at) VALUES ($1, 'off', false, $2) RETURNING id",
+            "INSERT INTO feed(source, key, polling, due_at) VALUES ($1, 'off', false, $2) RETURNING id",
             source,
             now,
         )
         paused_id = await conn.fetchval(
-            "INSERT INTO feed(source, key, due_at, paused_at) VALUES ($1, 'held', $2, $2) RETURNING id",
+            "INSERT INTO feed(source, key, polling, due_at, paused_at) "
+            "VALUES ($1, 'held', true, $2, $2) RETURNING id",
             source,
             now,
         )

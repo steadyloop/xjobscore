@@ -40,10 +40,9 @@ def test_legacy_gold_cli_flags_are_rejected(legacy):
         run.load_config(["--dsn", "postgresql://example/test", legacy])
 
 
-def test_seed_cli_selects_standalone_registry_seed():
-    config = run.load_config(["--dsn", "postgresql://example/test", "--seed"])
-
-    assert config.seed is True
+def test_seed_cli_flag_is_rejected():
+    with pytest.raises(SystemExit):
+        run.load_config(["--dsn", "postgresql://example/test", "--seed"])
 
 
 def test_fetch_all_cli_selects_full_sweep_and_concurrency():
@@ -74,6 +73,19 @@ def test_schema_indexes_the_opportunities_filter_and_default_sort():
     assert "((COALESCE(posted_at, first_seen_at)) DESC, id DESC)" in schema
 
 
+def test_workday_count_probe_state_has_a_live_database_migration():
+    root = Path(__file__).parent.parent.parent
+    schema = (root / "schema.sql").read_text()
+    migration = (
+        root / "xjobscore" / "migrations" / "20260822_workday_count_probe.sql"
+    ).read_text()
+
+    assert "list_total      integer" in schema
+    assert "last_full_poll_at timestamptz" in schema
+    assert "ADD COLUMN IF NOT EXISTS list_total integer" in migration
+    assert "ADD COLUMN IF NOT EXISTS last_full_poll_at timestamptz" in migration
+
+
 def test_schema_job_types_match_the_api_contract():
     """job_type has no registry canon any more -- the column CHECK is the
     contract. oneshot-ui is a separate sub-project with its own suite, so it
@@ -100,6 +112,56 @@ def test_schema_remote_domain_has_no_negative():
         "hybrid",
         "unknown",
     }
+
+
+def test_schema_uses_normalized_locations_not_a_scalar_country():
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
+
+    assert "locations jsonb NOT NULL DEFAULT '[]'::jsonb" in schema
+    assert "country char(2)" not in schema
+    assert "country_alpha2" not in schema
+
+
+def test_location_migration_preserves_then_removes_legacy_country():
+    migration = (
+        Path(__file__).parent.parent / "migrations" / "20260821_country.sql"
+    ).read_text()
+
+    assert "ADD COLUMN IF NOT EXISTS locations jsonb" in migration
+    assert "jsonb_build_object" in migration
+    assert "DROP COLUMN IF EXISTS country_alpha2" in migration
+    assert "DROP COLUMN IF EXISTS country" in migration
+
+
+def test_schema_rejects_retired_and_noncanonical_workday_token_identities():
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
+
+    assert "CONSTRAINT token_workday_source_renamed" in schema
+    assert "CHECK (ats <> 'workday')" in schema
+    assert "CONSTRAINT token_workday_list_key_lower" in schema
+    assert "CHECK (ats <> 'workday-list' OR token = lower(token))" in schema
+
+
+def test_schema_rejects_noncanonical_workday_posting_namespaces():
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
+
+    assert "CONSTRAINT raw_posting_workday_source_lower" in schema
+    assert "CONSTRAINT job_posting_workday_source_lower" in schema
+    assert "source NOT LIKE 'workday-list:%' OR source = lower(source)" in schema
+
+
+def test_workday_case_migration_preserves_rich_locations_before_deduping():
+    migration = (
+        Path(__file__).parent.parent
+        / "migrations"
+        / "20260821_workday_case_identity.sql"
+    ).read_text()
+
+    assert "jsonb_array_length(j.locations) DESC" in migration
+    assert "UPDATE job_application" in migration
+    assert "DELETE FROM job_posting" in migration
+    assert "DELETE FROM raw_posting" in migration
+    assert "job_posting_workday_source_lower" in migration
 
 
 class _AsyncContext:
@@ -150,8 +212,6 @@ async def test_fetch_all_dry_run_fetches_every_eligible_feed_with_bounded_concur
         active -= 1
 
     monkeypatch.setattr(store, "fetchable_feeds", candidates)
-    monkeypatch.setattr(run, "_registry_index", lambda: {})
-    monkeypatch.setattr(run, "source_types", lambda: {})
     monkeypatch.setattr(run.sources, "get", lambda source: harvest)
     cfg = run.Config(
         dsn="postgresql://example/test",
@@ -188,8 +248,6 @@ async def test_fetch_all_claims_each_feed_and_reports_concurrent_skips(monkeypat
     monkeypatch.setattr(store, "fetchable_feeds", candidates)
     monkeypatch.setattr(store, "claim_feed", claim)
     monkeypatch.setattr(run, "poll", poll)
-    monkeypatch.setattr(run, "_registry_index", lambda: {})
-    monkeypatch.setattr(run, "source_types", lambda: {})
     cfg = run.Config(
         dsn="postgresql://example/test",
         user_agent="test",
@@ -211,11 +269,28 @@ def _claimed_feed(**overrides) -> Feed:
         source="greenhouse",
         key="acme",
         company_id=42,
-        source_type="ATS",
+        type="ATS",
         interval_s=900,
         hold_until=NOW + timedelta(hours=1),
     )
     return replace(base, **overrides)
+
+
+def test_database_feed_keeps_its_runtime_metadata():
+    feed = Feed(
+        id=1,
+        source="ashby",
+        key="bild-ai",
+        company_id=42,
+        company_name="bild-ai",
+        config={"company_raw": "Bild"},
+        type="ATS",
+    )
+
+    assert feed.company_id == 42
+    assert feed.company_name == "bild-ai"
+    assert feed.config == {"company_raw": "Bild"}
+    assert feed.type == "ATS"
 
 
 def test_source_instance_prevents_tenant_local_id_collisions():
@@ -253,16 +328,6 @@ async def test_company_resolution_from_alias_map_skips_the_database():
     assert await store.resolve_company(Connection(), "Ambient AI, Inc.", aliases=aliases) == 97
     # A miss is authoritative -- the map is the whole table, so no DB fallback.
     assert await store.resolve_company(Connection(), "Nobody Here LLC", aliases=aliases) is None
-
-
-def test_alias_candidates_matches_inspector_persistence_mirror():
-    # inspector/persistence.py keeps its own copy of this normalization by
-    # design (its store is deliberately independent of schema.sql), but the
-    # two must still agree on what an alias key looks like.
-    from xjobscore.inspector.persistence import alias_candidates as mirrored
-
-    for raw in ("Ambient AI, Inc.", "Foo & Bar Co.", "  Baz Ltd  ", ""):
-        assert store.alias_candidates(raw) == mirrored(raw)
 
 
 def test_raw_wrapper_is_replayable_and_hash_ignores_volatile_fields():
@@ -405,8 +470,43 @@ async def test_poll_304_touches_postings_and_preserves_etag(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_poll_count_probe_uses_the_unchanged_path(monkeypatch):
+    feed = _claimed_feed(res_hash="snapshot")
+    calls = []
+
+    async def harvest(feed, net):
+        return Record(http_status=200, count_unchanged=True, list_total=17)
+
+    async def touch(conn, source, now, *, feed_id=None):
+        calls.append(("touch", source, feed_id))
+        return 17
+
+    async def success(conn, claimed, **kwargs):
+        calls.append(("success", kwargs))
+        return True
+
+    async def observe(conn, **kwargs):
+        calls.append(("observe", kwargs))
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "touch_source_postings", touch)
+    monkeypatch.setattr(store, "finish_schedule_success", success)
+    monkeypatch.setattr(store, "append_poll_observation", observe)
+
+    assert await run.poll(_Pool(), object(), feed, NOW) == "not_modified"
+    assert calls[0] == ("touch", "greenhouse:acme", feed.id)
+    assert calls[1][1]["changed"] is False
+    assert calls[2][1]["status"] == "not_modified"
+
+
+@pytest.mark.asyncio
 async def test_poll_unchanged_hash_skips_raw_and_silver(monkeypatch):
-    record = Record(items=[Item("job-1", {"title": "Engineer"})], etag='"new"')
+    record = Record(
+        items=[Item("job-1", {"title": "Engineer"})],
+        etag='"new"',
+        list_total=1,
+        full_listing=True,
+    )
     candidate = _claimed_feed()
     feed = replace(candidate, res_hash=router.snapshot_hash(router.prepare(candidate, record)))
     calls = []
@@ -436,6 +536,9 @@ async def test_poll_unchanged_hash_skips_raw_and_silver(monkeypatch):
     monkeypatch.setattr(silver, "process", unexpected)
 
     assert await run.poll(_Pool(), object(), feed, NOW) == "ok"
+    success = next(payload for name, payload in calls if name == "success")
+    assert success["list_total"] == 1
+    assert success["full_listing"] is True
     assert calls[0] == ("touch", feed.id)
     assert calls[1][1]["etag"] == '"new"'
     assert calls[1][1]["changed"] is False
@@ -631,7 +734,7 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
         key="acme",
         company_id=42,
         company_name="Acme",
-        source_type="ATS",
+        type="ATS",
     )
     stored = [router.StoredRaw(Item("123", {}), raw_id=7, data_hash="raw", created=True)]
     writes = []
@@ -666,6 +769,7 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
         # so silver carries the "no signal" defaults through untouched.
         "job_type": None,
         "remote": "unknown",
+        "locations": [{"country": "US", "state": None, "city": None}],
         "attributes": {
             "version": 1,
             "remote": "yes",
@@ -673,6 +777,205 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
         },
         "status": "active",
     }
+
+
+def test_silver_projects_ashby_student_program_from_parse_rules():
+    feed = Feed(id=1, source="ashby", key="acme")
+    posting = json_api.parse(
+        "ashby",
+        feed,
+        Item("student-1", {
+            "title": "Working Student, Software Engineering",
+            "employmentType": "PartTime",
+            "department": "Engineering",
+            "team": "Engineering",
+            "descriptionPlain": "",
+        }),
+        {},
+    )[0]
+
+    values = silver._projection(posting)
+
+    assert posting.job_type == "student_program"
+    assert values["job_type"] == "student_program"
+
+
+def test_ashby_stores_and_normalizes_the_postal_augmented_location_text():
+    feed = Feed(id=1, source="ashby", key="acme")
+    posting = json_api.parse(
+        "ashby",
+        feed,
+        Item("location-1", {
+            "title": "Engineer",
+            "location": "Santa Clara",
+            "address": {
+                "postalAddress": {
+                    "addressLocality": "Santa Clara",
+                    "addressCountry": "United States",
+                },
+            },
+        }),
+        {},
+    )[0]
+
+    values = silver._projection(posting)
+
+    assert posting.location_raw == "Santa Clara"
+    assert posting.location_normalization_raw == (
+        "Santa Clara, Santa Clara, United States"
+    )
+    assert values["location_text"] == "Santa Clara, Santa Clara, United States"
+    assert values["locations"] == [
+        {"country": "US", "state": "CA", "city": "Santa Clara"}
+    ]
+
+
+def test_greenhouse_normalizes_offices_separately_without_changing_primary_text():
+    feed = Feed(id=1, source="greenhouse", key="acme")
+    posting = json_api.parse(
+        "greenhouse",
+        feed,
+        Item("location-1", {
+            "title": "Engineer",
+            "location": {"name": "London, United Kingdom"},
+            "offices": [
+                {"name": "United States of America"},
+                {"name": "San Mateo"},
+            ],
+        }),
+        {},
+    )[0]
+
+    values = silver._projection(posting)
+
+    assert posting.location_raw == "London, United Kingdom"
+    assert posting.location_normalization_extra == [
+        "United States of America",
+        "San Mateo",
+    ]
+    assert values["location_text"] == "London, United Kingdom"
+    assert values["locations"] == [
+        {"country": "GB", "state": "ENG", "city": "London"},
+        {"country": "US", "state": None, "city": None},
+        {"country": "US", "state": "CA", "city": "San Mateo"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "location_text"),
+    [
+        ({"location": "Berlin"}, "Berlin"),
+        (
+            {
+                "location": "Toronto",
+                "address": {"postalAddress": {"addressCountry": "Canada"}},
+            },
+            "Toronto, Canada",
+        ),
+        (
+            {
+                "address": {
+                    "postalAddress": {
+                        "addressLocality": "Toronto",
+                        "addressCountry": "Canada",
+                    }
+                }
+            },
+            "Toronto, Canada",
+        ),
+    ],
+)
+def test_ashby_location_context_skips_missing_parts(payload, location_text):
+    posting = json_api.parse(
+        "ashby",
+        Feed(id=1, source="ashby", key="acme"),
+        Item("location-1", {"title": "Engineer", **payload}),
+        {},
+    )[0]
+
+    values = silver._projection(posting)
+
+    assert values["location_text"] == location_text
+    assert values["locations"]
+
+
+def test_ashby_secondary_locations_are_additive_and_never_remove_primary_cities():
+    posting = json_api.parse(
+        "ashby",
+        Feed(id=1, source="ashby", key="acme"),
+        Item("location-1", {
+            "title": "Engineer",
+            "location": "San Francisco",
+            "address": {
+                "postalAddress": {
+                    "addressLocality": "San Francisco",
+                    "addressCountry": "United States",
+                }
+            },
+            "secondaryLocations": [
+                {
+                    "location": "New York",
+                    "address": {
+                        "postalAddress": {
+                            "addressLocality": "New York",
+                            "addressCountry": "United States",
+                        }
+                    },
+                },
+                {
+                    "location": "San Francisco",
+                    "address": {
+                        "postalAddress": {
+                            "addressLocality": "San Francisco",
+                            "addressCountry": "United States",
+                        }
+                    },
+                },
+            ],
+        }),
+        {},
+    )[0]
+
+    primary_only = silver._projection(
+        replace(posting, location_normalization_extra=[])
+    )["locations"]
+    values = silver._projection(posting)
+
+    assert values["location_text"] == (
+        "San Francisco, San Francisco, United States"
+    )
+    assert values["locations"] == [
+        {"country": "US", "state": "CA", "city": "San Francisco"},
+        {"country": "US", "state": "NY", "city": "New York City"},
+    ]
+    assert {
+        (location["country"], location["state"], location["city"])
+        for location in primary_only
+    } <= {
+        (location["country"], location["state"], location["city"])
+        for location in values["locations"]
+    }
+
+
+def test_silver_projects_greenhouse_student_program_from_parse_rules():
+    feed = Feed(id=1, source="greenhouse", key="acme")
+    posting = json_api.parse(
+        "greenhouse",
+        feed,
+        Item("student-1", {
+            "title": "Working Student, Software Engineering",
+            "company_name": "Acme",
+            "location": {"name": "Berlin"},
+            "metadata": [],
+            "departments": [],
+        }),
+        {},
+    )[0]
+
+    values = silver._projection(posting)
+
+    assert posting.job_type == "student_program"
+    assert values["job_type"] == "student_program"
 
 
 _BASE_HASH_VALUES = {
@@ -684,6 +987,7 @@ _BASE_HASH_VALUES = {
     "posted_at": None,
     "job_type": None,
     "remote": "unknown",
+    "locations": [],
     "attributes": {"version": 1, "remote": "yes"},
     "status": "active",
 }
@@ -700,7 +1004,7 @@ def test_content_hash_ignores_status():
 
 def test_content_hash_ignores_attributes():
     """No gold step reads deadline_at or attributes' silver-derived remote --
-    both skills and degree_fields enrichment hash `description` alone."""
+    skills and degree_fields hash only their posting-text inputs."""
     without_deadline = silver._content_hash(_BASE_HASH_VALUES)
     with_deadline = silver._content_hash(
         {
@@ -718,14 +1022,28 @@ def test_content_hash_ignores_attributes():
 
 @pytest.mark.parametrize(
     "field",
-    ["title", "description", "location_text", "source_url", "apply_url",
-     "posted_at", "job_type", "remote"],
+    ["title", "description", "location_text", "source_url", "apply_url", "posted_at"],
 )
 def test_content_hash_covers_tracked_fields(field):
     base = silver._content_hash(_BASE_HASH_VALUES)
     changed = silver._content_hash({**_BASE_HASH_VALUES, field: "changed-value"})
 
     assert base != changed
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("job_type", "intern"),
+        ("remote", "yes"),
+        ("locations", [{"country": "US", "state": None, "city": None}]),
+    ],
+)
+def test_content_hash_ignores_parsed_fields(field, value):
+    base = silver._content_hash(_BASE_HASH_VALUES)
+    changed = silver._content_hash({**_BASE_HASH_VALUES, field: value})
+
+    assert base == changed
 
 
 def test_silver_leaves_derived_enrichment_to_gold():
@@ -786,7 +1104,7 @@ def test_silver_prefers_structured_remote_over_location_text():
 
 
 @pytest.mark.asyncio
-async def test_changed_silver_posting_invalidates_gold_enrichments():
+async def test_description_change_invalidates_gold_enrichments():
     queries = []
 
     class Connection:
@@ -819,9 +1137,19 @@ async def test_changed_silver_posting_invalidates_gold_enrichments():
     # it is overwritten unconditionally from the adapter on every upsert.
     assert "job_type = EXCLUDED.job_type" in upsert
     assert "remote = EXCLUDED.remote" in upsert
+    assert "locations = EXCLUDED.locations" in upsert
+    assert "country = EXCLUDED.country" not in upsert
     assert "job_type_meta" not in upsert
+    assert "job_posting.title IS DISTINCT FROM EXCLUDED.title" in upsert
+    assert (
+        "job_posting.description IS DISTINCT FROM EXCLUDED.description" in upsert
+    )
+    assert (
+        "job_posting.content_hash IS DISTINCT FROM EXCLUDED.content_hash" not in upsert
+    )
     assert "- 'skills' - 'skills_meta'" in upsert
     assert "- 'degree_fields' - 'degree_fields_meta'" in upsert
+    assert upsert.count("- 'summary' - 'summary_meta'") == 2
 
 
 @pytest.mark.asyncio
@@ -887,9 +1215,9 @@ async def test_replay_never_advances_last_seen_at():
         touch_seen=False,
     )
 
-    assert "WHEN $17 THEN EXCLUDED.last_seen_at" in queries[0]
+    assert "WHEN $18 THEN EXCLUDED.last_seen_at" in queries[0]
     assert "ELSE job_posting.last_seen_at" in queries[0]
-    assert captured[0][16] is False
+    assert captured[0][17] is False
 
 
 @pytest.mark.asyncio
@@ -968,7 +1296,7 @@ async def test_unresolved_board_posting_stays_bronze(monkeypatch):
         source="hn",
         key="monthly",
         company_id=99,
-        source_type="Board",
+        type="Board",
     )
     stored = [router.StoredRaw(Item("comment-1", {}), 7, "raw", True)]
     monkeypatch.setattr(silver.sources, "parser", lambda name: lambda feed, item, envelope: [posting])
@@ -1001,7 +1329,7 @@ async def test_unsupported_outputs_and_secondhand_postings_are_counted(monkeypat
             fidelity="secondhand",
         ),
     ]
-    feed = Feed(id=1, source="fixture", key="board", source_type="Board")
+    feed = Feed(id=1, source="fixture", key="board", type="Board")
     stored = [router.StoredRaw(Item("job-1", {}), 7, "raw", True)]
     monkeypatch.setattr(
         silver.sources, "parser", lambda name: lambda feed, item, envelope: outputs
