@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from xjobscore import degrees, skills, store
+from xjobscore import degrees, skills, store, summaries
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -43,6 +43,8 @@ __all__ = [
     "plan_dedup",
     "skills_input_hash",
     "skills_payload",
+    "summary_input_hash",
+    "summary_payload",
     "steps",
 ]
 
@@ -94,7 +96,7 @@ def normalize_title(value: str) -> str:
 
 # SKILLS -------------------------------------------------------------------
 
-_SKILLS_VERSION = 1
+_SKILLS_VERSION = 2
 _SKILLS_BATCH_SIZE = 1_000
 
 
@@ -114,6 +116,8 @@ def skills_payload(description: str | None, *, parsed_at: datetime) -> dict[str,
     return {
         "skills": skills.extract(description or ""),
         "skills_meta": {
+            "version": _SKILLS_VERSION,
+            "taxonomy_hash": skills.taxonomy_hash(),
             "parsed_at": _utc_text(parsed_at),
             "input_hash": skills_input_hash(description),
         },
@@ -126,13 +130,14 @@ async def _skills_rebuild(
     dry_run: bool = False,
     parsed_at: datetime | None = None,
 ) -> Counts:
-    """Enrich each unstamped silver row once, in bounded batches.
+    """Enrich each posting whose skill taxonomy is out of date.
 
-    Silver removes ``skills`` and ``skills_meta`` when its canonical content
-    hash changes, making that posting eligible again without making every gold
-    invocation rescan its description in Python.
+    Silver removes ``skills`` and ``skills_meta`` when the description changes,
+    while the version and taxonomy hash make matcher or dictionary changes
+    eligible without requiring manual database cleanup.
     """
     stamp = parsed_at or datetime.now(timezone.utc)
+    taxonomy_hash = skills.taxonomy_hash()
     last_id = 0
     enriched = 0
     while True:
@@ -141,12 +146,17 @@ async def _skills_rebuild(
             SELECT id, description
             FROM job_posting
             WHERE id > $1
-              AND NOT (attributes ? 'skills_meta')
+              AND (
+                COALESCE(attributes #>> '{skills_meta,version}', '') <> $3
+                OR COALESCE(attributes #>> '{skills_meta,taxonomy_hash}', '') <> $4
+              )
             ORDER BY id
             LIMIT $2
             """,
             last_id,
             _SKILLS_BATCH_SIZE,
+            str(_SKILLS_VERSION),
+            taxonomy_hash,
         )
         if not rows:
             break
@@ -156,6 +166,8 @@ async def _skills_rebuild(
                 int(row["id"]),
                 skills_payload(row["description"], parsed_at=stamp),
                 row["description"] or "",
+                str(_SKILLS_VERSION),
+                taxonomy_hash,
             )
             for row in rows
         ]
@@ -166,7 +178,98 @@ async def _skills_rebuild(
                 SET attributes = attributes || $2::jsonb
                 WHERE id = $1
                   AND COALESCE(description, '') = $3
-                  AND NOT (attributes ? 'skills_meta')
+                  AND (
+                    COALESCE(attributes #>> '{skills_meta,version}', '') <> $4
+                    OR COALESCE(attributes #>> '{skills_meta,taxonomy_hash}', '') <> $5
+                  )
+                """,
+                updates,
+            )
+        enriched += len(updates)
+    return Counts(postings=enriched)
+
+
+# ROLE SUMMARIES -----------------------------------------------------------
+
+_SUMMARIES_VERSION = 1
+_SUMMARIES_BATCH_SIZE = 1_000
+
+
+def summary_input_hash(title: str, description: str | None) -> str:
+    """Fingerprint exactly the posting text consumed by the extractor."""
+    value = f"{title}\n{description or ''}"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def summary_payload(
+    title: str,
+    description: str | None,
+    *,
+    parsed_at: datetime,
+) -> dict[str, Any]:
+    """The complete JSONB patch for one deterministic summary result."""
+    summary = summaries.extract(title, description)
+    return {
+        "summary": summary,
+        "summary_meta": {
+            "version": _SUMMARIES_VERSION,
+            "generator": "extractive",
+            "status": "ok" if summary else "insufficient_evidence",
+            "parsed_at": _utc_text(parsed_at),
+            "input_hash": summary_input_hash(title, description),
+        },
+    }
+
+
+async def _summaries_rebuild(
+    conn: Connection,
+    *,
+    dry_run: bool = False,
+    parsed_at: datetime | None = None,
+) -> Counts:
+    """Summarize classified student roles once per extractor version."""
+    stamp = parsed_at or datetime.now(timezone.utc)
+    version = str(_SUMMARIES_VERSION)
+    last_id = 0
+    enriched = 0
+    while True:
+        rows = await conn.fetch(
+            """
+            SELECT id, title, description
+            FROM job_posting
+            WHERE id > $1
+              AND job_type IS NOT NULL
+              AND COALESCE(attributes -> 'summary_meta' ->> 'version', '') <> $3
+            ORDER BY id
+            LIMIT $2
+            """,
+            last_id,
+            _SUMMARIES_BATCH_SIZE,
+            version,
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        updates = [
+            (
+                int(row["id"]),
+                summary_payload(row["title"], row["description"], parsed_at=stamp),
+                row["title"],
+                row["description"] or "",
+                version,
+            )
+            for row in rows
+        ]
+        if not dry_run:
+            await conn.executemany(
+                """
+                UPDATE job_posting
+                SET attributes = attributes || $2::jsonb
+                WHERE id = $1
+                  AND title = $3
+                  AND COALESCE(description, '') = $4
+                  AND job_type IS NOT NULL
+                  AND COALESCE(attributes -> 'summary_meta' ->> 'version', '') <> $5
                 """,
                 updates,
             )
@@ -176,23 +279,31 @@ async def _skills_rebuild(
 
 # DEGREE FIELDS ------------------------------------------------------------
 
-_DEGREES_VERSION = 1
+_DEGREES_VERSION = 3
 _DEGREES_BATCH_SIZE = 1_000
 
 
-def degree_fields_input_hash(description: str | None) -> str:
+def _degree_fields_text(title: str, description: str | None) -> str:
+    """Join every posting-owned text field consumed by degree extraction."""
+    return f"{title}\n{description or ''}"
+
+
+def degree_fields_input_hash(title: str, description: str | None) -> str:
     """Fingerprint exactly the text consumed by the degree-field matcher."""
-    return hashlib.sha256((description or "").encode("utf-8")).hexdigest()
+    return hashlib.sha256(_degree_fields_text(title, description).encode("utf-8")).hexdigest()
 
 
-def degree_fields_payload(description: str | None, *, parsed_at: datetime) -> dict[str, Any]:
+def degree_fields_payload(
+    title: str, description: str | None, *, parsed_at: datetime
+) -> dict[str, Any]:
     """The complete JSONB patch for one degree-field enrichment result."""
+    text = _degree_fields_text(title, description)
     return {
-        "degree_fields": degrees.extract(description or ""),
+        "degree_fields": degrees.extract(text, title=title),
         "degree_fields_meta": {
             "version": _DEGREES_VERSION,
             "parsed_at": _utc_text(parsed_at),
-            "input_hash": degree_fields_input_hash(description),
+            "input_hash": degree_fields_input_hash(title, description),
         },
     }
 
@@ -203,22 +314,23 @@ async def _degrees_rebuild(
     dry_run: bool = False,
     parsed_at: datetime | None = None,
 ) -> Counts:
-    """Enrich each unstamped silver row with mentioned degree fields."""
+    """Enrich each posting whose degree-field taxonomy is out of date."""
     stamp = parsed_at or datetime.now(timezone.utc)
     last_id = 0
     enriched = 0
     while True:
         rows = await conn.fetch(
             """
-            SELECT id, description
+            SELECT id, title, description
             FROM job_posting
             WHERE id > $1
-              AND NOT (attributes ? 'degree_fields_meta')
+              AND COALESCE(attributes #>> '{degree_fields_meta,version}', '') <> $3
             ORDER BY id
             LIMIT $2
             """,
             last_id,
             _DEGREES_BATCH_SIZE,
+            str(_DEGREES_VERSION),
         )
         if not rows:
             break
@@ -226,8 +338,10 @@ async def _degrees_rebuild(
         updates = [
             (
                 int(row["id"]),
-                degree_fields_payload(row["description"], parsed_at=stamp),
+                degree_fields_payload(row["title"], row["description"], parsed_at=stamp),
+                row["title"],
                 row["description"] or "",
+                str(_DEGREES_VERSION),
             )
             for row in rows
         ]
@@ -237,8 +351,9 @@ async def _degrees_rebuild(
                 UPDATE job_posting
                 SET attributes = attributes || $2::jsonb
                 WHERE id = $1
-                  AND COALESCE(description, '') = $3
-                  AND NOT (attributes ? 'degree_fields_meta')
+                  AND title = $3
+                  AND COALESCE(description, '') = $4
+                  AND COALESCE(attributes #>> '{degree_fields_meta,version}', '') <> $5
                 """,
                 updates,
             )
@@ -248,17 +363,18 @@ async def _degrees_rebuild(
 
 # DEDUP --------------------------------------------------------------------
 #
-# Stage one generates *candidates and evidence*, not verdicts. The key is the
-# cheapest signal that fires on every posting; the precise signals are recorded
-# as evidence so their real coverage can be measured before anything is keyed
-# on them.
+# Stage one generates *candidates and evidence*, not verdicts. Prefer native
+# posting identity when a URL exposes it; weaker fallbacks are deliberately
+# isolated so they can never merge two different known requisitions.
 
 _NAMESPACE = uuid.UUID("9f8b2c14-6d3a-5e7f-8a1b-2c3d4e5f6071")
-_STRATEGY_VERSION = 2
-_KEYER = "company_role_location"
+_STRATEGY_VERSION = 4
+_KEYER = "ats_requisition_then_apply_then_unlinked_role"
+_PRIMARY_SELECTOR = "direct_ats_then_posted_then_first_seen"
 
-# A key shared by more members than this is a placeholder, not an identity, and
-# the group would be too large to adjudicate by hand.
+# A fallback key shared by more members than this is a placeholder, not an
+# identity, and the group would be too large to adjudicate by hand. Extracted
+# ATS identities are authoritative and are not subject to this safety cap.
 _MAX_GROUP = 10
 
 # Enough description to be distinctive without depending on the boilerplate
@@ -325,9 +441,39 @@ def _member_evidence(row: Mapping[str, Any]) -> dict[str, Any]:
         "posting_id": row["id"],
         "source": row["source"],
         "location": _norm_text(row["location_text"]),
-        "ats_identity": ats_identity(row["source_url"], row["apply_url"]),
-        "description_hash": description_hash(row["description"]),
+        "ats_identity": ats_identity(row["apply_url"], row["source_url"]),
+        "description_hash": description_hash(row.get("description")),
     }
+
+
+def _is_direct_ats_posting(row: Mapping[str, Any]) -> bool:
+    """Whether the row came from the ATS that owns its requisition identity."""
+    identity = ats_identity(row["apply_url"], row["source_url"])
+    if identity is None:
+        return False
+    provider = identity.partition(":")[0]
+    source = (row["source"] or "").partition(":")[0].casefold()
+    # Listing adapters are still first-party views of their underlying ATS.
+    return source.removesuffix("-list") == provider
+
+
+def _primary_rank(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Rank primary candidates without using database ID as a tie-breaker."""
+    posted_at = row.get("posted_at")
+    first_seen_at = row.get("first_seen_at")
+    return (
+        _is_direct_ats_posting(row),
+        (posted_at is not None, posted_at),
+        (first_seen_at is not None, first_seen_at),
+    )
+
+
+def _select_primary(bucket: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """Return the sole best candidate, or no primary when the best rank ties."""
+    ranked = [(_primary_rank(row), row) for row in bucket]
+    best_rank = max(rank for rank, _row in ranked)
+    winners = [row for rank, row in ranked if rank == best_rank]
+    return winners[0] if len(winners) == 1 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,44 +483,92 @@ class Plan:
     counts: Counts
 
 
+def _with_description_hashes(
+    plan: Plan, descriptions: Mapping[int, str | None]
+) -> Plan:
+    """Attach heavyweight evidence after lightweight grouping has finished."""
+    groups: list[dict[str, Any]] = []
+    for group in plan.groups:
+        evidence = group["evidence"]
+        members = [
+            {
+                **member,
+                "description_hash": description_hash(
+                    descriptions.get(int(member["posting_id"]))
+                ),
+            }
+            for member in evidence["members"]
+        ]
+        groups.append({**group, "evidence": {**evidence, "members": members}})
+    return Plan(groups=groups, members=plan.members, counts=plan.counts)
+
+
+def _dedup_key(row: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Return the strongest safe identity available for one posting.
+
+    A known ATS requisition wins even when source presentations disagree on
+    title, location, or URL decoration. An unparseable but exact apply URL is a
+    weaker fallback. Company/title/location is used only when there is no apply
+    link at all, which prevents it from merging distinct known or visible URLs.
+    """
+    company_id = row["company_id"]
+    if company_id is None:
+        return None
+
+    identity = ats_identity(row["apply_url"], row["source_url"])
+    if identity:
+        parts = ["ats_requisition", company_id, identity]
+        return "ats_requisition", json.dumps(parts, separators=(",", ":"))
+
+    apply_url = (row["apply_url"] or "").strip()
+    if apply_url:
+        parts = ["exact_apply_url", company_id, apply_url]
+        return "exact_apply_url", json.dumps(parts, separators=(",", ":"))
+
+    role = normalize_title(row["title"] or "")
+    if not role:
+        return None
+    location = _norm_text(row["location_text"])
+    parts = ["company_role_location", company_id, role, location]
+    return "company_role_location", json.dumps(parts, separators=(",", ":"))
+
+
 def plan_dedup(rows: Sequence[Mapping[str, Any]]) -> Plan:
-    """Group silver rows by ``(company_id, normalized title, location)``.
+    """Group silver rows by requisition identity with cautious fallbacks.
 
     Pure: the whole strategy lives here and is testable without a database.
     """
-    buckets: dict[str, list[Mapping[str, Any]]] = {}
+    buckets: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     for row in rows:
-        if row["company_id"] is None:
+        key = _dedup_key(row)
+        if key is None:
             continue
-        role = normalize_title(row["title"] or "")
-        if not role:
-            continue
-        # ``None`` is intentional: an absent location is a valid component of
-        # the key rather than an error or a reason to discard the posting.
-        location = _norm_text(row["location_text"])
-        key = json.dumps([row["company_id"], role, location], separators=(",", ":"))
         buckets.setdefault(key, []).append(row)
 
     groups: list[dict[str, Any]] = []
     members: list[dict[str, Any]] = []
     counts = Counts()
-    for key, bucket in buckets.items():
+    for (signal, key), bucket in buckets.items():
         if len(bucket) < 2:
             continue
-        if len(bucket) > _MAX_GROUP:
+        if signal != "ats_requisition" and len(bucket) > _MAX_GROUP:
             counts += Counts(skipped_keys=1, skipped_postings=len(bucket))
             continue
+        primary = _select_primary(bucket)
         group_id = str(uuid.uuid5(_NAMESPACE, f"{_KEYER}:{_STRATEGY_VERSION}:{key}"))
         groups.append(
             {
                 "id": group_id,
+                "primary_posting_id": primary["id"] if primary is not None else None,
                 # Stage one never decides. Promotion to confirmed/rejected is a
                 # later strategy working from the evidence recorded here.
                 "state": "pending",
                 "evidence": {
                     "strategy_version": _STRATEGY_VERSION,
                     "keyer": _KEYER,
+                    "signal": signal,
                     "key": key,
+                    "primary_selector": _PRIMARY_SELECTOR,
                     "members": [_member_evidence(row) for row in bucket],
                 },
             }
@@ -387,6 +581,13 @@ def plan_dedup(rows: Sequence[Mapping[str, Any]]) -> Plan:
 async def _dedup_rebuild(conn: Connection, *, dry_run: bool = False) -> Counts:
     rows = await store.dedup_candidates(conn)
     plan = plan_dedup(rows)
+    description_rows = await store.dedup_descriptions(
+        conn, [int(member["posting_id"]) for member in plan.members]
+    )
+    plan = _with_description_hashes(
+        plan,
+        {int(row["id"]): row["description"] for row in description_rows},
+    )
     if plan.counts.skipped_keys:
         logger.info(
             "dedup dropped over-large keys keys=%d postings=%d cap=%d",
@@ -407,6 +608,7 @@ async def _dedup_rebuild(conn: Connection, *, dry_run: bool = False) -> Counts:
 STEPS: tuple[Step, ...] = (
     Step("skills", _SKILLS_VERSION, _skills_rebuild),
     Step("degrees", _DEGREES_VERSION, _degrees_rebuild),
+    Step("summaries", _SUMMARIES_VERSION, _summaries_rebuild),
     Step("dedup", _STRATEGY_VERSION, _dedup_rebuild),
 )
 

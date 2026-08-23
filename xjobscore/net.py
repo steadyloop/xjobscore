@@ -65,6 +65,15 @@ _VENDOR_CAPS: dict[str, int] = {
     "eightfold.ai": 16,
     "oraclecloud.com": 12,
     "bamboohr.com": 8,
+    # Provisional, and the one entry here whose hostnames actively mislead: all
+    # 288 catalogued Taleo tenants have distinct hostnames, so the per-host
+    # semaphore fragments 288 ways, but DNS collapses them onto a handful of
+    # shared zone load balancers -- baesystems, aa010 and who all resolve to
+    # lhrc1a-lbaas-otacextwb-001 at one IP, and a 60-host sample lands on 8 LBs
+    # with 16 on the busiest.  That is the Workday shape exactly.  12 mirrors
+    # oraclecloud.com (same operator); sizing it from measurement needs a
+    # cross-tenant sweep against boards we do not poll, which has not been run.
+    "taleo.net": 12,
 }
 
 
@@ -426,6 +435,15 @@ class Net:
         merged.update(conditional(etag))
         return await self._request("GET", url, params=params, headers=merged, concurrency=concurrency)
 
+    async def head(self, url: str) -> Response:
+        """HEAD, for a vendor that publishes a validator header but not an
+        ETag (Trakstar's Last-Modified). Shares `get`'s retry/pacing policy
+        via `_request`; body is always empty. Not conditional -- a source
+        that wants that compares the header itself, since a server may honor
+        HEAD while ignoring If-Modified-Since entirely.
+        """
+        return await self._request("HEAD", url)
+
     async def post(
         self,
         url: str,
@@ -479,3 +497,13 @@ def conditional(value: str | None) -> dict[str, str]:
 def etag(response: Response) -> str | None:
     """Extract the response ETag persisted by ``feed.etag``."""
     return response.headers.get("etag") or None
+
+
+def last_modified(response: Response) -> str | None:
+    """Extract the raw Last-Modified header persisted by ``feed.last_modified``.
+
+    Kept as the literal header string, never parsed as a date: it is only
+    ever compared byte-for-byte against a previous value, the same contract
+    ``etag`` already has.
+    """
+    return response.headers.get("last-modified") or None

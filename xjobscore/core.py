@@ -1,4 +1,4 @@
-"""Orchestrator: populate the DB if empty, then run silver and gold on everything.
+"""Orchestrator: fetch an empty DB, then run silver and gold on everything.
 
 Personal entrypoint, kept separate from run.py. Extend this file directly.
 """
@@ -15,8 +15,6 @@ async def main() -> None:
     cfg = run.load_config([])
     pool = await store.connect(cfg.dsn)
     try:
-        await run.seed_registry(pool, cfg)
-
         async with pool.acquire() as conn:
             raw_postings = await conn.fetchval("SELECT count(*) FROM raw_posting")
 

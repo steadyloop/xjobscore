@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from xjobscore import router, sources, store
+from xjobscore.location_normalizer import normalize_location
 from xjobscore.records import LINK_DEAD, Feed, Item, Posting
 
 if TYPE_CHECKING:
@@ -75,8 +76,24 @@ def _remote_from_location(location_raw: str | None) -> str | None:
     return _remote(match.group(1)) if match else None
 
 
+def _normalized_locations(posting: Posting) -> tuple[str | None, list[dict[str, Any]]]:
+    primary = posting.location_normalization_raw or posting.location_raw
+    locations: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, Any]] = set()
+    for value in (primary, *posting.location_normalization_extra):
+        if not value:
+            continue
+        for location in normalize_location(value)["locations"]:
+            key = tuple(location.get(field) for field in ("country", "state", "city"))
+            if key not in seen:
+                seen.add(key)
+                locations.append(location)
+    return primary, locations
+
+
 def _projection(posting: Posting) -> dict[str, Any]:
     description = _plain_text(posting.description_html)
+    location_input, locations = _normalized_locations(posting)
     attributes: dict[str, Any] = {"version": 1}
     remote = _remote(posting.workplace_type_raw) or _remote_from_location(
         posting.location_raw
@@ -88,7 +105,10 @@ def _projection(posting: Posting) -> dict[str, Any]:
     return {
         "title": posting.title,
         "description": description,
-        "location_text": posting.location_raw,
+        # A source may provide extra structured context specifically for
+        # normalization. Store that exact input so the normalized locations
+        # remain reproducible from the canonical row.
+        "location_text": location_input,
         "source_url": posting.url_posting,
         "apply_url": posting.apply_url,
         "posted_at": posting.published_at,
@@ -97,6 +117,7 @@ def _projection(posting: Posting) -> dict[str, Any]:
         # vendor has not been transcribed yet leaves these at their defaults.
         "job_type": posting.job_type,
         "remote": posting.remote,
+        "locations": locations,
         "attributes": attributes,
         "status": "closed"
         if posting.state == "closed" or posting.source_active is False
@@ -104,8 +125,9 @@ def _projection(posting: Posting) -> dict[str, Any]:
     }
 
 
-# The exact set of columns that define "this posting changed". Deliberately
-# omits two projection keys:
+# The exact set of columns inside schema.sql's STABLE (HASH) block. Parsed and
+# enriched outputs are overwritten independently and never define source
+# content identity. Deliberately omitted projection keys include:
 #   status     -- monotonic in the upsert: it can only ever go to 'closed'.
 #                 Hashing it would report a change on the active->active and
 #                 closed->active transitions the stored row cannot reflect.
@@ -115,9 +137,12 @@ def _projection(posting: Posting) -> dict[str, Any]:
 #                 attributes in both CASE branches regardless of content_hash,
 #                 so excluding it here costs no data -- only a churn signal
 #                 that was never wanted.
+#   job_type, remote, locations -- parse-time derivations. Parser improvements
+#                 may replace them without pretending the source posting
+#                 changed or invalidating unrelated Gold enrichment.
 _HASHED_FIELDS = (
     "title", "description", "location_text", "source_url",
-    "apply_url", "posted_at", "job_type", "remote",
+    "apply_url", "posted_at",
 )
 
 
@@ -160,7 +185,7 @@ async def _company_id(
         resolved = await store.resolve_company(conn, posting.company_raw, aliases=aliases)
     if resolved is not None:
         return resolved
-    if feed.source_type in {"ATS", "Direct"}:
+    if feed.type in {"ATS", "Direct"}:
         return feed.company_id
     return None
 

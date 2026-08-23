@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xjobscore import store
+from xjobscore.feed_identity import canonical_feed_key
 
 if TYPE_CHECKING:
     from asyncpg import Pool
@@ -58,8 +59,9 @@ _TENANT_PREFIXED_ATS = {"workday-list", "oracle"}
 @dataclass(frozen=True, slots=True)
 class Row:
     keyscan_ats: str  # the label as stored in keyscan's own database
+    keyscan_token: str  # exact keyscan spelling, used to mark its row imported
     ats: str  # the label to write into xjobscore (post-rename mapping)
-    token: str
+    token: str  # canonical destination spelling
     status: str
     checked_at: datetime | None
     discovered_at: datetime
@@ -88,17 +90,25 @@ def load_pending(db_path: Path) -> list[Row]:
         ).fetchall()
     finally:
         con.close()
-    return [
-        Row(
-            keyscan_ats=row["ats"],
-            ats=resolve_ats(row["ats"]),
-            token=row["token"],
-            status=row["status"],
-            checked_at=datetime.fromisoformat(row["checked_at"]) if row["checked_at"] else None,
-            discovered_at=datetime.fromisoformat(row["discovered_at"]),
+    result = []
+    for row in rows:
+        ats = resolve_ats(row["ats"])
+        result.append(
+            Row(
+                keyscan_ats=row["ats"],
+                keyscan_token=row["token"],
+                ats=ats,
+                token=canonical_feed_key(ats, row["token"]),
+                status=row["status"],
+                checked_at=(
+                    datetime.fromisoformat(row["checked_at"])
+                    if row["checked_at"]
+                    else None
+                ),
+                discovered_at=datetime.fromisoformat(row["discovered_at"]),
+            )
         )
-        for row in rows
-    ]
+    return result
 
 
 def _mark_imported(db_path: Path, written: list[Row], *, now: str) -> None:
@@ -106,7 +116,7 @@ def _mark_imported(db_path: Path, written: list[Row], *, now: str) -> None:
     try:
         con.executemany(
             "UPDATE token SET imported_at = ? WHERE ats = ? AND token = ?",
-            [(now, row.keyscan_ats, row.token) for row in written],
+            [(now, row.keyscan_ats, row.keyscan_token) for row in written],
         )
         con.commit()
     finally:

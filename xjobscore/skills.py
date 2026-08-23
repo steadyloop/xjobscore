@@ -4,15 +4,18 @@ The matcher is a pure-Python Aho--Corasick automaton. It compiles the skill
 aliases once and then scans each job description in linear time relative to the
 description length plus the number of candidate hits.
 
-Only entries in ``aliases`` are matchable. ``ambiguous_aliases`` document
+Entries in ``aliases`` are matched case-insensitively, while entries in
+``case_sensitive_aliases`` must match exactly. ``ambiguous_aliases`` document
 spellings such as ``go`` and ``c`` that are intentionally excluded from
 automatic extraction. The vocabulary is closed: no stemming, fuzzy matching,
-or inferred synonyms are applied.
+or inferred synonyms are applied. Top-level ``skill_group`` entries are
+display metadata and do not add patterns to the matcher.
 """
 
 from __future__ import annotations
 
 import functools
+import hashlib
 import re
 from collections import deque
 from dataclasses import dataclass
@@ -31,19 +34,36 @@ __all__ = [
     "canon",
     "extract",
     "finditer",
+    "taxonomy_hash",
 ]
 
 SKILLS_PATH = Path(__file__).parent / "registry" / "job-posting" / "skills.yaml"
-CATEGORIES = ("language", "stack", "concept")
+CATEGORIES = (
+    "language",
+    "library",
+    "tool",
+    "platform",
+    "method",
+    "concept",
+    "framework",
+    "datastore",
+    "protocol",
+    "format",
+    "hardware",
+)
 
 _FIELDS = {
     "id",
     "name",
     "category",
     "aliases",
+    "case_sensitive_aliases",
     "ambiguous_aliases",
+    # Retained for compatibility with older custom dictionaries. New files
+    # should put only the aliases that require exact case in the field above.
     "case_sensitive",
 }
+_GROUP_FIELDS = {"id", "name", "skill_ids"}
 _ID = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 
 
@@ -61,6 +81,7 @@ class Skill:
     aliases: tuple[str, ...]
     ambiguous_aliases: tuple[str, ...]
     case_sensitive: bool
+    case_sensitive_aliases: tuple[str, ...] = ()
 
     @property
     def slug(self) -> str:
@@ -70,7 +91,7 @@ class Skill:
     @property
     def patterns(self) -> tuple[str, ...]:
         """Spellings eligible for automatic matching."""
-        return self.aliases
+        return self.aliases + self.case_sensitive_aliases
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +157,9 @@ def _entry(row: object, index: int, path: Path) -> Skill:
         raise SkillsError(f"{where}: category must be one of {CATEGORIES}, got {category!r}")
 
     aliases = _strings(row.get("aliases", []), "aliases", where)
+    sensitive_aliases = _strings(
+        row.get("case_sensitive_aliases", []), "case_sensitive_aliases", where
+    )
     ambiguous = _strings(row.get("ambiguous_aliases", []), "ambiguous_aliases", where)
 
     case_sensitive = row.get("case_sensitive", False)
@@ -147,6 +171,7 @@ def _entry(row: object, index: int, path: Path) -> Skill:
         name=name,
         category=category,
         aliases=aliases,
+        case_sensitive_aliases=sensitive_aliases,
         ambiguous_aliases=ambiguous,
         case_sensitive=case_sensitive,
     )
@@ -159,14 +184,19 @@ def _validate_claims(skills: Iterable[Skill], path: Path) -> None:
 
     for skill in skills:
         local: set[tuple[str, bool]] = set()
-        for alias in (*skill.aliases, *skill.ambiguous_aliases):
-            key = (alias if skill.case_sensitive else alias.casefold(), skill.case_sensitive)
+        claims = (
+            *((alias, skill.case_sensitive) for alias in skill.aliases),
+            *((alias, True) for alias in skill.case_sensitive_aliases),
+            *((alias, False) for alias in skill.ambiguous_aliases),
+        )
+        for alias, case_sensitive in claims:
+            key = (alias if case_sensitive else alias.casefold(), case_sensitive)
             if key in local:
                 raise SkillsError(f"{path}: {alias!r} is repeated by {skill.id}")
             local.add(key)
 
             folded = alias.casefold()
-            if skill.case_sensitive:
+            if case_sensitive:
                 owner = exact.setdefault(alias, skill.id)
                 # An insensitive spelling also matches this exact spelling.
                 conflicting = insensitive.get(folded)
@@ -186,6 +216,41 @@ def _validate_claims(skills: Iterable[Skill], path: Path) -> None:
                 )
 
 
+def _validate_groups(groups: object, skill_ids: set[str], path: Path) -> None:
+    """Validate display-only groups and their references to canonical skills."""
+    if groups is None:
+        return
+    if not isinstance(groups, list):
+        raise SkillsError(f"{path}: skill_group must be an array")
+
+    seen: set[str] = set()
+    for index, row in enumerate(groups):
+        where = f"{path}: skill_group[{index}]"
+        if not isinstance(row, dict):
+            raise SkillsError(f"{where} must be a mapping")
+        unknown = sorted(set(row) - _GROUP_FIELDS)
+        if unknown:
+            raise SkillsError(f"{where}: unknown key {unknown[0]!r}")
+
+        group_id = row.get("id")
+        if not isinstance(group_id, str) or not _ID.fullmatch(group_id):
+            raise SkillsError(f"{where}: {group_id!r} is not a lowercase hyphenated id")
+        if group_id in seen:
+            raise SkillsError(f"{path}: duplicate skill group id {group_id!r}")
+        seen.add(group_id)
+
+        name = row.get("name")
+        if not isinstance(name, str) or not name:
+            raise SkillsError(f"{where}: name must be a non-empty string")
+        members = _strings(row.get("skill_ids"), "skill_ids", where)
+        if not members:
+            raise SkillsError(f"{where}: skill_ids must not be empty")
+        if len(set(members)) != len(members):
+            raise SkillsError(f"{where}: skill_ids contains a duplicate")
+        missing = next((member for member in members if member not in skill_ids), None)
+        if missing is not None:
+            raise SkillsError(f"{where}: unknown skill id {missing!r}")
+
 def _load(path: Path) -> dict[str, Skill]:
     try:
         with path.open(encoding="utf-8") as handle:
@@ -193,8 +258,16 @@ def _load(path: Path) -> dict[str, Skill]:
     except (OSError, yaml.YAMLError) as exc:
         raise SkillsError(f"{path}: {exc}") from exc
 
-    if not isinstance(document, dict) or set(document) != {"skill"}:
-        raise SkillsError(f"{path}: root must contain exactly one 'skill' array")
+    if not isinstance(document, dict):
+        raise SkillsError(f"{path}: root must be a mapping")
+    unknown_root = sorted(set(document) - {"skill", "skill_group"})
+    if "skill" not in document or unknown_root:
+        detail = (
+            "missing 'skill'"
+            if "skill" not in document
+            else f"unknown key {unknown_root[0]!r}"
+        )
+        raise SkillsError(f"{path}: invalid root ({detail})")
     rows = document["skill"]
     if not isinstance(rows, list):
         raise SkillsError(f"{path}: skill must be an array")
@@ -209,6 +282,7 @@ def _load(path: Path) -> dict[str, Skill]:
     if not skills:
         raise SkillsError(f"{path}: canon is empty")
     _validate_claims(skills.values(), path)
+    _validate_groups(document.get("skill_group"), set(skills), path)
     return skills
 
 
@@ -216,6 +290,16 @@ def _load(path: Path) -> dict[str, Skill]:
 def canon() -> dict[str, Skill]:
     """Return the validated canon keyed by skill id, loading it only once."""
     return _load(SKILLS_PATH)
+
+
+@functools.lru_cache(maxsize=1)
+def taxonomy_hash() -> str:
+    """Return a stable fingerprint of the loaded taxonomy file revision."""
+    try:
+        payload = SKILLS_PATH.read_bytes()
+    except OSError as exc:
+        raise SkillsError(f"{SKILLS_PATH}: {exc}") from exc
+    return hashlib.sha256(payload).hexdigest()
 
 
 class _Automaton:
@@ -289,6 +373,8 @@ class SkillMatcher:
             for alias in skill.aliases:
                 pattern = alias if skill.case_sensitive else alias.casefold()
                 destination.append((pattern, _Output(skill.id, alias)))
+            for alias in skill.case_sensitive_aliases:
+                sensitive.append((alias, _Output(skill.id, alias)))
         self._insensitive = _Automaton(insensitive)
         self._sensitive = _Automaton(sensitive)
 

@@ -81,25 +81,29 @@ class Feed:
     A source reads ``key``, ``config``, and ``etag``. Company and scheduling
     fields are carried for the orchestrator and ignored by harvesters.
 
-    Runtime configuration comes from the validated registry. Scheduler state
-    comes from schema.sql's ``feed`` row; only the ETag is exposed to a
-    source because it is the only conditional-request validator the schema
-    persists.
+    Runtime configuration and scheduling state come from schema.sql's ``feed``
+    row. Only the ETag is exposed to a source because it is the only
+    conditional-request validator the schema persists.
     """
 
     id: int
     source: str  # resolves to a harvest function in sources.SOURCES
     key: str  # locates the endpoint: a token, a URL, a Gmail query
-    config: dict = field(default_factory=dict)  # registry-owned adapter parameters
+    config: dict = field(default_factory=dict)  # database-owned adapter parameters
 
     enabled: bool = True
     company_id: int | None = None
     company_name: str | None = None
-    description: str = ""  # registry-owned note describing the source
-    implemented: bool = True  # a working adapter exists for this source
-    source_type: str = "Other"
+    description: str = ""  # company description resolved through the token
+    type: str = "ATS"
     etag: str | None = None
+    # Raw Last-Modified header value, for a vendor with no ETag (Trakstar).
+    # Never parsed as a date -- compared byte-for-byte against a fresh HEAD,
+    # same spirit as `etag` above.
+    last_modified: str | None = None
     res_hash: str | None = None
+    list_total: int | None = None
+    last_full_poll_at: datetime | None = None
     interval_s: int = 900
     strikes: int = 0
     due_at: datetime | None = None
@@ -138,9 +142,15 @@ class Record:
     truncated: bool = False
     http_status: int | None = None  # diagnostics/logging; feed has no status column
     etag: str | None = None  # response ETag -> feed.etag
-    # Inspector-only incremental harvests may carry forward a detail payload
-    # whose stable list/detail identity fields prove it unchanged. Production
-    # harvesters leave this at zero; it is diagnostics only.
+    last_modified: str | None = None  # response Last-Modified -> feed.last_modified
+    # A count probe is a local, time-bounded substitute for a validator on
+    # endpoints such as Workday CXS that explicitly disable HTTP caching.
+    count_unchanged: bool = False
+    list_total: int | None = None
+    full_listing: bool = False
+    # Incremental harvests may carry forward a detail payload whose stable
+    # list/detail identity fields prove it unchanged. This remains useful
+    # diagnostics when production enables reuse for a source.
     reused_item_count: int = 0
     enumerated_item_count: int = 0
     partition_count: int = 0
@@ -174,6 +184,12 @@ class Posting:
 
     apply_url: str | None = None  # apply_url
     location_raw: str | None = None
+    # Optional source-specific canonical location text. Silver uses this exact
+    # value both as the normalizer input and as job_posting.location_text.
+    location_normalization_raw: str | None = None
+    # Additional source-specific location strings normalized into the same
+    # locations array without replacing the primary location above.
+    location_normalization_extra: list[str] = field(default_factory=list)
 
     # NULL marks a pointer row (aggregator, email): no body means it cannot be
     # labeled or scored, so it has to resolve to an origin feed.
@@ -207,7 +223,7 @@ class Posting:
     source_extra: dict = field(default_factory=dict)  # the verbatim long tail
 
     # A parser hint retained for future provenance support. It does not create
-    # a feed; only the registry controls feed inventory.
+    # a feed; only explicit database actions control feed inventory.
     origin_url: str | None = None
 
 
@@ -215,9 +231,8 @@ class Posting:
 class Target:
     """Something worth fetching later.
 
-    Kept in the parser contract for adapter compatibility. The registry owns
-    feed inventory, so the core reports Target outputs as unsupported and
-    never creates runtime feeds from them.
+    Kept in the parser contract for adapter compatibility. The core reports
+    Target outputs as unsupported and never creates runtime feeds from them.
     """
 
     source: str  # the source it will be harvested as

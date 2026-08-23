@@ -3,29 +3,23 @@
 `schema.sql` is the storage contract. The implemented core path is:
 
 ```text
-registry → feed → fetch → raw_posting → job_posting → OneShot
+feed (PostgreSQL) → fetch → raw_posting → job_posting → OneShot
 ```
 
 Normal polls run bronze and silver together. Bronze remains independently
 replayable with `python -m xjobscore.run --parse` after a parser fix.
 
-## Registry and feed inventory
+## Feed inventory
 
-`registry/` owns companies, aliases, source taxonomy, feed inventory,
-company relationships, and adapter configuration. It is data only; `registry_loader.py`
-is the validated interface, and `REGISTRY.md` documents the TOML schemas. Worker startup
-synchronizes its durable projection into `company`, `alias`, `token`, and `feed`.
+PostgreSQL owns companies, aliases, feed inventory, source metadata, and
+per-feed adapter configuration. A feed is created explicitly from an ATS token
+or by an operator; workers never synchronize or seed feed rows.
 
-- Existing `feed.interval_s` values are preserved; new rows use the schema
-  default of 900 seconds.
-- Registry verification seeds `feed.enabled` the first time a feed is synced.
-  After that the column is operator state, owned by the inspector: re-syncing
-  the registry leaves it alone rather than resurrecting a feed that was
-  switched off. The registry decides which feeds exist, not which ones poll.
-- Removed feeds are disabled and removed tokens become inactive. Historical
-  companies, tokens, raw rows, and canonical postings are retained.
-- Adapter configuration is loaded from the validated registry at runtime and
-  is not stored in PostgreSQL.
+- `feed.config` holds endpoint-specific adapter values.
+- `token.company_id` is the feed's company identity and resolves its
+  description from `company`; `feed.type` is feed runtime metadata.
+- `feed.interval_s` defaults to 900 seconds; `feed.polling` is operator state.
+- Deleting a feed does not delete its token, company, raw rows, or postings.
 
 A feed instance is identified everywhere downstream as
 `"{feed.source}:{feed.key}"`. The adapter's external ID remains unchanged as
@@ -45,7 +39,7 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]
 fields. `parse` is synchronous and pure. It receives reconstructed bronze data
 and emits `Posting`, `Target`, `Label`, or `Fact` values.
 
-`Feed` carries registry configuration and schema-backed scheduler state:
+`Feed` carries PostgreSQL configuration and scheduler state:
 source, key, company metadata, ETag, response hash, interval, strikes, due
 time, and lease. Conditional requests use ETag only.
 
@@ -129,13 +123,16 @@ Canonical mapping is intentionally limited to columns in `schema.sql`:
 - published time becomes `posted_at`;
 - explicit closure becomes `closed`; all other rows are `active`;
 - `job_type` and `remote` are carried through from the adapter, not derived here;
+- the Greenhouse adapter resolves `location.name` through its code-owned alias
+  vocabulary into `country`; missing, ambiguous, and multi-country
+  values become `XX`;
 - recognized workplace and deadline values enter versioned `attributes`.
 
 The canonical `content_hash` includes only stored fields. Upserts preserve
 `first_seen_at` while refreshing `last_seen_at`, canonical values, status,
 hash, and `raw_id`.
 
-ATS and direct-company feeds fall back to the registry/token company. Boards
+ATS and direct-company feeds fall back to the feed/token company. Boards
 resolve `Posting.company_raw` through `alias`; unresolved board rows stay in
 bronze and are logged/counted without failing the feed. Secondhand postings
 remain bronze-only until the schema has a provenance model. `Target`, `Label`,
@@ -206,12 +203,11 @@ skipped.
 | `net.py` | HTTP, ETag conditional requests, retry, and rate limiting. |
 | `work.py` | Pure interval/strike/backoff calculations. |
 | `store.py` | All PostgreSQL operations and atomic claims. |
-| `feader.py` | Authoritative registry projection into `schema.sql`. |
 | `router.py` | Versioned bronze wrapper, hashes, persistence, reconstruction. |
 | `silver.py` | Parser dispatch, company resolution, canonical projection/upsert. |
 | `gold.py` | Derived enrichment and dedup artifacts computed from silver. |
 | `probe.py` | Three-valued origin-URL check backing reconciliation by absence. |
-| `run.py` | Startup sync, polling, inline ingestion, and replay orchestration. |
+| `run.py` | Polling, inline ingestion, and replay orchestration. |
 | `oneshot-ui/` | Reads `job_posting`; writes application-tracker tables. |
 
 Enrichment, scoring, notifications, dynamic targets, labels, and facts remain
@@ -223,8 +219,8 @@ enriched and deduped.
 `gold.py` holds artifacts recoverable from `job_posting`. Nothing whose value
 cannot be recovered from silver belongs here -- human judgements in particular.
 
-`--enrich` runs every enrichment; `--enrich skills`, `--enrich degrees`, or
-`--enrich dedup` runs one. Each enrichment gets its own transaction, so a
+`--enrich` runs every enrichment; `--enrich skills`, `--enrich degrees`,
+`--enrich summaries`, or `--enrich dedup` runs one. Each enrichment gets its own transaction, so a
 failure neither aborts nor half-writes the others.
 
 `job_type` is no longer a gold step. It classified from the silver title alone,
@@ -237,30 +233,46 @@ parse preview both consume it.
 The `skills` step extracts canonical aliases from each plain-text description
 and writes `attributes.skills` plus `attributes.skills_meta` directly onto the
 posting. The metadata records the full description hash and parse time. A row
-with metadata is skipped; when a later silver upsert changes canonical content,
-the upsert removes the skill result and stamp so the next gold pass enriches it
-once again. Empty skill lists are stamped too, so “processed with no matches”
-is distinct from “not processed.”
+also records the matcher version and a hash of `skills.yaml`; a row is skipped
+only when both are current. Changing the dictionary therefore makes existing
+rows eligible on the next skills pass. When a later silver upsert changes the
+description, the upsert removes the skill result and stamp so the next gold pass
+enriches it once again. Other source or parsed-field changes leave
+description-derived Gold data intact. Empty skill lists are stamped too, so
+“processed with no matches” is distinct from “not processed.”
 
 The `degrees` step uses the degree patterns in `registry/job-posting/types.yaml` to record
-the configured fields explicitly mentioned in a description as
+the configured fields explicitly mentioned in a title or description as
 `attributes.degree_fields`, with the same hash-and-stamp lifecycle as skills.
 
+The `summaries` step deterministically selects 40–50 words of role and
+qualification evidence from classified student postings. It recognizes common
+description headings, rejects company, compensation, benefits, application,
+and legal boilerplate, and never invents prose. When credible role evidence is
+missing it stamps an `insufficient_evidence` result rather than forcing a
+summary. `attributes.summary_meta` records the extractor version, input hash,
+status, and parse time; title or description changes invalidate both fields.
+The exact scoring, selection rules, live-data findings, and tradeoffs are in
+[`ROLE_SUMMARIES.md`](ROLE_SUMMARIES.md).
+
 Cross-source deduplication is at stage one and **generates candidates only**.
-Postings are grouped by `(company_id, normalize_title(title), normalize_location(location_text))` into
-`job_posting_dup_group` with `state = 'pending'`; keys with more than ten
-members are dropped as placeholders rather than identities. Group ids are
-`uuid5` of the key, so the pass is idempotent.
+Its key hierarchy is provider-native ATS requisition identity, then an exact
+apply URL when the ATS is unsupported, then
+`(company_id, normalize_title(title), normalize_location(location_text))` only
+for rows with no apply URL. This prevents different known requisitions or
+different visible apply links from being merged by the weaker role fallback.
+Fallback keys with more than ten members are dropped as placeholders;
+authoritative ATS identities are not frequency-capped. Group ids are `uuid5`
+of the versioned key, so the pass is idempotent.
 
-Location is normalized by Unicode-folding and punctuation removal; a missing
-location is represented by a null key component, so it remains a valid input.
-The precise signals -- ATS identity extracted from the posting URL and a
-normalized description hash -- are recorded in `evidence` but are **not**
-keyed on, so their real coverage and agreement can be measured before either
-is promoted. URL resolution is extraction, not string comparison, and fails
-closed: a careers landing page shared by every posting at a company yields no
-identity rather than merging them.
+URL identity extraction fails closed: a careers landing page shared by every
+posting at a company yields no ATS identity. The exact-link fallback preserves
+the full query string because some ATSs keep the requisition identifier there.
+Location and normalized description hashes remain supporting evidence.
 
-Nothing is confirmed, merged, or deleted, and `primary_posting_id` stays null.
+Nothing is confirmed, merged, or deleted. Gold selects `primary_posting_id` by
+preferring the direct ATS row, then newest `posted_at`, then newest
+`first_seen_at`. Exact ties remain unselected; database ID is not a
+tie-breaker.
 `requisition_id` is parsed by adapters but never reaches `job_posting`, so it
 is absent from the evidence set.

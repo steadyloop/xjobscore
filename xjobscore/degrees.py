@@ -12,7 +12,7 @@ import yaml
 __all__ = ["DEGREE_PATH", "DegreeError", "DegreeField", "canon", "extract"]
 
 DEGREE_PATH = Path(__file__).parent / "registry" / "job-posting" / "types.yaml"
-_FIELDS = {"name", "patterns"}
+_FIELDS = {"name", "patterns", "title_patterns"}
 _NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 
 
@@ -24,6 +24,24 @@ class DegreeError(ValueError):
 class DegreeField:
     name: str
     patterns: tuple[re.Pattern[str], ...]
+    title_patterns: tuple[re.Pattern[str], ...] = ()
+
+
+def _patterns(value: object, *, key: str, where: str, required: bool) -> tuple[re.Pattern[str], ...]:
+    if value is None and not required:
+        return ()
+    if not isinstance(value, list) or (required and not value):
+        qualifier = "a non-empty array" if required else "an array"
+        raise DegreeError(f"{where}: {key} must be {qualifier}")
+    patterns = []
+    for pattern in value:
+        if not isinstance(pattern, str) or not pattern:
+            raise DegreeError(f"{where}: {key} must contain non-empty strings")
+        try:
+            patterns.append(re.compile(pattern))
+        except re.error as exc:
+            raise DegreeError(f"{where}: invalid {key} pattern {pattern!r}: {exc}") from exc
+    return tuple(patterns)
 
 
 def _entry(row: object, index: int, path: Path) -> DegreeField:
@@ -38,18 +56,13 @@ def _entry(row: object, index: int, path: Path) -> DegreeField:
     if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise DegreeError(f"{where}: name must be a lowercase snake_case identifier")
 
-    source_patterns = row.get("patterns")
-    if not isinstance(source_patterns, list) or not source_patterns:
-        raise DegreeError(f"{where}: patterns must be a non-empty array")
-    patterns = []
-    for pattern in source_patterns:
-        if not isinstance(pattern, str) or not pattern:
-            raise DegreeError(f"{where}: patterns must contain non-empty strings")
-        try:
-            patterns.append(re.compile(pattern))
-        except re.error as exc:
-            raise DegreeError(f"{where}: invalid pattern {pattern!r}: {exc}") from exc
-    return DegreeField(name=name, patterns=tuple(patterns))
+    return DegreeField(
+        name=name,
+        patterns=_patterns(row.get("patterns"), key="patterns", where=where, required=True),
+        title_patterns=_patterns(
+            row.get("title_patterns"), key="title_patterns", where=where, required=False
+        ),
+    )
 
 
 def _load(path: Path) -> tuple[DegreeField, ...]:
@@ -83,10 +96,11 @@ def canon() -> tuple[DegreeField, ...]:
     return _load(DEGREE_PATH)
 
 
-def extract(text: str) -> list[str]:
-    """Return sorted degree fields explicitly mentioned in ``text``."""
+def extract(text: str, *, title: str = "") -> list[str]:
+    """Return fields mentioned in text, including title-only adjacent signals."""
     return sorted(
         field.name
         for field in canon()
         if any(pattern.search(text or "") for pattern in field.patterns)
+        or any(pattern.search(title or "") for pattern in field.title_patterns)
     )
