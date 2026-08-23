@@ -43,8 +43,8 @@ Re-running the four afterwards: eightfold 58 tokens, smartrecruiters 676 tokens
 ### eightfold token namespace is not reconcilable by rule
 `token.token` holds the catalog's `key` (`microsoft`); keyscan needs
 `{host}/{domain}` (`apply.careers.microsoft.com/microsoft.com`). Both halves are
-in the catalog's `[feed.config]`; `feader.py` drops `entry.config` when building
-`TokenRow`.
+in the catalog's `[feed.config]`, while the database token row has no config
+field.
 
 The bare key is a human-assigned label that appears in no URL, so composite →
 key needs a lookup and key → composite is impossible. Reassembled by hand, all 6

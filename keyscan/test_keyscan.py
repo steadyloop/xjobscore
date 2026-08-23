@@ -14,7 +14,8 @@ import pytest
 
 import keyscan.core as keyscan_core
 import keyscan.verify as keyscan_verify
-from keyscan.core import Keyscan, KeyscanError, _Cancelled, selftest
+from keyscan.__main__ import _progress_line
+from keyscan.core import Keyscan, KeyscanError, _Cancelled, _select_crawls, selftest
 from keyscan.probe import default_request, probe_rule
 from keyscan.rules import BY_SOURCE, SOURCE_GROUPS, expand_sources, extract
 from keyscan.verify import synthetic_token, verify_source, verify_sources
@@ -23,6 +24,103 @@ from keyscan.verify import synthetic_token, verify_source, verify_sources
 class FixtureScan(Keyscan):
     def _company_seeds(self):
         return [{"domain": "acme.test", "company_id": 999999, "company_name": "Acme"}]
+
+
+def test_cli_progress_renders_milestones_without_network_noise():
+    started = _progress_line({
+        "at": "2026-08-21T12:30:00+00:00",
+        "event": "crawl_start",
+        "crawl": "CC-MAIN-2026-30",
+        "snapshot": 1,
+        "snapshots": 12,
+        "files": 600,
+        "vendors": 10,
+    })
+    assert started == (
+        "[keyscan 12:30:00] CC-MAIN-2026-30 start | snapshot 1/12 | "
+        "600 files | 10 vendors"
+    )
+    checkpoint = _progress_line({
+        "at": "2026-08-21T12:34:56+00:00",
+        "event": "scan_checkpoint",
+        "crawl": "CC-MAIN-2026-30",
+        "files": 104,
+        "total_files": 600,
+        "candidates": 1761,
+        "vendors": 4,
+        "took_ms": 323929,
+    })
+    assert checkpoint == (
+        "[keyscan 12:34:56] CC-MAIN-2026-30 | files 104/600 (17%) | "
+        "+1761 candidates | 4 vendors | 5m24s"
+    )
+    assert _progress_line({
+        "at": "2026-08-21T12:34:56+00:00",
+        "event": "request_timing",
+        "message": "request timing",
+        "host": "example.test",
+    }) is None
+
+
+def test_durable_log_event_is_forwarded_to_progress_observer(tmp_path: Path):
+    events: list[dict] = []
+    scan = Keyscan(tmp_path / "work", progress=events.append)
+    run_id = scan._new_run(["commoncrawl"], 1, ["greenhouse"])
+    scan._log(
+        "info", "commoncrawl", "scan checkpoint", event="scan_checkpoint",
+        crawl="CC-MAIN-TEST", files=104, total_files=600,
+        candidates=12, vendors=1, took_ms=1000,
+    )
+    scan._finish("interrupted")
+
+    assert any(entry.get("event") == "scan_checkpoint" for entry in events)
+    assert all(entry["run_id"] == run_id for entry in events)
+
+
+def test_commoncrawl_date_range_selects_overlapping_crawl_weeks():
+    collections = [
+        {"id": "CC-MAIN-2026-30"},  # July 20-26
+        {"id": "CC-MAIN-2026-25"},  # June 15-21
+        {"id": "CC-MAIN-2026-21"},  # May 18-24
+        {"id": "not-a-crawl"},
+    ]
+    assert _select_crawls(collections, {
+        "date_from": "2026-06-21", "date_to": "2026-07-20",
+    }) == ["CC-MAIN-2026-30", "CC-MAIN-2026-25"]
+
+
+def test_commoncrawl_date_range_uses_exact_collection_coverage():
+    collections = [{
+        "id": "CC-MAIN-2026-30",
+        "from": "2026-07-10T07:05:34",
+        "to": "2026-07-23T01:13:28",
+    }]
+    # The ID resembles ISO week 30 (starting July 20), but the actual crawl
+    # began ten days earlier; a July 10 range must still select it.
+    assert _select_crawls(collections, {
+        "date_from": "2026-07-10", "date_to": "2026-07-10",
+    }) == ["CC-MAIN-2026-30"]
+
+
+def test_new_commoncrawl_run_requires_a_valid_complete_date_range(tmp_path: Path):
+    scan = Keyscan(tmp_path / "work")
+    with pytest.raises(KeyscanError, match="both --from and --to"):
+        scan._new_run(["commoncrawl"], date_from="2026-01-01")
+    with pytest.raises(KeyscanError, match="must be YYYY-MM-DD"):
+        scan._new_run(["commoncrawl"], date_from="2026/01/01", date_to="2026-02-01")
+    with pytest.raises(KeyscanError, match="must not be later"):
+        scan._new_run(["commoncrawl"], date_from="2026-02-01", date_to="2026-01-01")
+
+    run_id = scan._new_run(
+        ["commoncrawl"], date_from="2026-01-01", date_to="2026-02-01",
+    )
+    assert scan.status(run_id)["config"] == {
+        "archives": False,
+        "date_from": "2026-01-01",
+        "date_to": "2026-02-01",
+        "sources": [],
+    }
+    scan._finish("cancelled")
 
 
 def transport(handler):
@@ -84,6 +182,29 @@ async def test_probe_enriches_unbound_candidate_from_metadata(tmp_path: Path):
             "SELECT details FROM token WHERE ats = 'greenhouse' AND token = 'acme'"
         ).fetchone()["details"]
     assert json.loads(details)["company_name"] == "Acme Incorporated"
+
+
+def test_workday_candidates_use_one_lowercase_list_identity(tmp_path: Path):
+    scan = Keyscan(tmp_path / "work")
+    scan._new_run(["commoncrawl"], 1, ["workday-list"])
+
+    first = scan._record_candidate(
+        "workday-list",
+        "NVIDIA/wd5/NVIDIAExternalCareerSite",
+        "cc",
+        ["https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite"],
+    )
+    second = scan._record_candidate(
+        "workday-list",
+        "nvidia/wd5/nvidiaexternalcareersite",
+        "board",
+        ["https://nvidia.wd5.myworkdayjobs.com/en-US/nvidiaexternalcareersite"],
+    )
+
+    assert first == second == ("workday-list", "nvidia/wd5/nvidiaexternalcareersite")
+    rows = scan.list_candidates(source="workday-list")
+    assert len(rows) == 1
+    assert rows[0]["token"] == "nvidia/wd5/nvidiaexternalcareersite"
 
 
 @pytest.mark.asyncio
@@ -182,7 +303,7 @@ async def test_board_run_extracts_tokens_from_listings(tmp_path: Path, monkeypat
     assert set(rows) == {
         ("greenhouse", "acme"),
         ("ashby", "OpenAI"),
-        ("workday-list", "nvidia/wd5/NVIDIAExternalCareerSite"),
+        ("workday-list", "nvidia/wd5/nvidiaexternalcareersite"),
     }
     assert rows[("greenhouse", "acme")]["details"]["company_name"] == "Acme"
 
@@ -467,6 +588,40 @@ async def test_commoncrawl_checkpoint_can_resume_without_network_parquet(tmp_pat
     assert timing["crawl"] == "CC-MAIN-TEST"
 
 
+@pytest.mark.asyncio
+async def test_commoncrawl_attempts_later_snapshots_but_fails_an_incomplete_run(tmp_path: Path):
+    attempted: list[str] = []
+
+    class PartiallyFailingScan(FixtureScan):
+        def _cc_scan_sources(self, crawl, rules, urls, loop):
+            attempted.append(crawl)
+            if crawl == "CC-MAIN-BROKEN":
+                raise duckdb.IOException("Could not resolve hostname")
+            return {rule.source: [] for rule in rules}
+
+    manifest = gzip.compress(b"crawl-data/test/cc-index/table/subset=warc/part.parquet\n")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url == httpx.URL("https://index.commoncrawl.org/collinfo.json"):
+            return httpx.Response(200, json=[
+                {"id": "CC-MAIN-BROKEN"},
+                {"id": "CC-MAIN-GOOD"},
+            ])
+        if request.url.host == "data.commoncrawl.org":
+            return httpx.Response(200, content=manifest)
+        return httpx.Response(404)
+
+    scan = PartiallyFailingScan(tmp_path / "work", transport=transport(handler))
+    with pytest.raises(KeyscanError, match="CC-MAIN-BROKEN"):
+        await scan.run(["commoncrawl"], crawls=2, sources=["greenhouse"])
+
+    assert attempted == ["CC-MAIN-BROKEN", "CC-MAIN-GOOD"]
+    status = scan.status()
+    assert status["status"] == "failed"
+    assert status["error"].startswith("KeyscanError: 1 Common Crawl snapshot(s) failed")
+    assert status["checkpoint"]["cc_done"] == ["CC-MAIN-GOOD/greenhouse"]
+
+
 def test_commoncrawl_reads_a_persisted_synthetic_parquet(tmp_path: Path):
     scan = Keyscan(tmp_path / "work")
     scan._new_run(["commoncrawl"], 1)
@@ -633,6 +788,99 @@ def test_pacing_waits_long_enough_to_hold_the_target_rate():
     # Unreadable link counters fall back to a 50% duty cycle rather than to
     # no limit at all -- failing slow is the safe direction here.
     assert keyscan_core._pace_seconds(None, 3.0, mbps) == 3.0
+
+
+def test_duckdb_http_settings_use_seconds_and_a_bounded_retry_window(monkeypatch):
+    class FakeConnection:
+        def __init__(self):
+            self.statements: list[str] = []
+
+        def execute(self, statement):
+            self.statements.append(statement)
+            return self
+
+    con = FakeConnection()
+    monkeypatch.setattr(keyscan_core.duckdb, "connect", lambda: con)
+
+    assert keyscan_core._duckdb_http() is con
+    assert "SET http_timeout=120" in con.statements
+    assert "SET http_retries=3" in con.statements
+    assert "SET http_retry_backoff=2" in con.statements
+    assert "SET http_retry_wait_ms=250" in con.statements
+    assert "SET http_timeout=120000" not in con.statements
+
+
+def test_failed_remote_batch_reopens_connection_without_replaying_completed_batch(
+    tmp_path: Path, monkeypatch,
+):
+    first = ("greenhouse", "acme", 1, ["https://boards.greenhouse.io/acme"])
+    second = ("greenhouse", "globex", 1, ["https://boards.greenhouse.io/globex"])
+
+    class Result:
+        def __init__(self, rows=()):
+            self.rows = list(rows)
+
+        def fetchall(self):
+            return self.rows
+
+    class FakeConnection:
+        def __init__(self, generation: int):
+            self.generation = generation
+            self.remote_batches: list[str] = []
+            self.restored: list[tuple] = []
+            self.closed = False
+
+        def execute(self, statement):
+            if statement.startswith("INSERT INTO _batches"):
+                shard = "first" if "first.parquet" in statement else "second"
+                self.remote_batches.append(shard)
+                if self.generation == 1 and shard == "second":
+                    raise duckdb.IOException("Could not resolve hostname")
+                return Result([first] if shard == "first" else [second])
+            if statement.startswith("COPY"):
+                (tmp_path / "cache" / "greenhouse.part").touch()
+            return Result()
+
+        def executemany(self, _statement, rows):
+            self.restored.extend(rows)
+            return self
+
+        def close(self):
+            self.closed = True
+
+    connections: list[FakeConnection] = []
+
+    def connect():
+        con = FakeConnection(len(connections) + 1)
+        connections.append(con)
+        return con
+
+    monkeypatch.setattr(keyscan_core, "_duckdb_http", connect)
+    monkeypatch.setattr(keyscan_core, "_read_cache", lambda _target: [])
+    retries: list[dict] = []
+    candidates: list[tuple] = []
+
+    keyscan_core.cc_scan_sources(
+        "CC-MAIN-TEST", [BY_SOURCE["greenhouse"]],
+        ["first.parquet", "second.parquet"],
+        lambda source: tmp_path / "cache" / f"{source}.parquet",
+        target_mbps=0, batch_files=1, checkpoint_files=1,
+        on_candidates=candidates.extend, on_retry=retries.append,
+    )
+
+    assert len(connections) == 2
+    assert connections[0].remote_batches == ["first", "second"]
+    assert connections[0].closed
+    assert connections[1].restored == [first]
+    assert connections[1].remote_batches == ["second"]
+    assert candidates == [first, second]
+    assert retries == [{
+        "files": 1,
+        "batch_files": 1,
+        "attempt": 2,
+        "max_attempts": keyscan_core.BATCH_ATTEMPTS,
+        "error": "IOException: Could not resolve hostname",
+    }]
 
 
 def test_batching_matches_an_unbatched_scan(tmp_path: Path):
@@ -1446,10 +1694,10 @@ async def test_validation_stops_and_records_the_first_refusal(tmp_path: Path, mo
     assert any(entry.get("event") == "blocked" for entry in entries)
 
 
-def test_initialize_adds_imported_at_to_an_existing_database_in_place(tmp_path: Path):
+def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: Path):
     """CREATE TABLE IF NOT EXISTS does not add columns to a table already on
-    disk -- a real ``keyscan.sqlite`` predating the xjobscore-import feature
-    must gain the column, and keep its rows, rather than needing a rebuild.
+    disk -- a real ``keyscan.sqlite`` predating either schema addition must
+    gain both columns and keep its rows rather than needing a rebuild.
     """
     workdir = tmp_path / "work"
     workdir.mkdir()
@@ -1492,6 +1740,27 @@ def test_initialize_adds_imported_at_to_an_existing_database_in_place(tmp_path: 
         "INSERT INTO token(ats, token, status, canonical_url, discovered_at) "
         "VALUES ('greenhouse', 'acme', 'live', 'https://boards.greenhouse.io/acme', '2026-01-01T00:00:00+00:00')"
     )
+    con.execute(
+        """INSERT INTO token(
+               ats, token, status, canonical_url, urls, details,
+               discovered_at, checked_at
+           ) VALUES (
+               'workday', 'NVIDIA/wd5/NVIDIAExternalCareerSite', 'live',
+               'https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite',
+               '["old"]', '{"verdict":"live","job_count":42}',
+               '2025-12-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00'
+           )"""
+    )
+    con.execute(
+        """INSERT INTO token(
+               ats, token, status, canonical_url, urls, details, discovered_at
+           ) VALUES (
+               'workday-list', 'nvidia/wd5/nvidiaexternalcareersite', 'unknown',
+               'https://nvidia.wd5.myworkdayjobs.com/en-US/nvidiaexternalcareersite',
+               '["new"]', '{"company_name":"NVIDIA"}',
+               '2026-01-01T00:00:00+00:00'
+           )"""
+    )
     con.commit()
     con.close()
 
@@ -1500,9 +1769,29 @@ def test_initialize_adds_imported_at_to_an_existing_database_in_place(tmp_path: 
 
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
-    columns = {row["name"] for row in con.execute("PRAGMA table_info(token)")}
-    assert "imported_at" in columns
+    token_columns = {row["name"] for row in con.execute("PRAGMA table_info(token)")}
+    run_columns = {row["name"] for row in con.execute("PRAGMA table_info(runs)")}
+    assert "imported_at" in token_columns
+    assert "blocked_json" in run_columns
     row = con.execute("SELECT * FROM token WHERE ats = 'greenhouse' AND token = 'acme'").fetchone()
+    workday_rows = con.execute(
+        "SELECT * FROM token WHERE ats IN ('workday', 'workday-list')"
+    ).fetchall()
+    with pytest.raises(sqlite3.IntegrityError, match="renamed to workday-list"):
+        con.execute(
+            """INSERT INTO token(ats, token, canonical_url, discovered_at)
+               VALUES ('workday', 'acme/wd1/jobs', 'https://example.test', '2026-01-01')"""
+        )
     con.close()
     assert row["status"] == "live"
     assert row["imported_at"] is None
+    assert len(workday_rows) == 1
+    migrated = workday_rows[0]
+    assert migrated["ats"] == "workday-list"
+    assert migrated["token"] == "nvidia/wd5/nvidiaexternalcareersite"
+    assert migrated["status"] == "live"
+    assert migrated["checked_at"] == "2026-01-02T00:00:00+00:00"
+    assert migrated["discovered_at"] == "2025-12-01T00:00:00+00:00"
+    assert json.loads(migrated["urls"]) == ["old", "new"]
+    assert json.loads(migrated["details"])["company_name"] == "NVIDIA"
+    assert json.loads(migrated["details"])["job_count"] == 42

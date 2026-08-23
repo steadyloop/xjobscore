@@ -9,10 +9,17 @@ Run from the repository root:
 
 ```sh
 PYTHONPATH=. uv run python -m keyscan selftest
-PYTHONPATH=. uv run python -m keyscan run --methods commoncrawl --crawls 6
-PYTHONPATH=. uv run python -m keyscan run --methods commoncrawl --sources adp,oracle,ukg
+PYTHONPATH=. uv run python -m keyscan run --methods commoncrawl --from 2026-01-01 --to 2026-08-21
+PYTHONPATH=. uv run python -m keyscan run --methods commoncrawl --from 2026-06-01 --to 2026-08-21 --sources adp,oracle,ukg
 PYTHONPATH=. uv run python -m keyscan run --methods board --archives
 ```
+
+`run` and `resume` print a compact live progress stream to stderr while keeping
+the final JSON result alone on stdout. Common Crawl reports approximately every
+100 files (104/200/304/400/504/600 with the default eight-file batches), plus
+retries, snapshot completion, validation totals, and final status. Pass
+`--quiet` to suppress the live stream for automation; the complete durable log
+is written regardless.
 
 Working state is local to `keyscan/work/`:
 

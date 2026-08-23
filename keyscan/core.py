@@ -7,7 +7,7 @@ module writes the application database or source registry.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import gzip
 import hashlib
 import html
@@ -51,6 +51,17 @@ WAF_MARKERS = ("cloudflare", "cf-ray", "access denied", "attention required", "r
 # remaining lever is duty-cycling: scan a few files, measure what actually
 # crossed the link, then sleep long enough to hold this average.
 TARGET_MBPS = 60.0
+# DuckDB 1.5 expresses ``http_timeout`` in seconds.  This used to be set to
+# 120000 as though the value were milliseconds, which turns a two-minute
+# ceiling into 33 hours.  Keep the retry window bounded as well: DuckDB's
+# default backoff factor of four makes eight retries sleep for roughly nine
+# minutes after a fast DNS failure, without refreshing the connection that
+# owns the failed resolver state.
+HTTP_TIMEOUT_SECONDS = 120
+HTTP_RETRIES = 3
+HTTP_RETRY_BACKOFF = 2
+HTTP_RETRY_WAIT_MS = 250
+BATCH_ATTEMPTS = 3
 # Smaller batches pace more smoothly but pay more query overhead; eight files is
 # a few seconds of transfer, so the sleep between them stays short enough that
 # a cancel lands promptly.
@@ -120,6 +131,139 @@ def _merge(old: dict[str, Any], new: dict[str, Any] | None = None, **overrides: 
     return merged
 
 
+def _canonical_token(source: str, token: str) -> str:
+    """Return keyscan's one stored spelling for a vendor endpoint."""
+    return token.lower() if source == "workday-list" else token
+
+
+_CRAWL_WEEK = re.compile(r"^CC-MAIN-(\d{4})-(\d{2})$")
+
+
+def _iso_date(value: str, option: str) -> date:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise KeyscanError(f"{option} must be YYYY-MM-DD") from exc
+    if parsed.isoformat() != value:
+        raise KeyscanError(f"{option} must be YYYY-MM-DD")
+    return parsed
+
+
+def _date_range(date_from: str | None, date_to: str | None) -> tuple[date, date] | None:
+    if not date_from and not date_to:
+        return None
+    if not date_from or not date_to:
+        raise KeyscanError("commoncrawl requires both --from and --to")
+    start, end = _iso_date(date_from, "--from"), _iso_date(date_to, "--to")
+    if start > end:
+        raise KeyscanError("--from must not be later than --to")
+    return start, end
+
+
+def _select_crawls(collections: list[dict[str, Any]], config: dict[str, Any]) -> list[str]:
+    """Select snapshots overlapping an inclusive calendar-date range.
+
+    The collection API publishes each snapshot's exact ``from``/``to`` crawl
+    timestamps; use those rather than treating the week-like ID as its actual
+    coverage. The ID-derived week remains a fallback for fixtures or older API
+    responses. Legacy saved runs retain their old newest-N behavior so they
+    remain resumable.
+    """
+    selected_range = _date_range(config.get("date_from"), config.get("date_to"))
+    if selected_range is None:
+        return [row["id"] for row in collections[: int(config.get("crawls", 6))]]
+    start, end = selected_range
+    result: list[str] = []
+    for row in collections:
+        crawl = str(row.get("id", ""))
+        try:
+            crawl_start = datetime.fromisoformat(str(row["from"])).date()
+            crawl_end = datetime.fromisoformat(str(row["to"])).date()
+        except (KeyError, TypeError, ValueError):
+            match = _CRAWL_WEEK.fullmatch(crawl)
+            if match is None:
+                continue
+            try:
+                crawl_start = date.fromisocalendar(int(match[1]), int(match[2]), 1)
+            except ValueError:
+                continue
+            crawl_end = crawl_start + timedelta(days=6)
+        if crawl_start <= end and crawl_end >= start:
+            result.append(crawl)
+    return result
+
+
+def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
+    """Fold the retired Workday source into its listing-only replacement.
+
+    Historical databases can contain both labels and casing variants of the
+    same tenant endpoint.  Rebuild just those rows as one lowercase
+    ``workday-list`` identity, keeping the latest validation result and merging
+    discovery evidence.  ``imported_at`` follows the winning validation row so
+    a newer, not-yet-imported verdict remains pending.
+    """
+    dirty = con.execute(
+        """SELECT 1 FROM token
+           WHERE ats = 'workday'
+              OR (ats = 'workday-list' AND token <> lower(token))
+           LIMIT 1"""
+    ).fetchone()
+    if dirty is None:
+        return
+
+    rows = con.execute(
+        "SELECT * FROM token WHERE ats IN ('workday', 'workday-list')"
+    ).fetchall()
+    groups: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        groups.setdefault(row["token"].lower(), []).append(row)
+
+    con.execute("DELETE FROM token WHERE ats IN ('workday', 'workday-list')")
+    rule = BY_SOURCE["workday-list"]
+    for token, sightings in groups.items():
+        # ISO timestamps sort chronologically. A checked row outranks an
+        # unchecked discovery; exact ties prefer the current source label.
+        winner = max(
+            sightings,
+            key=lambda row: (
+                row["checked_at"] is not None,
+                row["checked_at"] or "",
+                row["ats"] == "workday-list",
+            ),
+        )
+        ordered = sorted(
+            sightings,
+            key=lambda row: (row["discovered_at"], row["ats"], row["token"]),
+        )
+        urls: list[str] = []
+        details: dict[str, Any] = {}
+        for row in ordered:
+            urls.extend(json.loads(row["urls"]))
+            details = _merge(details, json.loads(row["details"]))
+        # Validation-specific detail belongs with the same row as status and
+        # checked_at, so replay it last after combining discovery evidence.
+        details = _merge(details, json.loads(winner["details"]))
+        canonical_url = rule.board_url.format(**rule.urls(token))
+        con.execute(
+            """INSERT INTO token(
+                   ats, token, status, canonical_url, urls, method, run_id,
+                   details, discovered_at, checked_at, imported_at
+               ) VALUES ('workday-list', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                token,
+                winner["status"],
+                canonical_url,
+                _json(list(dict.fromkeys(urls))[:5]),
+                next((row["method"] for row in reversed(ordered) if row["method"]), None),
+                winner["run_id"],
+                _json(details),
+                min(row["discovered_at"] for row in sightings),
+                winner["checked_at"],
+                winner["imported_at"],
+            ),
+        )
+
+
 
 def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
@@ -184,11 +328,43 @@ def _merged_query(rules: list[Rule], urls: list[str]) -> str:
 def _duckdb_http() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
-    for setting in ("SET enable_http_metadata_cache=true", "SET http_retries=8", "SET http_timeout=120000", "SET preserve_insertion_order=false"):
+    for setting in (
+        "SET enable_http_metadata_cache=true",
+        f"SET http_retries={HTTP_RETRIES}",
+        f"SET http_retry_backoff={HTTP_RETRY_BACKOFF}",
+        f"SET http_retry_wait_ms={HTTP_RETRY_WAIT_MS}",
+        f"SET http_timeout={HTTP_TIMEOUT_SECONDS}",
+        "SET preserve_insertion_order=false",
+    ):
         try:
             con.execute(setting)
         except duckdb.Error:
             pass
+    return con
+
+
+def _batch_connection(
+    rows: list[tuple[str, str, int, list[str]]] | None = None,
+) -> duckdb.DuckDBPyConnection:
+    """Open the remote reader and restore already-completed batch results.
+
+    A failed httpfs request can leave its curl connection or resolver state
+    unusable for every built-in retry. Reopening DuckDB gives the next outer
+    attempt a genuinely fresh HTTP client. Completed batches live in Python
+    until the per-vendor parquet caches are committed, so rebuilding the small
+    local accumulator does not re-read any successful remote batch.
+    """
+    con = _duckdb_http()
+    try:
+        con.execute(
+            "CREATE TEMP TABLE _batches"
+            "(source VARCHAR, token VARCHAR, url_count BIGINT, urls VARCHAR[])"
+        )
+        if rows:
+            con.executemany("INSERT INTO _batches VALUES (?, ?, ?, ?)", rows)
+    except Exception:
+        con.close()
+        raise
     return con
 
 
@@ -277,10 +453,12 @@ def cc_scan_sources(
     crawl: str, rules: list[Rule], urls: list[str], target_for: Callable[[str], Path],
     *, target_mbps: float = TARGET_MBPS, batch_files: int = BATCH_FILES,
     checkpoint_files: int = CHECKPOINT_FILES,
+    batch_attempts: int = BATCH_ATTEMPTS,
     should_cancel: Callable[[], None] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
     on_candidates: Callable[[list[tuple[str, str, int, list[str]]]], None] | None = None,
+    on_retry: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Scan every vendor in `rules` in ONE pass over the crawl's columnar index.
 
@@ -295,15 +473,12 @@ def cc_scan_sources(
         for rule in pending:
             target_for(rule.source).parent.mkdir(parents=True, exist_ok=True)
         batches = list(_chunks(urls, batch_files))
-        # One connection for the whole crawl: `enable_http_metadata_cache` is
-        # per-connection, so reusing it keeps each file's footer read to once
-        # even though the files are now handed over a batch at a time.
-        con = _duckdb_http()
+        # Reuse one connection while it is healthy: `enable_http_metadata_cache`
+        # is per-connection. A remote I/O failure is the exception; recovery
+        # rebuilds the local accumulator on a fresh connection below.
+        completed_rows: list[tuple[str, str, int, list[str]]] = []
+        con = _batch_connection()
         try:
-            con.execute(
-                "CREATE TEMP TABLE _batches"
-                "(source VARCHAR, token VARCHAR, url_count BIGINT, urls VARCHAR[])"
-            )
             # A summary every `checkpoint_files` files is the only visibility
             # into a merged scan from the outside: it runs as one blocking
             # DuckDB call handed to a worker thread, so nothing else surfaces
@@ -318,10 +493,30 @@ def cc_scan_sources(
                 if should_cancel is not None:
                     should_cancel()
                 before, started = _link_bytes(), time.monotonic()
-                rows = con.execute(
-                    f"INSERT INTO _batches {_merged_query(pending, batch)} "
-                    "RETURNING source, token, url_count, urls"
-                ).fetchall()
+                attempts = max(1, batch_attempts)
+                for attempt in range(1, attempts + 1):
+                    try:
+                        rows = con.execute(
+                            f"INSERT INTO _batches {_merged_query(pending, batch)} "
+                            "RETURNING source, token, url_count, urls"
+                        ).fetchall()
+                        break
+                    except (duckdb.ConnectionException, duckdb.HTTPException, duckdb.IOException) as exc:
+                        if attempt == attempts:
+                            raise
+                        if should_cancel is not None:
+                            should_cancel()
+                        if on_retry is not None:
+                            on_retry({
+                                "files": files_done,
+                                "batch_files": len(batch),
+                                "attempt": attempt + 1,
+                                "max_attempts": attempts,
+                                "error": f"{type(exc).__name__}: {exc}",
+                            })
+                        con.close()
+                        con = _batch_connection(completed_rows)
+                completed_rows.extend(rows)
                 elapsed = time.monotonic() - started
                 after = _link_bytes()
                 sent = None if before is None or after is None else max(0, after - before)
@@ -411,6 +606,7 @@ class Keyscan:
         request_delay: float = 0.0,
         target_mbps: float = TARGET_MBPS,
         checkpoint_files: int = CHECKPOINT_FILES,
+        progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.workdir = Path(workdir) if workdir else Path(__file__).with_name("work")
         self.db_path = self.workdir / "keyscan.sqlite"
@@ -423,6 +619,10 @@ class Keyscan:
         # not just a module constant, so a test can force a checkpoint inside
         # a handful of synthetic files instead of needing 100+ real ones.
         self.checkpoint_files = checkpoint_files
+        # Optional human-facing observer for durable log events. The CLI uses
+        # this to show a deliberately small progress stream on stderr while
+        # leaving stdout available for the final machine-readable result.
+        self.progress = progress
         self._client: httpx.AsyncClient | None = None
         self._semaphore = asyncio.Semaphore(4)
         self._host_locks: dict[str, asyncio.Lock] = {}
@@ -482,7 +682,7 @@ class Keyscan:
                 CREATE UNIQUE INDEX IF NOT EXISTS keyscan_one_active
                     ON runs(status) WHERE status = 'running';
                 CREATE TABLE IF NOT EXISTS token (
-                    ats           TEXT NOT NULL,
+                    ats           TEXT NOT NULL CHECK (ats <> 'workday'),
                     token         TEXT NOT NULL,
                     status        TEXT NOT NULL DEFAULT 'unknown'
                         CHECK (status IN ('unknown','live','dead')),
@@ -512,6 +712,27 @@ class Keyscan:
             existing_columns = {row["name"] for row in con.execute("PRAGMA table_info(token)")}
             if "imported_at" not in existing_columns:
                 con.execute("ALTER TABLE token ADD COLUMN imported_at TEXT")
+            _migrate_workday_tokens(con)
+            # Existing SQLite tables cannot gain a CHECK constraint in place.
+            # Triggers give upgraded databases the same invariant as fresh
+            # databases after the legacy rows above have been consolidated.
+            con.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS keyscan_token_workday_insert
+                BEFORE INSERT ON token WHEN NEW.ats = 'workday'
+                BEGIN
+                    SELECT RAISE(ABORT, 'workday source was renamed to workday-list');
+                END;
+                CREATE TRIGGER IF NOT EXISTS keyscan_token_workday_update
+                BEFORE UPDATE OF ats ON token WHEN NEW.ats = 'workday'
+                BEGIN
+                    SELECT RAISE(ABORT, 'workday source was renamed to workday-list');
+                END;
+                """
+            )
+            run_columns = {row["name"] for row in con.execute("PRAGMA table_info(runs)")}
+            if "blocked_json" not in run_columns:
+                con.execute("ALTER TABLE runs ADD COLUMN blocked_json TEXT")
             # A process crash cannot retain a usable in-memory task.  Do not
             # interrupt a currently running CLI merely because another
             # process is inspecting its status.
@@ -601,15 +822,21 @@ class Keyscan:
     # ------------------------------------------------------------------
 
     def _new_run(
-        self, methods: Iterable[str], crawls: int, sources: Iterable[str] | None = None,
-        archives: bool = False,
+        self, methods: Iterable[str], crawls: int | None = None,
+        sources: Iterable[str] | None = None, archives: bool = False, *,
+        date_from: str | None = None, date_to: str | None = None,
     ) -> str:
         selected = tuple(dict.fromkeys(methods))
         unknown = set(selected) - METHODS
         if not selected or unknown:
             detail = ", ".join(sorted(unknown)) if unknown else "at least one method"
             raise KeyscanError(f"unknown method(s): {detail}")
-        if not 1 <= crawls <= 12:
+        selected_range = _date_range(date_from, date_to)
+        if selected_range is not None and crawls is not None:
+            raise KeyscanError("use a date range or crawls, not both")
+        if "commoncrawl" in selected and selected_range is None and crawls is None:
+            raise KeyscanError("commoncrawl requires both --from and --to")
+        if crawls is not None and not 1 <= crawls <= 12:
             raise KeyscanError("crawls must be between 1 and 12")
         selected_sources = expand_sources(tuple(dict.fromkeys(sources or ())))
         unknown_sources = set(selected_sources) - BY_SOURCE.keys()
@@ -620,6 +847,14 @@ class Keyscan:
         artifact = self.workdir / "runs" / run_id
         artifact.mkdir(parents=True)
         checkpoint = {"board_index": 0, "cc_done": []}
+        config: dict[str, Any] = {
+            "sources": selected_sources,
+            "archives": bool(archives),
+        }
+        if selected_range is not None:
+            config.update(date_from=date_from, date_to=date_to)
+        elif crawls is not None:
+            config["crawls"] = crawls
         now = utc_now()
         try:
             with self._connect() as con:
@@ -627,22 +862,26 @@ class Keyscan:
                     """INSERT INTO runs(id, methods_json, config_json, status, phase, checkpoint_json,
                        artifact_dir, pid, created_at, started_at)
                        VALUES (?, ?, ?, 'running', 'starting', ?, ?, ?, ?, ?)""",
-                    (run_id, _json(selected), _json({"crawls": crawls, "sources": selected_sources, "archives": bool(archives)}), _json(checkpoint), str(artifact), os.getpid(), now, now),
+                    (run_id, _json(selected), _json(config), _json(checkpoint), str(artifact), os.getpid(), now, now),
                 )
         except sqlite3.IntegrityError as exc:
             raise ActiveRunError("a keyscan run is already active") from exc
         self._run_id = run_id
         self._log(
             "info", "starting", "run started", methods=selected, crawls=crawls,
-            sources=selected_sources or "all", archives=bool(archives),
+            date_from=date_from, date_to=date_to, sources=selected_sources or "all",
+            archives=bool(archives),
         )
         return run_id
 
     async def run(
-        self, methods: Iterable[str], crawls: int = 6, sources: Iterable[str] | None = None,
-        archives: bool = False,
+        self, methods: Iterable[str], crawls: int | None = None,
+        sources: Iterable[str] | None = None, archives: bool = False, *,
+        date_from: str | None = None, date_to: str | None = None,
     ) -> str:
-        return await self._run(self._new_run(methods, crawls, sources, archives))
+        return await self._run(self._new_run(
+            methods, crawls, sources, archives, date_from=date_from, date_to=date_to,
+        ))
 
     @staticmethod
     def _selected_sources(run: dict[str, Any]) -> set[str] | None:
@@ -792,9 +1031,19 @@ class Keyscan:
             return
         artifact = self._artifact()
         artifact.mkdir(parents=True, exist_ok=True)
-        entry = {"at": utc_now(), "level": level, "phase": phase, "message": message, **details}
+        entry = {
+            "at": utc_now(), "run_id": self._run_id, "level": level,
+            "phase": phase, "message": message, **details,
+        }
         with (artifact / "run.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(_json(entry) + "\n")
+        if self.progress is not None:
+            try:
+                self.progress(entry)
+            except Exception:
+                # Display is ancillary. A closed stderr pipe or custom
+                # renderer must never stop a durable scan.
+                pass
 
     def tail_log(self, run_id: str, offset: int = 0, limit: int = 200) -> tuple[list[dict[str, Any]], int]:
         run = self.status(run_id)
@@ -953,6 +1202,7 @@ class Keyscan:
         details: dict[str, Any] | None = None,
     ) -> tuple[str, str]:
         assert self._run_id
+        token = _canonical_token(source, token)
         rule = BY_SOURCE[source]
         canonical = rule.board_url.format(**rule.urls(token))
         now = utc_now()
@@ -1070,21 +1320,19 @@ class Keyscan:
         response = await self._request("GET", COLLINFO)
         if response is None or response.status_code != 200:
             raise KeyscanError("unable to retrieve Common Crawl collection list")
-        crawls = [row["id"] for row in response.json()[: int(run["config"].get("crawls", 6))]]
+        crawls = _select_crawls(response.json(), run["config"])
+        if not crawls:
+            if run["config"].get("date_from"):
+                raise KeyscanError(
+                    "no Common Crawl snapshots overlap "
+                    f"{run['config']['date_from']} through {run['config']['date_to']}"
+                )
+            raise KeyscanError("no Common Crawl snapshots available")
         done = set(run["checkpoint"].get("cc_done", []))
-        for crawl in crawls:
-            manifest = await self._request("GET", CC_PATHS.format(crawl=crawl))
-            if manifest is None or manifest.status_code != 200:
-                self._log("warning", "commoncrawl", "crawl manifest unavailable", crawl=crawl)
-                continue
-            try:
-                paths = gzip.decompress(manifest.content).decode().splitlines()
-            except (OSError, UnicodeDecodeError) as exc:
-                self._log("warning", "commoncrawl", "invalid crawl manifest", crawl=crawl, error=str(exc))
-                continue
-            urls = [CC_CDN + path for path in paths if path.endswith(".parquet") and ("/subset=warc/" in path or "/subset=crawldiagnostics/" in path)]
-            selected_sources = self._selected_sources(run)
-            rules = [rule for rule in RULES if selected_sources is None or rule.source in selected_sources]
+        selected_sources = self._selected_sources(run)
+        rules = [rule for rule in RULES if selected_sources is None or rule.source in selected_sources]
+        failed_crawls: list[str] = []
+        for crawl_index, crawl in enumerate(crawls, start=1):
             self._check_cancelled()
             pending: list[Rule] = []
             for rule in rules:
@@ -1099,6 +1347,23 @@ class Keyscan:
                 pending.append(rule)
             if not pending:
                 continue
+            manifest = await self._request("GET", CC_PATHS.format(crawl=crawl))
+            if manifest is None or manifest.status_code != 200:
+                self._log("warning", "commoncrawl", "crawl manifest unavailable", crawl=crawl)
+                failed_crawls.append(crawl)
+                continue
+            try:
+                paths = gzip.decompress(manifest.content).decode().splitlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                self._log("warning", "commoncrawl", "invalid crawl manifest", crawl=crawl, error=str(exc))
+                failed_crawls.append(crawl)
+                continue
+            urls = [CC_CDN + path for path in paths if path.endswith(".parquet") and ("/subset=warc/" in path or "/subset=crawldiagnostics/" in path)]
+            self._log(
+                "info", "commoncrawl", "crawl started", event="crawl_start",
+                crawl=crawl, snapshot=crawl_index, snapshots=len(crawls),
+                files=len(urls), vendors=len(pending),
+            )
             # One scan for every outstanding vendor.  Reading the crawl's
             # parquet footers costs the same whether one vendor or nine are
             # being extracted, so paying it per vendor was pure waste.
@@ -1118,6 +1383,7 @@ class Keyscan:
                     operation="commoncrawl_merged_scan", crawl=crawl, sources=sources,
                     outcome="error", elapsed_ms=round(1000 * (time.monotonic() - started)),
                 )
+                failed_crawls.append(crawl)
                 continue
             elapsed_ms = round(1000 * (time.monotonic() - started))
             self._log(
@@ -1136,6 +1402,11 @@ class Keyscan:
                 done.add(f"{crawl}/{rule.source}")
                 self._checkpoint(cc_done=sorted(done))
                 self._log("info", "commoncrawl", "vendor scanned", crawl=crawl, source=rule.source, candidates=len(rows))
+        if failed_crawls:
+            raise KeyscanError(
+                f"{len(failed_crawls)} Common Crawl snapshot(s) failed: "
+                + ", ".join(failed_crawls)
+            )
 
     def _cc_scan_sources(
         self, crawl: str, rules: list[Rule], urls: list[str], loop: asyncio.AbstractEventLoop,
@@ -1151,6 +1422,10 @@ class Keyscan:
             # a file, no shared connection to open per call.
             on_checkpoint=lambda stats: self._log(
                 "info", "commoncrawl", "scan checkpoint", event="scan_checkpoint", crawl=crawl, **stats,
+            ),
+            on_retry=lambda stats: self._log(
+                "warning", "commoncrawl", "retrying crawl batch with fresh connection",
+                event="batch_retry", crawl=crawl, **stats,
             ),
             # `_record_candidate` ends by pushing onto `self._validation_queue`,
             # an `asyncio.Queue` -- calling that directly from this worker
