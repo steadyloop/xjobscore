@@ -23,11 +23,23 @@ export async function setFeedsEnabled(feeds, enabled) {
   return api("/api/feeds/bulk-policy", { body: { refs, enabled } });
 }
 
-/* Hard delete -- the row and its poll history are gone, not just paused.
-   Only meaningful once a feed has actually been imported into Postgres. */
+/* The token endpoint owns the whole mutation: muted=true and feed deletion
+   happen atomically in PostgreSQL. */
+export async function muteFeed(feed) {
+  if (!feed.policy?.in_postgres || !feed.policy?.feed_id) {
+    throw new Error("feed was never imported");
+  }
+  return api("/api/tokens/muted", {
+    method: "PUT",
+    body: { ats: feed.source, token: feed.key, muted: true },
+  });
+}
+
+/* Drop removes the feed without changing the token's muted state. The token
+   remains eligible for a later explicit import or heartbeat promotion. */
 export async function dropFeed(feed) {
   if (!feed.policy?.in_postgres || !feed.policy?.feed_id) {
     throw new Error("feed was never imported");
   }
-  return api("/api/feeds/bulk-delete", { body: { feed_ids: [feed.policy.feed_id] } });
+  return api(`/api/feeds/${feed.feed_ref}`, { method: "DELETE" });
 }

@@ -3,7 +3,7 @@
    panel (shared/inspect.js); this page only owns the on/off switch. */
 
 import { api, isDegraded } from "/static/shared/api.js";
-import { setFeedEnabled, setFeedsEnabled, dropFeed } from "/static/shared/feed-policy.js";
+import { muteFeed, setFeedEnabled, setFeedsEnabled } from "/static/shared/feed-policy.js";
 import {
   el,
   formatMs,
@@ -41,6 +41,10 @@ const paneEl = document.getElementById("detail-pane");
 const handleEl = document.getElementById("split-handle");
 const inspector = createInspector(paneEl, {
   onClose: closeDetail,
+  onMute: async () => {
+    closeDetail();
+    await load();
+  },
   onDrop: async () => {
     closeDetail();
     await load();
@@ -178,7 +182,7 @@ function wireFetchAllButton(button) {
         button.textContent = progress.cancelled
           ? `Stopping… ${progress.completed}/${progress.total}`
           : `Fetching ${progress.completed}/${progress.total}…`;
-        if (progress.completed % 5 === 0 || progress.completed === progress.total) render();
+        render();
       }
     }
     const workerCount = Math.min(BULK_FETCH_CONCURRENCY, feeds.length);
@@ -363,19 +367,20 @@ function fetchButton(feed) {
   return button;
 }
 
-/* Hard delete -- Direct/Board sources are out of scope, and a feed that was
-   never imported has nothing to drop. */
-function dropButton(feed) {
+/* Mute removes the feed and prevents the token heartbeat from promoting it
+   again. Direct/Board sources are out of scope, and a feed that was never
+   imported has nothing to remove. */
+function muteButton(feed) {
   const button = el(
     "button",
-    { class: "btn small", type: "button", title: "Drop this feed (permanent)" },
-    "Drop"
+    { class: "btn small", type: "button", title: "Mute token and remove feed" },
+    "Mute"
   );
   if (feed.category !== "ATS" || !feed.policy?.in_postgres) {
     button.disabled = true;
     button.title =
       feed.category !== "ATS"
-        ? "Drop is ATS-only"
+        ? "Mute is ATS-only"
         : "Not imported into the feed table yet";
     return button;
   }
@@ -384,12 +389,12 @@ function dropButton(feed) {
     button.disabled = true;
     button.textContent = "…";
     try {
-      await dropFeed(feed);
+      await muteFeed(feed);
       if (state.selectedRef === feed.feed_ref) closeDetail();
       await load();
     } catch (error) {
       button.disabled = false;
-      button.textContent = "Drop";
+      button.textContent = "Mute";
       console.error(error);
     }
   });
@@ -435,7 +440,7 @@ function feedRow(feed) {
       { style: "display:inline-flex;align-items:center;gap:6px" },
       feedToggle(feed),
       fetchButton(feed),
-      dropButton(feed)
+      muteButton(feed)
     )
   );
 
@@ -444,7 +449,12 @@ function feedRow(feed) {
     el(
       "td",
       { class: "feed-cell", title: `${feed.source}:${feed.key}` },
-      el("div", { class: "feed-name" }, feed.company_name || feed.key)
+      el(
+        "div",
+        { class: "feed-name" },
+        el("span", { class: "feed-display-name" }, feed.company_name || feed.key),
+        el("span", { class: "feed-identity mono" }, `${feed.source}:${feed.key}`)
+      )
     ),
     el("td", {}, lastRunCell(feed)),
     el("td", { class: "num" }, feed.last_result ? String(feed.last_result.item_count) : "—"),
@@ -599,9 +609,7 @@ async function fetchGroup(source, feeds) {
       progress.failed += 1;
     }
     progress.completed += 1;
-    if (progress.completed % 5 === 0 || progress.completed === progress.total) {
-      render();
-    }
+    render();
   }
   state.groupFetch.delete(source);
   await load();
@@ -643,7 +651,7 @@ function render() {
 
   body.replaceChildren();
   const work = [];
-  // Direct/Board/Other sources are single feeds by design — render them
+  // Direct and Board sources are single feeds by design — render them
   // flat, styled like group rows so they read as top-level sources.
   for (const feed of flatFeeds) {
     const row = feedRow(feed);

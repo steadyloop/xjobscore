@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>xJobscore</title>
+  <title>Scheduler · xJobscore</title>
   <link rel="stylesheet" href="/static/shared/tokens.css">
   <link rel="stylesheet" href="/static/shared/base.css">
   <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/scheduler/styles.css">
   <script>
     (() => {
       const theme = localStorage.getItem("inspector-theme");
@@ -14,105 +15,83 @@
     })();
   </script>
 </head>
-<body>
+<body class="scheduler-page">
   <header id="topnav"></header>
-  <main class="page">
-    <div class="banner" id="degraded-banner" hidden>
-      PostgreSQL is unreachable — every production column below reads "—" and
-      the interval control is disabled.
-    </div>
-    <div class="banner" id="telemetry-banner" hidden>
-      No poll observations yet — λ, New/7 d, and the request tiles are unknown, not zero.
-    </div>
-    <div class="banner" id="paused-banner" hidden>
-      The scheduler is paused — production is not polling any feed. Resume to continue.
-    </div>
-    <div class="banner" id="runner-missing-banner" hidden>
-      The scheduler is set to run, but no inspector process is currently supervising it —
-      polling will not happen until one is.
+
+  <main class="ops-shell" id="ops-shell">
+    <header class="ops-header" aria-labelledby="page-title">
+      <div class="ops-header-title">
+        <h1 id="page-title">Scheduler</h1>
+        <span class="ops-header-sub">polling control panel</span>
+      </div>
+      <div class="ops-header-right">
+        <div class="ops-run-state" id="run-state" aria-live="polite"></div>
+        <button class="btn small ops-run-toggle" type="button" id="run-toggle">Loading…</button>
+        <span class="ops-clock" id="utc-clock" aria-hidden="true"></span>
+      </div>
+    </header>
+    <div class="ops-summary-line" id="summary-line" aria-live="polite">Loading scheduler state…</div>
+
+    <div class="ops-alert" id="system-alert" role="status" hidden></div>
+
+    <div class="ops-provider-chips" id="provider-chips" role="group" aria-label="Filter by provider"></div>
+
+    <div class="ops-filterbar">
+      <label class="ops-search">
+        <span class="sr-only">Filter feeds</span>
+        <input type="search" id="search" placeholder="filter…" autocomplete="off">
+        <kbd>/</kbd>
+      </label>
+
+      <div class="ops-view-pills" role="group" aria-label="Feed view">
+        <button type="button" data-view="all" aria-pressed="true">all <span></span></button>
+        <button type="button" data-view="issues" aria-pressed="false">issues <span></span></button>
+        <button type="button" data-view="failing" aria-pressed="false">failing <span></span></button>
+        <button type="button" data-view="paused" aria-pressed="false">paused <span></span></button>
+      </div>
+
+      <span class="ops-shown" id="row-count"></span>
+      <button class="btn small" type="button" id="refresh">Refresh</button>
+      <button class="btn small" type="button" id="fetch-shown">Fetch shown</button>
     </div>
 
-    <section class="card">
-      <header><h1>Production poll telemetry</h1></header>
-      <div class="stat-row" id="sched-stats"></div>
-    </section>
-
-    <section class="card sched-vendors" id="vendor-rollup" hidden>
-      <header>
-        <h2>Request budget by vendor</h2>
-        <span class="secondary" id="vendor-scope"></span>
-        <div class="grow"></div>
-        <button class="btn small" type="button" id="vendor-toggle" aria-expanded="true">
-          Hide
-        </button>
-      </header>
-      <div class="table-wrap" id="vendor-wrap">
-        <table class="data" id="vendor-table">
+    <div class="ops-layout" id="ops-layout">
+      <div class="table-wrap ops-table-wrap">
+        <table class="data ops-table" id="sched-table">
           <thead>
             <tr>
-              <th>Vendor</th>
-              <th class="num">Feeds</th>
-              <th class="num" title="Polls per day the configured tiers ask this vendor for, excluding paused feeds">Requests / day</th>
-              <th class="num" title="What the same feeds would cost at the tier λ recommends">At recommended tiers</th>
-              <th>Needs attention</th>
-              <th class="num">Errors, 24 h</th>
+              <th data-sort="status"><button type="button">st</button></th>
+              <th data-sort="name"><button type="button">source</button></th>
+              <th data-sort="provider"><button type="button">provider</button></th>
+              <th class="num" data-sort="interval"><button type="button">ivl</button></th>
+              <th class="num" data-sort="due"><button type="button">next</button></th>
+              <th class="num" data-sort="last_poll"><button type="button">last</button></th>
+              <th class="num" data-sort="jobs"><button type="button">new·1d</button></th>
+              <th class="num" data-sort="errors"><button type="button">err·7d</button></th>
+              <th class="ops-actions-col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
-          <tbody id="vendor-body"></tbody>
+          <tbody id="sched-body"></tbody>
         </table>
+        <div class="empty-state" id="sched-empty" hidden></div>
       </div>
-    </section>
-
-    <div class="page-header">
-      <input type="search" id="search" placeholder="Search source, key, or company…" autocomplete="off">
-      <select id="filter-platform" aria-label="Filter by platform">
-        <option value="">All platforms</option>
-      </select>
-      <select id="filter-interval" aria-label="Filter by tier">
-        <option value="">All tiers</option>
-      </select>
-      <select id="filter-status" aria-label="Filter by status">
-        <option value="">All statuses</option>
-      </select>
-      <div class="grow"></div>
-      <button class="btn" type="button" id="run-toggle"
-              title="Pause or resume the production polling loop">
-        …
-      </button>
-      <button class="btn" type="button" id="fetch-all"
-              title="Fetch every visible feed live through the production pipeline, paced by each vendor's rate budget; click again to stop">
-        Fetch all feeds
-      </button>
-      <span class="secondary" id="row-count"></span>
+      <div class="ops-rail">
+        <section class="ops-livelog" aria-label="Live fetch log">
+          <header class="ops-livelog-header">
+            <span>live fetch log</span>
+            <span class="ops-log-dot" id="live-log-dot"></span>
+            <span class="ops-livelog-tail">tail -f</span>
+          </header>
+          <div class="ops-log-lines" id="live-log-lines" aria-live="off"></div>
+        </section>
+        <aside class="ops-detail-panel" id="detail-panel" aria-labelledby="panel-title" hidden></aside>
+      </div>
     </div>
-
-    <div class="master sched-master" id="master">
-      <section class="card feeds-card">
-        <div class="table-wrap">
-          <table class="data" id="sched-table">
-            <thead>
-              <tr>
-                <th>Feed</th>
-                <th>Platform</th>
-                <th>Tier</th>
-                <th class="num">λ / day</th>
-                <th class="num">New 7 d</th>
-                <th class="num">Last poll</th>
-                <th class="num">p95 latency</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="sched-body"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="sched-empty" hidden>No feeds match the current filters.</div>
-      </section>
-
-      <div class="split-handle" id="split-handle" hidden></div>
-      <aside class="card detail-pane sched-pane" id="detail-pane" hidden></aside>
-    </div>
-
   </main>
+
+  <dialog class="ops-dialog" id="bulk-dialog" aria-labelledby="bulk-title"></dialog>
+  <div class="ops-toast" id="toast" role="status" aria-live="polite" hidden></div>
+
   <script type="module" src="/static/scheduler/app.js"></script>
 </body>
 </html>

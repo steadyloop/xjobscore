@@ -10,8 +10,8 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from xjobscore import router, sources
-from xjobscore.sources import json_api, source_type
+from xjobscore import router, sources, store as core_store
+from xjobscore.sources import json_api
 from xjobscore.inspector import parsing
 from xjobscore.inspector.cache import RunSnapshot, estimate_raw_size, estimate_size, now_utc
 from xjobscore.inspector.db import feed_ref
@@ -20,10 +20,9 @@ from xjobscore.inspector.network import InspectorNet, StageTimer, telemetry
 from xjobscore.inspector.profile import source_profile
 from xjobscore.net import NetError
 from xjobscore.records import Feed, Item, Record
-from xjobscore.registry_loader import source_descriptions
 
 
-SOURCE_CATEGORIES = ("all", "ATS", "Direct", "Board", "Other")
+SOURCE_CATEGORIES = ("all", "ATS", "Direct", "Board")
 # Generic extraction strategies are implementation details, not inspector
 # sources a user can select or fetch directly.
 HIDDEN_SOURCES = frozenset({"jsonld"})
@@ -50,15 +49,19 @@ def display_source(source: str) -> str:
     return source
 
 
-def source_category(source: str) -> str:
-    return source_type(source)
-
-
 class InspectorService:
-    def __init__(self, db: Any, *, user_agent: str, result_store: ResultStore) -> None:
+    def __init__(
+        self,
+        db: Any,
+        *,
+        user_agent: str,
+        result_store: ResultStore,
+        company_store: Any | None = None,
+    ) -> None:
         self.db = db
         self.user_agent = user_agent
         self.result_store = result_store
+        self.company_store = company_store
         self._locks: dict[int, Any] = {}
         # Single-slot parse cache: (result_id, outcome) for the feed pane being
         # viewed. Parse previews are recomputed on demand, so retaining more
@@ -106,8 +109,13 @@ class InspectorService:
                 )
                 for item in snapshot.items
             )
+            aliases = await self._company_alias_index()
             outcome = await asyncio.to_thread(
-                self._parse_with_alias_scope, feed, staged_items, snapshot.envelope
+                self._parse_with_aliases,
+                feed,
+                staged_items,
+                snapshot.envelope,
+                aliases,
             )
             self._parse_slot = (snapshot.result_id, outcome)
         return replace(
@@ -159,17 +167,37 @@ class InspectorService:
 
         return self._locks.setdefault(feed_id, asyncio.Lock())
 
-    def _parse_with_alias_scope(
-        self, feed: Feed, items: Sequence[Item], envelope: dict
+    def _parse_with_aliases(
+        self,
+        feed: Feed,
+        items: Sequence[Item],
+        envelope: dict,
+        aliases: dict[str, tuple[int, str]],
     ) -> dict[str, Any]:
-        """Run parse_record with one memoized alias lookup for the pass.
+        """Run parse_record against the PostgreSQL alias snapshot."""
+        memo: dict[str, tuple[int, str] | None] = {}
 
-        Called via asyncio.to_thread, so the lookups cannot await. The store
-        resolves them from an in-memory registry index rather than the
-        connection pool for exactly that reason.
-        """
-        with self.result_store.alias_lookup_scope() as resolve_alias:
-            return parsing.parse_record(feed, items, envelope, resolve_alias)
+        def resolve_alias(raw: str) -> tuple[int, str] | None:
+            if raw not in memo:
+                memo[raw] = next(
+                    (
+                        aliases[key]
+                        for key in core_store.alias_candidates(raw)
+                        if key in aliases
+                    ),
+                    None,
+                )
+            return memo[raw]
+
+        return parsing.parse_record(feed, items, envelope, resolve_alias)
+
+    async def _company_alias_index(self) -> dict[str, tuple[int, str]]:
+        read = getattr(self.company_store, "company_alias_index", None)
+        return await read() if read is not None else {}
+
+    async def _company_descriptions(self, company_ids: set[int]) -> dict[int, str]:
+        read = getattr(self.company_store, "company_descriptions", None)
+        return await read(company_ids) if read is not None else {}
 
     @staticmethod
     def _raw_projection(feed: Feed, external_id: str, kind: str, payload: Any) -> dict[str, Any]:
@@ -401,12 +429,9 @@ class InspectorService:
             feed for feed in await self.db.all_feeds()
             if feed.source not in HIDDEN_SOURCES
         ]
-        descriptions = await self.result_store.company_descriptions(
+        descriptions = await self._company_descriptions(
             {feed.company_id for feed in feeds if feed.company_id is not None}
         )
-        # A registered source with no feed has no Feed to carry its description,
-        # so read it straight off the source declaration.
-        descriptions_by_source = source_descriptions()
         summaries = {
             int(result["feed_id"]): result
             for group in await self.source_groups()
@@ -416,7 +441,7 @@ class InspectorService:
             {
                 "feed_ref": feed_ref(feed.source, feed.key),
                 "source": display_source(feed.source),
-                "category": source_category(feed.source),
+                "category": feed.type,
                 "profile": source_profile(feed.source),
                 "key": feed.key,
                 "company_id": feed.company_id,
@@ -424,7 +449,6 @@ class InspectorService:
                 "company_description": descriptions.get(feed.company_id),
                 # Boards declare no company, so this is what labels them.
                 "description": feed.description,
-                "implemented": feed.implemented,
                 "configured": True,
                 "enabled": feed.enabled,
                 "complete": False,
@@ -446,36 +470,6 @@ class InspectorService:
             }
             for feed in feeds
         ]
-        configured_sources = {display_source(feed.source) for feed in feeds}
-        rows.extend(
-            {
-                # A registered source without a feed cannot be fetched: its
-                # harvester needs the feed's source-specific key and config.
-                "feed_ref": None,
-                "source": source,
-                "category": source_category(source),
-                "profile": source_profile(source),
-                "key": "",
-                "company_id": None,
-                "company_name": None,
-                "company_description": None,
-                "description": descriptions_by_source.get(source, ""),
-                "implemented": True,
-                "configured": False,
-                "enabled": False,
-                "complete": False,
-                "closes": False,
-                "credentialed": False,
-                "cadence_s": None,
-                "next_poll_at": None,
-                "source_registered": True,
-                "parser_registered": source in sources.PARSERS,
-                "last_result": None,
-            }
-            for source in sorted(
-                set(sources.SOURCES) - configured_sources - HIDDEN_SOURCES
-            )
-        )
         return sorted(
             rows,
             key=lambda row: (row["source"], not row["configured"], row["key"], row["feed_ref"] or ""),

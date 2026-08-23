@@ -25,7 +25,7 @@ from typing import Any
 
 import asyncpg
 
-# λ's observation window. Also the sparkline's width, so the two always agree.
+# Width of the per-feed new-postings chart.
 DEFAULT_WINDOW_DAYS = 14
 # "Recent activity" window for the New/7d column.
 ROLLUP_DAYS = 7
@@ -64,9 +64,9 @@ async def feed_daily_counts(
 ) -> dict[int, list[int]] | None:
     """New postings per feed per UTC day, oldest first and densely zero-filled.
 
-    Dense output is what makes the result safe to hand straight to both the
-    sparkline and ``scheduling.ewma_lambda``: a gap would otherwise be
-    indistinguishable from a quiet day, and the EWMA weights positions.
+    Dense output keeps every day aligned with its chart label. A feed absent
+    from the result has no observations; a zero inside a returned series means
+    it was observed but found no new postings that day.
     """
     start = _day_start(now) - timedelta(days=days - 1)
     rows = await _fetch(
@@ -100,33 +100,23 @@ async def feed_rollups(
     pool: Any,
     *,
     now: datetime,
-    days: int = DEFAULT_WINDOW_DAYS,
 ) -> dict[int, dict[str, Any]] | None:
-    """Per-feed counters over the observation window, plus the latest outcome.
-
-    ``observed_days`` counts distinct days with at least one poll over the same
-    window λ uses, so ``scheduling.feed_status`` can tell a genuinely quiet feed
-    from one that simply has not been watched long enough.
-    """
-    window_start = _day_start(now) - timedelta(days=days - 1)
+    """Per-feed counters over seven days, plus the latest outcome."""
     rollup_start = now - timedelta(days=ROLLUP_DAYS)
     rows = await _fetch(
         pool,
         """
         SELECT feed_id,
-               count(*) FILTER (WHERE polled_at >= $2)::bigint AS poll_count_7d,
-               coalesce(sum(new_postings) FILTER (WHERE polled_at >= $2), 0)::bigint
+               count(*)::bigint AS poll_count_7d,
+               coalesce(sum(new_postings), 0)::bigint
                    AS new_7d,
-               count(*) FILTER (WHERE polled_at >= $2 AND status = 'error')::bigint
+               count(*) FILTER (WHERE status = 'error')::bigint
                    AS error_count_7d,
-               count(DISTINCT (polled_at AT TIME ZONE 'UTC')::date)::int
-                   AS observed_days,
                max(polled_at) AS last_polled_at
         FROM poll_observation
         WHERE polled_at >= $1
         GROUP BY feed_id
         """,
-        window_start,
         rollup_start,
     )
     if rows is None:
@@ -147,7 +137,6 @@ async def feed_rollups(
             "poll_count_7d": int(row["poll_count_7d"]),
             "new_7d": int(row["new_7d"]),
             "error_count_7d": int(row["error_count_7d"]),
-            "observed_days": int(row["observed_days"]),
             "last_polled_at": _iso(row["last_polled_at"]),
             "last_status": last_status.get(row["feed_id"]),
         }
@@ -376,6 +365,37 @@ async def feed_events(
             "polled_at": _iso(row["polled_at"]),
             "status": row["status"],
             "new_postings": int(row["new_postings"]),
+        }
+        for row in rows
+    ]
+
+
+async def recent_events(
+    pool: Any,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]] | None:
+    """Latest polls across every feed, newest first -- the live fetch log."""
+    rows = await _fetch(
+        pool,
+        """
+        SELECT o.polled_at, o.status, o.new_postings, f.source, f.key
+        FROM poll_observation o
+        JOIN feed f ON f.id = o.feed_id
+        ORDER BY o.polled_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    if rows is None:
+        return None
+    return [
+        {
+            "polled_at": _iso(row["polled_at"]),
+            "status": row["status"],
+            "new_postings": int(row["new_postings"]),
+            "source": row["source"],
+            "key": row["key"],
         }
         for row in rows
     ]

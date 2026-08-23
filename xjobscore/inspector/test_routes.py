@@ -16,6 +16,8 @@ from xjobscore.inspector.app import create_app
 from xjobscore.inspector.db import feed_ref
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
+    MAX_INTERVAL_S,
+    MIN_INTERVAL_S,
     PolicyUnavailable,
     PollNowRefused,
 )
@@ -63,6 +65,10 @@ class FakePolicy:
         return {"feed_id": 11, "enabled": enabled}
 
     async def set_interval(self, source: str, key: str, interval_s: int) -> dict:
+        if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
+            raise ValueError(
+                f"interval_s must be within [{MIN_INTERVAL_S}, {MAX_INTERVAL_S}]"
+            )
         self.calls.append(("set_interval", source, key, interval_s))
         return {"feed_id": 11, "interval_s": interval_s}
 
@@ -81,6 +87,10 @@ class FakePolicy:
     async def import_feed(self, source: str, key: str, enabled: bool = True) -> dict:
         self.calls.append(("import_feed", source, key, enabled))
         return {"feed_id": 11, "enabled": enabled}
+
+    async def drop_feed(self, source: str, key: str) -> dict:
+        self.calls.append(("drop_feed", source, key))
+        return {"feed_id": 11, "dropped": True}
 
     async def import_feeds(self, identities: list[tuple], *, enabled: bool = False) -> dict:
         self.calls.append(("import_feeds", tuple(identities), enabled))
@@ -223,8 +233,6 @@ def client(monkeypatch, app_store):
 
     monkeypatch.setitem(sources.SOURCES, "route-test", harvest)
     monkeypatch.setitem(sources.PARSERS, "route-test", parse)
-    # Route tests exercise HTTP behavior, not the registry company mirror.
-    monkeypatch.setattr("xjobscore.inspector.persistence.registry_companies", tuple)
     app = create_app(
         catalog=FakeCatalog(
             Feed(id=1, source="route-test", key="demo", config={}),
@@ -443,7 +451,6 @@ def _imported_app(monkeypatch, app_store, runner=None):
     """
     for source in ("route-test", "route-off", "route-paused", "route-unimported"):
         monkeypatch.setitem(sources.SOURCES, source, lambda f, n: None)
-    monkeypatch.setattr("xjobscore.inspector.persistence.registry_companies", tuple)
     return create_app(
         catalog=FakeCatalog(
             Feed(id=1, source="route-test", key="demo", config={}),
@@ -496,18 +503,23 @@ def test_scheduler_overview_without_telemetry(imported_client):
     assert body["tiles"] is None  # not {"requests_today": 0, ...}
     assert body["feed_count"] == 2  # the enabled feed and the enabled-but-paused one
     assert sum(body["counts_by_status"].values()) == body["feed_count"]
+    assert "calibrating" not in body["counts_by_status"]
 
 
-def test_scheduler_feeds_carry_estimates_and_show_only_enabled(imported_client):
+def test_scheduler_feeds_carry_operational_state_and_show_only_enabled(imported_client):
     body = imported_client.get("/api/scheduler/feeds").json()
     assert body["telemetry_available"] is False
-    # feed.enabled is the membership test: neither the switched-off feed nor the
+    # feed.polling is the membership test: neither the switched-off feed nor the
     # unimported one is being polled, so neither belongs here. The paused feed is
     # still enabled, so it does.
     assert {row["feed_ref"] for row in body["feeds"]} == {
         REF,
         feed_ref("route-paused", "demo"),
     }
+    assert [row["sched"]["status"]["state"] for row in body["feeds"]] == [
+        "never_polled",
+        "paused",
+    ]
 
     # ...while the Feeds page keeps every configured feed, since that is where
     # the toggle lives -- and that toggle is the only way onto this page.
@@ -523,10 +535,7 @@ def test_scheduler_feeds_carry_estimates_and_show_only_enabled(imported_client):
     assert row["telemetry"] is None
     assert row["spark"] is None
     sched = row["sched"]
-    # Unknown rate => no cadence recommendation, and no verdict to act on.
-    assert sched["lambda"] is None
-    assert sched["ideal_interval_s"] is None
-    assert sched["verdict"] is None
+    assert set(sched) == {"requests_per_day", "status"}
     assert sched["requests_per_day"] == 96  # 900 s
     assert sched["status"]["state"] == "never_polled"
     assert sched["status"]["chip"] in {"ok", "not_modified", "partial", "error", "never"}
@@ -613,6 +622,13 @@ def test_scheduler_feed_detail(imported_client):
     # The membership rule applies to the detail route too, not just the list.
     off = feed_ref("route-off", "demo")
     assert imported_client.get(f"/api/scheduler/feeds/{off}").status_code == 404
+
+
+def test_scheduler_events_degrade_to_empty(imported_client):
+    """No pool means no fleet-wide poll log -- an empty list, never a 500."""
+    body = imported_client.get("/api/scheduler/events").json()
+    assert body["events"] == []
+    assert body["telemetry_available"] is False
 
 
 def test_scheduler_survives_degraded_postgres(client):
@@ -783,6 +799,17 @@ def test_scheduler_page_is_served(client):
     assert client.get("/scheduler").status_code == 200
 
 
+def test_regex_page_is_served(client):
+    response = client.get("/regex")
+
+    assert response.status_code == 200
+    assert "Ordered regex workbench" in response.text
+    assert '<details class="card regex-guide" id="regex-guide" open>' in response.text
+    assert "JavaScript quick reference" in response.text
+    assert "Paste input" not in response.text
+    assert "not <code>/pattern/i</code>" in response.text
+
+
 def test_postings_page_offers_duplicates_instead_of_any_status(client):
     response = client.get("/postings")
 
@@ -940,9 +967,6 @@ def postings_client(monkeypatch, app_store):
     """A client whose policy carries a canned public pool, store is real PG."""
 
     def build(pool):
-        monkeypatch.setattr(
-            "xjobscore.inspector.persistence.registry_companies", tuple
-        )
         app = create_app(
             catalog=FakeCatalog(),
             store=app_store,
@@ -1644,6 +1668,7 @@ class FakeTokensPool:
             "live": 1,
             "dead": 0,
             "unknown": 0,
+            "muted": 0,
             "unpromoted": 1,
             "promotable": 1,
         }
@@ -1656,6 +1681,16 @@ class FakeTokensPool:
         return self.rows
 
     async def fetchrow(self, sql, *args):
+        if "WITH changed AS" in sql:
+            return {
+                "ats": args[1],
+                "token": args[2],
+                "muted": args[0],
+                "feed_dropped": bool(args[0]),
+            }
+        if "UPDATE token" in sql:
+            field = "tags" if "SET tags" in sql else "note"
+            return {"ats": args[1], "token": args[2], field: args[0]}
         return self.counts
 
 
@@ -1666,6 +1701,9 @@ def token_row(**overrides):
         "company_id": 12,
         "company": "Snap",
         "status": "live",
+        "muted": False,
+        "tags": None,
+        "note": None,
         "source": "slug",
         "discovered_at": datetime(2026, 8, 19, tzinfo=timezone.utc),
         "checked_at": datetime(2026, 8, 19, tzinfo=timezone.utc),
@@ -1678,13 +1716,23 @@ def token_row(**overrides):
 
 
 def test_tokens_page_is_served(client):
-    assert client.get("/tokens").status_code == 200
+    response = client.get("/tokens")
+    assert response.status_code == 200
+    assert "Token heartbeat" in response.text
+    assert "Promote selected" in response.text
+    inactive = response.text.index('value="inactive" selected')
+    muted = response.text.index('value="muted"')
+    dead = response.text.index('value="dead"')
+    all_tokens = response.text.index('value="all">All (including active)</option>')
+    assert inactive < muted < dead < all_tokens
+    assert 'value="alive-active"' not in response.text
 
 
 def test_tokens_503_without_public_pool(client):
     # The default FakePolicy has no pool. An unreachable database is not an
     # empty inventory, and promoting into one must not report success either.
     assert client.get("/api/tokens").status_code == 503
+    assert client.get("/api/tokens/heartbeat").status_code == 503
 
 
 def test_tokens_rejects_unknown_enums(postings_client):
@@ -1710,25 +1758,55 @@ def test_tokens_list_shape(postings_client):
     assert row["discovered_at"] == "2026-08-19T00:00:00+00:00"
 
 
-def test_enable_forwards_identities_and_always_enables(postings_client):
+def test_token_note_is_saved_and_blank_notes_clear(postings_client):
     with postings_client(FakeTokensPool()) as test_client:
+        saved = test_client.put(
+            "/api/tokens/note",
+            json={"ats": "workable", "token": "snap", "note": "  follow up  "},
+        )
+        cleared = test_client.put(
+            "/api/tokens/note",
+            json={"ats": "workable", "token": "snap", "note": "  "},
+        )
+
+    assert saved.status_code == 200
+    assert saved.json() == {"ats": "workable", "token": "snap", "note": "follow up"}
+    assert cleared.status_code == 200
+    assert cleared.json()["note"] is None
+
+
+def test_token_tags_are_normalized_and_an_empty_list_clears(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        saved = test_client.put(
+            "/api/tokens/tags",
+            json={"ats": "workable", "token": "snap", "tags": [" bio ", "cs", "bio"]},
+        )
+        cleared = test_client.put(
+            "/api/tokens/tags",
+            json={"ats": "workable", "token": "snap", "tags": []},
+        )
+
+    assert saved.status_code == 200
+    assert saved.json() == {"ats": "workable", "token": "snap", "tags": ["bio", "cs"]}
+    assert cleared.status_code == 200
+    assert cleared.json()["tags"] == []
+
+
+def test_enable_promotes_only_rows_the_guarded_insert_accepts(postings_client):
+    with postings_client(FakeTokensPool(rows=[token_row()])) as test_client:
         response = test_client.post(
             "/api/tokens/enable",
             json={"tokens": [{"ats": "workable", "token": "snap"}]},
         )
-        policy = test_client.app.state.policy
 
     assert response.status_code == 200
     body = response.json()
     assert body["imported"] == 1
-    assert body["skipped_non_ats"] == 0
-    # enabled=True is the new contract: Enable is the one place a feed row
-    # gets created active, and it never touches a row that already exists.
-    assert policy.calls[-1] == ("import_feeds", (("workable", "snap"),), True)
+    assert body["skipped"] == 0
 
 
-def test_enable_skips_non_ats_identities(postings_client):
-    with postings_client(FakeTokensPool()) as test_client:
+def test_enable_reports_tokens_rejected_by_the_guarded_insert(postings_client):
+    with postings_client(FakeTokensPool(rows=[token_row()])) as test_client:
         response = test_client.post(
             "/api/tokens/enable",
             json={
@@ -1738,13 +1816,12 @@ def test_enable_skips_non_ats_identities(postings_client):
                 ]
             },
         )
-        policy = test_client.app.state.policy
 
     assert response.status_code == 200
     body = response.json()
-    assert body["skipped_non_ats"] == 1
-    # Only the ATS identity ever reaches the store.
-    assert policy.calls[-1] == ("import_feeds", (("workable", "snap"),), True)
+    assert body["requested"] == 2
+    assert body["imported"] == 1
+    assert body["skipped"] == 1
 
 
 def test_enable_rejects_an_empty_list(postings_client):
@@ -1752,6 +1829,77 @@ def test_enable_rejects_an_empty_list(postings_client):
         assert test_client.post(
             "/api/tokens/enable", json={"tokens": []}
         ).status_code == 400
+
+
+def test_heartbeat_status_and_run_now(postings_client, monkeypatch):
+    app_module = importlib.import_module("xjobscore.inspector.app")
+    queued = []
+
+    async def fake_snapshot(pool, **kwargs):
+        return {
+            "state": "healthy",
+            "runner_online": True,
+            "eligible": 4,
+            "last_validated": 20,
+            "last_promoted": 18,
+        }
+
+    async def fake_enqueue(pool, current):
+        queued.append(current)
+
+    monkeypatch.setattr(app_module, "token_heartbeat_snapshot", fake_snapshot)
+    monkeypatch.setattr(app_module, "token_heartbeat_enqueue", fake_enqueue)
+
+    with postings_client(FakeTokensPool()) as test_client:
+        status = test_client.get("/api/tokens/heartbeat")
+        started = test_client.post("/api/tokens/heartbeat/run")
+
+    assert status.status_code == 200
+    assert status.json()["eligible"] == 4
+    assert started.status_code == 202
+    assert len(queued) == 1
+
+
+def test_heartbeat_run_now_refuses_an_active_cycle(postings_client, monkeypatch):
+    app_module = importlib.import_module("xjobscore.inspector.app")
+
+    async def already_running(pool, current):
+        raise app_module.HeartbeatAlreadyRunning("already running")
+
+    monkeypatch.setattr(app_module, "token_heartbeat_enqueue", already_running)
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post("/api/tokens/heartbeat/run")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "already running"
+
+
+def test_muting_a_token_reports_feed_drop(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.put(
+            "/api/tokens/muted",
+            json={"ats": "workable", "token": "snap", "muted": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ats": "workable",
+        "token": "snap",
+        "muted": True,
+        "feed_dropped": True,
+    }
+
+
+def test_legacy_bulk_delete_route_is_removed(postings_client):
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post(
+            "/api/feeds/bulk-delete",
+            json={"feed_ids": [42]},
+        )
+
+    # The literal mutation route is gone. The generic GET-only feed detail
+    # route still recognizes this path shape, so POST is correctly refused.
+    assert response.status_code == 405
 
 
 def test_validate_probes_exactly_the_identities_it_is_given(postings_client, monkeypatch):

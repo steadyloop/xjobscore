@@ -15,7 +15,7 @@ def ats_feed(**overrides) -> Feed:
         source="parse-test",
         key="acme",
         config={},
-        source_type="ATS",
+        type="ATS",
         company_id=42,
         company_name="Acme",
     )
@@ -161,7 +161,7 @@ def test_board_feed_without_alias_would_park(register):
         return [posting(company_raw="Unknown Startup")]
 
     register(parse)
-    board = ats_feed(source_type="Board", company_id=None, company_name=None)
+    board = ats_feed(type="Board", company_id=None, company_name=None)
     outcome = parse_record(board, [Item("a", {})], {}, no_alias)
 
     resolution = outcome["items"][0]["canonicals"][0]["company_resolution"]

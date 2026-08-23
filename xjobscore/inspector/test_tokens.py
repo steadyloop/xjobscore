@@ -22,6 +22,7 @@ COUNTS = {
     "live": 1405,
     "dead": 28,
     "unknown": 0,
+    "muted": 0,
     "unpromoted": 257,
     "promotable": 257,
 }
@@ -34,6 +35,9 @@ def token_row(**overrides):
         "company_id": 12,
         "company": "Snap",
         "status": "live",
+        "muted": False,
+        "tags": None,
+        "note": None,
         "source": "slug",
         "discovered_at": NOW,
         "checked_at": NOW,
@@ -75,7 +79,7 @@ def pool_with(rows, *, counts=COUNTS):
 # ------------------------------------------------------------- validation
 
 
-@pytest.mark.parametrize("value", ["bogus", "inactive", "live", "none"])
+@pytest.mark.parametrize("value", ["bogus", "alive-active", "live", "none"])
 async def test_unknown_filter_rejected(value):
     # Only the four FILTERS keys are legal; the stored status vocabulary
     # ("live") and the feed-state words ("none") are not filter values.
@@ -92,21 +96,21 @@ async def test_every_declared_filter_is_accepted():
 # ------------------------------------------------------------- filtering
 
 
-async def test_default_view_is_the_whole_inventory():
+async def test_default_view_is_inactive_live_tokens():
     pool = pool_with([])
     await tokens.query(pool)
 
     sql, _ = pool.calls[-1]
-    assert "WHERE TRUE" in sql
+    assert "WHERE t.status = 'live' AND (f.id IS NULL OR NOT f.polling)" in sql
 
 
 @pytest.mark.parametrize(
     "filter,fragment",
     [
-        ("all", "TRUE"),
-        ("alive-active", "t.status = 'live' AND f.enabled"),
-        ("alive-inactive", "t.status = 'live' AND (f.id IS NULL OR NOT f.enabled)"),
+        ("inactive", "t.status = 'live' AND (f.id IS NULL OR NOT f.polling)"),
+        ("muted", "t.muted"),
         ("dead", "t.status = 'dead'"),
+        ("all", "TRUE"),
     ],
 )
 async def test_filter_selects_its_predicate(filter, fragment):
@@ -123,7 +127,7 @@ async def test_filter_is_not_interpolated_as_a_bind_value():
     # The filter maps to a fixed predicate; the only bound arguments are the
     # page window, never the filter itself.
     pool = pool_with([])
-    await tokens.query(pool, filter="dead", limit=10, offset=20)
+    await tokens.query(pool, filter="inactive", limit=10, offset=20)
 
     _, args = pool.calls[-1]
     assert args == (10, 20)
@@ -161,6 +165,60 @@ async def test_rows_are_shaped_for_the_page():
     assert row["company"] == "Snap"
 
 
+async def test_set_note_updates_only_the_named_token():
+    pool = FakePool(row={"ats": "workable", "token": "snap", "note": "follow up"})
+
+    saved = await tokens.set_note(
+        pool, ats="workable", token="snap", note="follow up"
+    )
+
+    sql, args = pool.calls[-1]
+    assert "UPDATE token" in sql
+    assert "SET note = $1" in sql
+    assert args == ("follow up", "workable", "snap")
+    assert saved == {"ats": "workable", "token": "snap", "note": "follow up"}
+
+
+async def test_set_tags_updates_only_the_named_token():
+    pool = FakePool(row={"ats": "workable", "token": "snap", "tags": ["bio"]})
+
+    saved = await tokens.set_tags(
+        pool, ats="workable", token="snap", tags=["bio"]
+    )
+
+    sql, args = pool.calls[-1]
+    assert "UPDATE token" in sql
+    assert "SET tags = $1" in sql
+    assert args == (["bio"], "workable", "snap")
+    assert saved == {"ats": "workable", "token": "snap", "tags": ["bio"]}
+
+
+async def test_muting_is_atomic_and_drops_the_feed_only_when_true():
+    pool = FakePool(
+        row={
+            "ats": "workable",
+            "token": "snap",
+            "muted": True,
+            "feed_dropped": True,
+        }
+    )
+
+    saved = await tokens.set_muted(
+        pool,
+        ats="workable",
+        token="snap",
+        muted=True,
+    )
+
+    sql, args = pool.calls[-1]
+    assert "WITH changed AS" in sql
+    assert "SET muted = $1" in sql
+    assert "DELETE FROM feed" in sql
+    assert "WHERE $1" in sql
+    assert args == (True, "workable", "snap")
+    assert saved["feed_dropped"] is True
+
+
 async def test_registry_rows_carry_no_discovery_timestamps():
     pool = pool_with(
         [token_row(source=None, discovered_at=None, checked_at=None, feed_state="enabled")]
@@ -189,3 +247,41 @@ async def test_counts_survive_an_empty_inventory():
     body = await tokens.query(pool_with([], counts=None))
 
     assert body["counts"] == {}
+
+
+async def test_promotion_candidates_are_live_unmuted_and_absent_from_feed():
+    pool = FakePool(
+        [
+            {"ats": "workable", "token": "snap", "total": 2},
+            {"ats": "greenhouse", "token": "stripe", "total": 2},
+        ]
+    )
+
+    identities, total = await tokens.promotion_candidates(pool, limit=10)
+
+    sql, args = pool.calls[-1]
+    assert "t.status = 'live'" in sql
+    assert "NOT t.muted" in sql
+    assert "NOT EXISTS" in sql
+    assert "FROM feed AS f" in sql
+    assert args == (10,)
+    assert identities == [("workable", "snap"), ("greenhouse", "stripe")]
+    assert total == 2
+
+
+async def test_promote_verified_rechecks_eligibility_during_insert():
+    pool = FakePool([{"source": "workable", "key": "snap"}])
+
+    promoted = await tokens.promote_verified(
+        pool,
+        [("workable", "snap"), ("workable", "snap")],
+    )
+
+    sql, args = pool.calls[-1]
+    assert "INSERT INTO feed" in sql
+    assert "t.status = 'live'" in sql
+    assert "NOT t.muted" in sql
+    assert "NOT EXISTS" in sql
+    assert "ON CONFLICT (source, key) DO NOTHING" in sql
+    assert args == (["workable"], ["snap"])
+    assert promoted == 1

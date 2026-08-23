@@ -1,0 +1,130 @@
+.tokens-page .tok-heartbeat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+}
+
+.tok-heartbeat-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.tok-heartbeat-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.tok-heartbeat-heading h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.tok-heartbeat-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tok-heartbeat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.tok-heartbeat-dot[data-state="healthy"] { background: var(--ok); }
+.tok-heartbeat-dot[data-state="running"] { background: var(--accent); }
+.tok-heartbeat-dot[data-state="queued"] { background: var(--warn); }
+.tok-heartbeat-dot[data-state="attention"] { background: var(--err); }
+
+.tok-heartbeat-meta,
+.tok-heartbeat-facts {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tok-heartbeat-meta {
+  margin-left: 2px;
+}
+
+.tok-heartbeat-facts {
+  margin-top: 4px;
+}
+
+.tok-heartbeat-facts[data-error="true"] {
+  color: var(--err);
+}
+
+.tok-muted-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tok-muted-toggle input {
+  margin: 0;
+}
+
+.tok-company {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.tok-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 35%, transparent);
+}
+
+.tok-tag[data-tag="cs"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+}
+
+.tok-tag[data-tag="bio"] {
+  color: var(--ok-text);
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+  background: color-mix(in srgb, var(--ok) 12%, var(--surface));
+}
+
+@media (max-width: 700px) {
+  .tokens-page .tok-heartbeat {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .tok-heartbeat-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tok-heartbeat-meta {
+    display: block;
+    margin: 4px 0 0;
+  }
+}

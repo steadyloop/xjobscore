@@ -34,6 +34,7 @@ def _runner_stays_off(monkeypatch):
     that wants the runner on sets it back explicitly.
     """
     monkeypatch.delenv("XJOBSCORE_INSPECTOR_RUNNER", raising=False)
+    monkeypatch.delenv("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", raising=False)
 
 
 def _staging_ddl() -> str:
@@ -67,16 +68,13 @@ async def store_factory():
         pytest.skip("No PostgreSQL DSN; set XJOBSCORE_TEST_DSN to run these tests.")
     built: list[ResultStore] = []
 
-    async def make(*, companies: bool = False, **kwargs) -> ResultStore:
+    async def make(**kwargs) -> ResultStore:
         schema = f"inspector_test_{os.getpid()}_{next(_schema_counter)}"
         # Staging goes in the throwaway schema too, so a test can never write
         # the pipeline's real fetched_feed rows.
         store = ResultStore(dsn, schema=schema, staging=schema, **kwargs)
         try:
-            if companies:
-                await store.initialize()
-            else:
-                await store.create_schema()
+            await store.create_schema()
             pool = await store.pool()
             # SET LOCAL, inside a transaction: the connection goes back to the
             # pool with its default search_path intact.
@@ -100,7 +98,7 @@ async def store_factory():
 
 @pytest.fixture
 async def store(store_factory):
-    """A ready-to-use store on its own schema, without the company mirror."""
+    """A ready-to-use store on its own schema."""
     return await store_factory()
 
 

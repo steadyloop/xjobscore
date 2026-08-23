@@ -2,6 +2,7 @@
    Used embedded on the Feeds page (master-detail) and standalone on /feed. */
 
 import { api } from "/static/shared/api.js";
+import { dropFeed, muteFeed } from "/static/shared/feed-policy.js";
 import { setFeedEnabled } from "/static/shared/feed-policy.js";
 import {
   el,
@@ -33,7 +34,7 @@ const ARCHETYPE_HINTS = {
 };
 const EXPENSIVE_ARCHETYPES = new Set(["detail", "link-discovery"]);
 
-export function createInspector(container, { standalone = false, onClose, onDrop } = {}) {
+export function createInspector(container, { standalone = false, onClose, onMute, onDrop } = {}) {
   const state = {
     ref: null,
     feed: null,
@@ -56,10 +57,11 @@ export function createInspector(container, { standalone = false, onClose, onDrop
     style: "display:inline-flex;align-items:center;gap:12px",
   });
   els.fetchBtn = el("button", { class: "btn primary", type: "button" }, "Fetch");
+  els.muteBtn = el("button", { class: "btn danger", type: "button" }, "Mute");
   els.dropBtn = el("button", { class: "btn danger", type: "button" }, "Drop");
   els.stats = el("div", { class: "stat-row" });
 
-  const headerRight = [els.badges, els.controls, els.fetchBtn, els.dropBtn];
+  const headerRight = [els.badges, els.controls, els.fetchBtn, els.muteBtn, els.dropBtn];
   if (!standalone) {
     const closeBtn = el(
       "button",
@@ -186,7 +188,8 @@ export function createInspector(container, { standalone = false, onClose, onDrop
   );
 
   els.fetchBtn.addEventListener("click", () => fetchNow());
-  els.dropBtn.addEventListener("click", () => dropFeed());
+  els.muteBtn.addEventListener("click", () => muteCurrentFeed());
+  els.dropBtn.addEventListener("click", () => dropCurrentFeed());
 
   /* Data loading ---------------------------------------------------------- */
 
@@ -262,15 +265,41 @@ export function createInspector(container, { standalone = false, onClose, onDrop
     }
   }
 
-  async function dropFeed() {
+  async function muteCurrentFeed() {
     const feed = state.feed;
     const feedId = feed?.policy?.feed_id;
     if (!feedId) return;
     const label = feed.company_name || feed.key;
     const proceed = window.confirm(
-      `Drop ${label} (${feed.source}/${feed.key}) from the feed table? ` +
-        "This unschedules it in production. Fetch history and any staged " +
-        "payload are kept, not deleted."
+      `Mute ${label} (${feed.source}/${feed.key})? ` +
+        "This removes its feed and prevents automatic promotion from adding " +
+        "it back. Existing job postings are kept."
+    );
+    if (!proceed) return;
+    const button = els.muteBtn;
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Muting…";
+    try {
+      await muteFeed(feed);
+      if (onMute) await onMute();
+      else onClose?.();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      window.alert(`Failed to mute feed: ${error.message ?? error}`);
+    }
+  }
+
+  async function dropCurrentFeed() {
+    const feed = state.feed;
+    const feedId = feed?.policy?.feed_id;
+    if (!feedId) return;
+    const label = feed.company_name || feed.key;
+    const proceed = window.confirm(
+      `Drop ${label} (${feed.source}/${feed.key})? ` +
+        "This removes its feed and poll history, but leaves the token unmuted " +
+        "and eligible for future promotion."
     );
     if (!proceed) return;
     const button = els.dropBtn;
@@ -278,7 +307,7 @@ export function createInspector(container, { standalone = false, onClose, onDrop
     const original = button.textContent;
     button.textContent = "Dropping…";
     try {
-      await api("/api/feeds/bulk-delete", { body: { feed_ids: [feedId] } });
+      await dropFeed(feed);
       if (onDrop) await onDrop();
       else onClose?.();
     } catch (error) {
@@ -296,9 +325,13 @@ export function createInspector(container, { standalone = false, onClose, onDrop
     els.description.textContent = feed.company_description || "";
     els.description.hidden = !feed.company_description;
 
+    els.muteBtn.disabled = !feed.policy?.feed_id;
+    els.muteBtn.title = feed.policy?.feed_id
+      ? "Mute token and remove feed"
+      : "Not in the feed table — nothing to mute";
     els.dropBtn.disabled = !feed.policy?.feed_id;
     els.dropBtn.title = feed.policy?.feed_id
-      ? "Remove this feed from the feed table"
+      ? "Drop this feed without muting its token"
       : "Not in the feed table — nothing to drop";
 
     const showParsedOnlyToggle = feed.source === "simplify";

@@ -11,6 +11,7 @@ const LINKS = [
   ["Review", "/review"],
   ["Query", "/query"],
   ["Fields", "/fields"],
+  ["Regex", "/regex"],
 ];
 
 const THEME_KEY = "inspector-theme";

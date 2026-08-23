@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/shared/tokens.css">
   <link rel="stylesheet" href="/static/shared/base.css">
   <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/tokens/styles.css">
   <script>
     (() => {
       const theme = localStorage.getItem("inspector-theme");
@@ -14,21 +15,15 @@
     })();
   </script>
 </head>
-<body>
+<body class="tokens-page">
   <header id="topnav"></header>
   <main class="page">
     <div class="page-header">
-      <select id="status-filter" title="Token status" aria-label="Token status" hidden>
-        <option value="live">Live</option>
-        <option value="dead">Dead</option>
-        <option value="unknown">Unknown</option>
-        <option value="all">Any status</option>
-      </select>
       <select id="status-feed-filter" title="Status" aria-label="Status">
-        <option value="all">All tokens</option>
-        <option value="alive-active">Alive - Active</option>
-        <option value="alive-inactive">Alive - Inactive</option>
+        <option value="inactive" selected>Inactive</option>
+        <option value="muted">Muted</option>
         <option value="dead">Dead</option>
+        <option value="all">All (including active)</option>
       </select>
       <select id="ats-filter" title="Vendor" aria-label="Vendor">
         <option value="">All vendors</option>
@@ -44,6 +39,21 @@
       <span class="secondary" id="counts"></span>
     </div>
 
+    <section class="tok-heartbeat" aria-labelledby="heartbeat-title" aria-live="polite">
+      <div class="tok-heartbeat-main">
+        <div class="tok-heartbeat-heading">
+          <h1 id="heartbeat-title">Token heartbeat</h1>
+          <span class="tok-heartbeat-state">
+            <span class="tok-heartbeat-dot" id="heartbeat-dot" data-state="offline"></span>
+            <span id="heartbeat-state">Loading…</span>
+          </span>
+          <span class="tok-heartbeat-meta" id="heartbeat-meta"></span>
+        </div>
+        <div class="tok-heartbeat-facts" id="heartbeat-facts">Reading system state…</div>
+      </div>
+      <button class="btn small" type="button" id="heartbeat-run" disabled>Run now</button>
+    </section>
+
     <div class="banner" id="degraded-banner" hidden>
       PostgreSQL is unreachable — the token inventory cannot be read.
     </div>
@@ -57,7 +67,7 @@
         <h1>Tokens</h1>
         <span class="secondary" id="selection-count"></span>
         <div class="grow"></div>
-        <button class="btn primary" type="button" id="promote-btn" disabled>Enable → feed</button>
+        <button class="btn primary" type="button" id="promote-btn" disabled>Promote selected</button>
       </header>
       <div class="table-wrap">
         <table class="data" id="tokens-table">
@@ -70,7 +80,9 @@
               <th>Company</th>
               <th>Status</th>
               <th>Feed</th>
+              <th>Muted</th>
               <th>Found via</th>
+              <th>Note</th>
               <th>Discovered</th>
               <th>Checked</th>
             </tr>

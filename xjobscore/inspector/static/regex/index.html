@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xJobscore · Regex</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/regex/styles.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body>
+  <header id="topnav"></header>
+  <main class="page regex-page">
+    <div class="page-header">
+      <div>
+        <h1>Ordered regex workbench</h1>
+        <p class="regex-subtitle">Each rule sees only the lines left unmatched by every rule before it.</p>
+      </div>
+      <div class="grow"></div>
+      <span class="secondary" id="run-status">Not applied</span>
+      <button class="btn primary" type="button" id="apply-btn" title="Apply (⌘/Ctrl + Enter)">Apply regexes</button>
+    </div>
+
+    <div class="banner error" id="error-banner" hidden>
+      <span id="error-text"></span>
+    </div>
+
+    <details class="card regex-guide" id="regex-guide" open>
+      <summary>
+        <span>Regex syntax</span>
+        <span class="secondary">JavaScript quick reference</span>
+      </summary>
+      <div class="regex-guide-body">
+        <div class="regex-guide-reference">
+          <div class="regex-guide-tokens">
+            <span><code>^</code> start</span>
+            <span><code>$</code> end</span>
+            <span><code>.</code> any character</span>
+            <span><code>*</code> zero or more</span>
+            <span><code>+</code> one or more</span>
+            <span><code>?</code> optional</span>
+            <span><code>[]</code> character set</span>
+            <span><code>()</code> group</span>
+            <span><code>|</code> or</span>
+            <span><code>\b</code> word boundary</span>
+            <span><code>\s</code> whitespace</span>
+            <span><code>\d</code> digit</span>
+          </div>
+          <p><code>i</code> ignores case. <code>m</code> makes <code>^</code> and <code>$</code> work per line. Enter <code>pattern</code> and <code>i</code>, not <code>/pattern/i</code>.</p>
+          <p class="regex-guide-examples"><code>^remote$</code> exact value · <code>remote|hybrid</code> either word · <code>\bremote\b</code> whole word · <code>^.+,\s*[A-Z]{2}$</code> text ending in a two-letter code</p>
+        </div>
+      </div>
+    </details>
+
+    <div class="regex-layout">
+      <div class="regex-builder">
+        <section class="card">
+          <header>
+            <h1>Input</h1>
+            <span class="secondary" id="input-count">0 lines</span>
+          </header>
+          <textarea id="input-editor" class="regex-input" spellcheck="false" autocomplete="off"
+                    autocapitalize="off" aria-label="Regex input"
+                    placeholder="Paste one value per line…"></textarea>
+        </section>
+
+        <section class="card">
+          <header>
+            <h1>Rules</h1>
+            <span class="secondary">JavaScript regex source · no /…/ delimiters</span>
+            <div class="grow"></div>
+            <button class="btn small" type="button" id="add-rule-btn">Add regex</button>
+          </header>
+          <div class="regex-rules" id="rules"></div>
+        </section>
+      </div>
+
+      <section class="card regex-results">
+        <header>
+          <h1>Output</h1>
+          <span class="secondary" id="result-summary">Apply rules to inspect results.</span>
+          <div class="grow"></div>
+          <button class="btn small" type="button" id="copy-btn" disabled>Copy pane</button>
+        </header>
+        <div class="tabs regex-tabs" id="result-tabs" role="tablist"></div>
+        <textarea id="result-output" class="regex-output" readonly spellcheck="false"
+                  aria-label="Regex result values" placeholder="Unmatched values will appear here."></textarea>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="/static/regex/app.js"></script>
+</body>
+</html>

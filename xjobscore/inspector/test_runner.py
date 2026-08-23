@@ -48,12 +48,6 @@ def make_runner(policy, *, batch=20, tick_s=1000.0, enabled=True):
         batch=batch,
         lease_seconds=60,
     )
-    # _tick calls _refresh_registry(), which parses the whole real registry off
-    # a thread. These tests care about pause/drain/error behavior, not registry
-    # parsing, so stand in trivial already-built values.
-    runner._registry_index = {}
-    runner._registry_types = {}
-    runner._registry_built_at = float("inf")
     return runner
 
 
@@ -309,8 +303,8 @@ def _poll_feed(**overrides):
     return Feed(**{**defaults, **overrides})
 
 
-async def test_poll_feed_now_claims_hydrates_and_polls(monkeypatch):
-    """One call: claim the lease, hydrate, run.poll, read back new_postings --
+async def test_poll_feed_now_claims_and_polls(monkeypatch):
+    """One call: claim the lease, run.poll, read back new_postings --
     all against the same `now`, with no gate on control or aliveness."""
     conn = PollConn(new_postings=3)
     runner = make_runner(FakePolicy(running=False), enabled=False)
@@ -339,7 +333,7 @@ async def test_poll_feed_now_claims_hydrates_and_polls(monkeypatch):
     assert claims[0][:2] == ("route-test", "demo")
     assert claims[0][3] == 60  # make_runner's lease_seconds, same as the loop
     (feed, poll_now) = polls[0]
-    assert feed.source_type == "Other"  # _hydrate ran (empty test index)
+    assert feed.type == "ATS"
     assert poll_now == claims[0][2]  # claim and poll share one `now`
     assert conn.fetchval_args == (7, poll_now)  # read back by that same stamp
 

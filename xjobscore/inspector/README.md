@@ -26,18 +26,16 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
 
 ## Pages
 
-- **Feeds** (`/`) — every registry feed plus one local feed per non-registry
-  source, grouped by source with category/enabled/error filters and search.
-  Per feed: the `feed.enabled` switch and the last run's harvest
+- **Feeds** (`/`) — every PostgreSQL feed, grouped by source with
+  category/enabled/error filters and search.
+  Per feed: the `feed.polling` switch and the last run's harvest
   status/items/elapsed; `feed.interval_s` and pause live in the detail
-  pane. Flipping the switch on a feed PostgreSQL has never seen imports it
-  first, so there is no separate Import control.
+  pane. Feeds are created explicitly from Tokens or by an operator; there is
+  no catalog import or local fallback.
 
-  Each ATS group header carries the same switch for the whole vendor, and it
-  imports too — that is the only practical way to bring a catalog-only source
-  online, since 2,591 of the 2,626 catalogued feeds are Ashby and none of them
-  start out in PostgreSQL. It goes through `POST /api/feeds/bulk-policy`, one
-  request and one round trip for the batch rather than a POST per feed. The
+  Each ATS group header carries the same switch for the whole vendor. It goes
+  through `POST /api/feeds/bulk-policy`, one request and one round trip for the
+  batch rather than a POST per feed. The
   header's **Enable all visible** button uses that same import-and-enable
   operation for every feed matching the current filters, guarded by a second
   confirmation click.
@@ -52,7 +50,7 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
     as a synthetic first row.
   - *Parsed*: `parse()` run over the harvested items in-process, classified
     exactly like `silver.process` — resolved / feed-fallback / would-park
-    company resolution (against the registry mirror), secondhand,
+    company resolution (against PostgreSQL's `alias` table), secondhand,
     unsupported — with per-item parser errors isolated and rendered.
     Harvest-only sources show a "no parser" state, not an error.
   - *Network*: a latency line over the run (one point per attempt, placed at
@@ -60,13 +58,21 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
     status and duration, click it for the full detail), the
     allowlisted response headers with `*ratelimit*`/`Retry-After` highlighted,
     and an elapsed-time sparkline over the retained run history.
-- **Scheduler** (`/scheduler`) — what production polling actually did, per feed.
-  Header tiles (active feeds, p95 discovery latency with a period-over-period
-  delta, requests today, errors in 24 h) over a table sorted busiest-first:
-  tier, λ/day, new postings in 7 d, last poll, p95 latency, and one status
-  chip. The detail pane adds a 14-day per-day sparkline, the recent-poll event
-  list, the tier control, and Poll now / Disable; the header carries Fetch all
-  feeds behind a two-click arm.
+- **Scheduler** (`/scheduler`) — the production polling operations console.
+  Its header reports the persisted run switch and whether a runner is actually
+  listening. Four summary cards cover scheduled feeds, polls today, errors in
+  24 h, and p95 discovery latency. A quiet vendor summary reports configured
+  load and attention counts. Feeds are grouped under collapsible vendor headers
+  that show feed counts, configured requests/day, and only the operational
+  exceptions that matter. Vendor groups and their feeds both put problems
+  first; the workspace can be searched or narrowed to attention, paused, or
+  interval views.
+
+  Selecting a feed opens a fixed detail drawer with Poll now / Pause controls,
+  operational timestamps, a 14-day new-postings chart, and recent poll events.
+  Cadence is entirely operator-owned: five presets and a custom interval from
+  60 seconds through 7 days write `feed.interval_s` only after an explicit
+  Apply. Nothing on the page estimates or changes a polling interval.
 
   **Poll now** means now. It backdates `due_at` well past the whole backlog
   rather than to `now()` — `store.claim_due_feeds` orders by `due_at`
@@ -78,8 +84,9 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   in flight. The sentinel `due_at` never persists — the poll's own
   `finish_schedule_success`/`_failure` overwrites it.
 
-  **Fetch all feeds** does not queue at all: the browser drives a small worker
-  pool over the visible (filtered) feeds, one
+  **Fetch visible feeds** lives under the secondary Actions menu and opens a
+  confirmation/progress dialog. It does not queue: the browser drives a small
+  worker pool over the visible (filtered) feeds, one
   `POST /api/scheduler/feeds/{ref}/fetch` each, and every request claims a
   lease and runs `run.poll` — the production path, `raw_posting` through
   `poll_observation` — before answering. It needs PostgreSQL but neither the
@@ -87,62 +94,50 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   the scheduler. Per-feed policy still holds — a paused, disabled, or
   already-claimed feed refuses (409) instead of polling, and paused rows are
   skipped client-side. A harvest that runs and fails is a 200 whose
-  `status: "error"` the progress counter reports as failed. The button doubles
-  as Stop while running.
+  `status: "error"` the progress counter reports as failed. Stop prevents new
+  work from starting while allowing requests already in flight to finish.
 
-  **Request budget by vendor** sits between the tiles and the table: one row
-  per platform with its feed count, the requests/day its configured tiers ask
-  for, what the same feeds would cost at the tiers λ recommends, and the
-  percentage between them. Rate limits are a vendor-level resource — `net.py`
-  caps concurrency per hostname suffix, and a board's tolerance belongs to the
-  vendor rather than to any one tenant — but every column in the table below is
-  per feed, so a thousand Ashby tenants at a 5m tier is a decision nobody makes
-  explicitly and no row shows. Clicking a vendor filters the table to it.
+  **Vendor grouping** keeps current configured cost next to the feeds that
+  create it. Paused feeds issue no requests, so they remain in each vendor's
+  feed count but are excluded from request totals. Groups with backing-off,
+  stale, or never-polled feeds come first and open by default; healthy groups
+  stay collapsed until requested. Search opens matching groups, while manual
+  expansion choices survive telemetry refreshes. Collapsing a group is only a
+  display choice and never changes the candidate set for Fetch visible feeds.
 
-  The totals are computed over every scheduled feed and deliberately ignore the
-  filters below: the question is what the vendor actually receives, and that
-  does not shrink because the table is narrowed to stale rows. Paused feeds are
-  excluded from both cost columns and counted in the caption instead — a held
-  feed issues no requests, so billing the vendor for its configured interval
-  would overstate the load. A feed λ cannot rank yet carries its current cost
-  into the recommended column, so the delta reads as "what retiering would
-  change" rather than "what we failed to estimate", and the caption says how
-  many rows that covers. The card is hidden when PostgreSQL is down, where
-  every cost would be a dash the degraded banner has already explained.
-
-  λ is an EWMA (half-life 21 d) over `poll_observation.new_postings`, shrunk
-  toward the median λ of the same platform. It *recommends* a tier and never
-  applies one — the "Auto" button is present but disabled because nothing
-  implements adaptive tiering yet.
+  Vendor HTTP protection is separate from feed cadence. `net.py` still caps
+  per-host concurrency and reacts to 429 responses so an operator-set interval
+  cannot disable production's rate-limit safeguards.
 
   `run.py` appends one `poll_observation` row per completed poll — status and
   first-sighting count, never a revision of an earlier row. Three states have to
   render correctly and are visibly distinct: PostgreSQL down, `poll_observation`
   absent or empty (a database nothing has polled against yet), and populated. In
-  the first two every telemetry column reads "—", never `0` — a zero would claim
-  the poller ran and found nothing.
+  the first two every unknown telemetry value reads "—", never `0` — a zero
+  would claim the poller ran and found nothing. Connection, runner, and
+  telemetry problems collapse into one prioritized alert rather than stacking.
 
-  `feed.enabled` is the membership test, and the Feeds page owns it: its toggle
+  `feed.polling` is the membership test, and the Feeds page owns it: its toggle
   imports the feed on first flip and switches it off afterwards. Enabling a feed
   there is what puts it on the Scheduler; disabling it is what takes it off.
-  Nothing here can widen or narrow that set — the Scheduler adjusts cadence and
-  queue position only.
+  Nothing here can widen or narrow that set — the Scheduler adjusts manual
+  cadence and queue position only.
 
   Stopping a feed here is **Pause**, not disable: it sets `feed.paused_at`,
   so production stops claiming the feed while it stays enabled, stays listed,
   and keeps its history. Poll now is refused while held, and resuming leaves
   `due_at` where it was — in the past — so the feed is due immediately. The
   Feeds page shows a read-only `paused` badge; it never sets one, exactly as
-  this page never sets `feed.enabled`.
+  this page never sets `feed.polling`.
 
-  A separate, global **Pause scheduler / Resume scheduler** button in the
+  A separate, global **Pause / Resume** button in the
   header controls `scheduler_control.running` — the one switch that decides
   whether *any* feed gets polled by this inspector process, independent of
   every feed's own `enabled`/`paused_at`. It is what `inspector.runner.
   SchedulerRunner` reads on every tick; see "Running the scheduler in-process"
-  below. A "Scheduler" tile up front shows running/paused, whether a process is
-  actually supervising it (a stale `running = true` with no live runner is
-  reported, not hidden), and the last cycle's feed count.
+  below. The header shows running/paused, whether a process is actually
+  supervising it (a stale `running = true` with no live runner is reported,
+  not hidden), and the last completed cycle.
 - **Postings** (`/postings`) — browser and labeling queue over
   `public.job_posting` (read via the policy store's borrowed pool). Each entry
   shows the gold row's actual fields; the detail pane follows a keyboard
@@ -242,83 +237,70 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   emit, never any of the text).
 - **Tokens** (`/tokens`) — the discovery inventory, and the one place an ATS
   board becomes a pollable one. `public.token` holds every `(ats, token)`
-  pair ever seen, live or dead, across every registry type — ATS, Direct,
-  and Board alike; `public.feed` is the curated set the scheduler polls.
+  pair ever seen, live or dead. Tokens are ATS-only; `public.feed` is the
+  curated set the scheduler polls.
   Nothing joins them — there is no foreign key — so a token can sit in the
   inventory with no feed row, and until this page there was no way to see
   that or act on it.
 
   Every row carries a derived **feed state** (*not in feed* / *disabled* /
-  *enabled*) and a **category** (ATS/Direct/Board/Other, from the same
-  registry taxonomy the Feeds page uses) that gates Enable-eligibility. The
-  default view is `status=live` + *not in feed*, which is exactly the enable
-  backlog; filters cover vendor, status, feed state, and a search over
-  token/company/vendor.
+  *enabled*) and an **ATS** category. The
+  default view is inactive live tokens — `status=live` + *not in feed* — which
+  is exactly the enable backlog. The status filter is ordered **Inactive**,
+  **Muted**, **Dead**, then **All (including active)**; filters also cover
+  vendor and a search over token/company/vendor.
 
-  **Enable** creates a feed row with polling **on**, ATS tokens only — a
-  Direct or Board row's checkbox is disabled, and if a non-ATS identity ever
-  reaches the backend anyway it is silently skipped and reported separately
-  (`skipped_non_ats`). It goes through `store.upsert_registry_feeds`, whose
-  conflict branch is a no-op write on `source`, so a token that already has
-  a feed row — enabled or disabled — is never touched again; sending it a
-  second time is always safe. Selection survives pagination, so a
-  multi-page backlog is one request.
+  **Promote selected** creates a feed row with polling **on** only while the
+  token is live, unmuted, and absent from `feed`. Muting a token is sticky:
+  it also switches an existing feed off, while unmuting never switches it
+  back on.
+
+  The token heartbeat applies the same guarded promotion after a fresh
+  liveness probe. When `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT=1`, one leased
+  batch of 20 runs every six hours. Its compact status strip persists the
+  last outcome and counts in `public.token_heartbeat`; **Run now** queues one
+  batch without bypassing the lease.
 
   The page is read + enable only — no delete. `token.status` belongs to the
-  liveness prober here, separate from `feed.enabled`; removing a feed
+  liveness prober here, separate from `feed.polling`; removing a feed
   entirely is **Drop**, on the Feeds page (see above) — a hard delete that
   also erases the feed's `poll_observation` history.
 
-  One caveat the page states inline: `run.py` fills `Feed.config` from the TOML
-  registry, so an enabled token absent from the registry polls with no adapter
-  config. That is correct for key-only vendors (Greenhouse, Lever, Ashby,
-  Workable, BambooHR, SmartRecruiters) and not for the config-driven ones
-  (Workday, Taleo, Oracle, iCIMS, Dayforce, Avature).
+  `feed.config` is PostgreSQL data. A config-driven feed must have its adapter
+  values stored there before it is enabled.
 
 ## Architecture
 
 Everything is PostgreSQL, but in two deliberately separate places:
 
 - **`public` — the core pipeline's tables.** `policy.py` writes exactly four
-  operator-owned fields — `feed.enabled`, `feed.interval_s`,
-  `feed.paused_at`, and `scheduler_control.running` — plus feed import via
-  the registry upsert. The remaining `feed` columns (`etag`, `res_hash`,
+  operator-owned fields — `feed.polling`, `feed.interval_s`,
+  `feed.paused_at`, and `scheduler_control.running` — plus explicit feed
+  imports. The remaining `feed` columns (`etag`, `res_hash`,
   `strikes`, `hold_until`) belong to `run.py`'s workers and are read for
   display only *by that class*. `due_at` is the one documented exception: Poll
   now moves it, which is a queue *position* rather than derived state —
-  `run.py` overwrites it unconditionally when the poll finishes. Bulk
-  registry→PostgreSQL seed is not a *policy* concern; `run.py` does it on every
-  startup and `python -m xjobscore.run --seed` does it standalone.
-  `SchedulerRunner` also does it — see below. With PostgreSQL down the policy
-  layer runs in degraded mode: policy controls disable, everything else works.
+  `run.py` overwrites it unconditionally when the poll finishes. With
+  PostgreSQL down the policy layer runs in degraded mode: policy controls
+  disable, everything else works.
 
   That "policy only" boundary describes `policy.py`, not the process. When
   `inspector.runner.SchedulerRunner` is enabled and `scheduler_control.running`
   is true, this same process also runs `run.cycle` — writing `raw_posting`,
   `job_posting`, `poll_observation`, and the runtime `feed` columns for
   whatever feeds it polls, exactly as `run.py`'s CLI would. The Scheduler
-  page's Fetch all takes the same path per feed on demand
+  page's Fetch visible action takes the same path per feed on demand
   (`SchedulerRunner.poll_feed_now`), with neither gate required. See "Running
   the scheduler in-process" below.
 
-  It also syncs the registry (`feader.feed`) on the same TTL as its in-memory
-  registry parse, because `run.cycle` alone is not self-sufficient: `_hydrate`
-  stamps each `Feed` with a `company_id` read straight from the registry TOML,
-  so without the write those IDs reference `company` rows that do not exist and
-  every posting fails on `job_posting_company_id_fkey`. `run.py`'s CLI avoids
-  this by syncing on every startup; a long-lived loop has no startup to hang it
-  on, so it re-syncs with the parse it must already refresh.
 - **The `inspector` schema — a bounded staging area the inspector owns.** One
   latest usable fetch per feed keeps its payload, envelope, validator, and
   detailed network telemetry. The last 50 attempts keep only
   latency/status/retry scalars; parse previews are recomputed from the staged
   payload and are never persisted (in memory, only the currently viewed
-  feed's parse is cached). This schema also holds the registry company/alias
-  mirror.
+  feed's parse is cached).
 
-The separate schema is not cosmetic: the mirror's tables are named `company`
-and `alias`, exactly like the pipeline's canonical rows in `public`. Set
-`XJOBSCORE_INSPECTOR_STORE_DSN` to move inspector staging into a different
+Set `XJOBSCORE_INSPECTOR_STORE_DSN` to move inspector staging into a different
 database entirely; `XJOBSCORE_INSPECTOR_SCHEMA` renames the schema and refuses
 `public`.
 
@@ -328,10 +310,7 @@ Set `XJOBSCORE_INSPECTOR_RUNNER=1` and this inspector process becomes a valid
 place to run production polling — `inspector.runner.SchedulerRunner` calls
 `run.cycle` on a tick (`XJOBSCORE_INSPECTOR_RUNNER_TICK_S`, default 60 s),
 reusing one long-lived `Net` (so adaptive per-host 429 pacing survives across
-cycles, unlike a cron process that discards it every run) and one parsed
-registry snapshot, refreshed every five minutes rather than reparsed on every
-tick. Each refresh also runs `feader.feed` to sync that registry into
-PostgreSQL — the write `run.cycle` depends on but does not perform itself.
+cycles, unlike a cron process that discards it every run).
 
 Two independent switches gate every cycle:
 
@@ -347,10 +326,10 @@ A process with the env var off still serves the control API and the button
 still works — it just reports `runner.alive: false`, which the Scheduler page
 distinguishes from "paused" (nothing is listening vs. deliberately stopped).
 
-The Scheduler page's Fetch all bypasses both switches on purpose:
+The Scheduler page's Fetch visible action bypasses both switches on purpose:
 `SchedulerRunner.poll_feed_now` claims a single-feed lease and runs `run.poll`
 per request, sharing the runner's `Net` (one per-host pacing budget covers the
-loop and the on-demand fetches together) and its registry snapshot. It works
+loop and the on-demand fetches together). It works
 with `XJOBSCORE_INSPECTOR_RUNNER` unset — the operator driving the browser is
 the schedule — while per-feed `enabled`/`paused_at` and held leases are still
 honored with a refusal.
@@ -373,11 +352,16 @@ pollers still double the outbound request rate against every ATS.
 | `XJOBSCORE_INSPECTOR_STORE_DSN` | the DSN above | Separate database for inspector staging data |
 | `XJOBSCORE_INSPECTOR_SCHEMA` | `inspector` | Schema owning the staging tables; may not be `public` |
 | `XJOBSCORE_INSPECTOR_USER_AGENT` | `net.DEFAULT_USER_AGENT` (a Chrome browser string) | Outbound UA |
-| `XJOBSCORE_INSPECTOR_{SOURCE}_CONFIG` | — | JSON feed config for a credentialed local source, e.g. `XJOBSCORE_INSPECTOR_WORKATASTARTUP_CONFIG` with captured `headers`/`body`; never placed in the shared registry |
 | `XJOBSCORE_INSPECTOR_RUNNER` | `false` | Allow this process to run `run.cycle` in-process; see "Running the scheduler in-process" |
 | `XJOBSCORE_INSPECTOR_RUNNER_TICK_S` | `60` | Seconds between scheduler ticks |
 | `XJOBSCORE_INSPECTOR_RUNNER_BATCH` | `20` | Feeds claimed per `run.cycle` call, same meaning as `run.py`'s `--batch` |
 | `XJOBSCORE_INSPECTOR_RUNNER_LEASE_S` | `3600` | Schedule lease duration, same meaning as `run.py`'s `--lease-seconds` |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT` | `false` | Allow this process to run the token validation/promotion heartbeat |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_TICK_S` | `60` | Seconds between heartbeat queue checks |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_BATCH` | `20` | Maximum tokens revalidated in one cycle |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_INTERVAL_S` | `21600` | Delay after a successful cycle (six hours) |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_RETRY_S` | `900` | Delay after a system-level cycle failure |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_LEASE_S` | `900` | Exclusive cycle lease duration |
 
 `.env` files in the working directory or repo root are honored with
 `setdefault` semantics.
@@ -392,7 +376,7 @@ Route tests run over `create_app(...)` with injected fakes (catalog, policy,
 runner, gold job) and no network. The policy layer is unit-tested against
 recording fakes. `test_runner.py` covers `SchedulerRunner`'s pause, drain, and
 error-backoff behavior, plus `GoldJob`'s single-flight rebuild — also with no
-network and no real registry parse. `create_app()`'s defaults leave the runner
+network. `create_app()`'s defaults leave the runner
 disabled, so nothing in this suite (or a bare `uv run python -m
 xjobscore.inspector`) polls production without `XJOBSCORE_INSPECTOR_RUNNER`
 set explicitly.

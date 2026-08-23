@@ -271,6 +271,20 @@ COLLAPSE: dict[str, dict[str, Any]] = {
         "note": "Never 'no' -- an on-site signal yields 'unknown' rather than "
         "being asserted as a negative.",
     },
+    "location_normalization_raw": {
+        "column": "location_text, locations",
+        "collapse": "location_normalizer.normalize_location()",
+        "target": "location_text, locations",
+        "note": "Optional source-specific canonical text; Silver stores this "
+        "exact normalizer input as location_text.",
+    },
+    "location_normalization_extra": {
+        "column": "locations",
+        "collapse": "location_normalizer.normalize_location() + deduplicate",
+        "target": "locations",
+        "note": "Additional normalized locations are appended primary-first; "
+        "they never replace a primary location.",
+    },
     "workplace_type_raw": {
         "column": None,
         "collapse": "silver._remote()",
@@ -297,7 +311,7 @@ COLLAPSE: dict[str, dict[str, Any]] = {
         "column": "company_id",
         "collapse": "store.resolve_company()",
         "target": "company_id",
-        "note": "Falls back to feed.company_id for ATS/Direct feeds only; a Board "
+        "note": "Falls back to the token-derived feed company for ATS/Direct feeds only; a Board "
         "posting that resolves to nothing stays bronze-only.",
     },
     "published_at": {"column": "posted_at", "collapse": None, "target": "posted_at"},

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+from xjobscore.feed_identity import feed_ref
 from xjobscore.inspector.cache import RunSnapshot
-from xjobscore.registry_loader import Company, feed_ref
 
 NOW = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
 REF = feed_ref("lever", "acme")
@@ -324,110 +324,3 @@ async def test_duplicate_group_reviews_retain_versions_and_clear_current(store):
     assert await store.delete_duplicate_group_review(
         group_id=group_id, fingerprint="missing"
     ) == 0
-
-
-async def test_company_descriptions_bulk_lookup(store):
-    pool = await store.pool()
-    async with pool.acquire() as conn:
-        await conn.executemany(
-            f"INSERT INTO {store.schema}.company(id, name, description)"
-            " VALUES ($1, $2, $3)",
-            [(1, "Acme", "Makes anvils."), (2, "Blank", None), (3, "Other", "Other work.")],
-        )
-
-    assert await store.company_descriptions({1, 2, 99}) == {1: "Makes anvils."}
-    assert await store.company_descriptions(set()) == {}
-
-
-async def test_initialize_projects_the_registry_into_its_own_schema(
-    monkeypatch, store_factory
-):
-    monkeypatch.setattr(
-        "xjobscore.inspector.persistence.registry_companies",
-        lambda: (
-            Company(
-                id=1, name="Acme", aliases=("acme",), domain="acme.test",
-                industry="test", stage="unknown", desc="Makes anvils.", verified=True,
-                domain_verified_at="2026-01-01",
-            ),
-        ),
-    )
-    store = await store_factory(companies=True)
-
-    pool = await store.pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"SELECT name, domain, description FROM {store.schema}.company"
-        )
-        alias = await conn.fetchval(
-            f"SELECT company_id FROM {store.schema}.alias WHERE alias_norm = 'acme'"
-        )
-
-    assert (row["name"], row["domain"], row["description"]) == (
-        "Acme", "acme.test", "Makes anvils.",
-    )
-    assert alias == 1
-
-
-async def test_initialize_is_idempotent_and_drops_departed_companies(
-    monkeypatch, store_factory
-):
-    def registry(*companies: Company):
-        return lambda: companies
-
-    acme = Company(
-        id=1, name="Acme", aliases=("acme",), domain="acme.test", industry="test",
-        stage="unknown", desc="", verified=False, domain_verified_at=None,
-    )
-    gone = Company(
-        id=2, name="Gone", aliases=("gone",), domain="gone.test", industry="test",
-        stage="unknown", desc="", verified=False, domain_verified_at=None,
-    )
-    monkeypatch.setattr(
-        "xjobscore.inspector.persistence.registry_companies", registry(acme, gone)
-    )
-    store = await store_factory(companies=True)
-
-    # Acme takes over the domain a departed company used to hold.
-    monkeypatch.setattr(
-        "xjobscore.inspector.persistence.registry_companies",
-        registry(
-            Company(
-                id=1, name="Acme", aliases=("acme",), domain="gone.test",
-                industry="test", stage="unknown", desc="", verified=False,
-                domain_verified_at=None,
-            )
-        ),
-    )
-    assert await store.initialize() == 1
-
-    pool = await store.pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(f"SELECT id, domain FROM {store.schema}.company")
-        aliases = await conn.fetchval(
-            f"SELECT count(*) FROM {store.schema}.alias"
-        )
-
-    assert [(row["id"], row["domain"]) for row in rows] == [(1, "gone.test")]
-    assert aliases == 1
-
-
-async def test_alias_lookup_matches_store_normalization(monkeypatch, store):
-    monkeypatch.setattr(
-        "xjobscore.inspector.persistence.registry_companies",
-        lambda: (
-            Company(
-                id=1, name="Acme", aliases=("acme",), domain="unknown",
-                industry="test", stage="unknown", desc="", verified=False,
-                domain_verified_at=None,
-            ),
-        ),
-    )
-
-    assert store.alias_lookup("Acme") == (1, "Acme")
-    assert store.alias_lookup(" ACME  Inc") == (1, "Acme")
-    assert store.alias_lookup("Unknown Co") is None
-
-    with store.alias_lookup_scope() as resolve:
-        assert resolve("Acme") == (1, "Acme")
-        assert resolve("Unknown Co") is None

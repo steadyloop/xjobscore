@@ -61,9 +61,40 @@ def test_json_api_adapter_map_matches_the_config():
     # job_type from the title the `title` field also reads.
     assert result["paths"]["title"] == ["title", "job_type"]
     assert result["paths"]["absolute_url"] == ["url_posting", "apply_url"]
+    assert result["paths"]["location.name"] == [
+        "location_raw",
+        "remote",
+    ]
     assert result["paths"]["offices[].name"] == ["locations_extra"]
     # "extra" lands under source_extra, which is bronze-only downstream.
     assert result["paths"]["language"] == ["source_extra.language"]
+
+
+def test_ashby_postal_address_only_feeds_location_normalization():
+    result = mapping.adapter_map("ashby")
+
+    assert result["paths"]["location"] == [
+        "location_raw",
+        "location_normalization_raw",
+        "remote",
+    ]
+    assert result["paths"]["address.postalAddress.addressLocality"] == [
+        "location_normalization_raw"
+    ]
+    assert result["paths"]["address.postalAddress.addressCountry"] == [
+        "location_normalization_raw"
+    ]
+    assert result["paths"]["secondaryLocations[].location"] == [
+        "location_normalization_extra",
+        "locations_extra",
+        "remote",
+    ]
+    assert result["paths"][
+        "secondaryLocations[].address.postalAddress.addressLocality"
+    ] == ["location_normalization_extra"]
+    assert result["paths"][
+        "secondaryLocations[].address.postalAddress.addressCountry"
+    ] == ["location_normalization_extra"]
 
 
 def test_a_selected_bag_entry_reports_both_halves_of_the_pair():

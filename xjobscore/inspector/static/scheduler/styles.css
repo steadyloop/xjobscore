@@ -1,0 +1,1202 @@
+/* Scheduler operations console — fleet view.
+   Flat, dense, monospace instrument panel: hairline rules instead of cards,
+   plain colored status text instead of pills. Everything is scoped so this
+   visual language does not leak into the rest of Inspector. */
+
+.scheduler-page {
+  --ops-bg: #f7f7f5;
+  --ops-panel: #ffffff;
+  --ops-panel-soft: #f1f1ef;
+  --ops-line: #dcdcd8;
+  --ops-line-soft: #e8e8e4;
+  --ops-ink: #1a1c1e;
+  --ops-subtle: #5c6166;
+  --ops-faint: #8b9096;
+  --ops-link: #1d4ed8;
+  --ops-good: #0f7d33;
+  --ops-good-soft: #e6f2e9;
+  --ops-warn: #9a5b08;
+  --ops-warn-soft: #f8efdd;
+  --ops-bad: #b42318;
+  --ops-bad-soft: #fbeae8;
+  --ops-selected: #ededea;
+  background: var(--ops-bg);
+  color: var(--ops-ink);
+}
+
+:root[data-theme="dark"] .scheduler-page {
+  --ops-bg: #101214;
+  --ops-panel: #16181b;
+  --ops-panel-soft: #1c1f23;
+  --ops-line: #2a2d31;
+  --ops-line-soft: #222528;
+  --ops-ink: #e8eaec;
+  --ops-subtle: #9aa0a6;
+  --ops-faint: #6b7076;
+  --ops-link: #6ea8fe;
+  --ops-good: #4cc38a;
+  --ops-good-soft: #143024;
+  --ops-warn: #e2b93d;
+  --ops-warn-soft: #33290f;
+  --ops-bad: #ff7b72;
+  --ops-bad-soft: #3a1a17;
+  --ops-selected: #1e2126;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .scheduler-page {
+    --ops-bg: #101214;
+    --ops-panel: #16181b;
+    --ops-panel-soft: #1c1f23;
+    --ops-line: #2a2d31;
+    --ops-line-soft: #222528;
+    --ops-ink: #e8eaec;
+    --ops-subtle: #9aa0a6;
+    --ops-faint: #6b7076;
+    --ops-link: #6ea8fe;
+    --ops-good: #4cc38a;
+    --ops-good-soft: #143024;
+    --ops-warn: #e2b93d;
+    --ops-warn-soft: #33290f;
+    --ops-bad: #ff7b72;
+    --ops-bad-soft: #3a1a17;
+    --ops-selected: #1e2126;
+  }
+}
+
+.scheduler-page .topnav {
+  background: color-mix(in srgb, var(--ops-panel) 94%, transparent);
+  border-color: var(--ops-line);
+  backdrop-filter: blur(14px);
+}
+
+.scheduler-page .ops-shell {
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 18px 24px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+/* ---------- header ---------- */
+
+.ops-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.ops-header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ops-header-title h1 {
+  margin: 0;
+  color: var(--ops-ink);
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.ops-header-sub {
+  color: var(--ops-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ops-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ops-run-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ops-subtle);
+  font-size: 12px;
+}
+
+.ops-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ops-faint);
+}
+
+.ops-status-dot[data-state="running"] {
+  background: var(--ops-good);
+}
+
+.ops-status-dot[data-state="warning"] {
+  background: var(--ops-warn);
+}
+
+.scheduler-page .ops-run-toggle {
+  border-color: var(--ops-line);
+  background: var(--ops-panel);
+  font-size: 12px;
+}
+
+.scheduler-page .ops-run-toggle.primary {
+  border-color: var(--ops-good);
+  background: var(--ops-good-soft);
+  color: var(--ops-good);
+}
+
+.ops-clock {
+  color: var(--ops-faint);
+  font: 12px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ops-summary-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+  color: var(--ops-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-summary-line .ops-sum-ok {
+  color: var(--ops-good);
+}
+
+.ops-summary-line .ops-sum-bad {
+  color: var(--ops-bad);
+}
+
+.ops-sum-sep {
+  color: var(--ops-line);
+}
+
+/* ---------- alert ---------- */
+
+.ops-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--ops-warn) 36%, var(--ops-line));
+  border-radius: 6px;
+  background: var(--ops-warn-soft);
+  color: var(--ops-ink);
+  font-size: 12px;
+}
+
+.ops-alert[hidden] {
+  display: none;
+}
+
+.ops-alert[data-level="error"] {
+  border-color: color-mix(in srgb, var(--ops-bad) 45%, var(--ops-line));
+  background: var(--ops-bad-soft);
+}
+
+.ops-alert strong {
+  display: block;
+  margin-bottom: 1px;
+}
+
+.ops-alert span {
+  color: var(--ops-subtle);
+}
+
+/* ---------- provider chips ---------- */
+
+.ops-provider-chips {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 3px 10px;
+  padding: 2px 0;
+  margin-left: -7px;
+}
+
+.ops-provider-chip {
+  display: inline-flex;
+  justify-self: start;
+  max-width: 100%;
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ops-ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ops-provider-chip:hover {
+  background: var(--ops-panel-soft);
+}
+
+.ops-provider-chip[aria-pressed="true"] {
+  background: var(--ops-selected);
+}
+
+.ops-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+@media (max-width: 1300px) {
+  .ops-provider-chips {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .ops-provider-chips {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .ops-provider-chips {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ops-provider-chip[aria-pressed="true"] .ops-chip-name {
+  font-weight: 700;
+}
+
+.ops-chip-count {
+  color: var(--ops-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ops-chip-err {
+  color: var(--ops-bad);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ops-chip-more {
+  justify-self: start;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ops-link);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ops-chip-more:hover {
+  text-decoration: underline;
+}
+
+/* ---------- filter bar ---------- */
+
+.ops-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+
+.ops-search {
+  position: relative;
+  flex: 0 1 240px;
+}
+
+.scheduler-page .ops-search input {
+  width: 100%;
+  height: 27px;
+  padding: 4px 30px 4px 9px;
+  border-color: var(--ops-line);
+  border-radius: 5px;
+  background: var(--ops-panel);
+  color: var(--ops-ink);
+  font-size: 12px;
+}
+
+.ops-search kbd {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--ops-line);
+  border-radius: 3px;
+  color: var(--ops-faint);
+  background: var(--ops-panel-soft);
+  font: 10px/15px var(--font-mono);
+  text-align: center;
+}
+
+.ops-view-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ops-view-pills button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ops-link);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ops-view-pills button:hover {
+  text-decoration: underline;
+}
+
+.ops-view-pills button[aria-pressed="true"] {
+  color: var(--ops-ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ops-view-pills span {
+  margin-left: 4px;
+  color: var(--ops-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-shown {
+  margin-left: auto;
+  color: var(--ops-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.scheduler-page .ops-filterbar .btn {
+  font-size: 12px;
+  border-color: var(--ops-line);
+  background: var(--ops-panel);
+}
+
+/* ---------- layout: table + inline detail panel ---------- */
+
+.ops-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+.ops-table-wrap {
+  border: 0;
+  background: transparent;
+}
+
+.ops-rail {
+  position: sticky;
+  top: 62px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100vh - 82px);
+  min-height: 0;
+}
+
+/* ---------- fleet table ---------- */
+
+.scheduler-page table.ops-table {
+  color: var(--ops-ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.scheduler-page table.ops-table th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 0;
+  border-bottom: 1px solid var(--ops-line);
+  background: var(--ops-bg);
+}
+
+.scheduler-page table.ops-table th button {
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ops-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scheduler-page table.ops-table th[aria-sort] button {
+  color: var(--ops-ink);
+  font-weight: 700;
+}
+
+.scheduler-page table.ops-table th[aria-sort="ascending"] button::after {
+  content: " ↑";
+}
+
+.scheduler-page table.ops-table th[aria-sort="descending"] button::after {
+  content: " ↓";
+}
+
+.scheduler-page table.ops-table td {
+  height: 30px;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--ops-line-soft);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+.scheduler-page table.ops-table td.num {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.scheduler-page table.ops-table tbody tr:hover {
+  background: color-mix(in srgb, var(--ops-selected) 55%, transparent);
+}
+
+.scheduler-page table.ops-table tbody tr[aria-selected="true"] {
+  background: var(--ops-selected);
+}
+
+.ops-st {
+  font-weight: 700;
+}
+
+.ops-st[data-state="healthy"] {
+  color: var(--ops-good);
+}
+
+.ops-st[data-state="backing_off"] {
+  color: var(--ops-bad);
+}
+
+.ops-st[data-state="stale"] {
+  color: var(--ops-warn);
+}
+
+.ops-st[data-state="never_polled"],
+.ops-st[data-state="paused"],
+.ops-st[data-state="disabled"],
+.ops-st[data-state="unknown"] {
+  color: var(--ops-faint);
+}
+
+.ops-status-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.ops-provider-cell {
+  color: var(--ops-subtle);
+  white-space: nowrap;
+}
+
+.ops-next span {
+  color: var(--ops-subtle);
+}
+
+.ops-next.ops-imminent span {
+  color: var(--ops-good);
+  font-weight: 700;
+}
+
+.ops-errors-cell {
+  min-width: 52px;
+}
+
+.ops-err {
+  color: var(--ops-bad);
+  font-weight: 700;
+}
+
+.ops-feed-button {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ops-ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ops-feed-key {
+  display: block;
+  overflow: hidden;
+  color: var(--ops-faint);
+  font: 10px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-row-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ops-row-btn {
+  padding: 2px 8px;
+  margin-left: 5px;
+  border: 1px solid var(--ops-line);
+  border-radius: 4px;
+  background: var(--ops-panel);
+  color: var(--ops-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ops-row-btn:hover:not(:disabled) {
+  border-color: var(--ops-subtle);
+  color: var(--ops-ink);
+}
+
+.ops-row-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.scheduler-page .empty-state {
+  padding: 26px 10px;
+  color: var(--ops-faint);
+}
+
+/* ---------- inline detail panel ---------- */
+
+.ops-detail-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--ops-line);
+  border-radius: 6px;
+  background: var(--ops-panel);
+  color: var(--ops-ink);
+}
+
+/* ---------- live fetch log ---------- */
+
+.ops-livelog {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+  max-height: 320px;
+  border: 1px solid var(--ops-line);
+  border-radius: 6px;
+  background: var(--ops-panel);
+}
+
+.ops-livelog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--ops-line-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ops-log-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ops-faint);
+}
+
+.ops-log-dot[data-state="live"] {
+  background: var(--ops-good);
+}
+
+.ops-livelog-tail {
+  color: var(--ops-faint);
+  font: 12px/1 var(--font-mono);
+  font-weight: 400;
+}
+
+.ops-log-lines {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font: 11px/1.75 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-log-line {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.ops-log-line time {
+  color: var(--ops-faint);
+  flex: none;
+}
+
+.ops-log-st {
+  flex: none;
+  font-weight: 700;
+  color: var(--ops-subtle);
+}
+
+.ops-log-st[data-status="ok"] {
+  color: var(--ops-good);
+}
+
+.ops-log-st[data-status="error"] {
+  color: var(--ops-bad);
+}
+
+.ops-log-st[data-status="partial"] {
+  color: var(--ops-warn);
+}
+
+.ops-log-st[data-status="not_modified"] {
+  color: var(--ops-faint);
+}
+
+.ops-log-feed {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ops-ink);
+}
+
+.ops-log-note {
+  margin-left: auto;
+  flex: none;
+  color: var(--ops-subtle);
+}
+
+.ops-log-empty {
+  color: var(--ops-faint);
+}
+
+.ops-detail-panel[hidden] {
+  display: none;
+}
+
+.ops-panel-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px 10px;
+  background: var(--ops-panel);
+}
+
+.ops-panel-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.ops-panel-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ops-panel-title h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ops-ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.ops-panel-title p {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--ops-faint);
+  font: 11px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--ops-line);
+  border-radius: 4px;
+  background: var(--ops-panel);
+  color: var(--ops-subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ops-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 14px 12px;
+}
+
+.ops-panel-actions .btn {
+  font-size: 12px;
+  text-transform: lowercase;
+  border-color: var(--ops-line);
+  background: var(--ops-panel);
+  color: var(--ops-ink);
+}
+
+.ops-panel-actions .btn:first-child {
+  flex: 1;
+}
+
+.scheduler-page .ops-panel-actions .btn.primary {
+  border-color: color-mix(in srgb, var(--ops-good) 45%, var(--ops-line));
+  background: var(--ops-good-soft);
+  color: var(--ops-good);
+}
+
+/* Drop and mute are irreversible, so they read as destructive the moment the
+   panel opens rather than only on hover. */
+.scheduler-page .ops-panel-actions .btn.ops-panel-danger {
+  border-color: color-mix(in srgb, var(--ops-bad) 40%, var(--ops-line));
+  color: var(--ops-bad);
+}
+
+.scheduler-page .ops-panel-actions .btn.ops-panel-danger:hover:not(:disabled) {
+  border-color: var(--ops-bad);
+  background: var(--ops-bad-soft);
+}
+
+.ops-inline-message {
+  margin: 0 14px 10px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: var(--ops-warn-soft);
+  color: var(--ops-warn);
+  font-size: 12px;
+}
+
+.ops-panel-section {
+  padding: 11px 14px;
+  border-top: 1px solid var(--ops-line-soft);
+}
+
+.ops-panel-section h3 {
+  margin: 0 0 8px;
+  color: var(--ops-subtle);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+
+.ops-panel-section h3::after {
+  content: ":";
+}
+
+.ops-interval-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+
+.ops-interval-summary strong {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-interval-summary span {
+  color: var(--ops-faint);
+  font-size: 11px;
+}
+
+.ops-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.ops-presets button {
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ops-link);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ops-presets button:hover {
+  text-decoration: underline;
+}
+
+.ops-presets button[aria-pressed="true"] {
+  background: transparent;
+  color: var(--ops-ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ops-presets button:disabled {
+  color: var(--ops-faint);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.ops-custom-interval {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.scheduler-page .ops-custom-interval input,
+.scheduler-page .ops-custom-interval select {
+  min-width: 0;
+  width: 100%;
+  border-color: var(--ops-line);
+  background: var(--ops-panel-soft);
+  color: var(--ops-ink);
+  font-size: 12px;
+}
+
+.ops-interval-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ops-field-error {
+  min-height: 15px;
+  color: var(--ops-bad);
+  font-size: 11px;
+}
+
+.ops-help {
+  margin: 7px 0 0;
+  color: var(--ops-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ops-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 14px;
+  margin: 0;
+}
+
+.ops-detail-stat {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.ops-detail-stat dt {
+  color: var(--ops-faint);
+  font-size: 10px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.ops-detail-stat dd {
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-chart-cap {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--ops-faint);
+  font-size: 10px;
+}
+
+.ops-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+}
+
+.ops-events li {
+  display: grid;
+  grid-template-columns: 64px auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--ops-line-soft);
+  font-size: 11px;
+}
+
+.ops-events li:last-child {
+  border-bottom: 0;
+}
+
+.ops-events time,
+.ops-events .ops-event-note {
+  color: var(--ops-faint);
+}
+
+.ops-events .ops-event-note {
+  text-align: right;
+  color: var(--ops-subtle);
+}
+
+.ops-panel-loading {
+  padding: 24px 16px;
+  color: var(--ops-faint);
+  font-size: 12px;
+}
+
+/* ---------- dialog + toast ---------- */
+
+.ops-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  background: var(--ops-panel);
+  color: var(--ops-ink);
+  box-shadow: 0 22px 60px rgba(8, 10, 12, 0.25);
+}
+
+.ops-dialog::backdrop {
+  background: rgba(8, 10, 12, 0.5);
+}
+
+.ops-dialog-header,
+.ops-dialog-body,
+.ops-dialog-footer {
+  padding: 14px 16px;
+}
+
+.ops-dialog-header {
+  border-bottom: 1px solid var(--ops-line-soft);
+}
+
+.ops-dialog-header h2 {
+  color: var(--ops-ink);
+  font-size: 15px;
+  text-transform: none;
+}
+
+.ops-dialog-body p {
+  margin: 0;
+  color: var(--ops-subtle);
+  font-size: 12px;
+}
+
+.ops-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--ops-line-soft);
+}
+
+.ops-bulk-count {
+  margin-bottom: 8px;
+  color: var(--ops-ink);
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-dialog progress {
+  width: 100%;
+  height: 7px;
+  margin: 14px 0 7px;
+  accent-color: var(--ops-good);
+}
+
+.ops-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ops-faint);
+  font-size: 11px;
+}
+
+.ops-toast {
+  position: fixed;
+  z-index: 50;
+  right: 18px;
+  bottom: 18px;
+  max-width: 360px;
+  padding: 9px 12px;
+  border: 1px solid var(--ops-line);
+  border-left: 3px solid var(--ops-good);
+  border-radius: 6px;
+  background: var(--ops-panel);
+  color: var(--ops-ink);
+  box-shadow: 0 14px 38px rgba(8, 10, 12, 0.2);
+  font-size: 12px;
+}
+
+.ops-toast[data-tone="error"] {
+  border-left-color: var(--ops-bad);
+}
+
+.ops-toast[hidden] {
+  display: none;
+}
+
+.scheduler-page .muted,
+.scheduler-page .secondary {
+  color: var(--ops-faint);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1100px) {
+  .ops-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ops-rail {
+    position: static;
+    max-height: none;
+  }
+
+  .ops-detail-panel {
+    overflow-y: visible;
+  }
+
+  .ops-livelog {
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 900px) {
+  .scheduler-page .topnav {
+    gap: 8px;
+    padding: 0 12px;
+    overflow: hidden;
+  }
+
+  .scheduler-page .topnav nav {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .scheduler-page .topnav nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scheduler-page .topnav nav a {
+    padding-inline: 9px;
+    white-space: nowrap;
+  }
+
+  .scheduler-page .topnav .health-chips,
+  .scheduler-page .topnav .theme-toggle {
+    display: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .scheduler-page .ops-shell {
+    padding: 14px 12px 36px;
+  }
+
+  .ops-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ops-header-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .ops-search {
+    flex-basis: 100%;
+  }
+
+  .ops-shown {
+    margin-left: 0;
+  }
+
+  .scheduler-page table.ops-table th:nth-child(3),
+  .scheduler-page table.ops-table td:nth-child(3),
+  .scheduler-page table.ops-table th:nth-child(4),
+  .scheduler-page table.ops-table td:nth-child(4),
+  .scheduler-page table.ops-table th:nth-child(6),
+  .scheduler-page table.ops-table td:nth-child(6),
+  .scheduler-page table.ops-table th:nth-child(7),
+  .scheduler-page table.ops-table td:nth-child(7),
+  .scheduler-page table.ops-table th:nth-child(8),
+  .scheduler-page table.ops-table td:nth-child(8) {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .ops-view-pills {
+    gap: 9px;
+  }
+
+  .scheduler-page table.ops-table th button,
+  .scheduler-page table.ops-table td {
+    padding-inline: 6px;
+  }
+}

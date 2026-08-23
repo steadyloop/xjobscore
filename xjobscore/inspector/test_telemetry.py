@@ -2,8 +2,8 @@
 
 The SQL itself is exercised by running the page against a real database. What is
 tested here is what is easy to get silently wrong: a table that does not exist
-yet must read as "unknown" rather than as zero activity, and daily counts must
-come back dense, because ``scheduling.ewma_lambda`` weights them by position.
+yet must read as "unknown" rather than as zero activity, and daily chart counts
+must come back dense so their positions remain aligned with UTC dates.
 """
 
 from __future__ import annotations
@@ -104,7 +104,6 @@ async def test_rollups_carry_counters_and_the_latest_outcome():
                 "poll_count_7d": 96,
                 "new_7d": 4,
                 "error_count_7d": 1,
-                "observed_days": 12,
                 "last_polled_at": NOW,
             }
         ],
@@ -112,7 +111,7 @@ async def test_rollups_carry_counters_and_the_latest_outcome():
     )
     rollups = await telemetry.feed_rollups(pool, now=NOW)
     assert rollups[7]["new_7d"] == 4
-    assert rollups[7]["observed_days"] == 12
+    assert "observed_days" not in rollups[7]
     assert rollups[7]["last_status"] == "not_modified"
     assert rollups[7]["last_polled_at"] == NOW.isoformat()
 

@@ -1,10 +1,7 @@
 """PostgreSQL persistence for inspector-only fetch results and scheduling state.
 
 Everything here lives in a dedicated schema (``inspector`` by default), never
-``public``. The inspector projects the source registry into its own
-``company``/``alias`` tables, and the core pipeline owns tables of exactly
-those names in ``public`` -- sharing a schema would let the inspector
-overwrite canonical pipeline rows.
+``public``.
 
 This store is deliberately independent of ``schema.sql``. It stages the
 latest usable payload per feed plus a short latency history; it is not a
@@ -14,22 +11,16 @@ second posting store and holds nothing the pipeline depends on.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import re
-import unicodedata
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 import asyncpg
 
+from xjobscore.feed_identity import feed_ref as compute_feed_ref
 from xjobscore.inspector.cache import RunSnapshot
-from xjobscore.registry_loader import (
-    Company,
-    companies as registry_companies,
-    feed_ref as compute_feed_ref,
-)
 
 # The staged payload lives in schema.sql's tables, keyed (source, feed_key), so
 # a staged feed can be promoted into the pipeline without copying schemas. Only
@@ -93,24 +84,6 @@ CREATE TABLE IF NOT EXISTS {schema}.meta (
     value TEXT NOT NULL
 );
 
--- Projection of the source registry, kept out of public so it cannot collide
--- with the pipeline's canonical company/alias rows.
-CREATE TABLE IF NOT EXISTS {schema}.company (
-    id                 BIGINT PRIMARY KEY,
-    name               TEXT NOT NULL,
-    domain             TEXT UNIQUE,
-    domain_verified_at TEXT,
-    description        TEXT
-);
-
-CREATE TABLE IF NOT EXISTS {schema}.alias (
-    alias_norm TEXT PRIMARY KEY,
-    company_id BIGINT NOT NULL
-               REFERENCES {schema}.company(id) ON DELETE CASCADE,
-    alias      TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS alias_company_idx ON {schema}.alias(company_id);
-
 -- Hand labels over public.job_posting rows, keyed by the posting's natural
 -- key: gold tables are rebuilt destructively (store.py: "Human judgements
 -- must never live here"), and this store's DSN can in principle diverge from
@@ -142,18 +115,6 @@ CREATE TABLE IF NOT EXISTS {schema}.duplicate_group_review (
     PRIMARY KEY (group_id, fingerprint)
 );
 """
-
-
-def alias_candidates(raw: str) -> list[str]:
-    """Mirror store.resolve_company's normalization for the registry mirror."""
-    exact = unicodedata.normalize("NFKC", raw).strip().casefold()
-    slug = re.sub(r"[^a-z0-9]+", "-", exact).strip("-")
-    without_suffix = re.sub(
-        r"-(?:inc|incorporated|llc|ltd|limited|corp|corporation|co|company)$",
-        "",
-        slug,
-    )
-    return list(dict.fromkeys(value for value in (exact, slug, without_suffix) if value))
 
 
 def _json(value: Any) -> str:
@@ -216,7 +177,6 @@ class ResultStore:
         self.history_limit = history_limit
         self._pool: asyncpg.Pool | None = None
         self._lock = asyncio.Lock()
-        self._alias_index: dict[str, tuple[int, str]] | None = None
 
     # Lifecycle ------------------------------------------------------------
 
@@ -235,80 +195,14 @@ class ResultStore:
             self._pool = None
 
     async def create_schema(self) -> None:
-        """Create the schema and tables, without the registry company import."""
+        """Create the inspector-owned schema and tables."""
         pool = await self.pool()
         async with pool.acquire() as conn:
             await conn.execute(_SCHEMA_SQL.format(schema=self.schema))
 
-    async def initialize(self) -> int:
-        """Create the inspector schema and mirror canonical registry companies."""
+    async def initialize(self) -> None:
+        """Create the inspector schema."""
         await self.create_schema()
-        rows = registry_companies()
-        pool = await self.pool()
-        async with pool.acquire() as conn, conn.transaction():
-            await self._import_companies(conn, rows)
-        return len(rows)
-
-    async def _import_companies(
-        self, conn: asyncpg.Connection, rows: tuple[Company, ...]
-    ) -> None:
-        """Idempotently make company/alias an exact registry projection."""
-        incoming_aliases = sorted(
-            {alias_norm for company in rows for alias_norm in company.aliases}
-        )
-        await conn.execute(
-            f"""
-            DELETE FROM {self.schema}.alias
-            WHERE alias_norm <> ALL($1::text[])
-            """,
-            incoming_aliases,
-        )
-        # Release UNIQUE domains before applying canonical ownership changes.
-        await conn.execute(
-            f"UPDATE {self.schema}.company SET domain = NULL, domain_verified_at = NULL"
-        )
-        await conn.executemany(
-            f"""
-            INSERT INTO {self.schema}.company
-                (id, name, domain, domain_verified_at, description)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (id) DO UPDATE SET
-                name = excluded.name,
-                domain = excluded.domain,
-                domain_verified_at = excluded.domain_verified_at,
-                description = excluded.description
-            """,
-            [
-                (
-                    company.id,
-                    company.name,
-                    None if company.domain == "unknown" else company.domain,
-                    company.domain_verified_at if company.verified else None,
-                    company.desc,
-                )
-                for company in rows
-            ],
-        )
-        await conn.executemany(
-            f"""
-            INSERT INTO {self.schema}.alias (alias_norm, company_id, alias)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (alias_norm) DO UPDATE SET
-                company_id = excluded.company_id,
-                alias = excluded.alias
-            """,
-            [
-                (alias_norm, company.id, alias_norm)
-                for company in rows
-                for alias_norm in company.aliases
-            ],
-        )
-        await conn.execute(
-            f"""
-            DELETE FROM {self.schema}.company
-            WHERE id NOT IN (SELECT DISTINCT company_id FROM {self.schema}.alias)
-            """
-        )
 
     # Run persistence ------------------------------------------------------
 
@@ -841,63 +735,3 @@ class ResultStore:
                 fingerprint,
             )
         return int(result.split()[-1])
-
-    # Company mirror -------------------------------------------------------
-
-    async def company_descriptions(self, company_ids: set[int]) -> dict[int, str]:
-        """Return canonical descriptions for the requested company IDs."""
-        if not company_ids:
-            return {}
-        pool = await self.pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, description FROM {self.schema}.company
-                WHERE description IS NOT NULL AND id = ANY($1::bigint[])
-                """,
-                sorted(company_ids),
-            )
-        return {int(row["id"]): str(row["description"]) for row in rows}
-
-    def _index(self) -> dict[str, tuple[int, str]]:
-        """Alias -> (company_id, name), built once from the source registry.
-
-        Resolved in memory rather than through SQL because parse previews run
-        inside ``asyncio.to_thread`` and cannot await: an async pool is not
-        reachable from that thread, and the registry projection this would
-        query is the same tuple already parsed in this process. Roughly 4k
-        aliases, so the index costs less than a single round trip.
-        """
-        if self._alias_index is None:
-            self._alias_index = {
-                alias_norm: (company.id, company.name)
-                for company in registry_companies()
-                for alias_norm in company.aliases
-            }
-        return self._alias_index
-
-    def alias_lookup(self, raw: str) -> tuple[int, str] | None:
-        """Resolve a raw company label against the registry mirror."""
-        index = self._index()
-        for candidate in alias_candidates(raw):
-            hit = index.get(candidate)
-            if hit is not None:
-                return hit
-        return None
-
-    @contextlib.contextmanager
-    def alias_lookup_scope(self):
-        """Memoized ``alias_lookup`` for a single parse pass.
-
-        Kept as a context manager because callers still express a pass-scoped
-        lifetime; the memo dict now saves repeated normalization for the
-        common ``"company_raw": "$key"`` config rather than repeated queries.
-        """
-        memo: dict[str, tuple[int, str] | None] = {}
-
-        def lookup(raw: str) -> tuple[int, str] | None:
-            if raw not in memo:
-                memo[raw] = self.alias_lookup(raw)
-            return memo[raw]
-
-        yield lookup

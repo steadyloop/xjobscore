@@ -3,9 +3,9 @@ polling policy, and -- when opted in -- the production scheduler itself.
 
 The inspector stages its own inspection results in a dedicated PostgreSQL
 schema (``inspector``). In the core pipeline's ``public`` schema its policy
-layer (``policy.py``) writes only the operator-owned fields (``feed.enabled``,
+layer (``policy.py``) writes only the operator-owned fields (``feed.polling``,
 ``feed.interval_s``, ``feed.paused_at``, ``scheduler_control.running``)
-and registry sync; it never touches feed runtime columns (etag,
+and explicit feed imports; it never touches feed runtime columns (etag,
 res_hash, strikes, hold_until) -- those stay run.py's workers' alone to write.
 
 That boundary is about ``policy.py`` specifically, not the process as a whole.

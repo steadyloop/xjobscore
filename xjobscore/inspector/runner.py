@@ -13,7 +13,7 @@ There are two entry points into that path. The tick loop below runs
 ``run.cycle`` on a schedule; ``poll_feed_now`` runs ``run.poll`` for one feed
 on demand -- the Scheduler page's Fetch-all, where the browser is the
 scheduler. The on-demand path shares this runner's ``Net`` (so per-host pacing
-covers both) and registry cache, and deliberately ignores both gates: it needs
+covers both) and deliberately ignores both gates: it needs
 neither ``config.runner_enabled()`` nor ``scheduler_control.running``, because
 the operator driving it *is* the schedule.
 
@@ -38,12 +38,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from xjobscore import feader, gold, run, store
+from xjobscore import gold, run, store
 from xjobscore.inspector.cache import now_utc
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
@@ -55,12 +54,6 @@ from xjobscore.net import Net
 from xjobscore.run import Config
 
 logger = logging.getLogger(__name__)
-
-# How long a parsed registry snapshot (index + source types) stays valid
-# before the next tick reparses it off-thread. Mirrors db.CatalogDB's TTL for
-# the same underlying data; a registry edit picked up within five minutes is
-# plenty responsive for a background poller.
-_REGISTRY_TTL_S = 300.0
 
 # Backoff ceiling after consecutive tick failures, so a wedged database (or a
 # bug) does not turn into a tight error loop.
@@ -120,10 +113,6 @@ class SchedulerRunner:
         # loop is pacing against.
         self._net: Net | None = None
         self._net_lock = asyncio.Lock()
-        self._registry_index: dict[tuple[str, str], object] | None = None
-        self._registry_types: dict[str, str] | None = None
-        self._registry_built_at = float("-inf")
-        self._registry_lock = asyncio.Lock()
 
     def status(self) -> dict[str, Any]:
         return self._status.as_dict()
@@ -175,37 +164,6 @@ class SchedulerRunner:
                 self._net = await Net(user_agent=self._cfg.user_agent).__aenter__()
             return self._net
 
-    async def _refresh_registry(self, pool: Any) -> None:
-        # Locked because poll_feed_now fans out: the first bulk-fetch click
-        # lands ~8 concurrent calls on a cold cache, and without the lock each
-        # would reparse the registry. The loop alone never raced this.
-        async with self._registry_lock:
-            if (
-                self._registry_index is not None
-                and time.monotonic() - self._registry_built_at < _REGISTRY_TTL_S
-            ):
-                return
-            # Parsing ~2600 feeds and every catalog is real CPU work; keep it off
-            # the event loop so a concurrent HTTP request to the inspector is never
-            # blocked behind it.
-            index, types = await asyncio.to_thread(self._build_registry)
-            # run.main() always syncs the registry into `public` before every
-            # cycle (run.py:361) -- that write is what makes the company_id values
-            # _hydrate() stamps onto each Feed actually exist as rows in
-            # `company`. Skipping it here would hand job_posting a company_id the
-            # database has never heard of and job_posting_company_id_fkey would
-            # reject the insert. Tied to the same TTL as the in-memory parse so
-            # the two never disagree.
-            async with pool.acquire() as conn:
-                await feader.feed(conn)
-            self._registry_index = index
-            self._registry_types = types
-            self._registry_built_at = time.monotonic()
-
-    @staticmethod
-    def _build_registry() -> tuple[dict[tuple[str, str], object], dict[str, str]]:
-        return run._registry_index(), run.source_types()
-
     async def _loop(self) -> None:
         # The shared Net outlives the loop on purpose: stop() closes it, so a
         # poll_feed_now racing shutdown never holds a client the loop tore down.
@@ -245,20 +203,12 @@ class SchedulerRunner:
         pool = await self._policy.pool_or_none()
         if pool is None:
             return
-        await self._refresh_registry(pool)
         # Drain the backlog: a full batch means more feeds were due than this
         # cycle claimed, so run again immediately rather than waiting a full
         # tick to make progress. An empty or partial batch means the queue is
         # caught up.
         while True:
-            polled = await run.cycle(
-                pool,
-                net,
-                self._cfg,
-                now_utc(),
-                index=self._registry_index,
-                types=self._registry_types,
-            )
+            polled = await run.cycle(pool, net, self._cfg, now_utc())
             self._status.last_cycle_at = now_utc()
             self._status.last_polled = polled
             if polled < self._cfg.batch:
@@ -279,7 +229,6 @@ class SchedulerRunner:
         pool = await self._policy.pool_or_none()
         if pool is None:
             raise PolicyUnavailable("PostgreSQL unavailable")
-        await self._refresh_registry(pool)
         net = await self._ensure_net()
         now = now_utc()
         async with pool.acquire() as conn:
@@ -292,7 +241,6 @@ class SchedulerRunner:
             )
             if feed is None:
                 await self._refuse_unclaimable(conn, source, key)
-        feed = run._hydrate(feed, self._registry_index, self._registry_types)
         outcome = await run.poll(pool, net, feed, now)
         async with pool.acquire() as conn:
             # run.poll stamps polled_at with the exact `now` it was handed on
@@ -315,7 +263,7 @@ class SchedulerRunner:
         """
         row = await conn.fetchrow(
             """
-            SELECT f.enabled,
+            SELECT f.polling AS enabled,
                    f.paused_at,
                    f.hold_until > now() AS held
             FROM feed f

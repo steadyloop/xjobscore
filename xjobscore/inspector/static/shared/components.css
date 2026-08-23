@@ -791,10 +791,29 @@ select:focus-visible,
   max-width: 170px;
 }
 
-.master.split-open .feeds-card .feed-name {
+.feed-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.feed-display-name,
+.feed-identity {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.feed-display-name {
+  flex: 0 1 auto;
+  min-width: 4ch;
+}
+
+.feed-identity {
+  flex: 1 1 auto;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .master.split-open .feeds-card select {
@@ -847,241 +866,8 @@ table.data tbody tr.flat-source .feed-name {
   }
 }
 
-/* Scheduler page -------------------------------------------------------------
-   Everything here is namespaced .sched-*. The detail pane's element ids and the
-   .detail-pane / .feeds-card classes are shared with the Feeds page, so an
-   unscoped rule for "the pane" would silently restyle that page's inspector. */
-
-/* The Feeds page opens the drawer wide to inspect payloads. The scheduler's
-   drawer is a handful of stats and a tier control — it should stay a fixed
-   sidebar, like the ops prototype, while the table keeps the room. */
-.sched-master.split-open {
-  grid-template-columns: minmax(0, 1fr) 8px minmax(320px, var(--detail-width, 380px));
-}
-
-.sched-master.split-open .feeds-card table.data {
-  font-size: 13px;
-}
-
-.sched-master.split-open .feeds-card table.data td {
-  padding: 6px var(--space-3);
-}
-
-.sched-master.split-open .feeds-card table.data th {
-  padding: var(--space-2) var(--space-3);
-  font-size: 11px;
-}
-
-.sched-master.split-open .feeds-card .mono {
-  font-size: 12px;
-}
-
-.sched-master.split-open .feeds-card .feed-cell {
-  max-width: none;
-}
-
-.sched-master.split-open .feeds-card select {
-  padding: 5px 10px;
-  font-size: 13px;
-}
-
-.sched-master.split-open .feeds-card .chip {
-  padding: 1px 8px;
-  font-size: 12px;
-}
-
-.sched-master.split-open .detail-pane .body {
-  padding: var(--space-4);
-}
-
-.sched-pane h3 {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.sched-pane h3:first-of-type {
-  margin-top: var(--space-3);
-}
-
-.sched-kv {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-1) var(--space-4);
-  margin: var(--space-3) 0 0;
-  font-size: 13px;
-  align-items: baseline;
-}
-
-.sched-kv dt {
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.sched-kv dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.sched-events {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-size: 12.5px;
-}
-
-.sched-events li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  border-bottom: 1px solid var(--grid);
-}
-
-.sched-events li:last-child {
-  border-bottom: none;
-}
-
-.sched-events time {
-  flex: none;
-  width: 72px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Cadence recommendation, shown only when it disagrees with interval_s. */
-.sched-rec {
-  margin-left: var(--space-1);
-  white-space: nowrap;
-}
-
-/* Read-only cadence chip. The control that changes it lives in the detail
-   pane; the table is for comparing feeds, not editing them. */
-.sched-tier {
-  display: inline-block;
-  min-width: 34px;
-  text-align: center;
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Segmented tier picker. */
-.sched-seg {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  overflow: hidden;
-}
-
-.sched-seg button {
-  appearance: none;
-  border: none;
-  border-right: 1px solid var(--border);
-  background: none;
-  cursor: pointer;
-  padding: 6px 11px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.sched-seg button:last-child {
-  border-right: none;
-}
-
-.sched-seg button:hover:not(:disabled) {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.sched-seg button[aria-pressed="true"] {
-  background: var(--accent);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.sched-seg button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.sched-chart-cap {
-  display: flex;
-  justify-content: space-between;
-  margin-top: var(--space-1);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.sched-note {
-  margin: var(--space-2) 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* Value and its delta/sparkline share a baseline inside a stat tile. */
-.sched-stat-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.sched-stat-row .spark {
-  flex: none;
-}
-
-.sched-delta-good {
-  font-size: 12px;
-  color: var(--ok-text);
-  padding-bottom: 3px;
-}
-
-/* Per-vendor request budget, above the feed table. Costed in the same green as
-   the latency delta, but the opposite sign is a real cost rather than merely
-   "not an improvement", so it gets its own colour instead of falling back to
-   .secondary the way latencyDelta does. */
-.sched-delta-cost {
-  font-size: 12px;
-  color: var(--serious);
-  padding-bottom: 3px;
-}
-
-.sched-vendors {
-  margin-top: var(--space-3);
-}
-
-.sched-vendors > header h2 {
-  margin: 0;
-  font-size: 14px;
-}
-
-/* Recommended total and its percentage delta share one right-aligned cell, so
-   the numbers stay in a single tabular column with the delta trailing. */
-.sched-budget-cell {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-/* A totals row is a summary, not a control: it borrows the group-row shading
-   for weight but must not read as clickable the way a vendor row does. */
-table.data tr.sched-vendor-total td {
-  cursor: default;
-}
-
 /* ---- Postings labeling queue (.plist-*) --------------------------------
-   Namespaced like .sched-* above: these are the /postings page's overrides
-   and never leak into Feeds or Scheduler. */
+   Namespaced so these overrides never leak into Feeds or Scheduler. */
 
 .plist {
   display: flex;
@@ -1943,6 +1729,25 @@ table.data tr.sched-vendor-total td {
 .tok-check input {
   display: block;
   cursor: pointer;
+}
+
+.tok-note-cell {
+  min-width: 12rem;
+}
+
+.tok-note-input {
+  width: 100%;
+  min-width: 12rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 5px 7px;
+  font: inherit;
+}
+
+.tok-note-input.saving {
+  opacity: 0.6;
 }
 
 .tok-foot {

@@ -14,6 +14,9 @@ if (!ref) {
   // Top-level await keeps the load event behind the first full render.
   await createInspector(root, {
     standalone: true,
+    onMute: () => {
+      location.href = "/";
+    },
     onDrop: () => {
       location.href = "/";
     },

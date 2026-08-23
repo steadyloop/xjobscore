@@ -3,8 +3,8 @@
 The inspector re-runs a source's registered ``parse`` over freshly harvested
 items so both pipeline stages can be verified from one fetch. Classification
 mirrors silver.process exactly -- unsupported / secondhand / company fallback
--- but company resolution consults the SQLite registry mirror instead of
-PostgreSQL, and per-item parser exceptions are captured rather than
+-- but company resolution consults a PostgreSQL alias snapshot, and per-item
+parser exceptions are captured rather than
 propagated: one malformed payload must not hide the other results.
 """
 
@@ -49,7 +49,7 @@ def _company_resolution(
                 "company_name": company_name,
                 "company_raw": posting.company_raw,
             }
-    if feed.source_type in {"ATS", "Direct"} and feed.company_id is not None:
+    if feed.type in {"ATS", "Direct"} and feed.company_id is not None:
         return {
             "status": "fallback",
             "company_id": feed.company_id,

@@ -1,8 +1,8 @@
 """PostgreSQL policy reads and writes -- the inspector's only PG coupling.
 
-The inspector may WRITE four operator-owned things: ``feed.enabled``,
+The inspector may WRITE four operator-owned things: ``feed.polling``,
 ``feed.interval_s``, ``feed.paused_at``, and ``scheduler_control.running``
-(plus feed import via the registry upsert). The runtime columns on ``feed``
+(plus explicit feed import and drop). The runtime columns on ``feed``
 -- etag, res_hash, strikes, hold_until -- belong to the production worker and
 are read here for display only. Writing them would corrupt run.py's change
 detection and 304 handling.
@@ -158,7 +158,7 @@ class PolicyStore:
                 # exposes the worker-owned last_* columns.
                 rows = await conn.fetch(
                     """
-                    SELECT f.id, f.source, f.key, f.enabled,
+                    SELECT f.id, f.source, f.key, f.polling AS enabled,
                            f.interval_s, f.strikes, f.due_at, f.hold_until,
                            f.paused_at, f.last_poll_at, f.last_change_at,
                            f.etag IS NOT NULL AS has_etag
@@ -185,6 +185,51 @@ class PolicyStore:
             }
             for row in rows
         }
+
+    async def company_alias_index(self) -> dict[str, tuple[int, str]]:
+        """Snapshot PostgreSQL aliases for one synchronous parse preview."""
+        pool = await self.pool_or_none()
+        if pool is None:
+            return {}
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT a.alias_norm, c.id AS company_id, c.name AS company_name
+                    FROM alias a
+                    JOIN company c ON c.id = a.company_id
+                    """
+                )
+        except Exception as exc:
+            self._error = str(exc)
+            return {}
+        return {
+            row["alias_norm"]: (int(row["company_id"]), row["company_name"])
+            for row in rows
+        }
+
+    async def company_descriptions(self, company_ids: set[int]) -> dict[int, str]:
+        """Read non-empty company descriptions from PostgreSQL."""
+        if not company_ids:
+            return {}
+        pool = await self.pool_or_none()
+        if pool is None:
+            return {}
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, description
+                    FROM company
+                    WHERE description IS NOT NULL AND description <> ''
+                      AND id = ANY($1::bigint[])
+                    """,
+                    sorted(company_ids),
+                )
+        except Exception as exc:
+            self._error = str(exc)
+            return {}
+        return {int(row["id"]): row["description"] for row in rows}
 
     async def set_enabled(self, source: str, key: str, enabled: bool) -> dict[str, Any]:
         pool = await self._ensure_pool()
@@ -281,7 +326,7 @@ class PolicyStore:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT f.id, f.enabled,
+                SELECT f.id, f.polling AS enabled,
                        f.paused_at,
                        f.hold_until > now() AS held
                 FROM feed f
@@ -293,7 +338,7 @@ class PolicyStore:
             if row is None:
                 raise FeedNotInPostgres(f"{source}:{key}")
             if not row["enabled"]:
-                # claim_due_feeds filters on f.enabled (store.py:109), so this
+                # claim_due_feeds filters on f.polling (store.py:109), so this
                 # used to answer 200 and then never poll.
                 raise PollNowRefused(
                     f"{source}:{key} is disabled; enable it before polling",
@@ -339,7 +384,7 @@ class PolicyStore:
                 """
                 WITH bumped AS (
                     UPDATE feed f SET due_at = now()
-                    WHERE f.enabled
+                    WHERE f.polling
                       AND f.paused_at IS NULL
                       AND f.due_at > now()
                       AND ($1::text IS NULL OR f.source = $1)
@@ -354,10 +399,28 @@ class PolicyStore:
     async def import_feed(self, source: str, key: str, enabled: bool = True) -> dict[str, Any]:
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            feed_id = await store.upsert_registry_feed(
+            feed_id = await store.import_feed(
                 conn, source=source, key=key, enabled=enabled
             )
         return {"feed_id": feed_id, "enabled": enabled}
+
+    async def drop_feed(self, source: str, key: str) -> dict[str, Any]:
+        """Remove an imported feed while leaving its token unmuted.
+
+        The database cascade removes poll observations with the feed. The token
+        row is intentionally untouched, so a later explicit import or token
+        heartbeat can bring the feed back.
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            feed_id = await conn.fetchval(
+                "DELETE FROM feed WHERE source = $1 AND key = $2 RETURNING id",
+                source,
+                key,
+            )
+        if feed_id is None:
+            raise FeedNotInPostgres(f"{source}:{key}")
+        return {"feed_id": int(feed_id), "dropped": True}
 
     async def import_feeds(
         self, identities: list[tuple[str, str]], *, enabled: bool = False
@@ -381,7 +444,7 @@ class PolicyStore:
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                imported, existing = await store.upsert_registry_feeds(
+                imported, existing = await store.import_feeds(
                     conn, deduped, enabled=enabled
                 )
         return {

@@ -1,13 +1,14 @@
 /* Tokens page: the discovery inventory, and enabling live ATS tokens into feed.
  *
  * `token` holds every board key ever seen; `feed` is the set the scheduler
- * polls. The default view is the gap between them -- live tokens with no feed
- * row -- because that is the only list anyone comes here to act on.
+ * polls. The default view is inactive live tokens; the status filter can also
+ * show muted, dead, or all tokens (including actively polled live ones).
  */
 
 import { api, isDegraded } from "/static/shared/api.js";
 import { el, formatCount, relativeTime } from "/static/shared/format.js";
 import { renderNav } from "/static/shared/nav.js";
+import { heartbeatPresentation, tokenPromotable } from "/static/tokens/model.mjs";
 
 // Show all tokens without pagination
 const ROW_LIMIT = 5000;
@@ -19,7 +20,7 @@ const ROW_LIMIT = 5000;
 const VALIDATE_CHUNK = 20;
 
 const state = {
-  filter: "all",
+  filter: "inactive",
   // Vendor to narrow to, client-side (the whole inventory is already on
   // screen -- see ROW_LIMIT). Empty string = all vendors.
   ats: "",
@@ -35,9 +36,10 @@ const state = {
   firstLoad: true,
   groupValidate: new Map(), // vendor -> {completed, total}
   validateAllRunning: false,
+  heartbeat: null,
 };
 
-const COLUMN_COUNT = 10;
+const COLUMN_COUNT = 12;
 
 const nodes = {
   filter: document.getElementById("status-feed-filter"),
@@ -51,6 +53,11 @@ const nodes = {
   selectAll: document.getElementById("select-all"),
   selectionCount: document.getElementById("selection-count"),
   promote: document.getElementById("promote-btn"),
+  heartbeatDot: document.getElementById("heartbeat-dot"),
+  heartbeatState: document.getElementById("heartbeat-state"),
+  heartbeatMeta: document.getElementById("heartbeat-meta"),
+  heartbeatFacts: document.getElementById("heartbeat-facts"),
+  heartbeatRun: document.getElementById("heartbeat-run"),
   validateAll: document.getElementById("validate-all-btn"),
   range: document.getElementById("range"),
   truncated: document.getElementById("truncated-banner"),
@@ -85,6 +92,25 @@ async function load() {
   }
 }
 
+async function loadHeartbeat() {
+  try {
+    const previousCompletion = state.heartbeat?.last_completed_at;
+    const payload = await api("/api/tokens/heartbeat");
+    state.heartbeat = payload;
+    renderHeartbeat();
+    if (previousCompletion && payload.last_completed_at !== previousCompletion) {
+      await load();
+    }
+  } catch (error) {
+    state.heartbeat = {
+      state: "offline",
+      runner_online: false,
+      last_error: error.message ?? String(error),
+    };
+    renderHeartbeat();
+  }
+}
+
 /* The counts header is served alongside the list, so re-ask for it with the
    smallest page the API will give rather than reloading the table underneath
    someone who is still working through it. */
@@ -101,7 +127,7 @@ async function refreshCounts() {
 async function enableTokens() {
   const tokens = [...state.selected.values()].filter(t => {
     const row = state.rows.find(r => r.ats === t.ats && r.token === t.token);
-    return row && row.status !== "dead" && row.category === "ATS";
+    return row && tokenPromotable(row);
   });
   if (!tokens.length) return;
   nodes.promote.disabled = true;
@@ -110,15 +136,30 @@ async function enableTokens() {
     showError(null);
     state.selected.clear();
     await load();
+    await loadHeartbeat();
     note(
-      `Enabled ${formatCount(result.imported)} to feed` +
-        (result.existing ? `, ${formatCount(result.existing)} already there` : "") +
-        (result.skipped_non_ats ? `, ${formatCount(result.skipped_non_ats)} skipped (non-ATS)` : "")
+      `Promoted ${formatCount(result.imported)} selected tokens` +
+        (result.skipped ? `; ${formatCount(result.skipped)} no longer eligible` : "")
     );
   } catch (error) {
     showError(error);
   } finally {
     syncPromote();
+  }
+}
+
+async function runHeartbeat() {
+  nodes.heartbeatRun.disabled = true;
+  nodes.heartbeatRun.textContent = "Queueing…";
+  try {
+    state.heartbeat = await api("/api/tokens/heartbeat/run", { method: "POST" });
+    showError(null);
+    renderHeartbeat();
+    note("Token heartbeat queued");
+  } catch (error) {
+    showError(error);
+  } finally {
+    await loadHeartbeat();
   }
 }
 
@@ -132,6 +173,7 @@ async function validateToken(row) {
       renderRows();
       syncPromote();
       await refreshCounts();
+      await loadHeartbeat();
     }
   } catch (error) {
     showError(error);
@@ -153,7 +195,7 @@ async function validateVendor(vendor, rows) {
     for (let i = 0; i < identities.length; i += VALIDATE_CHUNK) {
       const chunk = identities.slice(i, i + VALIDATE_CHUNK);
       const result = await api("/api/tokens/validate", { body: { tokens: chunk } });
-      // Validation only records liveness. Dropping a feed is a deliberate,
+      // Validation only records liveness. Muting a token is a deliberate,
       // separate action on the Feeds page -- a probe can be wrong (a
       // transient block, a markup change), so it must never delete on its own.
       for (const validation of result.results ?? []) {
@@ -189,6 +231,39 @@ function render(payload) {
   nodes.empty.hidden = state.rows.length > 0;
   renderRange();
   syncPromote();
+}
+
+function renderHeartbeat() {
+  const heartbeat = state.heartbeat;
+  if (!heartbeat) return;
+  const presentation = heartbeatPresentation(heartbeat.state);
+  nodes.heartbeatDot.dataset.state = presentation.tone;
+  nodes.heartbeatState.textContent = presentation.label;
+
+  const timing = [];
+  if (heartbeat.last_completed_at) {
+    timing.push(`Last run ${relativeTime(heartbeat.last_completed_at)}`);
+  }
+  if (heartbeat.due_at && heartbeat.state !== "running") {
+    timing.push(`Next run ${relativeTime(heartbeat.due_at)}`);
+  }
+  nodes.heartbeatMeta.textContent = timing.join(" · ");
+
+  const failed = Boolean(heartbeat.last_error);
+  nodes.heartbeatFacts.dataset.error = failed ? "true" : "false";
+  nodes.heartbeatFacts.textContent = failed
+    ? heartbeat.last_error
+    : `${formatCount(heartbeat.eligible)} eligible · Last batch: ` +
+      `${formatCount(heartbeat.last_validated)} checked · ` +
+      `${formatCount(heartbeat.last_promoted)} promoted`;
+
+  const runnable = heartbeat.postgres?.connected && heartbeat.runner_online
+    && heartbeat.state !== "running";
+  nodes.heartbeatRun.disabled = !runnable;
+  nodes.heartbeatRun.textContent = heartbeat.state === "running" ? "Running…" : "Run now";
+  nodes.heartbeatRun.title = heartbeat.runner_online
+    ? "Queue one token heartbeat batch"
+    : "The token heartbeat runner is offline";
 }
 
 /* Grouped by vendor. Vendors are ordered alphabetically regardless of the
@@ -316,17 +391,61 @@ function renderCounts(counts) {
     `${formatCount(counts.total)} tokens`,
     `${formatCount(counts.live)} live`,
     `${formatCount(counts.dead)} dead`,
+    `${formatCount(counts.muted)} muted`,
     `${formatCount(counts.promotable)} live and unpromoted`,
   ].join(" · ");
+}
+
+async function saveNote(row, input) {
+  const previous = row.note ?? "";
+  const next = input.value.trim() || null;
+  if (next === (row.note ?? null)) return;
+
+  input.disabled = true;
+  input.classList.add("saving");
+  try {
+    const saved = await api("/api/tokens/note", {
+      method: "PUT",
+      body: { ats: row.ats, token: row.token, note: next },
+    });
+    row.note = saved.note;
+    input.value = saved.note ?? "";
+  } catch (error) {
+    input.value = previous;
+    showError(error);
+  } finally {
+    input.disabled = false;
+    input.classList.remove("saving");
+  }
+}
+
+async function setMuted(row, input) {
+  const previous = Boolean(row.muted);
+  input.disabled = true;
+  try {
+    const saved = await api("/api/tokens/muted", {
+      method: "PUT",
+      body: { ats: row.ats, token: row.token, muted: input.checked },
+    });
+    row.muted = saved.muted;
+    if (saved.feed_dropped) row.feed_state = "none";
+    state.selected.delete(identity(row));
+    await Promise.all([load(), loadHeartbeat()]);
+    note(saved.muted ? "Token muted" : "Token unmuted");
+  } catch (error) {
+    input.checked = previous;
+    showError(error);
+  } finally {
+    input.disabled = false;
+    syncPromote();
+  }
 }
 
 function renderRow(row) {
   const key = identity(row);
   const check = el("input", {
     type: "checkbox",
-    // Enable is ATS-only, and never touches a token that already has a feed
-    // row -- dropping that row is a Feeds page action, not this checkbox.
-    disabled: row.status === "dead" || row.category !== "ATS",
+    disabled: !tokenPromotable(row),
     onchange: (event) => {
       if (event.target.checked) {
         state.selected.set(key, { ats: row.ats, token: row.token });
@@ -338,8 +457,38 @@ function renderRow(row) {
   });
   check.checked = state.selected.has(key);
 
+  const mutedInput = el("input", {
+    type: "checkbox",
+    checked: Boolean(row.muted),
+    "aria-label": `Mute ${row.ats} ${row.token}`,
+    onchange: (event) => setMuted(row, event.target),
+  });
+
   const actionTd = el("td", {});
   actionTd.append(validateButton(row));
+
+  const noteInput = el("input", {
+    class: "tok-note-input",
+    type: "text",
+    value: row.note ?? "",
+    placeholder: "Add note…",
+    title: "Saves when focus leaves this field",
+    "aria-label": `Note for ${row.ats} ${row.token}`,
+  });
+  noteInput.addEventListener("change", () => saveNote(row, noteInput));
+  noteInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      noteInput.blur();
+    }
+  });
+
+  const company = el(
+    "span",
+    { class: "tok-company" },
+    row.company ?? el("span", { class: "muted" }, "—"),
+    ...(row.tags ?? []).map(tagBadge)
+  );
 
   return el(
     "tr",
@@ -348,12 +497,26 @@ function renderRow(row) {
     actionTd,
     el("td", { class: "mono" }, row.ats),
     el("td", { class: "mono" }, row.token),
-    el("td", {}, row.company ?? el("span", { class: "muted" }, "—")),
+    el("td", {}, company),
     el("td", {}, chip(row.status)),
     el("td", {}, chip(row.feed_state)),
+    el("td", {}, el("label", { class: "tok-muted-toggle" }, mutedInput, row.muted ? "Muted" : "")),
     el("td", { class: "muted" }, row.source ?? "registry"),
+    el("td", { class: "tok-note-cell" }, noteInput),
     el("td", { class: "secondary" }, row.discovered_at ? relativeTime(row.discovered_at) : "—"),
     el("td", { class: "secondary" }, row.checked_at ? relativeTime(row.checked_at) : "—")
+  );
+}
+
+function tagBadge(tag) {
+  return el(
+    "span",
+    {
+      class: "tok-tag",
+      "data-tag": tag,
+      title: `${tag.toUpperCase()} token`,
+    },
+    tag.toLowerCase()
   );
 }
 
@@ -388,17 +551,17 @@ function renderRange() {
 function syncPromote() {
   const liveSelected = [...state.selected.values()].filter(t => {
     const row = state.rows.find(r => r.ats === t.ats && r.token === t.token);
-    return row && row.status !== "dead" && row.category === "ATS";
+    return row && tokenPromotable(row);
   });
   const count = liveSelected.length;
   nodes.promote.disabled = count === 0;
   nodes.promote.textContent = count
-    ? `Enable ${formatCount(count)} → feed`
-    : "Enable → feed";
+    ? `Promote ${formatCount(count)} selected`
+    : "Promote selected";
   nodes.selectionCount.textContent = state.selected.size ? `${formatCount(state.selected.size)} selected (${formatCount(count)} promotable)` : "";
   // Based on all selectable rows in view, not just the ones currently
   // rendered -- collapsed vendor groups have no checkboxes in the DOM at all.
-  const selectable = visibleRows().filter((row) => row.status !== "dead");
+  const selectable = visibleRows().filter(tokenPromotable);
   const allSelected = selectable.length > 0 && selectable.every((row) => state.selected.has(identity(row)));
   nodes.selectAll.checked = allSelected;
   nodes.selectAll.indeterminate = !allSelected && selectable.some((row) => state.selected.has(identity(row)));
@@ -428,7 +591,7 @@ function note(message) {
 nodes.selectAll.addEventListener("change", (event) => {
   const checked = event.target.checked;
   for (const row of visibleRows()) {
-    if (row.status === "dead") continue;
+    if (!tokenPromotable(row)) continue;
     const key = identity(row);
     if (checked) state.selected.set(key, { ats: row.ats, token: row.token });
     else state.selected.delete(key);
@@ -451,6 +614,7 @@ nodes.filter.addEventListener("change", (event) => {
 });
 
 nodes.promote.addEventListener("click", enableTokens);
+nodes.heartbeatRun.addEventListener("click", runHeartbeat);
 
 nodes.validateAll.addEventListener("click", async () => {
   if (!state.rows.length) return;
@@ -475,3 +639,5 @@ nodes.validateAll.addEventListener("click", async () => {
 });
 
 load();
+loadHeartbeat();
+setInterval(loadHeartbeat, 30_000);

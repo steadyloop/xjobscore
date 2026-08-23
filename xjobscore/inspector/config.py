@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -122,19 +121,28 @@ def runner_lease_s() -> int:
     return int(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_LEASE_S", "3600"))
 
 
-def source_config(source: str) -> dict:
-    """Optional local JSON config for a non-ATS source."""
-    name = f"XJOBSCORE_INSPECTOR_{source.upper()}_CONFIG"
-    value = os.environ.get(name)
-    if not value:
-        return {}
-    try:
-        config = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{name} must contain a JSON object") from exc
-    if not isinstance(config, dict):
-        raise RuntimeError(f"{name} must contain a JSON object")
-    return config
+def token_heartbeat_enabled() -> bool:
+    return _env_bool("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", False)
+
+
+def token_heartbeat_tick_s() -> float:
+    return float(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_TICK_S", "60"))
+
+
+def token_heartbeat_batch() -> int:
+    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_BATCH", "20"))
+
+
+def token_heartbeat_interval_s() -> int:
+    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_INTERVAL_S", "21600"))
+
+
+def token_heartbeat_retry_s() -> int:
+    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_RETRY_S", "900"))
+
+
+def token_heartbeat_lease_s() -> int:
+    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_LEASE_S", "900"))
 
 
 def persistence_dsn() -> str:
@@ -155,9 +163,8 @@ def persistence_dsn() -> str:
 def persistence_schema() -> str:
     """PostgreSQL schema owning the inspector's staging and history tables.
 
-    Never ``public``: the inspector mirrors the registry into its own
-    ``company``/``alias`` tables, which would otherwise overwrite the core
-    pipeline's canonical rows of the same name.
+    Never ``public``: the inspector staging tables must not collide with the
+    core pipeline's tables.
     """
     name = os.environ.get("XJOBSCORE_INSPECTOR_SCHEMA", "inspector")
     if not re.fullmatch(r"[a-z_][a-z0-9_]*", name):

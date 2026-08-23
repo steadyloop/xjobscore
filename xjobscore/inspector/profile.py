@@ -4,8 +4,8 @@ Everything here is derived at request time from the adapter config tables --
 nothing is persisted. The ``json-api | docxtract | bespoke`` adapter axis says
 how a source is *implemented*, not what kind of board it is: the first two are
 config rows driven by a generic module, and ``bespoke`` means the transport
-needed its own hand-written adapter. Board kind is a separate field entirely,
-the registry's ``source_type`` (ATS / Board / Direct). The remaining vocabulary
+needed its own hand-written adapter. Board kind is the PostgreSQL
+``feed.type`` field (ATS / Board / Direct). The remaining vocabulary
 reuses what the sources tree already names: the
 ``json | html | jsonld | xml`` response formats of ``unified_v2.spec``, and the
 archetypes exercised by ``sources/tests/test_unified_v2_archetypes.py``.

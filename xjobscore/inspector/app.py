@@ -38,9 +38,19 @@ from xjobscore.inspector.review import query as review_query
 from xjobscore.inspector.review import set_labels as review_set_labels
 from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.inspector.service import InspectorService
+from xjobscore.inspector.token_heartbeat import (
+    HeartbeatAlreadyRunning,
+    TokenHeartbeatRunner,
+    enqueue_now as token_heartbeat_enqueue,
+    heartbeat_snapshot as token_heartbeat_snapshot,
+)
 from xjobscore.inspector.tokens import query as tokens_query
+from xjobscore.inspector.tokens import promote_verified as tokens_promote_verified
+from xjobscore.inspector.tokens import set_muted as tokens_set_muted
+from xjobscore.inspector.tokens import set_note as tokens_set_note
+from xjobscore.inspector.tokens import set_tags as tokens_set_tags
 from xjobscore.inspector import validator
-from xjobscore.sources import UnknownSource, source_type
+from xjobscore.sources import UnknownSource
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -124,9 +134,20 @@ class TokenValidateBody(BaseModel):
     vendor: str | None = None
 
 
-class FeedsDeleteBody(BaseModel):
-    """Delete feeds by ID (e.g., after tokens are marked dead)."""
-    feed_ids: list[int]
+class TokenNoteBody(TokenIdentity):
+    """The operator note attached to a token; null or blank clears it."""
+
+    note: str | None = None
+
+
+class TokenTagsBody(TokenIdentity):
+    """Compact operator tags; an empty list clears them."""
+
+    tags: list[str]
+
+
+class TokenMutedBody(TokenIdentity):
+    muted: bool
 
 
 def _policy_error(exc: Exception) -> HTTPException:
@@ -157,6 +178,7 @@ def create_app(
     user_agent: str | None = None,
     policy: Any | None = None,
     runner: Any | None = None,
+    token_runner: Any | None = None,
     gold_job: Any | None = None,
 ) -> FastAPI:
     """Build an inspector app, optionally with injected test collaborators."""
@@ -165,14 +187,14 @@ def create_app(
         config.persistence_dsn(), schema=config.persistence_schema()
     )
     policy_store = policy if policy is not None else PolicyStore(config.dsn_or_none())
-    # The catalog borrows the policy pool rather than opening its own, same as
-    # the other read-only companions, so feed inventory comes from PostgreSQL
-    # when it is up and falls back to the TOML registry when it is not.
+    # The catalog borrows the policy pool rather than opening its own. Feed
+    # inventory is PostgreSQL-only.
     database = catalog if catalog is not None else CatalogDB(policy_store)
     inspector = InspectorService(
         database,
         user_agent=user_agent or config.user_agent(),
         result_store=store,
+        company_store=policy_store,
     )
     # Off by default (config.runner_enabled()): every test process and every
     # dev laptop's inspector must stay inert unless someone opts in. See
@@ -185,6 +207,15 @@ def create_app(
         batch=config.runner_batch(),
         lease_seconds=config.runner_lease_s(),
     )
+    heartbeat_runner = token_runner if token_runner is not None else TokenHeartbeatRunner(
+        policy_store,
+        enabled=config.token_heartbeat_enabled(),
+        tick_s=config.token_heartbeat_tick_s(),
+        batch=config.token_heartbeat_batch(),
+        interval_seconds=config.token_heartbeat_interval_s(),
+        retry_seconds=config.token_heartbeat_retry_s(),
+        lease_seconds=config.token_heartbeat_lease_s(),
+    )
     dedup_job = gold_job if gold_job is not None else GoldJob(policy_store)
 
     @asynccontextmanager
@@ -194,8 +225,10 @@ def create_app(
             await store.initialize()
             await policy_store.start()
             await scheduler_runner.start()
+            await heartbeat_runner.start()
             yield
         finally:
+            await heartbeat_runner.stop()
             await scheduler_runner.stop()
             await policy_store.close()
             await store.close()
@@ -207,6 +240,7 @@ def create_app(
     application.state.inspector = inspector
     application.state.policy = policy_store
     application.state.scheduler_runner = scheduler_runner
+    application.state.token_heartbeat_runner = heartbeat_runner
     application.state.gold_job = dedup_job
 
     async def merged_feed_rows() -> list[dict[str, Any]]:
@@ -230,7 +264,7 @@ def create_app(
     def scheduled_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Scheduler-page rows: feeds production is actually polling.
 
-        ``feed.enabled`` *is* the membership test. The Feeds page owns it end to
+        ``feed.polling`` *is* the membership test. The Feeds page owns it end to
         end -- its toggle imports the feed on first flip and switches it off
         afterwards -- so enabling a feed there is what puts it on the Scheduler,
         and disabling it is what takes it off. Nothing on the Scheduler widens
@@ -464,25 +498,6 @@ def create_app(
             raise _policy_error(exc) from exc
         return {**result, "unknown": unknown}
 
-    @application.post("/api/feeds/bulk-delete")
-    async def delete_feeds(body: FeedsDeleteBody) -> dict[str, Any]:
-        """Delete feeds by ID (e.g., after tokens are marked dead)."""
-        if not body.feed_ids:
-            raise HTTPException(status_code=400, detail="No feeds requested")
-        pool = await _public_pool()
-        try:
-            # Delete the feeds and any associated policies
-            await pool.execute(
-                "DELETE FROM feed WHERE id = ANY($1)",
-                body.feed_ids,
-            )
-            database.invalidate()
-            return {"deleted": len(body.feed_ids)}
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
     @application.post("/api/feeds/{feed_ref}/import")
     async def import_feed(
         feed_ref: str, body: ImportOptions | None = None
@@ -496,19 +511,26 @@ def create_app(
         except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
 
+    @application.delete("/api/feeds/{feed_ref}")
+    async def drop_feed(feed_ref: str) -> dict[str, Any]:
+        """Drop a feed without muting its discovery token."""
+        row = await configured_feed(feed_ref)
+        try:
+            result = await policy_store.drop_feed(row["source"], row["key"])
+        except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
+            raise _policy_error(exc) from exc
+        invalidate = getattr(database, "invalidate", None)
+        if invalidate is not None:
+            invalidate()
+        return {"feed_ref": feed_ref, **result}
+
     # --- Scheduler: production poll telemetry ------------------------------
     # Reads public.poll_observation, which run.py appends to once per completed
     # poll. Every response still has to be correct with the table absent,
     # present but empty, and populated -- see `telemetry_available`.
 
     async def scheduler_rows(current) -> tuple[list[dict[str, Any]], bool]:
-        """Imported feeds, each enriched with poll telemetry and its estimates.
-
-        Returns the rows plus whether poll_observation exists at all. Two passes
-        over the rows are needed: the per-source prior is the median λ of that
-        source's own feeds, so every raw λ has to be known before any of them can
-        be shrunk.
-        """
+        """Imported feeds enriched with production telemetry and status."""
         rows = scheduled_rows(await merged_feed_rows())
         pool = await policy_store.pool_or_none()
         daily = rollups = postings = None
@@ -518,7 +540,6 @@ def create_app(
             postings = await telemetry.posting_stats_by_source(pool, now=current)
         available = daily is not None and rollups is not None
 
-        raw_by_source: dict[str, list[float | None]] = {}
         for row in rows:
             feed_id = (row.get("policy") or {}).get("feed_id")
             spark = (daily or {}).get(feed_id) if feed_id is not None else None
@@ -529,36 +550,27 @@ def create_app(
             # job_posting keys on the source namespace, not feed_id -- see
             # telemetry.posting_stats_by_source.
             row["postings"] = (postings or {}).get(f"{row['source']}:{row['key']}")
-            row["_lambda_raw"] = scheduling.ewma_lambda(spark)
-            raw_by_source.setdefault(row["source"], []).append(row["_lambda_raw"])
-
-        priors = scheduling.source_priors(raw_by_source)
-        for row in rows:
-            tel = row["telemetry"]
-            prior = scheduling.prior_for(row["source"], priors)
-            lam = scheduling.shrunk_lambda(
-                row.pop("_lambda_raw"),
-                (tel or {}).get("observed_days") or 0,
-                prior,
-            )
             interval_s = (row.get("policy") or {}).get("interval_s")
-            ideal_s = scheduling.ideal_interval_s(lam)
             row["sched"] = {
-                "lambda": lam,
-                "prior": prior,
-                "ideal_interval_s": ideal_s,
-                "verdict": scheduling.interval_verdict(interval_s, ideal_s),
                 "requests_per_day": scheduling.requests_per_day(interval_s),
-                "status": scheduling.feed_status(row.get("policy"), tel, current),
+                "status": scheduling.feed_status(row.get("policy"), current),
             }
 
-        # Busiest first; unknown rates sort last rather than as zero.
+        priority = {
+            "backing_off": 0,
+            "stale": 1,
+            "never_polled": 2,
+            "healthy": 3,
+            "paused": 4,
+            "disabled": 5,
+            "unknown": 6,
+        }
         rows.sort(
             key=lambda row: (
-                row["sched"]["lambda"] is None,
-                -(row["sched"]["lambda"] or 0.0),
+                priority[row["sched"]["status"]["state"]],
+                (row.get("policy") or {}).get("last_poll_at") or "",
                 row["source"],
-                row["key"],
+                (row.get("company_name") or row["key"]).casefold(),
             )
         )
         return rows, available
@@ -572,7 +584,7 @@ def create_app(
     @application.get("/api/scheduler/overview")
     async def scheduler_overview() -> dict[str, Any]:
         current = now_utc()
-        rows, available = await scheduler_rows(current)
+        rows = scheduled_rows(await merged_feed_rows())
         pool = await policy_store.pool_or_none()
         tiles = (
             await telemetry.global_tiles(pool, now=current)
@@ -581,11 +593,11 @@ def create_app(
         )
         counts: dict[str, int] = {}
         for row in rows:
-            state = row["sched"]["status"]["state"]
+            state = scheduling.feed_status(row.get("policy"), current)["state"]
             counts[state] = counts.get(state, 0) + 1
         return {
             "postgres": policy_store.status(),
-            "telemetry_available": available,
+            "telemetry_available": tiles is not None,
             "feed_count": len(rows),
             "tiles": tiles,
             "counts_by_status": counts,
@@ -642,6 +654,19 @@ def create_app(
             "postgres": policy_store.status(),
             "telemetry_available": available,
             "feed": row,
+            "events": events or [],
+        }
+
+    @application.get("/api/scheduler/events")
+    async def scheduler_events(limit: int = 50) -> dict[str, Any]:
+        """Latest polls across the whole fleet -- the live fetch log."""
+        pool = await policy_store.pool_or_none()
+        events = None
+        if pool is not None:
+            events = await telemetry.recent_events(pool, limit=max(1, min(limit, 200)))
+        return {
+            "postgres": policy_store.status(),
+            "telemetry_available": events is not None,
             "events": events or [],
         }
 
@@ -1081,7 +1106,7 @@ def create_app(
 
     @application.get("/api/tokens")
     async def tokens(
-        filter: str = "all",
+        filter: str = "inactive",
         limit: int = Query(default=50, ge=1, le=10000),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
@@ -1105,29 +1130,114 @@ def create_app(
 
     @application.post("/api/tokens/enable")
     async def enable_tokens(body: TokenEnableBody) -> dict[str, Any]:
-        """Create an enabled feed row for each ATS token, leaving existing ones be.
-
-        Non-ATS identities (Direct, Board) are out of scope here -- they are
-        dropped before ever reaching the store, and counted separately, so a
-        stray one in the request can't silently create a feed row.
-        """
         if not body.tokens:
             raise HTTPException(status_code=400, detail="tokens must not be empty")
-        ats_identities = [
-            (entry.ats, entry.token)
-            for entry in body.tokens
-            if source_type(entry.ats) == "ATS"
-        ]
-        skipped_non_ats = len(body.tokens) - len(ats_identities)
+        identities = list(
+            dict.fromkeys((entry.ats, entry.token) for entry in body.tokens)
+        )
+        pool = await _public_pool()
         try:
-            result = await policy_store.import_feeds(ats_identities, enabled=True)
-        except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
-            raise _policy_error(exc) from exc
+            promoted = await tokens_promote_verified(pool, identities)
         except (OSError, asyncpg.PostgresError) as exc:
             raise HTTPException(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
             ) from exc
-        return {**result, "skipped_non_ats": skipped_non_ats}
+        return {
+            "requested": len(identities),
+            "imported": promoted,
+            "skipped": len(identities) - promoted,
+            "enabled": True,
+        }
+
+    async def heartbeat_payload() -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return {
+                "postgres": policy_store.status(),
+                **await token_heartbeat_snapshot(
+                    pool,
+                    current=now_utc(),
+                    configured=heartbeat_runner.enabled,
+                    offline_after_s=max(180, heartbeat_runner.tick_s * 3),
+                ),
+            }
+        except (OSError, asyncpg.PostgresError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.get("/api/tokens/heartbeat")
+    async def token_heartbeat_get() -> dict[str, Any]:
+        return await heartbeat_payload()
+
+    @application.post("/api/tokens/heartbeat/run", status_code=202)
+    async def token_heartbeat_run() -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            await token_heartbeat_enqueue(pool, now_utc())
+        except HeartbeatAlreadyRunning as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        heartbeat_runner.nudge()
+        return await heartbeat_payload()
+
+    @application.put("/api/tokens/note")
+    async def set_token_note(body: TokenNoteBody) -> dict[str, Any]:
+        """Save (or clear) the operator note for one existing token."""
+        pool = await _public_pool()
+        note = body.note.strip() if body.note and body.note.strip() else None
+        try:
+            saved = await tokens_set_note(
+                pool, ats=body.ats, token=body.token, note=note
+            )
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        if saved is None:
+            raise HTTPException(status_code=404, detail="Token not found")
+        return saved
+
+    @application.put("/api/tokens/tags")
+    async def set_token_tags(body: TokenTagsBody) -> dict[str, Any]:
+        pool = await _public_pool()
+        tags = list(dict.fromkeys(tag.strip() for tag in body.tags if tag.strip()))
+        try:
+            saved = await tokens_set_tags(
+                pool, ats=body.ats, token=body.token, tags=tags
+            )
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        if saved is None:
+            raise HTTPException(status_code=404, detail="Token not found")
+        return saved
+
+    @application.put("/api/tokens/muted")
+    async def set_token_muted(body: TokenMutedBody) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            saved = await tokens_set_muted(
+                pool,
+                ats=body.ats,
+                token=body.token,
+                muted=body.muted,
+            )
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        if saved is None:
+            raise HTTPException(status_code=404, detail="Token not found")
+        if saved["feed_dropped"]:
+            invalidate = getattr(database, "invalidate", None)
+            if invalidate is not None:
+                invalidate()
+        return saved
 
     @application.post("/api/tokens/validate")
     async def validate_tokens_endpoint(body: TokenValidateBody) -> dict[str, Any]:
@@ -1203,6 +1313,10 @@ def create_app(
     @application.get("/tokens")
     async def tokens_page():
         return FileResponse(STATIC_DIR / "tokens" / "index.html")
+
+    @application.get("/regex")
+    async def regex_page():
+        return FileResponse(STATIC_DIR / "regex" / "index.html")
 
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return application

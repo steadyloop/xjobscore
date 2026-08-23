@@ -4,17 +4,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from xjobscore.inspector.cache import RunSnapshot
-from xjobscore.inspector.db import CatalogDB, _id, feed_ref, registry_entries
+from xjobscore.inspector.db import CatalogDB, feed_ref
 from xjobscore.inspector.service import (
     HIDDEN_SOURCES,
     InspectorService,
     display_source,
-    source_category,
 )
-from xjobscore.records import Feed, Item, Record
+from xjobscore.records import Feed, Item, Posting, Record
 from xjobscore import sources
 from xjobscore.sources import docxtract, json_api
-from xjobscore.registry_loader import companies
 
 DOCXTRACT_CONFIGS = docxtract.CONFIGS
 JSON_API_CONFIGS = json_api.CONFIGS
@@ -209,74 +207,8 @@ async def test_smartrecruiters_options_reuse_prior_items(
     assert partial.network["summary"]["reused_item_count"] == 1
 
 
-def test_live_registry_sources_are_registered_and_company_keys_are_configured():
-    live = [entry for entry in registry_entries() if entry.verified]
-    refs = [feed_ref(entry.source, entry.key) for entry in registry_entries()]
-
-    assert {entry.source for entry in live} <= set(sources.SOURCES)
-    assert len(refs) == len(set(refs))
-    assert {"amazon", "apple"} <= set(JSON_API_CONFIGS)
-
-
-def test_document_sources_are_declared_in_the_registry():
-    declared_sources = set(sources.SOURCE_TYPES)
-
-    assert set(DOCXTRACT_CONFIGS) - HIDDEN_SOURCES <= declared_sources
-
-
-def test_single_feed_sources_are_embedded_in_the_registry():
-    entries_by_source = {entry.source: entry for entry in registry_entries()}
-
-    assert entries_by_source["amazon"].company_name == "Amazon"
-    assert entries_by_source["flyio"].key == "flyio"  # defaulted from the source name
-    # Boards name themselves through `description`; their employer is resolved
-    # per posting, so no feed-level company is declared.
-    assert entries_by_source["hn"].company_name is None
-    assert entries_by_source["hn"].description.startswith("Hacker News")
-    assert entries_by_source["unstop"].company_name is None
-    assert entries_by_source["unstop"].description
-
-
-async def test_feed_rows_include_registered_sources_without_a_feed(monkeypatch, store):
-    feed = Feed(id=1, source="inspector-test", key="demo", config={}, company_name="Demo Co")
-
-    async def harvest(_feed, _net):
-        return Record()
-
-    monkeypatch.setitem(sources.SOURCES, "unconfigured-inspector-test", harvest)
-    service = InspectorService(FakeDB(feed), user_agent="test", result_store=store)
-
-    rows = await service.feed_rows()
-    by_source = {row["source"]: row for row in rows}
-
-    assert by_source["inspector-test"]["configured"] is True
-    assert by_source["inspector-test"]["company_name"] == "Demo Co"
-    assert by_source["inspector-test"]["profile"] == {
-        "adapter": "bespoke", "formats": [], "flavor": None, "archetypes": [],
-    }
-    assert by_source["unconfigured-inspector-test"] == {
-        "feed_ref": None,
-        "source": "unconfigured-inspector-test",
-        "category": "Other",
-        "profile": {"adapter": "bespoke", "formats": [], "flavor": None, "archetypes": []},
-        "key": "",
-        "company_id": None,
-        "company_name": None,
-        # Not in the registry at all, so no source declaration to describe it.
-        "description": "",
-        "company_description": None,
-        "implemented": True,
-        "configured": False,
-        "enabled": False,
-        "complete": False,
-        "closes": False,
-        "credentialed": False,
-        "cadence_s": None,
-        "next_poll_at": None,
-        "source_registered": True,
-        "parser_registered": False,
-        "last_result": None,
-    }
+async def test_catalog_without_postgres_has_no_fallback():
+    assert await CatalogDB().all_feeds() == []
 
 
 async def test_feed_rows_hide_jsonld(monkeypatch, store):
@@ -304,21 +236,87 @@ async def test_feed_rows_resolve_company_description_by_id(store):
         company_id=42,
         company_name="Demo Co",
     )
-    pool = await store.pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"""
-            INSERT INTO {store.schema}.company(id, name, description)
-            VALUES (42, 'Demo Co', 'Builds useful testing tools. (Oakland)')
-            """
-        )
+    class CompanyStore:
+        async def company_descriptions(self, company_ids):
+            assert company_ids == {42}
+            return {42: "Builds useful testing tools. (Oakland)"}
 
     rows = await InspectorService(
-        FakeDB(feed), user_agent="test", result_store=store
+        FakeDB(feed),
+        user_agent="test",
+        result_store=store,
+        company_store=CompanyStore(),
     ).feed_rows()
     row = next(row for row in rows if row["feed_ref"] == feed_ref(feed.source, feed.key))
 
     assert row["company_description"] == "Builds useful testing tools. (Oakland)"
+
+
+async def test_parse_preview_resolves_company_from_postgres_alias_snapshot(
+    monkeypatch, store
+):
+    feed = Feed(id=1, source="alias-test", key="demo", type="Board")
+    now = datetime.now(timezone.utc)
+    await store.save(
+        RunSnapshot(
+            result_id="alias-preview",
+            feed_id=feed.id,
+            source=feed.source,
+            key=feed.key,
+            started_at=now,
+            finished_at=now,
+            elapsed_ms=1,
+            status="ok",
+            http_status=200,
+            item_count=1,
+            raw_size_bytes=1,
+            truncated=False,
+            error_class=None,
+            error_detail=None,
+            items=(
+                {
+                    "external_id": "job-1",
+                    "kind": "json",
+                    "payload": {},
+                    "raw_document": {},
+                },
+            ),
+            envelope={},
+            size_bytes=1,
+        )
+    )
+
+    def parse(_feed, item, _envelope):
+        return [
+            Posting(
+                external_id=item.external_id,
+                title="Engineer",
+                url_posting="https://example.test/job-1",
+                company_raw="Acme, Inc.",
+            )
+        ]
+
+    class CompanyStore:
+        async def company_alias_index(self):
+            return {"acme": (42, "Acme")}
+
+    monkeypatch.setitem(sources.PARSERS, feed.source, parse)
+    result = await InspectorService(
+        FakeDB(feed),
+        user_agent="test",
+        result_store=store,
+        company_store=CompanyStore(),
+    ).get_result(feed.id)
+
+    assert result is not None
+    assert result.parse_summary["resolved"] == 1
+    resolution = result.parse_items[0]["canonicals"][0]["company_resolution"]
+    assert resolution == {
+        "status": "resolved",
+        "company_id": 42,
+        "company_name": "Acme",
+        "company_raw": "Acme, Inc.",
+    }
 
 
 async def test_feed_rows_and_result_view_read_postgres_after_a_service_restart(store):
@@ -347,65 +345,6 @@ async def test_feed_rows_and_result_view_read_postgres_after_a_service_restart(s
     assert result.items == snapshot.items
 
 
-async def test_registry_feed_is_required_for_endpoint_specific_sources(monkeypatch):
-    async def harvest(_feed, _net):
-        return Record()
-
-    monkeypatch.setattr(sources, "SOURCES", {"greenhouse": harvest, "workatastartup": harvest})
-    monkeypatch.setattr("xjobscore.inspector.db.json_api.SPECS", {"greenhouse": {}})
-    monkeypatch.setattr("xjobscore.inspector.db.registry_entries", lambda: [])
-    monkeypatch.setattr("xjobscore.inspector.db.registry_feeds", lambda: [])
-    monkeypatch.setattr("xjobscore.inspector.db.config.source_config", lambda source: {"body": {}})
-
-    feeds = await CatalogDB().all_feeds()
-
-    assert [(feed.source, feed.key) for feed in feeds] == [("workatastartup", "workatastartup")]
-    assert feeds[0].config == {"body": {}}
-
-
-async def test_registry_owned_json_api_source_has_no_synthetic_feed(monkeypatch):
-    async def harvest(_feed, _net):
-        return Record()
-
-    monkeypatch.setattr(sources, "SOURCES", {"amazon": harvest, "workatastartup": harvest})
-    monkeypatch.setattr("xjobscore.inspector.db.json_api.SPECS", {"amazon": {}})
-    monkeypatch.setattr("xjobscore.inspector.db.config.source_config", lambda source: {})
-    monkeypatch.setattr("xjobscore.inspector.db.registry_entries", lambda: [])
-    monkeypatch.setattr("xjobscore.inspector.db.registry_feeds", lambda: [])
-
-    feeds = await CatalogDB().all_feeds()
-
-    assert [(feed.source, feed.key) for feed in feeds] == [("workatastartup", "workatastartup")]
-
-
-async def test_board_source_without_a_registry_feed_has_no_synthetic_feed(monkeypatch):
-    async def harvest(_feed, _net):
-        return Record()
-
-    monkeypatch.setattr(sources, "SOURCES", {"jsonld": harvest, "workatastartup": harvest})
-    monkeypatch.setattr("xjobscore.inspector.db.json_api.SPECS", {})
-    monkeypatch.setattr("xjobscore.inspector.db.docxtract.SPECS", {"jsonld": {}})
-    monkeypatch.setattr("xjobscore.inspector.db.registry_entries", lambda: [])
-    monkeypatch.setattr("xjobscore.inspector.db.registry_feeds", lambda: [])
-    monkeypatch.setattr("xjobscore.inspector.db.config.source_config", lambda source: {})
-
-    feeds = await CatalogDB().all_feeds()
-
-    assert [(feed.source, feed.key) for feed in feeds] == [("workatastartup", "workatastartup")]
-
-
-async def test_registry_feed_refs_round_trip_without_numeric_ids(monkeypatch):
-    monkeypatch.setattr("xjobscore.inspector.db.config.source_config", lambda source: {})
-    database = CatalogDB()
-    for feed in await database.all_feeds():
-        ref = feed_ref(feed.source, feed.key)
-        resolved = await database.get_feed_ref(ref)
-        assert resolved is not None
-        assert (resolved.source, resolved.key) == (feed.source, feed.key)
-
-    assert await database.get_feed_ref("0" * 64) is None
-
-
 def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
     static = Path(__file__).with_name("static")
     scripts = [
@@ -429,6 +368,48 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
     assert "await setFeedsEnabled(feeds, true)" in feeds_js
 
 
+def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
+    scheduler = Path(__file__).with_name("static") / "scheduler"
+    source = "\n".join(
+        (scheduler / name).read_text()
+        for name in ("index.html", "app.js", "model.mjs")
+    )
+    for removed in (
+        "ewma_" + "lambda",
+        "ideal_" + "interval_s",
+        "interval_" + "verdict",
+        "calibrat" + "ing",
+        "Recommended" + " tier",
+        chr(955),
+    ):
+        assert removed not in source
+
+    html = (scheduler / "index.html").read_text()
+    app = (scheduler / "app.js").read_text()
+    css = (scheduler / "styles.css").read_text()
+    assert '/static/scheduler/styles.css' in html
+    assert 'id="detail-drawer"' in html
+    assert 'id="bulk-dialog"' in html
+    assert 'id="vendor-summary"' in html
+    assert 'id="group-controls"' in html
+    assert 'id="vendor-panel"' not in html
+    assert 'id="filter-platform"' not in html
+    assert 'data-sort="vendor"' not in html
+    assert "vendorsExpanded" not in app
+    assert ".ops-vendor-item" not in css
+    # Selecting a feed only changes row selection and opens the drawer. Replacing
+    # the chunk-rendered tbody here used to collapse the table briefly, making
+    # the page jump on every feed click.
+    load_detail = app.split("async function loadDetail(", 1)[1].split("\n}\n", 1)[0]
+    select_feed = app.split("function selectFeed(", 1)[1].split("\n}\n", 1)[0]
+    close_drawer = app.split("function closeDrawer(", 1)[1].split("\n}\n", 1)[0]
+    assert "renderTable(" not in load_detail
+    assert "syncSelectedRow();" in select_feed
+    assert "renderTable(" not in select_feed
+    assert "syncSelectedRow();" in close_drawer
+    assert "renderTable(" not in close_drawer
+
+
 async def test_feed_rows_use_string_ids_and_stable_public_refs(store):
     feed = Feed(id=-7588981172000531025, source="amazon", key="amazon", config={})
     rows = await InspectorService(
@@ -438,71 +419,6 @@ async def test_feed_rows_use_string_ids_and_stable_public_refs(store):
 
     assert "id" not in row
     assert row["feed_ref"] == feed_ref("amazon", "amazon")
-
-
-def test_local_feed_ids_are_javascript_safe():
-    assert abs(_id("workatastartup")) <= (1 << 53) - 1
-
-
-async def test_inspector_initialization_imports_registry_companies(store):
-    registry = companies()
-    expected_aliases = {
-        alias_norm
-        for company in registry
-        for alias_norm in company.aliases
-    }
-
-    assert await store.initialize() == len(registry)
-    pool = await store.pool()
-    async with pool.acquire() as conn:
-        columns = {
-            name: [
-                row["column_name"]
-                for row in await conn.fetch(
-                    """
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = $1 AND table_name = $2
-                    ORDER BY ordinal_position
-                    """,
-                    store.schema,
-                    name,
-                )
-            ]
-            for name in ("company", "alias")
-        }
-        counts = (
-            await conn.fetchval(f"SELECT count(*) FROM {store.schema}.company"),
-            await conn.fetchval(f"SELECT count(*) FROM {store.schema}.alias"),
-        )
-        # Spot-check one arbitrary company against the registry projection so
-        # data edits in companies.toml never break this structural test.
-        probe = registry[0]
-        probe_row = await conn.fetchrow(
-            f"""
-            SELECT a.company_id, c.domain, c.domain_verified_at, c.description
-            FROM {store.schema}.company c
-            JOIN {store.schema}.alias a ON a.company_id = c.id
-            WHERE a.alias_norm = $1
-            """,
-            probe.aliases[0],
-        )
-
-    assert columns["company"] == ["id", "name", "domain", "domain_verified_at", "description"]
-    assert columns["alias"] == ["alias_norm", "company_id", "alias"]
-    assert counts == (len(registry), len(expected_aliases))
-    assert tuple(probe_row) == (
-        probe.id,
-        None if probe.domain == "unknown" else probe.domain,
-        probe.domain_verified_at if probe.verified else None,
-        probe.desc,
-    )
-
-    # Re-importing is an upsert, not a duplicate seed.
-    assert await store.initialize() == len(registry)
-    async with pool.acquire() as conn:
-        assert await conn.fetchval(
-            f"SELECT count(*) FROM {store.schema}.company"
-        ) == len(registry)
 
 
 async def test_result_store_round_trips_items_and_envelope(store):
@@ -529,21 +445,6 @@ async def test_result_store_round_trips_items_and_envelope(store):
     assert loaded[0].items == snapshot.items
     assert loaded[0].envelope == snapshot.envelope
     assert loaded[0].item_summary(0)["display_name"] == "Demo"
-
-
-def test_source_categories():
-    assert source_category("lever") == "ATS"
-    assert source_category("jobvite") == "ATS"
-    assert source_category("teamtailor") == "ATS"
-    for source in (
-        "jazzhr", "manatal", "peopleadmin", "personio", "pinpoint",
-        "recruitee", "successfactors", "talentreef", "ukg", "vincere",
-    ):
-        assert source_category(source) == "ATS"
-    for source in ("amazon", "apple", "flyio", "janestreet"):
-        assert source_category(source) == "Direct"
-    for source in ("hn", "simplify", "unstop", "usajobs", "workatastartup"):
-        assert source_category(source) == "Board"
 
 
 def test_item_picker_uses_job_title_and_hides_identifier_noise():

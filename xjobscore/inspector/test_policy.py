@@ -23,7 +23,6 @@ REF = feed_ref("policy-test", "demo")
 
 
 def make_client(monkeypatch, app_store, policy):
-    monkeypatch.setattr("xjobscore.inspector.persistence.registry_companies", tuple)
     app = create_app(
         catalog=FakeCatalog(Feed(id=1, source="policy-test", key="demo", config={})),
         store=app_store,
@@ -68,11 +67,9 @@ def test_policy_rows_merge_postgres_snapshot(monkeypatch, app_store):
     with make_client(monkeypatch, app_store, FakePolicy(snapshot)) as client:
         rows = client.get("/api/feeds").json()["feeds"]
         row = next(row for row in rows if row["feed_ref"] == REF)
-        other = next(row for row in rows if row["feed_ref"] != REF)
 
         assert row["policy"]["in_postgres"] is True
         assert row["policy"]["interval_s"] == 900
-        assert other["policy"] == {"in_postgres": False}
 
 
 def test_policy_mutations_are_forwarded(monkeypatch, app_store):
@@ -96,6 +93,38 @@ def test_policy_mutations_are_forwarded(monkeypatch, app_store):
         ("set_paused", "policy-test", "demo", True),
         ("import_feed", "policy-test", "demo", True),
     ]
+
+
+def test_drop_feed_is_forwarded_without_a_token_mutation(monkeypatch, app_store):
+    policy = FakePolicy({})
+    with make_client(monkeypatch, app_store, policy) as client:
+        response = client.delete(f"/api/feeds/{REF}")
+
+    assert response.status_code == 200
+    assert response.json() == {"feed_ref": REF, "feed_id": 11, "dropped": True}
+    assert policy.calls == [("drop_feed", "policy-test", "demo")]
+
+
+@pytest.mark.parametrize("interval_s", [60, 5400, 7 * 86_400])
+def test_custom_interval_route_accepts_policy_range(monkeypatch, app_store, interval_s):
+    policy = FakePolicy({})
+    with make_client(monkeypatch, app_store, policy) as client:
+        response = client.post(
+            f"/api/feeds/{REF}/policy", json={"interval_s": interval_s}
+        )
+    assert response.status_code == 200
+    assert response.json()["interval_s"] == interval_s
+
+
+@pytest.mark.parametrize("interval_s", [59, 7 * 86_400 + 1])
+def test_custom_interval_route_rejects_out_of_range(monkeypatch, app_store, interval_s):
+    policy = FakePolicy({})
+    with make_client(monkeypatch, app_store, policy) as client:
+        response = client.post(
+            f"/api/feeds/{REF}/policy", json={"interval_s": interval_s}
+        )
+    assert response.status_code == 400
+    assert "interval_s must be within" in response.json()["detail"]
 
 
 def test_feed_missing_from_postgres_maps_to_409(monkeypatch, app_store):
@@ -187,6 +216,8 @@ async def test_policy_store_without_dsn_is_degraded():
     assert policy.status()["connected"] is False
     assert policy.status()["error"] == "no DSN configured"
     assert await policy.snapshot() is None
+    assert await policy.company_alias_index() == {}
+    assert await policy.company_descriptions({1}) == {}
     with pytest.raises(PolicyUnavailable):
         await policy.set_enabled("lever", "acme", True)
 
@@ -204,9 +235,39 @@ async def test_policy_store_connect_failure_is_degraded(monkeypatch):
     assert await policy.snapshot() is None
 
 
+async def test_policy_store_reads_company_aliases_and_descriptions(monkeypatch):
+    alias_sql = (
+        "SELECT a.alias_norm, c.id AS company_id, c.name AS company_name "
+        "FROM alias a JOIN company c ON c.id = a.company_id"
+    )
+    description_sql = (
+        "SELECT id, description FROM company "
+        "WHERE description IS NOT NULL AND description <> '' "
+        "AND id = ANY($1::bigint[])"
+    )
+    connection = FakeConnection(
+        {
+            alias_sql: [
+                {"alias_norm": "acme", "company_id": 7, "company_name": "Acme"}
+            ],
+            description_sql: [{"id": 7, "description": "Makes anvils."}],
+        }
+    )
+
+    async def fake_connect(_dsn):
+        return FakePool(connection)
+
+    monkeypatch.setattr(store, "connect", fake_connect)
+    policy = PolicyStore("postgresql://localhost/xjobscore")
+
+    assert await policy.company_alias_index() == {"acme": (7, "Acme")}
+    assert await policy.company_descriptions({7, 99}) == {7: "Makes anvils."}
+    assert connection.queries[-1][1] == ([7, 99],)
+
+
 async def test_policy_store_set_enabled_uses_store_mutator(monkeypatch):
     connection = FakeConnection(
-        {"UPDATE feed SET enabled = $3 WHERE source = $1 AND key = $2 RETURNING id": 7}
+        {"UPDATE feed SET polling = $3 WHERE source = $1 AND key = $2 RETURNING id": 7}
     )
     pool = FakePool(connection)
 
@@ -233,6 +294,25 @@ async def test_policy_store_missing_feed_raises(monkeypatch):
 
     with pytest.raises(FeedNotInPostgres):
         await policy.set_enabled("lever", "ghost", True)
+
+
+async def test_policy_store_drop_feed_preserves_the_token(monkeypatch):
+    connection = FakeConnection(
+        {"DELETE FROM feed WHERE source = $1 AND key = $2 RETURNING id": 7}
+    )
+    pool = FakePool(connection)
+
+    async def fake_connect(_dsn):
+        return pool
+
+    monkeypatch.setattr(store, "connect", fake_connect)
+    policy = PolicyStore("postgresql://localhost/xjobscore")
+
+    assert await policy.drop_feed("lever", "acme") == {"feed_id": 7, "dropped": True}
+    sql, args = connection.queries[0]
+    assert sql.startswith("DELETE FROM feed")
+    assert "token" not in sql.lower()
+    assert args == ("lever", "acme")
 
 
 async def test_policy_store_set_paused_uses_store_mutator(monkeypatch):
@@ -275,7 +355,7 @@ async def test_policy_store_set_paused_on_a_missing_feed_raises(monkeypatch):
 
 _CONTROL_SQL = "SELECT running, changed_at, note FROM scheduler_control WHERE id"
 _STATE_SQL = (
-    "SELECT f.id, f.enabled, f.paused_at, f.hold_until > now() AS held FROM feed f "
+    "SELECT f.id, f.polling AS enabled, f.paused_at, f.hold_until > now() AS held FROM feed f "
     "WHERE f.source = $1 AND f.key = $2"
 )
 _EXPRESS_SQL = (
@@ -341,7 +421,7 @@ async def test_poll_now_refuses_while_the_scheduler_is_paused(monkeypatch):
 
 
 async def test_poll_now_refuses_a_disabled_feed(monkeypatch):
-    """claim_due_feeds filters on f.enabled, so this used to answer 200 and never poll."""
+    """claim_due_feeds filters on f.polling, so this used to answer 200 and never poll."""
     policy, connection = poll_now_store(
         monkeypatch, state=healthy_state(enabled=False), due_at=datetime.now(timezone.utc)
     )
@@ -395,7 +475,7 @@ async def test_policy_store_interval_bounds():
 
 async def test_store_set_feed_enabled_sql():
     connection = FakeConnection(
-        {"UPDATE feed SET enabled = $3 WHERE source = $1 AND key = $2 RETURNING id": 3}
+        {"UPDATE feed SET polling = $3 WHERE source = $1 AND key = $2 RETURNING id": 3}
     )
 
     assert await store.set_feed_enabled(connection, source="lever", key="acme", enabled=True) == 3

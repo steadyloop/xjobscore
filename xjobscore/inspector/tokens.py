@@ -1,4 +1,4 @@
-"""Read-only queries over ``public.token`` for the Tokens page.
+"""Queries and operator-note edits over ``public.token`` for the Tokens page.
 
 ``token`` is the full inventory of every ATS board key ever seen -- live or
 dead -- while ``feed`` is the curated set the scheduler actually polls. The
@@ -16,26 +16,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from xjobscore.sources import source_type
+# These are the operator-facing views for the token table.  Keep the tuple in
+# the same order as the status filter in the page.
+FILTERS = ("inactive", "muted", "dead", "all")
+PROMOTION_BATCH = 20
 
-# Matches schema.sql's CHECK on token.status. "all" is a filter value, not a
-# stored one, so it is listed here but never compared against a column.
-FILTERS = ("all", "alive-active", "alive-inactive", "dead")
+_INACTIVE = "t.status = 'live' AND (f.id IS NULL OR NOT f.polling)"
 
 _FILTER_PREDICATES = {
-    "all": "TRUE",
-    "alive-active": "t.status = 'live' AND f.enabled",
-    "alive-inactive": "t.status = 'live' AND (f.id IS NULL OR NOT f.enabled)",
+    "inactive": _INACTIVE,
+    "muted": "t.muted",
     "dead": "t.status = 'dead'",
+    # Unlike the focused views above, this is the complete inventory,
+    # including live tokens that are actively polled.
+    "all": "TRUE",
 }
 
 _SELECT = """
-SELECT t.ats, t.token, t.company_id, c.name AS company, t.status,
+SELECT t.ats, t.token, t.company_id, c.name AS company, t.status, t.muted, t.tags, t.note,
        t.source, t.discovered_at, t.checked_at,
        f.id AS feed_id,
        CASE
            WHEN f.id IS NULL THEN 'none'
-           WHEN f.enabled THEN 'enabled'
+           WHEN f.polling THEN 'enabled'
            ELSE 'disabled'
        END AS feed_state,
        count(*) OVER () AS total
@@ -54,8 +57,11 @@ SELECT count(*)::int AS total,
        count(*) FILTER (WHERE t.status = 'live')::int AS live,
        count(*) FILTER (WHERE t.status = 'dead')::int AS dead,
        count(*) FILTER (WHERE t.status = 'unknown')::int AS unknown,
+       count(*) FILTER (WHERE t.muted)::int AS muted,
        count(*) FILTER (WHERE f.id IS NULL)::int AS unpromoted,
-       count(*) FILTER (WHERE t.status = 'live' AND f.id IS NULL)::int
+       count(*) FILTER (
+           WHERE t.status = 'live' AND NOT t.muted AND f.id IS NULL
+       )::int
            AS promotable
 FROM token AS t
 LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
@@ -77,16 +83,16 @@ def _shape(record: Any) -> dict[str, Any]:
     row.pop("total", None)
     for field in ("discovered_at", "checked_at"):
         row[field] = _iso(row.get(field))
-    # Enable is ATS-only; the frontend gates on this the same way the Feeds
-    # page already gates its own controls on category.
-    row["category"] = source_type(row["ats"])
+    # token is exclusively the ATS discovery inventory. Direct and board
+    # feeds are created directly in `feed`, never through this page.
+    row["category"] = "ATS"
     return row
 
 
 async def query(
     pool,
     *,
-    filter: str = "all",
+    filter: str = "inactive",
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -110,3 +116,143 @@ async def query(
         "limit": limit,
         "rows": [_shape(record) for record in records],
     }
+
+
+async def set_note(
+    pool,
+    *,
+    ats: str,
+    token: str,
+    note: str | None,
+) -> dict[str, Any] | None:
+    """Store one operator note, returning the saved row when it exists."""
+    async with pool.acquire() as conn:
+        record = await conn.fetchrow(
+            """
+            UPDATE token
+               SET note = $1
+             WHERE ats = $2 AND token = $3
+         RETURNING ats, token, note
+            """,
+            note,
+            ats,
+            token,
+        )
+    return dict(record) if record else None
+
+
+async def set_tags(
+    pool,
+    *,
+    ats: str,
+    token: str,
+    tags: list[str],
+) -> dict[str, Any] | None:
+    """Store compact operator tags for an existing token."""
+    async with pool.acquire() as conn:
+        record = await conn.fetchrow(
+            """
+            UPDATE token
+               SET tags = $1
+             WHERE ats = $2 AND token = $3
+         RETURNING ats, token, tags
+            """,
+            tags,
+            ats,
+            token,
+        )
+    return dict(record) if record else None
+
+
+async def set_muted(
+    pool,
+    *,
+    ats: str,
+    token: str,
+    muted: bool,
+) -> dict[str, Any] | None:
+    async with pool.acquire() as conn:
+        record = await conn.fetchrow(
+            """
+            WITH changed AS (
+                UPDATE token
+                   SET muted = $1
+                 WHERE ats = $2 AND token = $3
+             RETURNING ats, token, muted
+            ), dropped AS (
+                DELETE FROM feed AS f
+                 USING changed AS c
+                 WHERE $1
+                   AND f.source = c.ats
+                   AND f.key = c.token
+             RETURNING f.id
+            )
+            SELECT c.ats, c.token, c.muted,
+                   EXISTS (SELECT 1 FROM dropped) AS feed_dropped
+              FROM changed AS c
+            """,
+            muted,
+            ats,
+            token,
+        )
+    return dict(record) if record else None
+
+
+async def promotion_candidates(
+    pool,
+    *,
+    limit: int = PROMOTION_BATCH,
+) -> tuple[list[tuple[str, str]], int]:
+    limit = max(1, min(limit, PROMOTION_BATCH))
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            """
+            SELECT t.ats, t.token, count(*) OVER ()::int AS total
+              FROM token AS t
+             WHERE t.status = 'live'
+               AND NOT t.muted
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM feed AS f
+                    WHERE f.source = t.ats AND f.key = t.token
+               )
+             ORDER BY t.checked_at NULLS FIRST, t.ats, t.token
+             LIMIT $1
+            """,
+            limit,
+        )
+    total = records[0]["total"] if records else 0
+    return ([(record["ats"], record["token"]) for record in records], total)
+
+
+async def promote_verified(
+    pool,
+    identities: list[tuple[str, str]],
+) -> int:
+    identities = list(dict.fromkeys(identities))
+    if not identities:
+        return 0
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            """
+            WITH incoming(ats, token) AS (
+                SELECT * FROM unnest($1::text[], $2::text[])
+            )
+            INSERT INTO feed(source, key, polling)
+            SELECT t.ats, t.token, true
+              FROM incoming AS i
+              JOIN token AS t USING (ats, token)
+             WHERE t.status = 'live'
+               AND NOT t.muted
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM feed AS f
+                    WHERE f.source = t.ats AND f.key = t.token
+               )
+            ON CONFLICT (source, key) DO NOTHING
+            RETURNING source, key
+            """,
+            [ats for ats, _ in identities],
+            [token for _, token in identities],
+        )
+    return len(records)
