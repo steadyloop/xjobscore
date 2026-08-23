@@ -168,6 +168,7 @@ Opportunities UI. Skills are stored as canonical taxonomy ids:
   "term": "Summer 2027",
   "workplace": "hybrid",
   "skills": ["python", "postgresql"],
+  "summary": "Build and operate backend services for the data platform, own a scoped project from technical design through production rollout, and collaborate with infrastructure and product engineers to improve reliability. Currently enrolled in a computer science or related degree program with experience in Python and SQL.",
   "deadline_at": "2027-02-01T23:59:59Z"
 }
 ```
@@ -175,11 +176,14 @@ Opportunities UI. Skills are stored as canonical taxonomy ids:
 Keys other than `version` may be absent while enrichment is pending. PostgreSQL
 enforces their types and allowed enum values.
 
-`GET /api/jobs` leaves those stored attributes unchanged and adds taxonomy
-metadata for presentation at the top level of each job:
+`GET /api/jobs` leaves those stored attributes unchanged, promotes `summary` to
+the top level, and adds taxonomy metadata for presentation. It deliberately
+omits the full source description; the canonical text remains in PostgreSQL for
+re-enrichment, while the UI links to the original posting for complete details:
 
 ```json
 {
+  "summary": "Build and operate backend services for the data platform, own a scoped project from technical design through production rollout, and collaborate with infrastructure and product engineers to improve reliability. Currently enrolled in a computer science or related degree program with experience in Python and SQL.",
   "skills": [
     {"id": "python", "name": "Python", "category": "language"},
     {"id": "postgresql", "name": "PostgreSQL", "category": "stack"}
@@ -189,6 +193,27 @@ metadata for presentation at the top level of each job:
 
 Historical display-name values and unknown taxonomy strings remain visible
 during replay; they never cause the API to rewrite `job_posting.attributes`.
+
+The same response collapses each non-rejected duplicate group with a populated
+`primary_posting_id` into one opportunity. Counts, filters, and pagination use
+that representative too. Active alternate postings are exposed without internal
+group metadata through the additive `other_sources` field:
+
+```json
+{
+  "other_sources": [
+    {
+      "source": "workday:example",
+      "url": "https://example.com/job/42",
+      "posted_at": "2026-08-20T00:00:00+00:00",
+      "first_seen_at": "2026-08-20T00:05:00+00:00"
+    }
+  ]
+}
+```
+
+Tracked and browser-excluded posting ids suppress their whole eligible group,
+so a primary change does not make the same opportunity reappear.
 
 ## Tests
 

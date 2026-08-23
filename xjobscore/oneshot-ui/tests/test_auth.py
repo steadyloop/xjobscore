@@ -56,6 +56,9 @@ class NullRepository:
     async def source_coverage(self):
         return {"sources": [], "total_coverage": 0}
 
+    async def board_map(self):
+        return {"providers": [], "totals": {"boards": 0, "providers": 0, "ok": 0, "erroring": 0, "stale": 0, "paused": 0, "never": 0, "added_today": 0}}
+
 
 class FakeAuthStore:
     def __init__(self) -> None:
@@ -120,6 +123,7 @@ def test_public_reads_and_pages_stay_open_but_workspace_apis_require_sign_in() -
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/jobs").status_code == 200
         assert client.get("/api/source-coverage").status_code == 200
+        assert client.get("/api/source-coverage/boards").status_code == 200
         assert client.get("/").status_code == 200
         assert client.get("/login/").status_code == 200
 

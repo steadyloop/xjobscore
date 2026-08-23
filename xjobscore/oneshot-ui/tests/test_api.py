@@ -8,7 +8,16 @@ import pytest
 from oneshot_ui.app import create_app
 from oneshot_ui.auth import session_account
 from oneshot_ui.config import Settings
-from oneshot_ui.repository import PostgresRepository, _ilike_pattern
+from oneshot_ui.repository import (
+    PostgresRepository,
+    UNCLASSIFIED,
+    _board_state,
+    _ilike_pattern,
+    _location_label,
+    _skill_search_ids,
+    _us_location_bucket,
+    _us_proximity_priority,
+)
 
 TEST_ACCOUNT_ID = UUID("00000000-0000-0000-0000-0000000000aa")
 
@@ -35,8 +44,9 @@ class FakeRepository:
                 "source_url": "https://jobs.example.test/41",
                 "company": "Example Labs",
                 "title": "Summer Software Engineering Intern",
-                "description": "Build Python services.",
-                "location": "Remote, United States",
+                "summary": "Build Python services and ship a scoped production project with the platform team.",
+                "locations": [{"country": "US", "state": None, "city": None}],
+                "location": "United States",
                 "apply_url": "https://jobs.example.test/41/apply",
                 "job_type": "intern",
                 "remote": "yes",
@@ -47,9 +57,20 @@ class FakeRepository:
                     "degree_fields": ["computer_science"],
                 },
                 "skills": [
-                    {"id": "python", "name": "Python", "category": "language"},
-                    {"id": "postgresql", "name": "PostgreSQL", "category": "stack"},
+                    {
+                        "id": "python",
+                        "name": "Python",
+                        "label": "Python",
+                        "category": "language",
+                    },
+                    {
+                        "id": "postgresql",
+                        "name": "PostgreSQL",
+                        "label": "PostgreSQL",
+                        "category": "datastore",
+                    },
                 ],
+                "other_sources": [],
             }
         ]
         self.applications: list[dict] = []
@@ -70,9 +91,6 @@ class FakeRepository:
     async def list_jobs(self, **options):
         application_job_ids = {row["job_id"] for row in self.applications if row["job_id"]}
         rows = [row for row in self.jobs if row["id"] not in application_job_ids]
-        types = set(options["job_types"])
-        if types:
-            rows = [row for row in rows if row.get("job_type") in types]
         degree_fields = set(options["degree_fields"])
         if degree_fields:
             rows = [
@@ -80,7 +98,19 @@ class FakeRepository:
                 for row in rows
                 if degree_fields.intersection(row["attributes"].get("degree_fields", []))
             ]
-        return {"jobs": deepcopy(rows), "total": len(rows), "limit": options["limit"], "offset": options["offset"]}
+        job_type_counts = {
+            job_type: sum(row.get("job_type") == job_type for row in rows)
+            for job_type in ("intern", "coop", "student_program", "research", "part_time")
+        }
+        types = set(options["job_types"])
+        if types:
+            rows = [
+                row
+                for row in rows
+                if row.get("job_type") in types
+                or (row.get("job_type") is None and UNCLASSIFIED in types)
+            ]
+        return {"jobs": deepcopy(rows), "total": len(rows), "job_type_counts": job_type_counts, "limit": options["limit"], "offset": options["offset"]}
 
     async def source_coverage(self):
         return {
@@ -88,6 +118,22 @@ class FakeRepository:
             "source_count": 1,
             "total_coverage": 1,
             "total_added_today": 1,
+        }
+
+    async def board_map(self):
+        return {
+            "providers": [
+                {
+                    "source": "ashby",
+                    "board_count": 2,
+                    "err_count": 1,
+                    "boards": [
+                        {"key": "acme", "company": "Acme Corp", "state": "ok", "strikes": 0, "last_poll_at": None, "coverage": 3},
+                        {"key": "initech", "company": "Initech", "state": "degraded", "strikes": 1, "last_poll_at": None, "coverage": 0},
+                    ],
+                }
+            ],
+            "totals": {"boards": 2, "providers": 1, "ok": 1, "erroring": 1, "stale": 0, "paused": 0, "never": 0, "added_today": 3},
         }
 
     def _new_application(self, *, job_id, company, title, url, location, note, external):
@@ -164,27 +210,61 @@ def test_job_response_exposes_provenance_without_internal_trace_fields() -> None
         "source_url": "https://jobs.example.test/41",
         "company_name": "Example Labs",
         "title": "Summer Software Engineering Intern",
-        "description": "Build Python services.",
-        "location_text": "Remote, United States",
+        "location_text": "This raw value must not reach the UI",
+        "locations": '[{"country":"US","state":"CA","city":"San Francisco"}]',
         "apply_url": "https://jobs.example.test/41/apply",
         "posted_at": None,
         "first_seen_at": None,
         "last_seen_at": None,
         "status": "active",
-        "attributes": {"version": 1},
+        "attributes": {
+            "version": 1,
+            "summary": "Build Python services and ship a scoped production project with the platform team.",
+        },
         "content_hash": "internal-hash",
         "raw_id": 99,
         "source_key": "internal-key",
+        "other_sources": [
+            {
+                "source": "workday:example-labs",
+                "url": "https://workday.example.test/41",
+                "posted_at": "2026-08-20T00:00:00+00:00",
+                "first_seen_at": "2026-08-20T01:00:00+00:00",
+                "source_key": "must-not-leak",
+            },
+            {"source": "", "url": "https://invalid.example.test"},
+        ],
     })
 
     assert result["source"] == "greenhouse:example-labs"
     assert result["source_url"] == "https://jobs.example.test/41"
+    assert result["locations"] == [
+        {"country": "US", "state": "CA", "city": "San Francisco"}
+    ]
+    assert result["location"] == "San Francisco, CA"
     assert result["skills"] == []
-    assert not ({"content_hash", "raw_id", "source_key"} & result.keys())
+    assert result["summary"].startswith("Build Python services")
+    assert result["other_sources"] == [
+        {
+            "source": "workday:example-labs",
+            "url": "https://workday.example.test/41",
+            "posted_at": "2026-08-20T00:00:00+00:00",
+            "first_seen_at": "2026-08-20T01:00:00+00:00",
+        }
+    ]
+    assert not ({"description", "content_hash", "raw_id", "source_key"} & result.keys())
 
 
 def test_job_response_derives_structured_skills_without_mutating_attributes() -> None:
-    stored = ["go", "Kubernetes", "legacy-tool", "go", "", 7]
+    stored = [
+        "go",
+        "Kubernetes",
+        "artificial-intelligence",
+        "legacy-tool",
+        "go",
+        "",
+        7,
+    ]
     result = PostgresRepository._job({
         "id": 42,
         "title": "Backend Engineer",
@@ -193,10 +273,74 @@ def test_job_response_derives_structured_skills_without_mutating_attributes() ->
 
     assert result["attributes"]["skills"] == stored
     assert result["skills"] == [
-        {"id": "go", "name": "Go", "category": "language"},
-        {"id": "kubernetes", "name": "Kubernetes", "category": "stack"},
-        {"id": "legacy-tool", "name": "legacy-tool", "category": None},
+        {"id": "go", "name": "Go", "label": "Go", "category": "language"},
+        {
+            "id": "kubernetes",
+            "name": "Kubernetes",
+            "label": "Kubernetes",
+            "category": "platform",
+        },
+        {
+            "id": "artificial-intelligence",
+            "name": "Artificial intelligence (AI)",
+            "label": "AI",
+            "category": "concept",
+        },
+        {
+            "id": "legacy-tool",
+            "name": "legacy-tool",
+            "label": "legacy-tool",
+            "category": None,
+        },
     ]
+
+
+def test_location_label_is_compact_and_uses_only_normalized_locations() -> None:
+    assert _location_label([
+        {"country": "US", "state": "NY", "city": "New York City"},
+        {"country": "GB", "state": "ENG", "city": "London"},
+        {"country": "SG", "state": None, "city": "Singapore"},
+        {"country": "DE", "state": "16", "city": "Berlin"},
+    ]) == "New York City, NY · London, United Kingdom · Singapore · +1 more"
+    assert _location_label([]) is None
+
+
+def test_us_location_policy_has_four_read_time_buckets() -> None:
+    assert _us_location_bucket([
+        {"country": "US", "state": "CA", "city": "San Francisco"}
+    ]) == 1
+    assert _us_location_bucket([
+        {"country": "US", "state": "CA", "city": "Palo Alto"}
+    ]) == 2
+    assert _us_location_bucket([
+        {"country": "US", "state": "MN", "city": "Rochester"}
+    ]) == 3
+    assert _us_proximity_priority([
+        {"country": "US", "state": "CA", "city": "San Francisco"}
+    ]) == 1
+    assert _us_proximity_priority([
+        {"country": "US", "state": "CA", "city": "Los Angeles"}
+    ]) == 2
+    assert _us_proximity_priority([
+        {"country": "US", "state": "WA", "city": "Seattle"}
+    ]) == 3
+    assert _us_proximity_priority([
+        {"country": "US", "state": "NY", "city": "New York City"}
+    ]) == 4
+    assert _us_location_bucket([]) == 4
+    assert _us_location_bucket([
+        {"country": "DE", "state": "16", "city": "Berlin"}
+    ]) is None
+    assert _us_location_bucket([
+        {"country": "DE", "state": "16", "city": "Berlin"},
+        {"country": "US", "state": "AZ", "city": "Tucson"},
+    ]) == 3
+
+
+def test_skill_keyword_search_resolves_ids_without_description_search() -> None:
+    assert "cpp" in _skill_search_ids("C++")
+    assert "kubernetes" in _skill_search_ids("Kubernetes")
+    assert _skill_search_ids("not-a-real-skill") == ()
 
 
 @pytest.mark.asyncio
@@ -212,14 +356,23 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
         def __init__(self) -> None:
             self.page_started = asyncio.Event()
             self.count_args = ()
+            self.count_query = ""
+            self.type_count_query = ""
             self.page_args = ()
+            self.page_query = ""
 
         async def fetchval(self, query, *args):
+            self.count_query = query
             self.count_args = args
             await self.page_started.wait()
             return 1
 
+        async def fetchrow(self, query, *args):
+            self.type_count_query = query
+            return {"intern": 1, "coop": 0, "student_program": 0, "research": 0, "part_time": 0}
+
         async def fetch(self, query, *args):
+            self.page_query = query
             self.page_args = args
             self.page_started.set()
             return [
@@ -229,8 +382,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
                     "source_url": "https://jobs.example.test/41",
                     "company_name": "Example Labs",
                     "title": "Summer Software Engineering Intern",
-                    "description": "Build Python services.",
-                    "location_text": "Remote, United States",
+                    "locations": [{"country": "US", "state": None, "city": None}],
                     "apply_url": "https://jobs.example.test/41/apply",
                     "posted_at": None,
                     "first_seen_at": None,
@@ -239,6 +391,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
                     "attributes": {
                         "version": 1,
                         "job_type": "intern",
+                        "summary": "Build Python services with the platform team.",
                     },
                 }
             ]
@@ -251,6 +404,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
             job_types=["intern"],
             degree_fields=["computer_science"],
             exclude_job_ids=[99],
+            q="Kubernetes",
             limit=25,
             offset=50,
         ),
@@ -258,12 +412,96 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     )
 
     assert result["total"] == 1
+    assert result["job_type_counts"]["intern"] == 1
     assert result["jobs"][0]["id"] == 41
+    assert result["jobs"][0]["location"] == "United States"
     # COUNT sees only account + filters; LIMIT/OFFSET belong only to the page.
-    assert len(pool.count_args) == 4
-    assert pool.count_args[2] == ["computer_science"]
-    assert pool.count_args[3] == [99]
+    assert len(pool.count_args) == 6
+    assert pool.count_args[1] == ["computer_science"]
+    assert pool.count_args[2] == [99]
+    assert pool.count_args[3] == "%Kubernetes%"
+    assert "kubernetes" in pool.count_args[4]
+    assert pool.count_args[5] == ["intern"]
     assert pool.page_args[-2:] == (25, 50)
+    array_args = [value for value in pool.page_args if isinstance(value, list)]
+    assert any("CA|San Francisco" in value and "NY|New York City" in value for value in array_args)
+    assert any("CA|Palo Alto" in value for value in array_args)
+    assert any("CA|San Francisco" in value and "CA|Palo Alto" in value for value in array_args)
+    assert any("CA|Los Angeles" in value and "CA|San Diego" in value for value in array_args)
+    assert any("WA|Seattle" in value and "WA|Redmond" in value for value in array_args)
+    where = pool.page_query.split("WHERE", 1)[1]
+    assert "j.description" not in pool.page_query
+    assert "(j.attributes -> 'skills') ?|" in where
+    assert "j.locations = '[]'::jsonb" in where
+    assert "AT TIME ZONE 'America/Los_Angeles'" in pool.page_query
+    assert "SELECT 1 FROM jsonb_array_elements(j.locations) location" in pool.page_query
+    assert "THEN 1" in pool.page_query and "ELSE 4" in pool.page_query
+    for query in (pool.count_query, pool.type_count_query, pool.page_query):
+        assert "LEFT JOIN job_posting_dup_group g" in query
+        assert "g.primary_posting_id IS NOT NULL" in query
+        assert "g.state <> 'rejected'" in query
+        assert "stored_primary.status = 'active'" in query
+        assert "active_member.status = 'active'" in query
+    assert "tracked.dup_group_id = j.dup_group_id" in pool.page_query
+    assert "excluded.dup_group_id = j.dup_group_id" in pool.page_query
+    assert "AS other_sources" in pool.page_query
+    assert "sibling.status = 'active'" in pool.page_query
+
+
+@pytest.mark.asyncio
+async def test_bio_degree_filter_uses_title_and_employer_evidence() -> None:
+    class RecordingPool:
+        def __init__(self) -> None:
+            self.queries = []
+
+        async def fetchval(self, query, *args):
+            self.queries.append((query, args))
+            return 0
+
+        async def fetchrow(self, query, *args):
+            self.queries.append((query, args))
+            return {
+                "intern": 0,
+                "coop": 0,
+                "student_program": 0,
+                "research": 0,
+                "part_time": 0,
+            }
+
+        async def fetch(self, query, *args):
+            self.queries.append((query, args))
+            return []
+
+    pool = RecordingPool()
+    repository = PostgresRepository("injected", pool=pool)
+    await repository.list_jobs(
+        job_types=["intern"],
+        degree_fields=["biotech"],
+    )
+
+    assert len(pool.queries) == 4
+    employer_query, employer_args = pool.queries[0]
+    assert "WITH company_postings AS MATERIALIZED" in employer_query
+    assert "c.labels ? 'biotech'" in employer_query
+    assert "COALESCE(ct.direct_count, 0) >= 5" in employer_query
+    assert ">= 0.02" in employer_query
+    assert "COALESCE(ct.direct_count, 0) >= 3" in employer_query
+    assert any("bio[- ]?engineer" in str(value) for value in employer_args)
+
+    for query, args in pool.queries[1:]:
+        assert "company_postings AS MATERIALIZED" not in query
+        assert "c.id = ANY" in query
+        assert "COALESCE(j.description" not in query
+        assert any("bio[- ]?engineer" in str(value) for value in args)
+
+    # Account-scoped repository clones share the same five-minute employer
+    # snapshot rather than recomputing it for each signed-in request.
+    await repository.for_account(TEST_ACCOUNT_ID).list_jobs(
+        job_types=["intern"],
+        degree_fields=["biotech"],
+    )
+    assert len(pool.queries) == 7
+
 
 def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
     repository = FakeRepository()
@@ -276,11 +514,24 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
             params={"job_type": "intern", "degree_field": "computer_science"},
         ).json()
         assert jobs["total"] == 1
+        assert jobs["job_type_counts"] == {
+            "intern": 1, "coop": 0, "student_program": 0, "research": 0, "part_time": 0,
+        }
         assert jobs["jobs"][0]["attributes"]["skills"] == ["python", "postgresql"]
         assert jobs["jobs"][0]["attributes"]["degree_fields"] == ["computer_science"]
         assert jobs["jobs"][0]["skills"] == [
-            {"id": "python", "name": "Python", "category": "language"},
-            {"id": "postgresql", "name": "PostgreSQL", "category": "stack"},
+            {
+                "id": "python",
+                "name": "Python",
+                "label": "Python",
+                "category": "language",
+            },
+            {
+                "id": "postgresql",
+                "name": "PostgreSQL",
+                "label": "PostgreSQL",
+                "category": "datastore",
+            },
         ]
         created = client.post("/api/jobs/41/applications").json()
         assert created["stage"] == "considering"
@@ -299,6 +550,10 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
         assert updated["closed_reason"] == "withdrawn"
         assert client.delete(f"/api/applications/{external['id']}").status_code == 204
         assert client.get("/api/source-coverage").json()["total_coverage"] == 1
+        board_map = client.get("/api/source-coverage/boards").json()
+        assert board_map["totals"] == {"boards": 2, "providers": 1, "ok": 1, "erroring": 1, "stale": 0, "paused": 0, "never": 0, "added_today": 3}
+        assert board_map["providers"][0]["err_count"] == 1
+        assert [board["state"] for board in board_map["providers"][0]["boards"]] == ["ok", "degraded"]
     assert not repository.connected
 
 
@@ -309,7 +564,7 @@ def test_jobs_default_scope_excludes_the_unclassified_pool() -> None:
             "id": 77,
             "company": "Example Labs",
             "title": "Senior Quantitative Analyst",
-            "description": "4+ years of experience.",
+            "summary": None,
             "location": "New York",
             "apply_url": "https://jobs.example.test/77/apply",
             # NULL is how storage says "no vendor rule matched"; the API keeps
@@ -446,6 +701,23 @@ def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
         # `assert False` and names nothing.
         for path in paths:
             assert client.get(path).status_code == 200, f"{path} is not served"
+
+
+def test_board_state_ranks_deliberate_holds_above_derived_signals() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+    fresh = now - timedelta(minutes=5)
+    ancient = now - timedelta(days=2)
+    # An operator hold outranks strikes; repeated failures outrank staleness.
+    assert _board_state(5, ancient, now, 900, now) == "paused"
+    assert _board_state(3, ancient, None, 900, now) == "failing"
+    assert _board_state(1, fresh, None, 900, now) == "degraded"
+    assert _board_state(0, None, None, 900, now) == "never"
+    assert _board_state(0, ancient, None, 900, now) == "stale"
+    assert _board_state(0, fresh, None, 900, now) == "ok"
+    # No cadence configured: staleness cannot be judged, so a polled feed is ok.
+    assert _board_state(0, ancient, None, 0, now) == "ok"
 
 
 def test_search_treats_ilike_wildcards_as_literal_text() -> None:

@@ -195,6 +195,11 @@ def create_app(
         # Account-independent: source_coverage() never references account_id.
         return await store.source_coverage()
 
+    @application.get("/api/source-coverage/boards")
+    async def source_coverage_boards(store: Any = Depends(public_store)) -> dict[str, Any]:
+        # Account-independent: board_map() never references account_id.
+        return await store.board_map()
+
     @application.post("/api/jobs/{job_id}/applications")
     async def create_application_record(
         job_id: int,
@@ -284,6 +289,13 @@ def create_app(
         @application.get("/opportunities-v2/")
         async def opportunities_v2() -> FileResponse:
             return FileResponse(static_dir / "opportunities-v2" / "index.html")
+
+        # Opportunities (v2): the same data and app logic on the Source coverage
+        # design system, served from its own directory so the live page at "/"
+        # cannot be affected by changes to it.
+        @application.get("/opportunities-v3/")
+        async def opportunities_v3() -> FileResponse:
+            return FileResponse(static_dir / "opportunities-v3" / "index.html")
 
         @application.get("/resume/")
         async def resume_page() -> FileResponse:
