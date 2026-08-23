@@ -1,8 +1,8 @@
-"""The registry: one name, one function -- doubled, now, for `harvest` and
-its downstream `parse`.
+"""Source registration: one name, one function -- doubled, now, for
+`harvest` and its downstream `parse`.
 
 Registration is explicit. The two shared adapter modules use literal
-hyphenated filenames, so this registry loads them once by name. JSON API
+hyphenated filenames, so this module loads them once by name. JSON API
 sources bind to the plain config table in `json-api-configs.py`; genuinely
 bespoke transports bind to focused modules here. Both paths expose the same
 two call signatures, and nothing else in the tree names a source.
@@ -20,6 +20,7 @@ owns those.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timezone
 from functools import partial
 from importlib import import_module
 
@@ -27,7 +28,6 @@ from xjobscore.net import Net
 from xjobscore.records import Canonical, Feed, Item, Record
 from xjobscore.sources import avature, dayforce, hn, join, taleo, zohorecruit
 from xjobscore.sources.planned import janestreet, workatastartup
-from xjobscore.registry_loader import source_types
 
 # A hyphenated filename cannot be imported with Python's ``import`` syntax.
 # Keep the public adapter labels literal while exposing ordinary local aliases.
@@ -35,8 +35,8 @@ json_api = import_module(".json-api", __name__)
 docxtract = import_module(".docxtract", __name__)
 
 __all__ = [
-    "PARSERS", "REVISION_FIELDS", "SOURCES", "Harvest", "Parse", "UnknownSource", "docxtract", "get",
-    "json_api", "parser", "reusing", "source_type",
+    "PARSERS", "REVISION_FIELDS", "REVISION_REFRESH_WINDOWS", "SOURCES", "Harvest", "Parse",
+    "UnknownSource", "docxtract", "get", "json_api", "parser", "reusing",
 ]
 
 Harvest = Callable[[Feed, Net], Awaitable[Record]]
@@ -89,7 +89,7 @@ PARSERS: dict[str, Parse] = {
 
 
 # Sources whose list response omits the fields `parse` needs, so every posting
-# costs a second, per-item detail request (SmartRecruiters today). The tuple
+# costs a second, per-item detail request. The tuple
 # is what `json-api.py`'s revision check compares between a live list row and
 # a stored detail payload: an unchanged value on both sides skips the detail
 # request entirely. Opt-in and per-source on purpose -- these fields are
@@ -98,11 +98,77 @@ PARSERS: dict[str, Parse] = {
 # gets today's unconditional-fetch behaviour from `reusing`, identical to
 # calling `get` directly.
 REVISION_FIELDS: dict[str, tuple[str, ...]] = {
+    # Gem's list and detail operations share these complete metadata fields.
+    # Description HTML exists only in detail, so the reuse is time-bounded
+    # below: a forced refresh catches description-only edits.
+    "gem": (
+        "id",
+        "title",
+        "locations",
+        "job.id",
+        "job.department",
+        "job.locationType",
+        "job.employmentType",
+    ),
     "smartrecruiters": ("jobAdId", "releasedDate"),
+    # BambooHR's list row and its `result.jobOpening` detail payload
+    # (config's `detail.payload`) share these scalar paths verbatim --
+    # checked against a live tenant (prentkeromich, 13 postings). `location`
+    # and `atsLocation` are deliberately excluded even though both sides have
+    # them: the detail payload's dicts carry extra keys (postalCode,
+    # addressCountry, countryId) the list row doesn't, so the two are never
+    # `==`, which would silently disable reuse for every row. `employmentType`
+    # is excluded too -- null on all 13 rows of the tenant probed, and
+    # `_revision` treats any None field as "never reusable" for the whole
+    # tuple, which would have disabled reuse tenant-wide. `location.city` /
+    # `location.state` use dotted `_dig` paths to get the stable leaves
+    # without the unstable dict wrapper.
+    "bamboohr": (
+        "jobOpeningName",
+        "departmentId",
+        "departmentLabel",
+        "employmentStatusLabel",
+        "locationType",
+        "location.city",
+        "location.state",
+    ),
+    # Rippling's list row is thin (uuid/name/department/url/workLocation) and
+    # its detail response (config's `detail` has no `payload` key, so the
+    # whole body is the stored payload) uses different shapes for the two
+    # richer fields: list `department` is `{id, label}`, detail `department`
+    # is `{name, base_department, department_tree}` -- never `==`. List
+    # `workLocation` doesn't even exist at the detail root (`workLocations`,
+    # plural, instead). Checked live (rippling/rippling, 734 postings): only
+    # uuid/name/url are identical scalars on both sides, and never null. As
+    # with Gem, this can't see a description-only edit, hence the bound below.
+    "rippling": ("uuid", "name", "url"),
+}
+
+# Maximum age of a successful all-detail reconciliation. Sources absent from
+# this table retain revision reuse indefinitely, matching the original
+# SmartRecruiters behavior. Gem gets the same bounded-staleness contract as
+# Workday's count probe: cheap polls within the window and a forced full poll
+# when it expires.
+REVISION_REFRESH_WINDOWS: dict[str, int] = {
+    "gem": 86_400,
+    # Neither vendor's revision fields see a description/compensation-only
+    # edit (see the comments on REVISION_FIELDS above); this is the same
+    # 24h reconciliation bound Gem uses to bound that blind spot.
+    "bamboohr": 86_400,
+    "rippling": 86_400,
+    # jobAdId/releasedDate don't change on a description-only edit either;
+    # was unbounded (the "original SmartRecruiters behavior" noted above),
+    # which left such edits permanently stale.
+    "smartrecruiters": 86_400,
 }
 
 
-def reusing(name: str, prior_items: Mapping[str, Item] | None) -> Harvest:
+def reusing(
+    name: str,
+    prior_items: Mapping[str, Item] | None,
+    *,
+    now: datetime | None = None,
+) -> Harvest:
     """`get(name)`, plus revision-checked detail reuse when both are available.
 
     `prior_items` is the caller's newest stored payload per posting (see
@@ -110,25 +176,43 @@ def reusing(name: str, prior_items: Mapping[str, Item] | None) -> Harvest:
     function performs itself, since only `run.poll` has the database
     connection `harvest` is barred from touching. Falls back to a plain
     `get(name)` -- byte-identical to production before this existed -- when
-    the source hasn't opted in, there is nothing to reuse yet, or the config
-    isn't a JSON API adapter (the only engine that implements reuse).
+    the source hasn't opted in or the config isn't a JSON API adapter (the
+    only engine that implements reuse). A time-bounded source with no prior
+    payload performs and records a cold full reconciliation.
     """
     fields = REVISION_FIELDS.get(name)
-    if not fields or prior_items is None or name not in json_api.SPECS:
+    if not fields or name not in json_api.SPECS:
+        return get(name)
+    refresh_window = REVISION_REFRESH_WINDOWS.get(name)
+    if refresh_window is not None:
+        async def harvest(feed: Feed, net: Net) -> Record:
+            poll_now = now or datetime.now(timezone.utc)
+            last_full = feed.last_full_poll_at
+            reuse_is_fresh = (
+                prior_items is not None
+                and last_full is not None
+                and (poll_now - last_full).total_seconds() < refresh_window
+            )
+            return await json_api.harvest(
+                name,
+                feed,
+                net,
+                options=json_api.JsonApiHarvestOptions(
+                    revision_fields=fields,
+                    prior_items=prior_items if reuse_is_fresh else None,
+                    force_full=not reuse_is_fresh,
+                    now=poll_now,
+                ),
+            )
+
+        return harvest
+    if prior_items is None:
         return get(name)
     return partial(
         json_api.harvest,
         name,
         options=json_api.JsonApiHarvestOptions(revision_fields=fields, prior_items=prior_items),
     )
-
-
-SOURCE_TYPES = source_types()
-
-
-def source_type(source: str) -> str:
-    """Stable source taxonomy declared in ``registry/feeds.toml``."""
-    return SOURCE_TYPES.get(source, "Other")
 
 
 def get(name: str) -> Harvest:

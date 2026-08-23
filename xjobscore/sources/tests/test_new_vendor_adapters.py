@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import html
 import json
+from typing import NamedTuple
 
-from xjobscore.net import Response
+import pytest
+
+from xjobscore.net import NetError, Response
 from xjobscore.records import Feed
 from xjobscore.sources import PARSERS, SOURCES, avature, dayforce, docxtract, join, taleo, zohorecruit
 
@@ -13,21 +16,40 @@ def response(url: str, body: str | dict) -> Response:
     return Response(url=url, status=200, headers={}, body=raw.encode())
 
 
+class Call(NamedTuple):
+    method: str
+    url: str
+    data: dict | None = None
+    concurrency: int = 1
+
+
 class RouteNet:
+    """A routing fake. A route may be a `Response` or a `(url, data)` callable.
+
+    The callable form exists because a Taleo pager POST distinguishes its pages
+    only by request body -- keying on the URL alone would hand back the same
+    page forever, which is exactly the bug the size-selector work uncovered
+    against the live board.
+    """
+
     def __init__(self, routes: dict[tuple[str, str], Response]) -> None:
         self.routes = routes
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[Call] = []
+
+    def _route(self, method, url, data=None):
+        route = self.routes[(method, url)]
+        return route(url, data) if callable(route) else route
 
     async def get(self, url, *, params=None, headers=None, etag=None, concurrency=1):
         if params:
             from urllib.parse import urlencode
             url = f"{url}?{urlencode(params)}"
-        self.calls.append(("GET", url))
-        return self.routes[("GET", url)]
+        self.calls.append(Call("GET", url, None, concurrency))
+        return self._route("GET", url)
 
     async def post(self, url, *, json=None, data=None, headers=None, concurrency=1):
-        self.calls.append(("POST", url))
-        return self.routes[("POST", url)]
+        self.calls.append(Call("POST", url, dict(data or {}), concurrency))
+        return self._route("POST", url, data)
 
 
 def avature_detail(external_id: str, title: str) -> str:
@@ -231,3 +253,263 @@ def test_all_seven_cataloged_vendors_are_registered_end_to_end():
     names = {"avature", "dayforce", "homerun", "join", "taleo", "trakstar", "zohorecruit"}
     assert names <= SOURCES.keys()
     assert names <= PARSERS.keys()
+
+
+# --- taleo pagination ------------------------------------------------------
+#
+# The pre-existing taleo test above uses nbElements=1, so page_count is 1 and
+# the pager never runs. Everything below covers the leg that was 76-81% of a
+# live run's wall clock and had no coverage at all.
+
+TALEO_ROOT = "https://demo.taleo.net/careersection/ex/jobsearch.ftl?lang=en"
+TALEO_AJAX = "https://demo.taleo.net/careersection/ex/jobsearch.ajax"
+TALEO_LIST_LABELS = ["reqlistitem.no", "reqlistitem.title"]
+
+
+def taleo_rows(start: int, count: int) -> list[tuple[str, str]]:
+    return [(str(1000 + i), f"Engineer {i}") for i in range(start, start + count)]
+
+
+def taleo_list_page(*, total: int, size: int, rows, sizes=()) -> str:
+    """A search page: the form inputs, the optional size `select`, the fillList."""
+    select = ""
+    if sizes:
+        options = "".join(f'<option value="{s}">{s}</option>' for s in sizes)
+        select = f'<select id="x" name="dropListSize">{options}</select>'
+    return (
+        f'<input name="listRequisition.nbElements" value="{total}">'
+        f'<input name="listRequisition.size" value="{size}">'
+        '<input name="csrftoken" value="tok">' + select
+        + taleo_definition(
+            "listRequisition", TALEO_LIST_LABELS, [v for row in rows for v in row]
+        )
+    )
+
+
+def taleo_pager_body(rows) -> str:
+    """The `!$!`/`!|!` AJAX payload a pager POST answers with."""
+    return "header!$!" + "!|!".join(v for row in rows for v in row)
+
+
+def taleo_pager(pages: dict):
+    """Route pager POSTs by their requested page. A value may be an exception."""
+    def handler(url, data):
+        page = pages[int(data["rlPager.currentPage"])]
+        if isinstance(page, Exception):
+            raise page
+        return response(url, taleo_pager_body(page))
+    return handler
+
+
+def taleo_details(rows) -> dict:
+    routes = {}
+    for external_id, title in rows:
+        url = f"https://demo.taleo.net/careersection/ex/jobdetail.ftl?job={external_id}&lang=en"
+        routes[("GET", url)] = response(
+            url, taleo_definition("descRequisition", ["reqlistitem.title"], [title])
+        )
+    return routes
+
+
+def taleo_feed() -> Feed:
+    return Feed(1, "taleo", "demo", config={"url": TALEO_ROOT}, company_name="Demo")
+
+
+async def test_taleo_walks_every_pager_page_when_no_size_selector():
+    rows = taleo_rows(0, 25)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=25, size=10, rows=rows[:10])
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({2: rows[10:20], 3: rows[20:]}),
+        **taleo_details(rows),
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    posts = [call for call in net.calls if call.method == "POST"]
+    assert [call.data["rlPager.currentPage"] for call in posts] == ["2", "3"]
+    assert all(call.url == TALEO_AJAX for call in posts)
+    assert [item.external_id for item in record.items] == [row[0] for row in rows]
+    assert record.partition_count == 3
+    assert record.truncated is False
+
+
+async def test_taleo_asks_for_the_largest_offered_page_size():
+    rows = taleo_rows(0, 250)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT,
+            taleo_list_page(total=250, size=10, rows=rows[:10], sizes=(5, 10, 25, 50, 100)),
+        ),
+        ("POST", TALEO_ROOT): response(
+            TALEO_ROOT,
+            taleo_list_page(total=250, size=100, rows=rows[:100], sizes=(5, 10, 25, 50, 100)),
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({2: rows[100:200], 3: rows[200:]}),
+        **taleo_details(rows),
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    resize = [call for call in net.calls if call.method == "POST" and call.url == TALEO_ROOT]
+    assert len(resize) == 1
+    assert resize[0].data["dropListSize"] == "100"
+    assert resize[0].data["ftlcompid"] == "actNbElementByPage"
+    assert resize[0].data["ftlcompclass"] == "PageComponent"
+    # 250 postings in 3 pages instead of 25, and every id still collected.
+    assert len([c for c in net.calls if c.method == "POST" and c.url == TALEO_AJAX]) == 2
+    assert record.partition_count == 3
+    assert [item.external_id for item in record.items] == [row[0] for row in rows]
+
+
+async def test_taleo_carries_the_page_size_into_every_pager_post():
+    """The `<select>` value is absent from the inputs, so it must be added back.
+
+    Live, a pager POST that omits `dropListSize` silently reverts to ten rows a
+    page and returns page 1 of that listing -- 200 OK, well-formed, and wrong.
+    """
+    rows = taleo_rows(0, 250)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT,
+            taleo_list_page(total=250, size=10, rows=rows[:10], sizes=(10, 100)),
+        ),
+        ("POST", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=250, size=100, rows=rows[:100], sizes=(10, 100))
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({2: rows[100:200], 3: rows[200:]}),
+        **taleo_details(rows),
+    })
+
+    await taleo.harvest(taleo_feed(), net)
+
+    pager = [c for c in net.calls if c.method == "POST" and c.url == TALEO_AJAX]
+    assert pager and all(call.data["dropListSize"] == "100" for call in pager)
+
+
+async def test_taleo_falls_back_when_the_tenant_ignores_the_size_request():
+    rows = taleo_rows(0, 250)
+    pages = {page: rows[(page - 1) * 10:page * 10] for page in range(2, 26)}
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=250, size=10, rows=rows[:10], sizes=(10, 100))
+        ),
+        # Echoes the old size: the board declined. Not an error.
+        ("POST", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=250, size=10, rows=rows[:10], sizes=(10, 100))
+        ),
+        ("POST", TALEO_AJAX): taleo_pager(pages),
+        **taleo_details(rows),
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    assert record.partition_count == 25
+    assert record.truncated is False
+    assert [item.external_id for item in record.items] == [row[0] for row in rows]
+
+
+async def test_taleo_skips_the_size_request_when_it_would_not_pay():
+    rows = taleo_rows(0, 15)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=15, size=10, rows=rows[:10], sizes=(10, 100))
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({2: rows[10:]}),
+        **taleo_details(rows),
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    # Two pages either way, so the ~150 kB form POST buys nothing.
+    assert [c for c in net.calls if c.method == "POST" and c.url == TALEO_ROOT] == []
+    assert len(record.items) == 15
+
+
+async def test_taleo_keeps_the_pages_it_read_when_a_pager_page_fails():
+    rows = taleo_rows(0, 50)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=50, size=10, rows=rows[:10])
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({
+            2: rows[10:20],
+            3: NetError("HTTP 503", url=TALEO_AJAX, status=503),
+            4: rows[30:40],
+            5: rows[40:],
+        }),
+        **taleo_details(rows),
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    # A contiguous prefix, not a hole: pages 4-5 are dropped even though they
+    # would have answered, because rows after a gap cannot be placed.
+    assert record.truncated is True
+    assert [item.external_id for item in record.items] == [row[0] for row in rows[:20]]
+    assert record.partition_count == 2
+
+
+async def test_taleo_keeps_the_pages_it_read_when_a_page_has_no_rows():
+    rows = taleo_rows(0, 30)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=30, size=10, rows=rows[:10])
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({2: rows[10:20], 3: []}),
+        **taleo_details(rows),
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    assert record.truncated is True
+    assert len(record.items) == 20
+
+
+async def test_taleo_raises_when_the_first_page_cannot_be_parsed():
+    net = RouteNet({("GET", TALEO_ROOT): response(TALEO_ROOT, "<html>nothing here</html>")})
+
+    with pytest.raises(ValueError):
+        await taleo.harvest(taleo_feed(), net)
+
+
+async def test_taleo_uses_one_width_for_the_pager_and_detail_legs():
+    """`Net._host_semaphores` is keyed by (host, width), so two widths would
+    take two semaphores and the real in-flight count would be their sum."""
+    rows = taleo_rows(0, 25)
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=25, size=10, rows=rows[:10])
+        ),
+        ("POST", TALEO_AJAX): taleo_pager({2: rows[10:20], 3: rows[20:]}),
+        **taleo_details(rows),
+    })
+
+    await taleo.harvest(taleo_feed(), net)
+
+    widths = {call.concurrency for call in net.calls if call.url != TALEO_ROOT}
+    assert widths == {taleo._CONCURRENCY}
+
+
+async def test_taleo_reports_partial_when_a_detail_fetch_fails():
+    rows = taleo_rows(0, 3)
+    routes = taleo_details(rows)
+    dead = f"https://demo.taleo.net/careersection/ex/jobdetail.ftl?job={rows[1][0]}&lang=en"
+
+    def fail(url, data=None):
+        raise NetError("HTTP 500", url=dead, status=500)
+
+    routes[("GET", dead)] = fail
+    net = RouteNet({
+        ("GET", TALEO_ROOT): response(
+            TALEO_ROOT, taleo_list_page(total=3, size=10, rows=rows)
+        ),
+        **routes,
+    })
+
+    record = await taleo.harvest(taleo_feed(), net)
+
+    assert record.truncated is True
+    assert record.enumerated_item_count == 3
+    assert record.detail_fetched_count == 2

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -99,8 +100,11 @@ def workday_list_config(monkeypatch):
     return config
 
 
-def feed() -> Feed:
-    return Feed(id=1, source="workday-list-test", key="tenant/wd1/Site")
+NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+
+
+def feed(**kwargs) -> Feed:
+    return Feed(id=1, source="workday-list-test", key="tenant/wd1/Site", **kwargs)
 
 
 async def harvest(net: ListOnlyNet):
@@ -128,6 +132,77 @@ async def test_items_are_the_verbatim_list_rows(workday_list_config):
     assert [item.external_id for item in record.items] == ["/job/0", "/job/1", "/job/2"]
     # No detail merge: the stored payload is the jobPostings[] element itself.
     assert record.items[0].payload == jobs[0]
+
+
+async def test_recent_equal_total_stops_after_the_first_page(workday_list_config):
+    jobs = [job(index) for index in range(3)]
+    net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
+
+    record = await json_api.harvest(
+        "workday-list-test",
+        feed(list_total=3, last_full_poll_at=NOW),
+        net,
+        options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=23)),
+    )
+
+    assert record.count_unchanged is True
+    assert record.list_total == 3
+    assert record.items == []
+    assert len(net.posts) == 1
+
+
+async def test_changed_total_paginates_immediately(workday_list_config):
+    jobs = [job(index) for index in range(3)]
+    net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
+
+    record = await json_api.harvest(
+        "workday-list-test",
+        feed(list_total=2, last_full_poll_at=NOW),
+        net,
+        options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=1)),
+    )
+
+    assert [item.external_id for item in record.items] == ["/job/0", "/job/1", "/job/2"]
+    assert record.full_listing is True
+    assert record.list_total == 3
+    assert len(net.posts) == 2
+
+
+async def test_equal_total_forces_full_listing_at_24_hours(workday_list_config):
+    jobs = [job(index) for index in range(3)]
+    net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
+
+    record = await json_api.harvest(
+        "workday-list-test",
+        feed(list_total=3, last_full_poll_at=NOW),
+        net,
+        options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=24)),
+    )
+
+    assert len(record.items) == 3
+    assert record.full_listing is True
+    assert record.count_unchanged is False
+
+
+async def test_capped_total_never_takes_count_shortcut(workday_list_config):
+    jobs = [job(index) for index in range(6)]
+    net = ListOnlyNet(
+        jobs,
+        {"category": {"A": [j["externalPath"] for j in jobs[:3]],
+                      "B": [j["externalPath"] for j in jobs[3:5]],
+                      "C": [jobs[5]["externalPath"]]}},
+    )
+
+    record = await json_api.harvest(
+        "workday-list-test",
+        feed(list_total=4, last_full_poll_at=NOW),
+        net,
+        options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=1)),
+    )
+
+    assert len(record.items) == 6
+    assert record.full_listing is True
+    assert record.result_window_truncated is True
 
 
 async def test_capped_board_is_still_partitioned_and_deduplicated(workday_list_config):

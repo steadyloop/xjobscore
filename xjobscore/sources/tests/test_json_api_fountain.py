@@ -14,7 +14,6 @@ from pathlib import Path
 from xjobscore.net import Response
 from xjobscore.records import Feed
 from xjobscore.sources import json_api
-from xjobscore.registry_loader import entries as registry_entries, feeds as registry_feeds
 
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "fountain.json"
@@ -98,11 +97,8 @@ def test_fountain_fixture_has_no_hidden_description_or_date_field():
     )
 
 
-def test_fountain_is_registered_but_its_registry_feed_is_not_live():
+def test_fountain_adapter_is_registered():
     from xjobscore import sources
 
     assert sources.get("fountain") is not None
     assert sources.parser("fountain") is not None
-    entry = next(entry for entry in registry_entries() if entry.source == "fountain")
-    assert not entry.verified
-    assert not any(feed.source == "fountain" for feed in registry_feeds())

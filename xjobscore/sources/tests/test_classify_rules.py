@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 
 from xjobscore import classify
+from xjobscore.records import Feed, Item
 from xjobscore.sources import json_api
 
 
@@ -269,9 +270,10 @@ def test_workday_research_is_a_research_flavoured_internship(title, expected):
 ASHBY = json_api.CONFIGS["ashby"]["fields"]
 
 
-def ashby_job_type(title="", employment_type="", department="", team=""):
+def ashby_job_type(title="", employment_type="", department="", team="", description=""):
     return resolve(ASHBY["job_type"], {"title": title, "employmentType": employment_type,
-                                       "department": department, "team": team})
+                                       "department": department, "team": team,
+                                       "descriptionPlain": description})
 
 
 def ashby_remote(workplace_type="", location="", secondary=()):
@@ -284,11 +286,19 @@ def ashby_remote(workplace_type="", location="", secondary=()):
     ("Software Engineering Intern", "intern"),                  # md:32, 276 title hits
     ("Intern, Financial Planning", "intern"),                   # md:32
     ("Software Engineer, New Grad", "student_program"),         # md:29, 47 hits
-    ("Apprentice Electrician", "student_program"),              # md:32, 4 hits
+    ("December 2026 New Graduate Engineer, Software", "student_program"),
+    ("CoDesign & NextGen - New College Grad", "student_program"),
+    ("Software Engineer (2027 University Grad)", "student_program"),
+    ("Quantitative Trader - 2027 Graduate Program", "student_program"),
+    ("Apprentice Electrician", None),                            # vocational, not college
     ("Software Engineer", None),
 ])
 def test_ashby_titles_classify_as_the_doc_measured(title, expected):
     assert ashby_job_type(title=title) == expected
+
+
+def test_ashby_phd_new_grad_is_not_an_undergraduate_program():
+    assert ashby_job_type(title="Applied Scientist, PhD New Grad") is None
 
 
 @pytest.mark.parametrize("title", [
@@ -313,15 +323,79 @@ def test_ashby_university_recruiter_is_not_a_student_program():
     "Werkstudent Content & Brand (m/w/d)",
 ])
 def test_ashby_werkstudent_matches_with_no_right_boundary(title):
-    """md:43 -- three of the four German rows carry an inflected tail, so the
-    pattern ends in `[a-z]*` rather than at a boundary."""
-    assert ashby_job_type(title=title) == "intern"
+    """md:Student Programs -- three of the four German rows carry an inflected
+    tail, so the pattern ends in `[a-z]*` rather than at a boundary."""
+    assert ashby_job_type(title=title) == "student_program"
 
 
 def test_ashby_working_student_is_reachable_by_no_other_signal():
-    """md:38-40 -- the English form of Werkstudent. Four of its seven rows say
-    neither Intern in the title nor Intern in employmentType."""
-    assert ashby_job_type(title="Working Student, IT") == "intern"
+    """md:Student Programs -- the English form of Werkstudent. Four of its
+    seven rows say neither Intern in the title nor Intern in employmentType."""
+    assert ashby_job_type(title="Working Student, IT") == "student_program"
+
+
+@pytest.mark.parametrize(("kwargs", "expected"), [
+    ({"title": "Founder's Associate Intern / Working Student"}, "intern"),
+    ({"title": "Working Student- Ecodesign", "employment_type": "Intern"}, "intern"),
+])
+def test_ashby_explicit_internship_evidence_precedes_working_student(kwargs, expected):
+    """Three of the ten measured Working Student/Werkstudent rows carry an
+    explicit internship signal; that narrower evidence must still win."""
+    assert ashby_job_type(**kwargs) == expected
+
+
+def test_ashby_working_student_outranks_a_mixed_early_talent_department():
+    """Current Statista roles use one mixed bucket for working students,
+    interns, and trainees. The role-specific title is the stronger fact."""
+    assert ashby_job_type(
+        title="Working Student Billing & Receivable Operations",
+        department="Working students / Interns / Trainees",
+        team="Working students / Interns / Trainees",
+    ) == "student_program"
+
+
+def test_ashby_campus_ambassador_is_the_student_not_the_program_staff():
+    assert ashby_job_type(title="Nolla Skin Campus Ambassador") == "student_program"
+    assert ashby_job_type(title="Technical Community Lead, Campus Leaders") is None
+
+
+def test_ashby_exact_description_evidence_reaches_undergraduate_programs():
+    assert ashby_job_type(
+        title="AI Resident",
+        description="No degree required; strong undergrads, grad students, and builders welcome.",
+    ) == "student_program"
+    assert ashby_job_type(
+        title="Student Ambassador",
+        description="Currently enrolled at a university - Bachelors Level",
+    ) == "student_program"
+    assert ashby_job_type(
+        title="Law School Student Ambassador",
+        description="Current JD candidate",
+    ) is None
+
+
+@pytest.mark.parametrize(("payload", "expected"), [
+    ({"title": "Working Student, IT", "employmentType": "FullTime"}, "student_program"),
+    ({"title": "Intern / Working Student, IT", "employmentType": "FullTime"}, "intern"),
+    ({"title": "Working Student, IT", "employmentType": "Intern"}, "intern"),
+    ({"title": "Applied Scientist, PhD New Grad", "employmentType": "FullTime"}, None),
+    ({"title": "Nolla Skin Campus Ambassador", "employmentType": "PartTime"}, "student_program"),
+])
+def test_ashby_parse_emits_student_program_with_narrower_signals_first(payload, expected):
+    """Exercise the adapter boundary, not only the rule resolver used above."""
+    posting = json_api.parse(
+        "ashby",
+        Feed(id=1, source="ashby", key="acme"),
+        Item("posting-1", {
+            "department": "Engineering",
+            "team": "Engineering",
+            "descriptionPlain": "",
+            **payload,
+        }),
+        {},
+    )[0]
+
+    assert posting.job_type == expected
 
 
 def test_ashby_praktikum_has_no_rule_because_it_measures_zero_here():
@@ -332,32 +406,25 @@ def test_ashby_praktikum_has_no_rule_because_it_measures_zero_here():
 
 
 def test_ashby_employment_type_reaches_rows_the_title_cannot():
-    """md:49-51 -- of the enum's 3 rows, "Research Internships" is now claimed
-    earlier by the `research` title rule (below the co-op rule, above this
-    one); "Working Student- Ecodesign" is the one the enum still reaches
-    alone."""
+    """Explicit internship metadata outranks the student-program title rule."""
     assert ashby_job_type(title="Working Student- Ecodesign", employment_type="Intern") == "intern"
 
 
-def test_ashby_research_internships_is_research_not_plain_intern():
-    """md:Research -- claimed by the title rule before `employmentType` is
-    ever consulted, so it no longer needs the enum to resolve at all."""
-    assert ashby_job_type(title="Research Internships", employment_type="Intern") == "research"
+def test_ashby_research_internships_use_the_visible_intern_type():
+    assert ashby_job_type(title="Research Internships", employment_type="Intern") == "intern"
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Research Scientist Intern", "research"),
-    ("AI Research Engineer Intern", "research"),   # word before "Intern"
-    ("ML Research Intern (Fall 2026)", "research"),
+    ("Research Scientist Intern", "intern"),
+    ("AI Research Engineer Intern", "intern"),   # word before "Intern"
+    ("ML Research Intern (Fall 2026)", "intern"),
     ("Research Assistant - Structural Bioinformatics", None),  # no internship signal
 ])
-def test_ashby_research_titles_classify_as_the_doc_measured(title, expected):
+def test_ashby_research_is_a_subject_not_a_job_type(title, expected):
     assert ashby_job_type(title=title) == expected
 
 
-def test_ashby_research_resolves_after_coop():
-    """md:Research -- research is checked after co-op, so a title carrying
-    both stays coop, matching the same ordering as intern."""
+def test_ashby_research_coop_stays_coop():
     assert ashby_job_type(title="Research Co-Op") == "coop"
 
 
@@ -459,6 +526,17 @@ def test_ashby_a_remote_secondary_location_is_remote_eligible():
     assert ashby_remote(location="New York", secondary=["Austin, TX"]) == "unknown"
 
 
+def test_ashby_secondary_location_uses_the_same_remote_fallbacks_as_primary():
+    assert ashby_remote(location="Winnersh", secondary=["Hybrid"]) == "hybrid"
+    assert ashby_remote(location="New York", secondary=["Anywhere"]) == "yes"
+
+
+def test_ashby_workplace_type_still_wins_over_secondary_location():
+    assert ashby_remote(
+        workplace_type="OnSite", location="Winnersh", secondary=["Hybrid"]
+    ) == "unknown"
+
+
 # greenhouse, from doc/raw_postings/greenhouse.md ---------------------------
 
 GREENHOUSE = json_api.CONFIGS["greenhouse"]["fields"]
@@ -485,6 +563,12 @@ def bag(**entries):
     ("Campus Systems Engineer (Intern)", "intern"),       # md:23
     ("Naval Architect Co-op - Winter 2027", "coop"),      # md:68, 5 hits
     ("Software Engineer, New Grad", "student_program"),   # md:21
+    ("New Graduate Engineer, Software", "student_program"),
+    ("Technical Support Engineer - University Graduate 2026", "student_program"),
+    ("Working Student - Tech", "student_program"),
+    ("Werkstudent", "student_program"),
+    ("Data Center Apprentice Program", "student_program"),
+    ("Apprentice Weld Support Technician", "student_program"),
     ("Software Engineer", None),
 ])
 def test_greenhouse_titles_classify_as_the_doc_measured(title, expected):
@@ -492,23 +576,20 @@ def test_greenhouse_titles_classify_as_the_doc_measured(title, expected):
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Quantitative Research Intern", "research"),                          # md:Research, 96 title hits
-    ("2026 BSc/MSc/PhD Quantitative Research/Strat Internship", "research"),  # word order: research after intern
-    ("Research Engineer Intern (Fall 2026)", "research"),
-    ("Researcher Intern", "research"),                                     # the `research[a-z]*` inflection
-    # Traps: the whole reason for the [ /&,()-]+ / [^a-z] separators.
+    ("Quantitative Research Intern", "intern"),
+    ("2026 BSc/MSc/PhD Quantitative Research/Strat Internship", "intern"),
+    ("Research Engineer Intern (Fall 2026)", "intern"),
+    ("Researcher Intern", "intern"),
     ("International Sector Analyst, Market Intelligence (MI)-Data Research", None),
     ("Internal Audit Research Manager", None),
     ("Research Scientist", None),               # research with no internship signal
     ("Clinical Research Associate II", None),   # a career title, not a student one
 ])
-def test_greenhouse_research_titles_classify_as_the_doc_measured(title, expected):
+def test_greenhouse_research_is_a_subject_not_a_job_type(title, expected):
     assert greenhouse_job_type(title=title) == expected
 
 
-def test_greenhouse_research_resolves_below_coop():
-    """md:Research -- research sits below co-op in the rule order, so a title
-    that is both stays coop. The one row measured carries both signals."""
+def test_greenhouse_research_coop_stays_coop():
     assert greenhouse_job_type(
         title="Applied Research Intern, Proactive Intelligence & Customer "
         "World Models (PhD / Graduate Co-op)"
@@ -544,6 +625,35 @@ def test_greenhouse_employment_type_matches_a_tenant_prefixed_value():
     assert greenhouse_job_type(metadata=bag(Employment_Type="Jump Trading - Intern")) == "intern"
     assert greenhouse_job_type(metadata=bag(Employment_Type="Summer Internship")) == "intern"
     assert greenhouse_job_type(metadata=bag(Employment_Type="Full-time - Campus")) == "student_program"
+
+
+def test_greenhouse_summer_analyst_is_an_internship_family():
+    assert greenhouse_job_type(title="2027 Research Summer Analyst") == "intern"
+
+
+@pytest.mark.parametrize(("title", "departments"), [
+    ("Machine Learning Engineer (PhD, New Grad)", ("Early Career",)),
+    ("Algorithm Developer - 2027 PhDs", ("Campus",)),
+    ("University Recruiter", ("University Recruiting",)),
+    ("ICML 2026 - University Recruiting", ("University",)),
+    ("Campus Ambassador", ("University Relations",)),
+    ("Mission Ops Engineer - SkillBridge", ("Early Career/New Grad",)),
+])
+def test_greenhouse_student_program_exclusions_precede_broad_groups(title, departments):
+    assert greenhouse_job_type(title=title, departments=departments) is None
+
+
+def test_greenhouse_explicit_internship_precedes_phd_exclusion():
+    assert greenhouse_job_type(title="PhD Research Intern") == "intern"
+
+
+@pytest.mark.parametrize("title", [
+    "SkillBridge Software Engineering Intern",
+    "Skillbridge Administrative Operations Apprentice",
+    "Campus Ambassador Intern",
+])
+def test_greenhouse_eligibility_exclusions_are_terminal(title):
+    assert greenhouse_job_type(title=title) is None
 
 
 def test_greenhouse_workday_job_profile_is_read_as_well():

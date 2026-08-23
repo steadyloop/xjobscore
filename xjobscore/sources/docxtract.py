@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urljoin
 import xml.etree.ElementTree as ET
 
-from xjobscore.net import Net, NetError, etag
+from xjobscore.net import Net, NetError, etag, last_modified
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 CONFIGS = import_module(".docxtract-configs", __package__).CONFIGS
 
@@ -184,17 +184,42 @@ def _links(text: str, base_url: str, spec: dict, feed: Feed) -> list[tuple[str, 
 async def harvest(name: str, feed: Feed, net: Net) -> Record:
     config = CONFIGS[name]
     list_spec = config["list"]
-    response = await net.get(_list_url(config, feed), etag=feed.etag)
+    list_url = _list_url(config, feed)
+
+    # A `probe` config opts in a vendor with no ETag but a Last-Modified that
+    # actually tracks content (Trakstar: verified live, day-granular, moves
+    # with the newest posting). Trakstar also ignores If-Modified-Since --
+    # confirmed live, a conditional GET there always returns 200 -- so this
+    # is deliberately a separate HEAD, not `net.get`'s conditional path. A
+    # cold feed (no stored value yet) always falls through to the real GET.
+    if list_spec.get("probe") and feed.last_modified is not None:
+        try:
+            probed = await net.head(list_url)
+        except NetError:
+            probed = None
+        if probed is not None and probed.status == 200:
+            probed_value = last_modified(probed)
+            if probed_value is not None and probed_value == feed.last_modified:
+                return Record(count_unchanged=True, http_status=probed.status, last_modified=probed_value)
+
+    response = await net.get(list_url, etag=feed.etag)
+    fresh_last_modified = last_modified(response) if list_spec.get("probe") else None
     if response.not_modified:
-        return Record(http_status=304, etag=etag(response))
+        return Record(http_status=304, etag=etag(response), last_modified=fresh_last_modified)
 
     if list_spec["extract"] == "jsonld":
         items = [Item(external_id=_external_id(job), payload=job) for job in _jsonld(response.text)]
-        return Record(items=items, http_status=response.status, etag=etag(response))
+        return Record(items=items, http_status=response.status, etag=etag(response), last_modified=fresh_last_modified)
     if list_spec["extract"] == "xml_items":
-        return Record(items=_xml_items(response.text, list_spec), http_status=response.status, etag=etag(response))
+        return Record(
+            items=_xml_items(response.text, list_spec),
+            http_status=response.status, etag=etag(response), last_modified=fresh_last_modified,
+        )
     if list_spec["extract"] == "json_items":
-        return Record(items=_json_items(response.json(), list_spec), http_status=response.status, etag=etag(response))
+        return Record(
+            items=_json_items(response.json(), list_spec),
+            http_status=response.status, etag=etag(response), last_modified=fresh_last_modified,
+        )
     if list_spec["extract"] != "html_links":
         raise ValueError(f"unsupported web-board extractor: {list_spec['extract']}")
 
@@ -232,7 +257,10 @@ async def harvest(name: str, feed: Feed, net: Net) -> Record:
         for job in _jsonld(result.text):
             item_id = external_id if config["detail"].get("id") == "discovered" else _external_id(job)
             items.append(Item(external_id=item_id, payload=job))
-    return Record(items=items, truncated=truncated, http_status=response.status, etag=etag(response))
+    return Record(
+        items=items, truncated=truncated,
+        http_status=response.status, etag=etag(response), last_modified=fresh_last_modified,
+    )
 
 
 def _parse_date(value: object) -> tuple[datetime | None, str]:

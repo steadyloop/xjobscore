@@ -14,8 +14,8 @@ directly via `json_api.parse` against a hand-picked `Item` from the fixture
 -- both real code paths, neither one needing pagination to run.
 
 Every value here is unverified only in the sense that no `Authorization-Key`
-has been minted yet (`registry/feeds.toml` keeps the feed `verified = false`
-until the user registers one at developer.usajobs.gov); the response shape,
+has been minted yet (the feed remains disabled until the user registers one
+at developer.usajobs.gov); the response shape,
 field paths, and JobCategoryCode semantics are all confirmed against this
 real capture and the live API reference page.
 """

@@ -19,14 +19,14 @@ a new flag per vendor.
 
 ## 2. Validate `CONFIGS` at load time
 
-`xjobscore/registry_loader.py` validates every TOML entry and raises `RegistryError` on anything
-missing or malformed. `json-api-configs.py` / `docxtract-configs.py` — also data
+`json-api-configs.py` / `docxtract-configs.py` are executable adapter data and
+need validation just as much as a database-backed feed configuration does.
 — have no schema validation. A misspelled key in a `fields` mapping silently resolves
 to `None` via `_dig`'s `.get()` chains, matching the exact silent-absence failure mode
 documented as a verified defect in CLAUDE.md (Oracle drops 100% of postings).
 
 Change: add a load-time schema check for `CONFIGS` (both `json-api-configs.py` and
-`docxtract-configs.py`) with the same rigor the registry loader applies to TOML — fail loud
+`docxtract-configs.py`) with strict validation — fail loud
 on an unrecognized or malformed key instead of resolving to a missing field.
 
 ## 3. Give community/aggregator boards a real third contract

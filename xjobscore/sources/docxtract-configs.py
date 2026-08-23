@@ -45,6 +45,13 @@ CONFIGS: dict[str, dict] = {
             "extract": "xml_items",
             "path": "channel/item",
             "id": ("guid", "link"),
+            # No ETag (verified live), and the feed ignores If-Modified-Since
+            # -- a conditional GET always returns 200 here, so `net.get`'s
+            # own validator path buys nothing. It does support HEAD and
+            # returns a real Last-Modified there, day-granular and tied to
+            # the newest posting, so a cheap probe still catches a dormant
+            # board before paying for the ~37KB body.
+            "probe": {"method": "HEAD"},
         },
         "parser": "rss",
         "rss": {

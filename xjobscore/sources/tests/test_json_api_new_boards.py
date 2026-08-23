@@ -17,13 +17,16 @@ the pagination-params test is the load-bearing one for that source.
 
 from __future__ import annotations
 
+import copy
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from xjobscore.net import Response
-from xjobscore.records import Feed
+from xjobscore import sources
+from xjobscore.records import Feed, Item
 from xjobscore.sources import json_api
 
 
@@ -202,6 +205,24 @@ async def test_recruitcrm_has_no_date_field_anywhere_in_the_schema():
 # -- Gem -----------------------------------------------------------------------
 
 
+GEM_NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+
+
+def gem_feed(**kwargs) -> Feed:
+    return Feed(
+        id=1,
+        source="gem",
+        key="gem",
+        config=SEQUENCED_CONFIG["gem"],
+        **kwargs,
+    )
+
+
+def gem_prior_item() -> Item:
+    payload = fixture("gem_detail")[0]["data"]["oatsExternalJobPosting"]
+    return Item(external_id=payload["extId"], payload=payload)
+
+
 async def test_gem_list_query_is_a_separate_operation_from_detail():
     net, _ = await harvest_sequenced("gem")
 
@@ -234,6 +255,76 @@ async def test_gem_location_comes_from_the_list_locations_list():
     assert posting.location_raw == "San Francisco"
     assert posting.employment_type == "FULL_TIME"
     assert posting.workplace_type_raw == "HYBRID"
+
+
+async def test_recent_unchanged_gem_list_reuses_detail_without_fetching_it():
+    prior = gem_prior_item()
+    net = SequencedFixtureNet(fixture("gem"), fixture("gem_detail"))
+
+    record = await sources.reusing(
+        "gem",
+        {prior.external_id: prior},
+        now=GEM_NOW + timedelta(hours=23),
+    )(gem_feed(last_full_poll_at=GEM_NOW), net)
+
+    assert len(net.post_calls) == 1
+    assert net.post_calls[0]["json"][0]["operationName"] == "JobBoardList"
+    assert record.items == [prior]
+    assert record.reused_item_count == 1
+    assert record.detail_fetched_count == 0
+    assert record.full_listing is False
+
+
+async def test_changed_gem_list_metadata_fetches_only_that_detail():
+    list_payload = copy.deepcopy(fixture("gem"))
+    list_payload[0]["data"]["oatsExternalJobPostings"]["jobPostings"][0]["title"] = (
+        "Senior Software Engineer"
+    )
+    prior = gem_prior_item()
+    net = SequencedFixtureNet(list_payload, fixture("gem_detail"))
+
+    record = await sources.reusing(
+        "gem",
+        {prior.external_id: prior},
+        now=GEM_NOW + timedelta(hours=1),
+    )(gem_feed(last_full_poll_at=GEM_NOW), net)
+
+    assert [call["json"][0]["operationName"] for call in net.post_calls] == [
+        "JobBoardList",
+        "ExternalJobPostingQuery",
+    ]
+    assert record.reused_item_count == 0
+    assert record.detail_fetched_count == 1
+    assert record.full_listing is False
+
+
+async def test_gem_forces_all_details_at_24_hours():
+    prior = gem_prior_item()
+    net = SequencedFixtureNet(fixture("gem"), fixture("gem_detail"))
+
+    record = await sources.reusing(
+        "gem",
+        {prior.external_id: prior},
+        now=GEM_NOW + timedelta(hours=24),
+    )(gem_feed(last_full_poll_at=GEM_NOW), net)
+
+    assert [call["json"][0]["operationName"] for call in net.post_calls] == [
+        "JobBoardList",
+        "ExternalJobPostingQuery",
+    ]
+    assert record.reused_item_count == 0
+    assert record.detail_fetched_count == 1
+    assert record.full_listing is True
+
+
+async def test_first_gem_poll_is_a_full_detail_reconciliation():
+    net = SequencedFixtureNet(fixture("gem"), fixture("gem_detail"))
+
+    record = await sources.reusing("gem", None, now=GEM_NOW)(gem_feed(), net)
+
+    assert len(net.post_calls) == 2
+    assert record.detail_fetched_count == 1
+    assert record.full_listing is True
 
 
 # -- ADP -------------------------------------------------------------------

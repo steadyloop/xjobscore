@@ -32,11 +32,11 @@ _TOKEN = re.compile(r"{([^}]+)}")
 
 @dataclass(frozen=True, slots=True)
 class JsonApiHarvestOptions:
-    """One-run overrides used by the inspector without changing production.
+    """One-run overrides for controlled pagination and detail reuse.
 
-    The registered harvester still accepts only ``(feed, net)``. Inspector
-    calls may opt into faster pagination/detail fan-out and supply the latest
-    full detail items for revision-checked reuse.
+    The registered harvester still accepts only ``(feed, net)``. The inspector
+    may override request widths; the production scheduler supplies prior items
+    and refresh timing through ``sources.reusing``.
     """
 
     page_step: int | None = None
@@ -46,6 +46,8 @@ class JsonApiHarvestOptions:
     list_revision_fields: tuple[str, ...] = ()
     detail_revision_fields: tuple[str, ...] = ()
     prior_items: Mapping[str, Item] | None = None
+    force_full: bool = False
+    now: datetime | None = None
 
 
 def _dig(value: Any, path: str | None) -> Any:
@@ -578,6 +580,36 @@ async def harvest(
     pagination_truncated = False
     concurrency = page_config.get("concurrency", 1) if page_config else 1
     partition = list_config.get("partition")
+    count_probe = list_config.get("count_probe")
+    observed_total = context.get("total")
+    probe_now = (
+        options.now
+        if options is not None and options.now is not None
+        else datetime.now(timezone.utc)
+    )
+    # Workday's public CXS list is a POST with `no-store`, so HTTP validators
+    # cannot help. Its first page does carry `total`; use that only as a
+    # time-bounded shortcut. Equal totals are not proof of equal contents, so a
+    # successful full listing must be forced when the window expires. The
+    # result-window cap is excluded because 2,000 is not the real board total.
+    if (
+        count_probe
+        and not (options is not None and options.force_full)
+        and isinstance(observed_total, int)
+        and feed.list_total == observed_total
+        and feed.last_full_poll_at is not None
+        and (partition is None or observed_total < int(partition["window"]))
+        and (probe_now - feed.last_full_poll_at).total_seconds()
+        < int(count_probe["window_s"])
+    ):
+        return Record(
+            envelope=context["envelope"],
+            http_status=first_status,
+            etag=first_etag,
+            count_unchanged=True,
+            list_total=observed_total,
+            enumerated_item_count=len(rows),
+        )
     if (
         page_config
         and partition
@@ -657,6 +689,8 @@ async def harvest(
             truncated=pagination_truncated,
             http_status=last_status if config.get("last_status") else first_status,
             etag=first_etag,
+            list_total=observed_total if isinstance(observed_total, int) else None,
+            full_listing=bool(count_probe) and not pagination_truncated,
             enumerated_item_count=len(rows),
             partition_count=partition_count,
             result_window_truncated=result_window_truncated,
@@ -725,11 +759,25 @@ async def harvest(
             detail_fetched_count=detail_fetched_count,
             detail_skipped_count=detail_skipped_count,
             result_window_truncated=result_window_truncated,
+            # A source with a detail leg never set this before -- only the
+            # no-detail return branch above did. Without it, a vendor whose
+            # list also configures `count_probe` (bamboohr) would persist
+            # `list_total=NULL` on every full pass and the probe could never
+            # find a stored baseline to compare against.
+            list_total=observed_total if isinstance(observed_total, int) else None,
+            # A forced all-detail pass is the reconciliation boundary for a
+            # time-bounded reuse policy such as Gem's. Only advance the clock
+            # when every list and detail request completed successfully.
+            full_listing=bool(options is not None and options.force_full and not truncated),
         )
 
     batch = detail.get("batch")
     if not batch:
-        prior_items = options.prior_items if options is not None else None
+        prior_items = (
+            options.prior_items
+            if options is not None and not options.force_full
+            else None
+        )
         revision_fields = options.revision_fields if options is not None else ()
         list_revision_fields = (
             (options.list_revision_fields or revision_fields) if options is not None else ()

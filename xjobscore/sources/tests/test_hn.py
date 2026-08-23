@@ -209,9 +209,8 @@ def test_parse_uses_honest_fallback_when_no_role_is_stated():
     assert posting.title == "Acme — hiring"
 
 
-def test_hn_is_registered_for_harvest_replay_and_board_taxonomy():
+def test_hn_is_registered_for_harvest_and_replay():
     from xjobscore import sources
 
     assert sources.get("hn") is hn.harvest
     assert sources.parser("hn") is hn.parse
-    assert sources.source_type("hn") == "Board"

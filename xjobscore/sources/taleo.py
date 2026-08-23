@@ -1,9 +1,18 @@
 """Oracle Taleo Enterprise classic-career-section adapter.
 
 Classic Taleo renders list/detail records through ``api.fillList`` calls.  The
-pager is an AJAX form tied to the initial cookie session; Net's shared client
-keeps that session while this adapter enumerates every list page.  Each detail
-HTML response is retained verbatim for replay.
+list defaults to ten rows a page, so a large career section costs dozens of
+pager POSTs before a single posting is fetched.  Where the search page offers a
+"results per page" selector this adapter first asks for the largest size it
+lists, which is what keeps the pager short -- see ``_page_size_body``.  Each
+detail HTML response is retained verbatim for replay.
+
+Two vendor facts worth not rediscovering.  Taleo sends neither ``ETag`` nor
+``Last-Modified``, so ``feed.etag`` stays NULL and the conditional-GET below
+never short-circuits a poll; every poll pays the full cost.  And the pager is
+not session-bound the way an AJAX form usually is: the initial GET sets only a
+``locale`` cookie, and every pager POST carries the whole form -- ``csrftoken``
+and target page included -- in its body.
 """
 
 from __future__ import annotations
@@ -19,26 +28,71 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 
+# One width for both legs on purpose.  `Net._host_semaphores` is keyed by
+# (host, concurrency), so two widths take two semaphores and the true in-flight
+# count against a host is their sum.  Taleo's legs are phase-separated -- the
+# pager finishes before the detail gather starts -- so unlike Workday one feed
+# could not carry both at once today; the reason to share a width anyway is
+# that a tenant running two career sections is two feeds on one host, and
+# those phases do overlap.  See doc/networking/rate-limits.md.
+#
+# 12 per that doc: sweeps of kp (681 details) and textron (473) were clean at
+# every width to 24, so no ceiling was found and this is a chosen value, not a
+# measured one.  It is the widest width that inflated no latency on *either*
+# tenant -- textron starts queueing at 24 (p50 99 -> 158ms, p95 178 -> 303ms
+# for 30% more throughput) while kp does not, and 12 stays under both.  Not the
+# widest clean width, deliberately: at width 24 kp's whole detail leg finishes
+# in 2.1s, far inside any burst allowance, so the sweep says nothing about a
+# sustained limiter -- the same trap the retired Workday config fell into when
+# it read a small clean tenant as licence for width 32.
+_CONCURRENCY = 12
 
-class _Inputs(HTMLParser):
+# Largest page size worth asking for.  Taleo's own selector stops at 100.
+_PAGE_SIZE_CAP = 100
+
+
+class _Form(HTMLParser):
+    """The search form's `input` values and `select` options, in one pass.
+
+    The options matter as much as the inputs: the page-size control is a
+    `<select>`, so a parser that only saw `<input>` could not find it.  Reading
+    real tags rather than regex-matching the name is deliberate -- `dropListSize`
+    also appears inside the `!|!`-delimited fillList payload, where it is data
+    about the rendered page rather than a control we may drive.
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.values: dict[str, str] = {}
+        self.options: dict[str, list[str]] = {}
+        self._select: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() != "input":
-            return
+        tag = tag.lower()
         values = dict(attrs)
         name = values.get("name")
-        if name:
-            self.values[str(name)] = str(values.get("value") or "")
+        if tag == "input":
+            if name:
+                self.values[str(name)] = str(values.get("value") or "")
+        elif tag == "select":
+            self._select = str(name) if name else None
+            if self._select:
+                self.options.setdefault(self._select, [])
+        elif tag == "option" and self._select:
+            value = values.get("value")
+            if value is not None:
+                self.options[self._select].append(str(value))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "select":
+            self._select = None
 
 
-def _inputs(text: str) -> dict[str, str]:
-    parser = _Inputs()
+def _form(text: str) -> _Form:
+    parser = _Form()
     parser.feed(text)
     parser.close()
-    return parser.values
+    return parser
 
 
 def _array(raw: str) -> list[str]:
@@ -94,9 +148,68 @@ def _value(row: dict[str, list[str]], name: str, *, longest: bool = False) -> st
     return max(values, key=len) if longest else values[0]
 
 
-def _list_rows(text: str, values: list[str] | None = None) -> list[dict[str, list[str]]]:
-    fields, labels, _ = _definition(text, "listRequisition")
-    return _rows(values if values is not None else _fill(text, "listRequisition"), fields, labels)
+def _page_size(options: dict[str, list[str]], current: int) -> int | None:
+    """The largest offered page size, or None if it would not beat `current`."""
+    sizes = [int(value) for value in options.get("dropListSize", []) if value.isdigit()]
+    best = max((size for size in sizes if size <= _PAGE_SIZE_CAP), default=0)
+    return best if best > current else None
+
+
+def _page_size_body(form: dict[str, str], size: int) -> dict[str, str]:
+    """The form POST Taleo's own `dropListSize` onchange handler builds.
+
+    `ftlPage_doRefresh` resets `currentPage`, names `actNbElementByPage` as the
+    firing component, then submits the whole search form -- so this goes to the
+    `.ftl`, not the `.ajax` path the pager loop uses.
+    """
+    return {
+        **form,
+        "dropListSize": str(size),
+        "ftlinterfaceid": "requisitionListInterface",
+        "ftlcompid": "actNbElementByPage",
+        "ftlcompclass": "PageComponent",
+        "jsfCmdId": "actNbElementByPage",
+        "actNbElementByPage.target": "",
+        "rlPager.currentPage": "1",
+    }
+
+
+async def _resize(
+    net: Net,
+    url: str,
+    form: dict[str, str],
+    size: int,
+    shape: tuple[list[str], list[str]],
+    total: int,
+) -> tuple[dict[str, str], list[dict[str, list[str]]]] | None:
+    """Ask for `size` rows a page; return the new form and rows, or None.
+
+    Verified rather than trusted, and on any doubt the caller keeps the page it
+    already has.  A tenant that ignores `dropListSize` answers 200 with the old
+    page, and one that honours it must still describe its rows the same way.
+    Never raises: 288 catalogued tenants render this form, only two are polled
+    today, and a career section that declines a bigger page is not a failure.
+    """
+    try:
+        response = await net.post(url, data=_page_size_body(form, size), concurrency=_CONCURRENCY)
+    except NetError:
+        return None
+    parsed = _form(response.text)
+    if int(parsed.values.get("listRequisition.size") or 0) != size:
+        return None
+    try:
+        fields, labels, _ = _definition(response.text, "listRequisition")
+        rows = _rows(_fill(response.text, "listRequisition"), fields, labels)
+    except (ValueError, SyntaxError):
+        return None
+    if (fields, labels) != shape or len(rows) != min(size, total):
+        return None
+    # `dropListSize` is a `<select>`, so it is absent from the parsed inputs and
+    # every later pager POST would omit it -- and the `.ajax` pager silently
+    # falls back to ten rows a page when it does, handing back page 1 of a
+    # ten-row listing while we believe we are reading page 2 of a hundred-row
+    # one.  Carry the size we asked for in the form itself.
+    return {**parsed.values, "dropListSize": str(size)}, rows
 
 
 def _search_url(feed: Feed) -> str:
@@ -118,38 +231,71 @@ async def harvest(feed: Feed, net: Net) -> Record:
     if first.not_modified:
         return Record(http_status=304, etag=etag(first))
 
-    form = _inputs(first.text)
-    initial_rows = _list_rows(first.text)
-    total = int(form.get("listRequisition.nbElements") or len(initial_rows))
-    page_size = int(form.get("listRequisition.size") or len(initial_rows) or 1)
+    parsed = _form(first.text)
+    form = parsed.values
+    # Derived once and threaded through the pager: `_definition` is a re.S scan
+    # of a ~145 kB document, and the loop used to run two of them per page.
+    fields, labels, _ = _definition(first.text, "listRequisition")
+    rows = _rows(_fill(first.text, "listRequisition"), fields, labels)
+    total = int(form.get("listRequisition.nbElements") or len(rows))
+    page_size = int(form.get("listRequisition.size") or len(rows) or 1)
+
+    # Ask for a bigger page before walking any.  Taleo defaults to ten rows,
+    # and one POST that turns 69 pages into 7 beats any amount of pager
+    # concurrency -- without needing to know whether Taleo tolerates
+    # out-of-order page requests.  Guarded so a small board never pays a
+    # ~150 kB POST to save nothing.
+    wider = _page_size(parsed.options, page_size)
+    if wider is not None and math.ceil(total / wider) + 1 < math.ceil(total / page_size):
+        resized = await _resize(net, first.url, form, wider, (fields, labels), total)
+        if resized is not None:
+            form, rows = resized
+            page_size = wider
+
     page_count = max(1, math.ceil(total / page_size))
-    rows = list(initial_rows)
     ajax_url = urlsplit(first.url)
     ajax_path = re.sub(r"\.ftl$", ".ajax", ajax_url.path)
     ajax_url_text = urlunsplit((ajax_url.scheme, ajax_url.netloc, ajax_path, "", ""))
+    # Built once -- the form is ~200 keys and only the page number moves.  Each
+    # POST is serialized before the next mutation, so reusing the dict is safe.
+    pager = {
+        **form,
+        "ftlinterfaceid": "requisitionListInterface",
+        "ftlcompid": "rlPager",
+        "jsfCmdId": "rlPager",
+        "ftlcompclass": "PagerComponent",
+        "ftlcallback": "ftlPager_processResponse",
+        "ftlajaxid": "ftlx1",
+    }
+    width = len(fields)
+    truncated = False
+    pages = 1
     for page in range(2, page_count + 1):
-        data = {
-            **form,
-            "ftlinterfaceid": "requisitionListInterface",
-            "ftlcompid": "rlPager",
-            "jsfCmdId": "rlPager",
-            "ftlcompclass": "PagerComponent",
-            "ftlcallback": "ftlPager_processResponse",
-            "ftlajaxid": "ftlx1",
-            "rlPager.currentPage": str(page),
-        }
-        response = await net.post(ajax_url_text, data=data)
-        chunks = response.text.split("!$!")
-        width = len(_definition(first.text, "listRequisition")[0])
+        pager["rlPager.currentPage"] = str(page)
+        # `concurrency` on a strictly sequential await: one request in flight,
+        # in page order, but opted out of Net's 1 req/s per-host floor -- which
+        # was ~90% of this leg's wall clock, idle rather than in transit.  It
+        # says nothing about issuing pages concurrently, which is a separate
+        # question about `rlPager`'s server-side state.
+        try:
+            response = await net.post(ajax_url_text, data=pager, concurrency=_CONCURRENCY)
+        except NetError:
+            truncated = True
+            break
         candidates = [
             chunk.split("!|!")
-            for chunk in chunks
+            for chunk in response.text.split("!$!")
             if chunk and len(chunk.split("!|!")) % width == 0
         ]
         if not candidates:
-            raise ValueError("Taleo pager response contained no requisition rows")
-        values = max(candidates, key=len)
-        rows.extend(_list_rows(first.text, values))
+            # Keep the contiguous prefix rather than losing the whole run.  A
+            # partial still stores its rows, and `reconcile` refuses to close
+            # postings absent from an incomplete fetch, so a short listing
+            # cannot manufacture a closure.
+            truncated = True
+            break
+        rows.extend(_rows(max(candidates, key=len), fields, labels))
+        pages = page
 
     identities: list[str] = []
     seen: set[str] = set()
@@ -161,11 +307,13 @@ async def harvest(feed: Feed, net: Net) -> Record:
             identities.append(external_id)
 
     responses = await asyncio.gather(
-        *(net.get(_detail_url(first.url, external_id), concurrency=4) for external_id in identities),
+        *(
+            net.get(_detail_url(first.url, external_id), concurrency=_CONCURRENCY)
+            for external_id in identities
+        ),
         return_exceptions=True,
     )
     items: list[Item] = []
-    truncated = False
     for external_id, response in zip(identities, responses):
         if isinstance(response, NetError):
             truncated = True
@@ -181,7 +329,9 @@ async def harvest(feed: Feed, net: Net) -> Record:
         etag=etag(first),
         enumerated_item_count=len(identities),
         detail_fetched_count=len(items),
-        partition_count=page_count,
+        # Pages actually walked, not the count the first page declared: a run
+        # that broke off early must not report the coverage it planned.
+        partition_count=pages,
     )
 
 
