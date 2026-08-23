@@ -1,0 +1,2957 @@
+# Candidate bioengineering skill taxonomy.
+#
+# This is a supplement to skills.yaml, not a production input.  It intentionally
+# omits skills already present in the main taxonomy (for example Python, MATLAB,
+# LabVIEW, statistics, signal processing, image processing, bioinformatics, and
+# computational biology).  Promote reviewed entries into skills.yaml rather than
+# pointing Gold at this file.
+#
+# Candidate selection covers biomedical devices, biotechnology, wet-lab methods,
+# bioinformatics, bioprocessing, pharmaceutical development, clinical research,
+# and regulated quality systems.  Aliases are global because the production
+# matcher scans every posting description, not only bioengineering postings.
+# Bare abbreviations that are ordinary words or overloaded outside this domain
+# are therefore case-sensitive, qualified, or recorded as ambiguous.
+#
+# Categories use the production vocabulary: language, library, tool, platform,
+# method, concept, framework, datastore, protocol, format, and hardware.
+
+skill:
+
+# CELL CULTURE AND GENERAL WET-LAB METHODS --------------------------------
+
+- id: aseptic-technique
+  name: Aseptic technique
+  category: method
+  aliases:
+  - aseptic technique
+  - aseptic techniques
+  - aseptic processing
+
+- id: cell-culture
+  name: Cell culture
+  category: method
+  aliases:
+  - cell culture
+  - cell culturing
+
+- id: mammalian-cell-culture
+  name: Mammalian cell culture
+  category: method
+  aliases:
+  - mammalian cell culture
+  - mammalian cell culturing
+
+- id: bacterial-cell-culture
+  name: Bacterial cell culture
+  category: method
+  aliases:
+  - bacterial cell culture
+  - bacterial culture
+
+- id: primary-cell-culture
+  name: Primary cell culture
+  category: method
+  aliases:
+  - primary cell culture
+  - primary cells culture
+
+- id: stem-cell-culture
+  name: Stem cell culture
+  category: method
+  aliases:
+  - stem cell culture
+  - stem-cell culture
+
+- id: organoid-culture
+  name: Organoid culture
+  category: method
+  aliases:
+  - organoid culture
+  - organoid culturing
+
+- id: three-dimensional-cell-culture
+  name: 3D cell culture
+  category: method
+  aliases:
+  - 3D cell culture
+  - three-dimensional cell culture
+  - three dimensional cell culture
+
+- id: tissue-culture
+  name: Tissue culture
+  category: method
+  aliases:
+  - tissue culture
+  - tissue culturing
+
+- id: cell-line-development
+  name: Cell-line development
+  category: method
+  aliases:
+  - cell line development
+  - cell-line development
+
+- id: cell-banking
+  name: Cell banking
+  category: method
+  aliases:
+  - cell banking
+  - master cell bank
+  - working cell bank
+
+- id: cryopreservation
+  name: Cryopreservation
+  category: method
+  aliases:
+  - cryopreservation
+  - cryogenic preservation
+
+- id: cell-counting
+  name: Cell counting
+  category: method
+  aliases:
+  - cell counting
+  - automated cell counting
+
+- id: cell-viability-assays
+  name: Cell-viability assays
+  category: method
+  aliases:
+  - cell viability assay
+  - cell viability assays
+  - viability assay
+  - viability assays
+
+- id: cell-based-assays
+  name: Cell-based assays
+  category: method
+  aliases:
+  - cell-based assay
+  - cell-based assays
+  - cell based assay
+  - cell based assays
+
+- id: cell-transfection
+  name: Cell transfection
+  category: method
+  aliases:
+  - cell transfection
+  - transient transfection
+  - stable transfection
+  - transfection
+
+- id: electroporation
+  name: Electroporation
+  category: method
+  aliases:
+  - electroporation
+  - electroporating
+
+- id: viral-transduction
+  name: Viral transduction
+  category: method
+  aliases:
+  - viral transduction
+  - lentiviral transduction
+  - adenoviral transduction
+
+- id: cell-sorting
+  name: Cell sorting
+  category: method
+  aliases:
+  - cell sorting
+  - fluorescence-activated cell sorting
+  - fluorescence activated cell sorting
+  case_sensitive_aliases:
+  - FACS
+
+- id: single-cell-analysis
+  name: Single-cell analysis
+  category: method
+  aliases:
+  - single-cell analysis
+  - single cell analysis
+
+- id: pipetting
+  name: Pipetting
+  category: method
+  aliases:
+  - pipetting
+  - micropipetting
+  - pipette technique
+
+- id: liquid-handling
+  name: Liquid handling
+  category: method
+  aliases:
+  - liquid handling
+  - automated liquid handling
+
+- id: serial-dilution
+  name: Serial dilution
+  category: method
+  aliases:
+  - serial dilution
+  - serial dilutions
+
+- id: buffer-preparation
+  name: Buffer preparation
+  category: method
+  aliases:
+  - buffer preparation
+  - buffer formulation
+
+- id: media-preparation
+  name: Culture-media preparation
+  category: method
+  aliases:
+  - culture media preparation
+  - cell culture media preparation
+  - media preparation
+
+- id: biological-sample-preparation
+  name: Biological sample preparation
+  category: method
+  aliases:
+  - biological sample preparation
+  - biospecimen preparation
+  - sample preparation for analysis
+
+- id: centrifugation
+  name: Centrifugation
+  category: method
+  aliases:
+  - centrifugation
+  - centrifuge operation
+
+- id: ultracentrifugation
+  name: Ultracentrifugation
+  category: method
+  aliases:
+  - ultracentrifugation
+  - ultracentrifuge operation
+
+- id: homogenization
+  name: Sample homogenization
+  category: method
+  aliases:
+  - sample homogenization
+  - tissue homogenization
+  - cell homogenization
+
+- id: sonication
+  name: Sonication
+  category: method
+  aliases:
+  - sonication
+  - ultrasonic cell disruption
+
+- id: membrane-filtration
+  name: Membrane filtration
+  category: method
+  aliases:
+  - membrane filtration
+  - sterile filtration
+
+- id: tangential-flow-filtration
+  name: Tangential-flow filtration
+  category: method
+  aliases:
+  - tangential flow filtration
+  - tangential-flow filtration
+  case_sensitive_aliases:
+  - TFF
+
+- id: dialysis
+  name: Laboratory dialysis
+  category: method
+  aliases:
+  - membrane dialysis
+  - protein dialysis
+  - laboratory dialysis
+  ambiguous_aliases:
+  - dialysis
+
+- id: lyophilization
+  name: Lyophilization
+  category: method
+  aliases:
+  - lyophilization
+  - freeze drying
+  - freeze-drying
+
+- id: autoclaving
+  name: Autoclaving
+  category: method
+  aliases:
+  - autoclaving
+  - autoclave operation
+
+- id: laboratory-sterilization
+  name: Laboratory sterilization
+  category: method
+  aliases:
+  - laboratory sterilization
+  - equipment sterilization
+  - steam sterilization
+
+# MOLECULAR BIOLOGY AND ASSAYS -------------------------------------------
+
+- id: nucleic-acid-extraction
+  name: Nucleic-acid extraction
+  category: method
+  aliases:
+  - nucleic acid extraction
+  - nucleic-acid extraction
+  - nucleic acid isolation
+
+- id: dna-extraction
+  name: DNA extraction
+  category: method
+  aliases:
+  - DNA extraction
+  - DNA isolation
+  - genomic DNA extraction
+
+- id: rna-extraction
+  name: RNA extraction
+  category: method
+  aliases:
+  - RNA extraction
+  - RNA isolation
+  - total RNA extraction
+
+- id: polymerase-chain-reaction
+  name: Polymerase chain reaction
+  category: method
+  aliases:
+  - polymerase chain reaction
+  case_sensitive_aliases:
+  - PCR
+
+- id: quantitative-pcr
+  name: Quantitative PCR
+  category: method
+  aliases:
+  - quantitative PCR
+  - real-time PCR
+  - real time PCR
+  case_sensitive_aliases:
+  - qPCR
+
+- id: reverse-transcription-pcr
+  name: Reverse-transcription PCR
+  category: method
+  aliases:
+  - reverse transcription PCR
+  - reverse-transcription PCR
+  - RT qPCR
+  - RT-qPCR
+  case_sensitive_aliases:
+  - RT-PCR
+
+- id: digital-droplet-pcr
+  name: Digital droplet PCR
+  category: method
+  aliases:
+  - digital droplet PCR
+  - droplet digital PCR
+  case_sensitive_aliases:
+  - ddPCR
+
+- id: gel-electrophoresis
+  name: Gel electrophoresis
+  category: method
+  aliases:
+  - gel electrophoresis
+  - agarose gel electrophoresis
+
+- id: polyacrylamide-gel-electrophoresis
+  name: Polyacrylamide gel electrophoresis
+  category: method
+  aliases:
+  - polyacrylamide gel electrophoresis
+  case_sensitive_aliases:
+  - PAGE
+
+- id: sds-page
+  name: SDS-PAGE
+  category: method
+  aliases:
+  - sodium dodecyl sulfate polyacrylamide gel electrophoresis
+  case_sensitive_aliases:
+  - SDS-PAGE
+  - SDS PAGE
+
+- id: capillary-electrophoresis
+  name: Capillary electrophoresis
+  category: method
+  aliases:
+  - capillary electrophoresis
+
+- id: western-blotting
+  name: Western blotting
+  category: method
+  aliases:
+  - Western blot
+  - Western blotting
+  - immunoblot
+  - immunoblotting
+
+- id: northern-blotting
+  name: Northern blotting
+  category: method
+  aliases:
+  - Northern blot
+  - Northern blotting
+
+- id: southern-blotting
+  name: Southern blotting
+  category: method
+  aliases:
+  - Southern blot
+  - Southern blotting
+
+- id: enzyme-linked-immunosorbent-assay
+  name: Enzyme-linked immunosorbent assay
+  category: method
+  aliases:
+  - enzyme-linked immunosorbent assay
+  - enzyme linked immunosorbent assay
+  case_sensitive_aliases:
+  - ELISA
+
+- id: immunoassays
+  name: Immunoassays
+  category: method
+  aliases:
+  - immunoassay
+  - immunoassays
+  - immunometric assay
+
+- id: immunohistochemistry
+  name: Immunohistochemistry
+  category: method
+  aliases:
+  - immunohistochemistry
+  - immunohistochemical staining
+  case_sensitive_aliases:
+  - IHC
+
+- id: immunocytochemistry
+  name: Immunocytochemistry
+  category: method
+  aliases:
+  - immunocytochemistry
+  - immunocytochemical staining
+  case_sensitive_aliases:
+  - ICC
+
+- id: immunofluorescence
+  name: Immunofluorescence
+  category: method
+  aliases:
+  - immunofluorescence
+  - immunofluorescent staining
+  case_sensitive_aliases:
+  - IF staining
+
+- id: flow-cytometry
+  name: Flow cytometry
+  category: method
+  aliases:
+  - flow cytometry
+  - flow-cytometric analysis
+
+- id: enzyme-assays
+  name: Enzyme assays
+  category: method
+  aliases:
+  - enzyme assay
+  - enzyme assays
+  - enzymatic assay
+  - enzymatic assays
+
+- id: binding-assays
+  name: Binding assays
+  category: method
+  aliases:
+  - binding assay
+  - binding assays
+  - ligand-binding assay
+  - ligand binding assay
+
+- id: reporter-gene-assays
+  name: Reporter-gene assays
+  category: method
+  aliases:
+  - reporter gene assay
+  - reporter-gene assay
+  - luciferase assay
+
+- id: molecular-cloning
+  name: Molecular cloning
+  category: method
+  aliases:
+  - molecular cloning
+  - DNA cloning
+  - gene cloning
+
+- id: recombinant-dna-techniques
+  name: Recombinant DNA techniques
+  category: method
+  aliases:
+  - recombinant DNA technology
+  - recombinant DNA techniques
+  - recombinant DNA methods
+
+- id: restriction-digestion
+  name: Restriction digestion
+  category: method
+  aliases:
+  - restriction digestion
+  - restriction enzyme digestion
+  - restriction digest
+
+- id: dna-ligation
+  name: DNA ligation
+  category: method
+  aliases:
+  - DNA ligation
+  - ligation reaction
+
+- id: primer-design
+  name: Primer design
+  category: method
+  aliases:
+  - primer design
+  - PCR primer design
+  - oligonucleotide design
+
+- id: plasmid-design
+  name: Plasmid design
+  category: method
+  aliases:
+  - plasmid design
+  - plasmid construction
+
+- id: gibson-assembly
+  name: Gibson Assembly
+  category: method
+  aliases:
+  - Gibson Assembly
+  - Gibson cloning
+
+- id: golden-gate-assembly
+  name: Golden Gate assembly
+  category: method
+  aliases:
+  - Golden Gate assembly
+  - Golden Gate cloning
+
+- id: bacterial-transformation
+  name: Bacterial transformation
+  category: method
+  aliases:
+  - bacterial transformation
+  - plasmid transformation
+
+- id: crispr-cas
+  name: CRISPR-Cas systems
+  category: method
+  aliases:
+  - CRISPR-Cas
+  - CRISPR Cas
+  - CRISPR-Cas9
+  - CRISPR Cas9
+  case_sensitive_aliases:
+  - CRISPR
+
+- id: genome-editing
+  name: Genome editing
+  category: method
+  aliases:
+  - genome editing
+  - gene editing
+  - genetic editing
+
+- id: rna-interference
+  name: RNA interference
+  category: method
+  aliases:
+  - RNA interference
+  - RNAi-mediated knockdown
+  - siRNA knockdown
+  - shRNA knockdown
+  case_sensitive_aliases:
+  - RNAi
+
+- id: protein-expression
+  name: Protein expression
+  category: method
+  aliases:
+  - protein expression
+  - heterologous protein expression
+
+- id: recombinant-protein-production
+  name: Recombinant protein production
+  category: method
+  aliases:
+  - recombinant protein production
+  - recombinant protein expression
+
+- id: protein-purification
+  name: Protein purification
+  category: method
+  aliases:
+  - protein purification
+  - protein isolation and purification
+
+- id: affinity-purification
+  name: Affinity purification
+  category: method
+  aliases:
+  - affinity purification
+  - affinity protein purification
+  - affinity capture
+
+# ANALYTICAL CHEMISTRY AND CHARACTERIZATION ------------------------------
+
+- id: high-performance-liquid-chromatography
+  name: High-performance liquid chromatography
+  category: method
+  aliases:
+  - high-performance liquid chromatography
+  - high performance liquid chromatography
+  case_sensitive_aliases:
+  - HPLC
+
+- id: ultra-high-performance-liquid-chromatography
+  name: Ultra-high-performance liquid chromatography
+  category: method
+  aliases:
+  - ultra-high-performance liquid chromatography
+  - ultra high performance liquid chromatography
+  - ultrahigh-performance liquid chromatography
+  case_sensitive_aliases:
+  - UHPLC
+  - UPLC
+
+- id: fast-protein-liquid-chromatography
+  name: Fast protein liquid chromatography
+  category: method
+  aliases:
+  - fast protein liquid chromatography
+  case_sensitive_aliases:
+  - FPLC
+
+- id: gas-chromatography
+  name: Gas chromatography
+  category: method
+  aliases:
+  - gas chromatography
+  case_sensitive_aliases:
+  - GC chromatography
+
+- id: liquid-chromatography-mass-spectrometry
+  name: Liquid chromatography–mass spectrometry
+  category: method
+  aliases:
+  - liquid chromatography mass spectrometry
+  - liquid chromatography-mass spectrometry
+  case_sensitive_aliases:
+  - LC-MS
+  - LC/MS
+  - LC-MS/MS
+
+- id: gas-chromatography-mass-spectrometry
+  name: Gas chromatography–mass spectrometry
+  category: method
+  aliases:
+  - gas chromatography mass spectrometry
+  - gas chromatography-mass spectrometry
+  case_sensitive_aliases:
+  - GC-MS
+  - GC/MS
+
+- id: mass-spectrometry
+  name: Mass spectrometry
+  category: method
+  aliases:
+  - mass spectrometry
+  - tandem mass spectrometry
+  - high-resolution mass spectrometry
+  case_sensitive_aliases:
+  - MS/MS
+  - HRMS
+
+- id: size-exclusion-chromatography
+  name: Size-exclusion chromatography
+  category: method
+  aliases:
+  - size-exclusion chromatography
+  - size exclusion chromatography
+  - gel filtration chromatography
+  case_sensitive_aliases:
+  - SEC chromatography
+
+- id: ion-exchange-chromatography
+  name: Ion-exchange chromatography
+  category: method
+  aliases:
+  - ion-exchange chromatography
+  - ion exchange chromatography
+  case_sensitive_aliases:
+  - IEX chromatography
+
+- id: affinity-chromatography
+  name: Affinity chromatography
+  category: method
+  aliases:
+  - affinity chromatography
+  - immobilized metal affinity chromatography
+  case_sensitive_aliases:
+  - IMAC
+
+- id: spectrophotometry
+  name: Spectrophotometry
+  category: method
+  aliases:
+  - spectrophotometry
+  - spectrophotometric analysis
+
+- id: uv-visible-spectroscopy
+  name: UV–visible spectroscopy
+  category: method
+  aliases:
+  - UV-visible spectroscopy
+  - UV visible spectroscopy
+  - ultraviolet-visible spectroscopy
+  case_sensitive_aliases:
+  - UV-Vis
+  - UV/VIS
+
+- id: fluorometry
+  name: Fluorometry
+  category: method
+  aliases:
+  - fluorometry
+  - fluorescence spectroscopy
+
+- id: microplate-reader-assays
+  name: Microplate-reader assays
+  category: method
+  aliases:
+  - microplate reader assay
+  - microplate reader assays
+  - plate reader assay
+  - plate reader assays
+
+- id: nuclear-magnetic-resonance-spectroscopy
+  name: Nuclear magnetic resonance spectroscopy
+  category: method
+  aliases:
+  - nuclear magnetic resonance spectroscopy
+  - NMR spectroscopy
+  case_sensitive_aliases:
+  - NMR
+
+- id: x-ray-diffraction
+  name: X-ray diffraction
+  category: method
+  aliases:
+  - X-ray diffraction
+  - X ray diffraction
+  case_sensitive_aliases:
+  - XRD
+
+- id: fourier-transform-infrared-spectroscopy
+  name: Fourier-transform infrared spectroscopy
+  category: method
+  aliases:
+  - Fourier-transform infrared spectroscopy
+  - Fourier transform infrared spectroscopy
+  case_sensitive_aliases:
+  - FTIR
+
+- id: raman-spectroscopy
+  name: Raman spectroscopy
+  category: method
+  aliases:
+  - Raman spectroscopy
+  - Raman spectrometry
+
+- id: differential-scanning-calorimetry
+  name: Differential scanning calorimetry
+  category: method
+  aliases:
+  - differential scanning calorimetry
+  case_sensitive_aliases:
+  - DSC
+
+- id: thermogravimetric-analysis
+  name: Thermogravimetric analysis
+  category: method
+  aliases:
+  - thermogravimetric analysis
+  case_sensitive_aliases:
+  - TGA
+
+- id: rheology
+  name: Rheology
+  category: concept
+  aliases:
+  - rheology
+  - rheological characterization
+  - rheological analysis
+
+- id: surface-plasmon-resonance
+  name: Surface plasmon resonance
+  category: method
+  aliases:
+  - surface plasmon resonance
+  case_sensitive_aliases:
+  - SPR assay
+  - SPR analysis
+
+- id: dynamic-light-scattering
+  name: Dynamic light scattering
+  category: method
+  aliases:
+  - dynamic light scattering
+  case_sensitive_aliases:
+  - DLS analysis
+
+- id: particle-size-analysis
+  name: Particle-size analysis
+  category: method
+  aliases:
+  - particle size analysis
+  - particle-size analysis
+  - particle sizing
+
+# MICROSCOPY, HISTOLOGY, AND PHYSIOLOGICAL MEASUREMENT -------------------
+
+- id: bright-field-microscopy
+  name: Bright-field microscopy
+  category: method
+  aliases:
+  - bright-field microscopy
+  - brightfield microscopy
+
+- id: phase-contrast-microscopy
+  name: Phase-contrast microscopy
+  category: method
+  aliases:
+  - phase-contrast microscopy
+  - phase contrast microscopy
+
+- id: fluorescence-microscopy
+  name: Fluorescence microscopy
+  category: method
+  aliases:
+  - fluorescence microscopy
+  - fluorescent microscopy
+
+- id: confocal-microscopy
+  name: Confocal microscopy
+  category: method
+  aliases:
+  - confocal microscopy
+  - confocal imaging
+
+- id: electron-microscopy
+  name: Electron microscopy
+  category: method
+  aliases:
+  - electron microscopy
+
+- id: scanning-electron-microscopy
+  name: Scanning electron microscopy
+  category: method
+  aliases:
+  - scanning electron microscopy
+  case_sensitive_aliases:
+  - SEM imaging
+
+- id: transmission-electron-microscopy
+  name: Transmission electron microscopy
+  category: method
+  aliases:
+  - transmission electron microscopy
+  case_sensitive_aliases:
+  - TEM imaging
+
+- id: atomic-force-microscopy
+  name: Atomic force microscopy
+  category: method
+  aliases:
+  - atomic force microscopy
+  case_sensitive_aliases:
+  - AFM imaging
+
+- id: two-photon-microscopy
+  name: Two-photon microscopy
+  category: method
+  aliases:
+  - two-photon microscopy
+  - two photon microscopy
+
+- id: light-sheet-microscopy
+  name: Light-sheet microscopy
+  category: method
+  aliases:
+  - light-sheet microscopy
+  - light sheet microscopy
+
+- id: live-cell-imaging
+  name: Live-cell imaging
+  category: method
+  aliases:
+  - live-cell imaging
+  - live cell imaging
+
+- id: bioimage-analysis
+  name: Bioimage analysis
+  category: method
+  aliases:
+  - bioimage analysis
+  - biological image analysis
+  - microscopy image analysis
+
+- id: histology
+  name: Histology
+  category: concept
+  aliases:
+  - histology
+  - histological analysis
+  - histological techniques
+
+- id: microtomy
+  name: Microtomy
+  category: method
+  aliases:
+  - microtomy
+  - microtome sectioning
+
+- id: cryosectioning
+  name: Cryosectioning
+  category: method
+  aliases:
+  - cryosectioning
+  - cryostat sectioning
+
+- id: hematoxylin-and-eosin-staining
+  name: Hematoxylin and eosin staining
+  category: method
+  aliases:
+  - hematoxylin and eosin staining
+  - hematoxylin-eosin staining
+  case_sensitive_aliases:
+  - H&E staining
+
+- id: electrophysiology
+  name: Electrophysiology
+  category: concept
+  aliases:
+  - electrophysiology
+  - electrophysiological recording
+  - electrophysiological measurements
+
+- id: patch-clamp
+  name: Patch clamp
+  category: method
+  aliases:
+  - patch clamp
+  - patch-clamp recording
+  - whole-cell patch clamp
+
+- id: electroencephalography
+  name: Electroencephalography
+  category: method
+  aliases:
+  - electroencephalography
+  - electroencephalographic recording
+  case_sensitive_aliases:
+  - EEG
+
+- id: electrocardiography
+  name: Electrocardiography
+  category: method
+  aliases:
+  - electrocardiography
+  - electrocardiographic recording
+  case_sensitive_aliases:
+  - ECG
+  - EKG
+
+- id: electromyography
+  name: Electromyography
+  category: method
+  aliases:
+  - electromyography
+  - electromyographic recording
+  case_sensitive_aliases:
+  - EMG
+
+# SEQUENCING, OMICS, AND COMPUTATIONAL METHODS ---------------------------
+
+- id: dna-sequencing
+  name: DNA sequencing
+  category: method
+  aliases:
+  - DNA sequencing
+  - genomic sequencing
+
+- id: sanger-sequencing
+  name: Sanger sequencing
+  category: method
+  aliases:
+  - Sanger sequencing
+  - dideoxy sequencing
+
+- id: next-generation-sequencing
+  name: Next-generation sequencing
+  category: method
+  aliases:
+  - next-generation sequencing
+  - next generation sequencing
+  - massively parallel sequencing
+  case_sensitive_aliases:
+  - NGS
+
+- id: long-read-sequencing
+  name: Long-read sequencing
+  category: method
+  aliases:
+  - long-read sequencing
+  - long read sequencing
+
+- id: whole-genome-sequencing
+  name: Whole-genome sequencing
+  category: method
+  aliases:
+  - whole-genome sequencing
+  - whole genome sequencing
+  case_sensitive_aliases:
+  - WGS
+
+- id: whole-exome-sequencing
+  name: Whole-exome sequencing
+  category: method
+  aliases:
+  - whole-exome sequencing
+  - whole exome sequencing
+  case_sensitive_aliases:
+  - WES
+
+- id: rna-sequencing
+  name: RNA sequencing
+  category: method
+  aliases:
+  - RNA sequencing
+  - RNA-seq
+  - RNA seq
+
+- id: single-cell-rna-sequencing
+  name: Single-cell RNA sequencing
+  category: method
+  aliases:
+  - single-cell RNA sequencing
+  - single cell RNA sequencing
+  - single-cell RNA-seq
+  - single cell RNA-seq
+  case_sensitive_aliases:
+  - scRNA-seq
+
+- id: chip-sequencing
+  name: ChIP sequencing
+  category: method
+  aliases:
+  - chromatin immunoprecipitation sequencing
+  - ChIP sequencing
+  - ChIP-seq
+
+- id: atac-sequencing
+  name: ATAC sequencing
+  category: method
+  aliases:
+  - assay for transposase-accessible chromatin
+  - ATAC sequencing
+  case_sensitive_aliases:
+  - ATAC-seq
+
+- id: spatial-transcriptomics
+  name: Spatial transcriptomics
+  category: method
+  aliases:
+  - spatial transcriptomics
+  - spatial transcriptomic analysis
+
+- id: sequencing-library-preparation
+  name: Sequencing-library preparation
+  category: method
+  aliases:
+  - sequencing library preparation
+  - NGS library preparation
+  - RNA-seq library preparation
+  - DNA library preparation
+
+- id: sequence-alignment
+  name: Sequence alignment
+  category: method
+  aliases:
+  - sequence alignment
+  - read alignment
+  - multiple sequence alignment
+
+- id: genome-assembly
+  name: Genome assembly
+  category: method
+  aliases:
+  - genome assembly
+  - de novo assembly
+  - reference-guided assembly
+
+- id: variant-calling
+  name: Variant calling
+  category: method
+  aliases:
+  - variant calling
+  - genomic variant calling
+  - SNP calling
+
+- id: genome-annotation
+  name: Genome annotation
+  category: method
+  aliases:
+  - genome annotation
+  - genomic annotation
+  - gene annotation
+
+- id: differential-gene-expression
+  name: Differential gene-expression analysis
+  category: method
+  aliases:
+  - differential gene expression
+  - differential expression analysis
+  - differential gene-expression analysis
+
+- id: pathway-enrichment-analysis
+  name: Pathway-enrichment analysis
+  category: method
+  aliases:
+  - pathway enrichment analysis
+  - pathway-enrichment analysis
+  - gene set enrichment analysis
+  case_sensitive_aliases:
+  - GSEA
+
+- id: phylogenetic-analysis
+  name: Phylogenetic analysis
+  category: method
+  aliases:
+  - phylogenetic analysis
+  - phylogenetic inference
+  - phylogenomics
+
+- id: metagenomic-analysis
+  name: Metagenomic analysis
+  category: method
+  aliases:
+  - metagenomic analysis
+  - metagenomics analysis
+  - microbiome analysis
+
+- id: genomics
+  name: Genomics
+  category: concept
+  aliases:
+  - genomics
+  - genomic science
+
+- id: transcriptomics
+  name: Transcriptomics
+  category: concept
+  aliases:
+  - transcriptomics
+  - transcriptomic analysis
+
+- id: proteomics
+  name: Proteomics
+  category: concept
+  aliases:
+  - proteomics
+  - proteomic analysis
+
+- id: metabolomics
+  name: Metabolomics
+  category: concept
+  aliases:
+  - metabolomics
+  - metabolomic analysis
+
+- id: epigenomics
+  name: Epigenomics
+  category: concept
+  aliases:
+  - epigenomics
+  - epigenomic analysis
+
+- id: metagenomics
+  name: Metagenomics
+  category: concept
+  aliases:
+  - metagenomics
+  - metagenomic sequencing
+
+- id: lipidomics
+  name: Lipidomics
+  category: concept
+  aliases:
+  - lipidomics
+  - lipidomic analysis
+
+- id: glycomics
+  name: Glycomics
+  category: concept
+  aliases:
+  - glycomics
+  - glycomic analysis
+
+- id: systems-biology
+  name: Systems biology
+  category: concept
+  aliases:
+  - systems biology
+  - systems-level biology
+
+- id: synthetic-biology
+  name: Synthetic biology
+  category: concept
+  aliases:
+  - synthetic biology
+  - synthetic biological systems
+
+- id: molecular-biology
+  name: Molecular biology
+  category: concept
+  aliases:
+  - molecular biology
+  - molecular biological techniques
+
+- id: cell-biology
+  name: Cell biology
+  category: concept
+  aliases:
+  - cell biology
+  - cellular biology
+
+- id: structural-biology
+  name: Structural biology
+  category: concept
+  aliases:
+  - structural biology
+  - structural bioinformatics
+
+- id: microbiology
+  name: Microbiology
+  category: concept
+  aliases:
+  - microbiology
+  - microbial biology
+
+- id: immunology
+  name: Immunology
+  category: concept
+  aliases:
+  - immunology
+  - immunological science
+
+- id: neuroscience
+  name: Neuroscience
+  category: concept
+  aliases:
+  - neuroscience
+  - neural science
+
+- id: pharmacology
+  name: Pharmacology
+  category: concept
+  aliases:
+  - pharmacology
+  - pharmacological science
+
+- id: toxicology
+  name: Toxicology
+  category: concept
+  aliases:
+  - toxicology
+  - toxicological science
+
+- id: biochemistry
+  name: Biochemistry
+  category: concept
+  aliases:
+  - biochemistry
+  - biochemical science
+
+- id: biophysics
+  name: Biophysics
+  category: concept
+  aliases:
+  - biophysics
+  - biological physics
+
+# BIOINFORMATICS SOFTWARE AND FILE FORMATS -------------------------------
+
+- id: ncbi-blast
+  name: NCBI BLAST
+  category: tool
+  aliases:
+  - NCBI BLAST
+  - Basic Local Alignment Search Tool
+  case_sensitive_aliases:
+  - BLAST
+
+- id: bwa
+  name: BWA
+  category: tool
+  aliases:
+  - Burrows-Wheeler Aligner
+  case_sensitive_aliases:
+  - BWA
+
+- id: bowtie-2
+  name: Bowtie 2
+  category: tool
+  aliases:
+  - Bowtie 2
+  - Bowtie2
+
+- id: star-aligner
+  name: STAR aligner
+  category: tool
+  aliases:
+  - STAR aligner
+  - STAR RNA-seq aligner
+  ambiguous_aliases:
+  - STAR
+
+- id: hisat2
+  name: HISAT2
+  category: tool
+  aliases:
+  - HISAT2
+  - HISAT 2
+
+- id: samtools
+  name: SAMtools
+  category: tool
+  aliases:
+  - SAMtools
+  - SAM tools bioinformatics
+
+- id: bcftools
+  name: BCFtools
+  category: tool
+  aliases:
+  - BCFtools
+  - BCF tools bioinformatics
+
+- id: genome-analysis-toolkit
+  name: Genome Analysis Toolkit
+  category: tool
+  aliases:
+  - Genome Analysis Toolkit
+  case_sensitive_aliases:
+  - GATK
+
+- id: cell-ranger
+  name: Cell Ranger
+  category: tool
+  aliases:
+  - Cell Ranger
+  - 10x Cell Ranger
+
+- id: seurat
+  name: Seurat
+  category: library
+  aliases:
+  - Seurat single-cell
+  - Seurat package
+  ambiguous_aliases:
+  - Seurat
+
+- id: scanpy
+  name: Scanpy
+  category: library
+  aliases:
+  - Scanpy
+  - Scanpy toolkit
+
+- id: bioconductor
+  name: Bioconductor
+  category: platform
+  aliases:
+  - Bioconductor
+  - Bioconductor packages
+
+- id: deseq2
+  name: DESeq2
+  category: library
+  aliases:
+  - DESeq2
+  - DESeq 2
+
+- id: edger
+  name: edgeR
+  category: library
+  aliases:
+  - edgeR Bioconductor
+  case_sensitive_aliases:
+  - edgeR
+
+- id: limma
+  name: limma
+  category: library
+  aliases:
+  - limma Bioconductor
+  - limma package
+  ambiguous_aliases:
+  - limma
+
+- id: galaxy-bioinformatics
+  name: Galaxy bioinformatics platform
+  category: platform
+  aliases:
+  - Galaxy bioinformatics
+  - Galaxy platform for bioinformatics
+  ambiguous_aliases:
+  - Galaxy
+
+- id: integrative-genomics-viewer
+  name: Integrative Genomics Viewer
+  category: tool
+  aliases:
+  - Integrative Genomics Viewer
+  case_sensitive_aliases:
+  - IGV
+
+- id: cytoscape
+  name: Cytoscape
+  category: tool
+  aliases:
+  - Cytoscape
+  - Cytoscape network analysis
+
+- id: alphafold
+  name: AlphaFold
+  category: tool
+  aliases:
+  - AlphaFold
+  - AlphaFold2
+  - AlphaFold 2
+
+- id: rosetta-biomolecular-modeling
+  name: Rosetta biomolecular modeling
+  category: platform
+  aliases:
+  - Rosetta biomolecular modeling
+  - Rosetta protein modeling
+  - Rosetta molecular modeling
+  ambiguous_aliases:
+  - Rosetta
+
+- id: pymol
+  name: PyMOL
+  category: tool
+  aliases:
+  - PyMOL
+
+- id: ucsf-chimerax
+  name: UCSF ChimeraX
+  category: tool
+  aliases:
+  - UCSF ChimeraX
+  - ChimeraX
+
+- id: benchling
+  name: Benchling
+  category: platform
+  aliases:
+  - Benchling
+  - Benchling platform
+
+- id: snapgene
+  name: SnapGene
+  category: tool
+  aliases:
+  - SnapGene
+  - SnapGene Viewer
+
+- id: geneious-prime
+  name: Geneious Prime
+  category: tool
+  aliases:
+  - Geneious Prime
+  - Geneious software
+  ambiguous_aliases:
+  - Geneious
+
+- id: imagej
+  name: ImageJ
+  category: tool
+  aliases:
+  - ImageJ
+  - ImageJ software
+
+- id: fiji-imagej
+  name: Fiji
+  category: tool
+  aliases:
+  - Fiji ImageJ
+  - Fiji image-processing package
+  ambiguous_aliases:
+  - Fiji
+
+- id: cellprofiler
+  name: CellProfiler
+  category: tool
+  aliases:
+  - CellProfiler
+  - CellProfiler software
+
+- id: graphpad-prism
+  name: GraphPad Prism
+  category: tool
+  aliases:
+  - GraphPad Prism
+  - GraphPad
+  - Prism statistical software
+
+- id: flowjo
+  name: FlowJo
+  category: tool
+  aliases:
+  - FlowJo
+  - FlowJo software
+
+- id: fasta-format
+  name: FASTA format
+  category: format
+  aliases:
+  - FASTA format
+  - FASTA file
+  - FASTA files
+  case_sensitive_aliases:
+  - FASTA
+
+- id: fastq-format
+  name: FASTQ format
+  category: format
+  aliases:
+  - FASTQ format
+  - FASTQ file
+  - FASTQ files
+  case_sensitive_aliases:
+  - FASTQ
+
+- id: sam-format
+  name: SAM format
+  category: format
+  aliases:
+  - Sequence Alignment/Map format
+  - SAM alignment format
+  - .sam file
+  ambiguous_aliases:
+  - SAM
+
+- id: bam-format
+  name: BAM format
+  category: format
+  aliases:
+  - Binary Alignment Map format
+  - BAM alignment file
+  - .bam file
+  case_sensitive_aliases:
+  - BAM
+
+- id: cram-format
+  name: CRAM format
+  category: format
+  aliases:
+  - CRAM format
+  - CRAM file
+  - CRAM files
+  case_sensitive_aliases:
+  - CRAM
+
+- id: variant-call-format
+  name: Variant Call Format
+  category: format
+  aliases:
+  - Variant Call Format
+  - VCF file
+  - VCF files
+  case_sensitive_aliases:
+  - VCF
+
+- id: bed-format
+  name: BED format
+  category: format
+  aliases:
+  - Browser Extensible Data format
+  - BED genomic format
+  - BED file
+  case_sensitive_aliases:
+  - BED
+
+- id: gff-format
+  name: General Feature Format
+  category: format
+  aliases:
+  - General Feature Format
+  - GFF file
+  - GFF3 format
+  case_sensitive_aliases:
+  - GFF
+  - GFF3
+
+- id: gtf-format
+  name: Gene Transfer Format
+  category: format
+  aliases:
+  - Gene Transfer Format
+  - GTF file
+  - GTF annotation
+  case_sensitive_aliases:
+  - GTF
+
+- id: protein-data-bank-format
+  name: Protein Data Bank format
+  category: format
+  aliases:
+  - Protein Data Bank format
+  - PDB structure file
+  - PDB files
+  ambiguous_aliases:
+  - PDB
+
+- id: mzml-format
+  name: mzML format
+  category: format
+  aliases:
+  - mzML format
+  - mzML file
+  case_sensitive_aliases:
+  - mzML
+
+# BIOPROCESSING AND BIOMANUFACTURING -------------------------------------
+
+- id: bioreactor-operation
+  name: Bioreactor operation
+  category: method
+  aliases:
+  - bioreactor operation
+  - bioreactor operations
+  - bioreactor processing
+  - bioreactor cultivation
+
+- id: fermentation
+  name: Fermentation
+  category: method
+  aliases:
+  - fermentation
+  - microbial fermentation
+  - precision fermentation
+
+- id: upstream-bioprocessing
+  name: Upstream bioprocessing
+  category: method
+  aliases:
+  - upstream bioprocessing
+  - upstream processing
+  - upstream process development
+
+- id: downstream-bioprocessing
+  name: Downstream bioprocessing
+  category: method
+  aliases:
+  - downstream bioprocessing
+  - downstream processing
+  - downstream process development
+
+- id: bioprocess-development
+  name: Bioprocess development
+  category: method
+  aliases:
+  - bioprocess development
+  - bioprocess engineering
+  - bioprocess optimization
+
+- id: bioprocess-scale-up
+  name: Bioprocess scale-up
+  category: method
+  aliases:
+  - bioprocess scale-up
+  - bioprocess scale up
+  - process scale-up for biologics
+  - fermentation scale-up
+
+- id: technology-transfer
+  name: Manufacturing technology transfer
+  category: method
+  aliases:
+  - manufacturing technology transfer
+  - process technology transfer
+  - analytical method transfer
+  - tech transfer to manufacturing
+
+- id: process-validation
+  name: Process validation
+  category: method
+  aliases:
+  - process validation
+  - manufacturing process validation
+  - validated manufacturing process
+
+- id: cleaning-validation
+  name: Cleaning validation
+  category: method
+  aliases:
+  - cleaning validation
+  - validated cleaning process
+
+- id: equipment-qualification
+  name: Equipment qualification
+  category: method
+  aliases:
+  - equipment qualification
+  - installation qualification
+  - operational qualification
+  - performance qualification
+  case_sensitive_aliases:
+  - IQ/OQ/PQ
+  - IQ OQ PQ
+
+- id: clean-in-place
+  name: Clean-in-place
+  category: method
+  aliases:
+  - clean-in-place
+  - clean in place
+  case_sensitive_aliases:
+  - CIP
+
+- id: steam-in-place
+  name: Steam-in-place
+  category: method
+  aliases:
+  - steam-in-place
+  - steam in place
+  case_sensitive_aliases:
+  - SIP
+
+- id: fill-finish-manufacturing
+  name: Fill-finish manufacturing
+  category: method
+  aliases:
+  - fill-finish manufacturing
+  - fill finish manufacturing
+  - aseptic fill-finish
+  - aseptic fill finish
+
+- id: single-use-bioprocessing
+  name: Single-use bioprocessing
+  category: method
+  aliases:
+  - single-use bioprocessing
+  - single use bioprocessing
+  - single-use bioreactor
+  - single use bioreactor
+
+- id: cell-therapy-manufacturing
+  name: Cell-therapy manufacturing
+  category: method
+  aliases:
+  - cell therapy manufacturing
+  - cell-therapy manufacturing
+
+- id: gene-therapy-manufacturing
+  name: Gene-therapy manufacturing
+  category: method
+  aliases:
+  - gene therapy manufacturing
+  - gene-therapy manufacturing
+  - viral vector manufacturing
+
+- id: statistical-process-control
+  name: Statistical process control
+  category: method
+  aliases:
+  - statistical process control
+  - statistical process monitoring
+  case_sensitive_aliases:
+  - SPC
+
+- id: quality-by-design
+  name: Quality by Design
+  category: method
+  aliases:
+  - Quality by Design
+  - pharmaceutical quality by design
+  case_sensitive_aliases:
+  - QbD
+
+- id: process-analytical-technology
+  name: Process analytical technology
+  category: method
+  aliases:
+  - process analytical technology
+  case_sensitive_aliases:
+  - PAT framework
+
+- id: design-of-experiments
+  name: Design of experiments
+  category: method
+  aliases:
+  - design of experiments
+  - designed experiments
+  case_sensitive_aliases:
+  - DOE
+
+# BIOMEDICAL DEVICES, BIOMECHANICS, AND PROTOTYPING ----------------------
+
+- id: computer-aided-design
+  name: Computer-aided design
+  category: method
+  aliases:
+  - computer-aided design
+  - computer aided design
+  - 3D CAD
+  case_sensitive_aliases:
+  - CAD
+
+- id: solidworks
+  name: SOLIDWORKS
+  category: tool
+  aliases:
+  - SOLIDWORKS
+
+- id: ptc-creo
+  name: PTC Creo
+  category: tool
+  aliases:
+  - PTC Creo
+  - Creo Parametric
+  ambiguous_aliases:
+  - Creo
+
+- id: autodesk-fusion
+  name: Autodesk Fusion
+  category: tool
+  aliases:
+  - Autodesk Fusion
+  - Autodesk Fusion 360
+  - Fusion 360
+
+- id: autocad
+  name: AutoCAD
+  category: tool
+  aliases:
+  - AutoCAD
+  - Autodesk AutoCAD
+
+- id: catia
+  name: CATIA
+  category: tool
+  aliases:
+  - Dassault CATIA
+  case_sensitive_aliases:
+  - CATIA
+
+- id: ansys
+  name: Ansys
+  category: platform
+  aliases:
+  - Ansys Mechanical
+  - Ansys Fluent
+  - Ansys simulation
+  case_sensitive_aliases:
+  - ANSYS
+
+- id: comsol-multiphysics
+  name: COMSOL Multiphysics
+  category: platform
+  aliases:
+  - COMSOL Multiphysics
+  case_sensitive_aliases:
+  - COMSOL
+
+- id: abaqus
+  name: Abaqus
+  category: tool
+  aliases:
+  - Abaqus
+  - SIMULIA Abaqus
+
+- id: three-dimensional-printing
+  name: 3D printing
+  category: method
+  aliases:
+  - 3D printing
+  - three-dimensional printing
+  - additive manufacturing
+
+- id: rapid-prototyping
+  name: Rapid prototyping
+  category: method
+  aliases:
+  - rapid prototyping
+  - rapid prototype development
+
+- id: mechanical-testing
+  name: Mechanical testing
+  category: method
+  aliases:
+  - mechanical testing
+  - mechanical characterization
+
+- id: tensile-testing
+  name: Tensile testing
+  category: method
+  aliases:
+  - tensile testing
+  - tensile test
+  - uniaxial tensile testing
+
+- id: compression-testing
+  name: Compression testing
+  category: method
+  aliases:
+  - compression testing
+  - compression test
+
+- id: fatigue-testing
+  name: Fatigue testing
+  category: method
+  aliases:
+  - fatigue testing
+  - cyclic fatigue testing
+
+- id: dynamic-mechanical-analysis
+  name: Dynamic mechanical analysis
+  category: method
+  aliases:
+  - dynamic mechanical analysis
+  case_sensitive_aliases:
+  - DMA testing
+
+- id: geometric-dimensioning-and-tolerancing
+  name: Geometric dimensioning and tolerancing
+  category: method
+  aliases:
+  - geometric dimensioning and tolerancing
+  - geometric dimensioning & tolerancing
+  case_sensitive_aliases:
+  - GD&T
+
+- id: tolerance-analysis
+  name: Tolerance analysis
+  category: method
+  aliases:
+  - tolerance analysis
+  - tolerance stack-up analysis
+  - tolerance stackup analysis
+
+- id: design-for-manufacturability
+  name: Design for manufacturability
+  category: method
+  aliases:
+  - design for manufacturability
+  - design for manufacturing
+  case_sensitive_aliases:
+  - DFM
+
+- id: injection-molding
+  name: Injection molding
+  category: method
+  aliases:
+  - injection molding
+  - injection moulding
+
+- id: biomechanics
+  name: Biomechanics
+  category: concept
+  aliases:
+  - biomechanics
+  - biomechanical engineering
+  - biomechanical analysis
+
+- id: biomaterials
+  name: Biomaterials
+  category: concept
+  aliases:
+  - biomaterials
+  - biomaterial science
+  - biomaterials engineering
+
+- id: biocompatibility
+  name: Biocompatibility
+  category: concept
+  aliases:
+  - biocompatibility
+  - biocompatibility assessment
+  - biocompatibility testing
+
+- id: tissue-engineering
+  name: Tissue engineering
+  category: concept
+  aliases:
+  - tissue engineering
+  - engineered tissues
+
+- id: regenerative-medicine
+  name: Regenerative medicine
+  category: concept
+  aliases:
+  - regenerative medicine
+  - regenerative therapies
+
+- id: three-dimensional-bioprinting
+  name: 3D bioprinting
+  category: method
+  aliases:
+  - 3D bioprinting
+  - three-dimensional bioprinting
+  - biofabrication printing
+
+- id: drug-delivery
+  name: Drug delivery
+  category: concept
+  aliases:
+  - drug delivery
+  - targeted drug delivery
+  - controlled drug delivery
+
+- id: controlled-release
+  name: Controlled release
+  category: concept
+  aliases:
+  - controlled release formulation
+  - controlled-release drug delivery
+  - sustained release formulation
+
+- id: microfluidics
+  name: Microfluidics
+  category: concept
+  aliases:
+  - microfluidics
+  - microfluidic systems
+  - microfluidic device design
+
+- id: lab-on-a-chip
+  name: Lab-on-a-chip
+  category: concept
+  aliases:
+  - lab-on-a-chip
+  - lab on a chip
+  - micro total analysis system
+
+- id: organ-on-a-chip
+  name: Organ-on-a-chip
+  category: concept
+  aliases:
+  - organ-on-a-chip
+  - organ on a chip
+  - organs-on-chips
+
+- id: biosensors
+  name: Biosensors
+  category: hardware
+  aliases:
+  - biosensor
+  - biosensors
+  - biological sensor
+  - biological sensors
+
+- id: implantable-medical-devices
+  name: Implantable medical devices
+  category: hardware
+  aliases:
+  - implantable medical device
+  - implantable medical devices
+  - medical implant design
+
+- id: prosthetic-design
+  name: Prosthetic design
+  category: method
+  aliases:
+  - prosthetic design
+  - prosthesis design
+  - prosthetic device development
+
+- id: orthotic-design
+  name: Orthotic design
+  category: method
+  aliases:
+  - orthotic design
+  - orthosis design
+  - orthotic device development
+
+- id: rehabilitation-engineering
+  name: Rehabilitation engineering
+  category: concept
+  aliases:
+  - rehabilitation engineering
+  - rehabilitation technology
+  - assistive technology engineering
+
+- id: gait-analysis
+  name: Gait analysis
+  category: method
+  aliases:
+  - gait analysis
+  - gait assessment
+  - instrumented gait analysis
+
+- id: motion-capture
+  name: Motion capture
+  category: method
+  aliases:
+  - motion capture
+  - optical motion capture
+  - marker-based motion capture
+
+- id: musculoskeletal-modeling
+  name: Musculoskeletal modeling
+  category: method
+  aliases:
+  - musculoskeletal modeling
+  - musculoskeletal simulation
+
+- id: hemodynamics
+  name: Hemodynamics
+  category: concept
+  aliases:
+  - hemodynamics
+  - haemodynamics
+  - blood-flow dynamics
+
+- id: computational-fluid-dynamics
+  name: Computational fluid dynamics
+  category: method
+  aliases:
+  - computational fluid dynamics
+  - computational fluid-dynamic simulation
+  case_sensitive_aliases:
+  - CFD
+
+- id: medical-imaging
+  name: Medical imaging
+  category: concept
+  aliases:
+  - medical imaging
+  - biomedical imaging
+  - diagnostic imaging
+
+- id: magnetic-resonance-imaging
+  name: Magnetic resonance imaging
+  category: method
+  aliases:
+  - magnetic resonance imaging
+  case_sensitive_aliases:
+  - MRI
+
+- id: computed-tomography
+  name: Computed tomography
+  category: method
+  aliases:
+  - computed tomography
+  - computed axial tomography
+  case_sensitive_aliases:
+  - CT imaging
+  - CAT scan
+
+- id: medical-ultrasound
+  name: Medical ultrasound
+  category: method
+  aliases:
+  - medical ultrasound
+  - ultrasound imaging
+  - diagnostic ultrasound
+
+- id: positron-emission-tomography
+  name: Positron emission tomography
+  category: method
+  aliases:
+  - positron emission tomography
+  case_sensitive_aliases:
+  - PET imaging
+  - PET scan
+
+- id: medical-image-segmentation
+  name: Medical-image segmentation
+  category: method
+  aliases:
+  - medical image segmentation
+  - biomedical image segmentation
+  - anatomical segmentation
+
+- id: dicom
+  name: DICOM
+  category: protocol
+  aliases:
+  - Digital Imaging and Communications in Medicine
+  - DICOM standard
+  - DICOM imaging
+  case_sensitive_aliases:
+  - DICOM
+
+- id: hl7
+  name: HL7
+  category: protocol
+  aliases:
+  - Health Level Seven
+  - HL7 messaging
+  - HL7 interface
+  case_sensitive_aliases:
+  - HL7
+
+- id: fhir
+  name: FHIR
+  category: protocol
+  aliases:
+  - Fast Healthcare Interoperability Resources
+  - FHIR standard
+  - FHIR API
+  case_sensitive_aliases:
+  - FHIR
+
+- id: neural-recording
+  name: Neural recording
+  category: method
+  aliases:
+  - neural recording
+  - neural signal recording
+  - intracortical recording
+
+- id: neural-stimulation
+  name: Neural stimulation
+  category: method
+  aliases:
+  - neural stimulation
+  - neurostimulation
+  - electrical neural stimulation
+
+- id: brain-computer-interfaces
+  name: Brain–computer interfaces
+  category: concept
+  aliases:
+  - brain-computer interface
+  - brain computer interface
+  - brain-machine interface
+  - brain machine interface
+  case_sensitive_aliases:
+  - BCI
+
+# MEDICAL-DEVICE QUALITY AND REGULATORY ----------------------------------
+
+- id: medical-device-design-controls
+  name: Medical-device design controls
+  category: method
+  aliases:
+  - medical device design controls
+  - design controls for medical devices
+  - medical-device design control
+
+- id: design-inputs-and-outputs
+  name: Design inputs and outputs
+  category: method
+  aliases:
+  - design inputs and outputs
+  - design input requirements
+  - design output specifications
+
+- id: design-verification
+  name: Design verification
+  category: method
+  aliases:
+  - design verification
+  - product design verification
+
+- id: design-validation
+  name: Design validation
+  category: method
+  aliases:
+  - design validation
+  - product design validation
+
+- id: verification-and-validation
+  name: Verification and validation
+  category: method
+  aliases:
+  - verification and validation
+  - verification & validation
+  case_sensitive_aliases:
+  - V&V
+
+- id: design-history-file
+  name: Design History File
+  category: format
+  aliases:
+  - Design History File
+  - design history documentation
+  case_sensitive_aliases:
+  - DHF
+
+- id: device-master-record
+  name: Device Master Record
+  category: format
+  aliases:
+  - Device Master Record
+  case_sensitive_aliases:
+  - DMR
+
+- id: medical-device-design-transfer
+  name: Medical-device design transfer
+  category: method
+  aliases:
+  - medical device design transfer
+  - design transfer to manufacturing
+
+- id: medical-device-risk-management
+  name: Medical-device risk management
+  category: method
+  aliases:
+  - medical device risk management
+  - product safety risk management
+  - risk management for medical devices
+
+- id: failure-mode-and-effects-analysis
+  name: Failure mode and effects analysis
+  category: method
+  aliases:
+  - failure mode and effects analysis
+  - failure modes and effects analysis
+  - design FMEA
+  - process FMEA
+  case_sensitive_aliases:
+  - FMEA
+  - DFMEA
+  - PFMEA
+
+- id: fault-tree-analysis
+  name: Fault-tree analysis
+  category: method
+  aliases:
+  - fault tree analysis
+  - fault-tree analysis
+  case_sensitive_aliases:
+  - FTA
+
+- id: hazard-analysis
+  name: Hazard analysis
+  category: method
+  aliases:
+  - hazard analysis
+  - product hazard analysis
+  - medical device hazard analysis
+
+- id: corrective-and-preventive-action
+  name: Corrective and preventive action
+  category: method
+  aliases:
+  - corrective and preventive action
+  - corrective and preventative action
+  case_sensitive_aliases:
+  - CAPA
+
+- id: nonconformance-management
+  name: Nonconformance management
+  category: method
+  aliases:
+  - nonconformance management
+  - non-conformance management
+  - nonconforming product management
+  case_sensitive_aliases:
+  - NCR management
+
+- id: complaint-handling
+  name: Medical-device complaint handling
+  category: method
+  aliases:
+  - medical device complaint handling
+  - product complaint handling
+  - complaint investigation
+
+- id: postmarket-surveillance
+  name: Postmarket surveillance
+  category: method
+  aliases:
+  - postmarket surveillance
+  - post-market surveillance
+  - post market surveillance
+  case_sensitive_aliases:
+  - PMS for medical devices
+
+- id: change-control
+  name: Change control
+  category: method
+  aliases:
+  - change control
+  - engineering change control
+  - quality change control
+
+- id: document-control
+  name: Quality document control
+  category: method
+  aliases:
+  - quality document control
+  - controlled document management
+  - document control procedures
+
+- id: supplier-quality-engineering
+  name: Supplier quality engineering
+  category: method
+  aliases:
+  - supplier quality engineering
+  - supplier quality management
+  - supplier qualification
+
+- id: quality-system-auditing
+  name: Quality-system auditing
+  category: method
+  aliases:
+  - quality system auditing
+  - quality-system audit
+  - quality systems audit
+  - regulatory compliance audit
+
+- id: good-manufacturing-practice
+  name: Good Manufacturing Practice
+  category: protocol
+  aliases:
+  - good manufacturing practice
+  - good manufacturing practices
+  - current good manufacturing practice
+  - current good manufacturing practices
+  case_sensitive_aliases:
+  - GMP
+  - cGMP
+  - CGMP
+
+- id: good-laboratory-practice
+  name: Good Laboratory Practice
+  category: protocol
+  aliases:
+  - good laboratory practice
+  - good laboratory practices
+  case_sensitive_aliases:
+  - GLP
+
+- id: good-clinical-practice
+  name: Good Clinical Practice
+  category: protocol
+  aliases:
+  - good clinical practice
+  - ICH good clinical practice
+  - ICH-GCP
+  - GCP guidelines
+  - GCP compliance
+
+- id: iso-13485
+  name: ISO 13485
+  category: protocol
+  aliases:
+  - ISO 13485
+  - ISO13485
+  - ISO 13485 quality management system
+
+- id: iso-14971
+  name: ISO 14971
+  category: protocol
+  aliases:
+  - ISO 14971
+  - ISO14971
+  - ISO 14971 risk management
+
+- id: iso-10993
+  name: ISO 10993
+  category: protocol
+  aliases:
+  - ISO 10993
+  - ISO10993
+  - ISO 10993 biocompatibility
+
+- id: iec-60601
+  name: IEC 60601
+  category: protocol
+  aliases:
+  - IEC 60601
+  - IEC60601
+  - IEC 60601-1
+
+- id: iec-62304
+  name: IEC 62304
+  category: protocol
+  aliases:
+  - IEC 62304
+  - IEC62304
+  - IEC 62304 software lifecycle
+
+- id: iec-62366
+  name: IEC 62366
+  category: protocol
+  aliases:
+  - IEC 62366
+  - IEC62366
+  - IEC 62366 usability engineering
+
+- id: twenty-one-cfr-part-820
+  name: 21 CFR Part 820
+  category: protocol
+  aliases:
+  - 21 CFR Part 820
+  - 21 CFR 820
+  - CFR Part 820
+
+- id: twenty-one-cfr-part-11
+  name: 21 CFR Part 11
+  category: protocol
+  aliases:
+  - 21 CFR Part 11
+  - 21 CFR 11
+  - CFR Part 11
+
+- id: fda-quality-system-regulation
+  name: FDA Quality System Regulation
+  category: protocol
+  aliases:
+  - FDA Quality System Regulation
+  - Quality System Regulation for medical devices
+  case_sensitive_aliases:
+  - FDA QSR
+  - QMSR
+
+- id: eu-medical-device-regulation
+  name: EU Medical Device Regulation
+  category: protocol
+  aliases:
+  - EU Medical Device Regulation
+  - European Medical Device Regulation
+  - Regulation (EU) 2017/745
+  case_sensitive_aliases:
+  - EU MDR
+
+- id: medical-device-software-validation
+  name: Medical-device software validation
+  category: method
+  aliases:
+  - medical device software validation
+  - software validation for medical devices
+  - FDA software validation
+
+- id: computer-software-assurance
+  name: Computer Software Assurance
+  category: method
+  aliases:
+  - Computer Software Assurance
+  - computer software assurance for production
+  case_sensitive_aliases:
+  - CSA for quality systems
+
+- id: human-factors-engineering
+  name: Human-factors engineering
+  category: method
+  aliases:
+  - human factors engineering
+  - human-factors engineering
+  - medical device human factors
+
+- id: medical-device-usability-engineering
+  name: Medical-device usability engineering
+  category: method
+  aliases:
+  - medical device usability engineering
+  - usability engineering for medical devices
+  - medical-device usability testing
+
+- id: fda-510k-submissions
+  name: FDA 510(k) submissions
+  category: method
+  aliases:
+  - 510(k) submission
+  - 510(k) submissions
+  - FDA 510(k)
+  - premarket notification submission
+
+- id: premarket-approval-submissions
+  name: Premarket Approval submissions
+  category: method
+  aliases:
+  - Premarket Approval submission
+  - Premarket Approval submissions
+  - FDA premarket approval
+  case_sensitive_aliases:
+  - PMA submission
+  - PMA submissions
+
+- id: investigational-device-exemption
+  name: Investigational Device Exemption
+  category: protocol
+  aliases:
+  - Investigational Device Exemption
+  case_sensitive_aliases:
+  - IDE submission
+  - IDE application
+
+- id: medical-device-reporting
+  name: Medical Device Reporting
+  category: protocol
+  aliases:
+  - Medical Device Reporting
+  - FDA medical device reporting
+  case_sensitive_aliases:
+  - MDR reporting
+
+- id: unique-device-identification
+  name: Unique Device Identification
+  category: protocol
+  aliases:
+  - Unique Device Identification
+  - unique device identifier
+  case_sensitive_aliases:
+  - UDI
+
+# PHARMACEUTICAL, PRECLINICAL, AND CLINICAL DEVELOPMENT ------------------
+
+- id: pharmacokinetics
+  name: Pharmacokinetics
+  category: concept
+  aliases:
+  - pharmacokinetics
+  - pharmacokinetic analysis
+  - pharmacokinetic modeling
+  case_sensitive_aliases:
+  - PK analysis
+
+- id: pharmacodynamics
+  name: Pharmacodynamics
+  category: concept
+  aliases:
+  - pharmacodynamics
+  - pharmacodynamic analysis
+  - pharmacodynamic modeling
+  case_sensitive_aliases:
+  - PD analysis
+
+- id: pk-pd-modeling
+  name: PK/PD modeling
+  category: method
+  aliases:
+  - pharmacokinetic pharmacodynamic modeling
+  - pharmacokinetic/pharmacodynamic modeling
+  case_sensitive_aliases:
+  - PK/PD modeling
+  - PK-PD modeling
+
+- id: dose-response-analysis
+  name: Dose–response analysis
+  category: method
+  aliases:
+  - dose-response analysis
+  - dose response analysis
+  - dose-response modeling
+
+- id: absorption-distribution-metabolism-excretion
+  name: ADME
+  category: concept
+  aliases:
+  - absorption distribution metabolism and excretion
+  - absorption, distribution, metabolism, and excretion
+  case_sensitive_aliases:
+  - ADME
+
+- id: drug-metabolism-and-pharmacokinetics
+  name: Drug metabolism and pharmacokinetics
+  category: concept
+  aliases:
+  - drug metabolism and pharmacokinetics
+  - drug metabolism pharmacokinetics
+  case_sensitive_aliases:
+  - DMPK
+
+- id: quantitative-structure-activity-relationship
+  name: Quantitative structure–activity relationship
+  category: method
+  aliases:
+  - quantitative structure-activity relationship
+  - quantitative structure activity relationship
+  - quantitative structure-activity relationships
+  case_sensitive_aliases:
+  - QSAR
+
+- id: molecular-docking
+  name: Molecular docking
+  category: method
+  aliases:
+  - molecular docking
+  - protein-ligand docking
+
+- id: molecular-dynamics-simulation
+  name: Molecular-dynamics simulation
+  category: method
+  aliases:
+  - molecular dynamics simulation
+  - molecular-dynamics simulation
+  - biomolecular dynamics simulation
+
+- id: formulation-development
+  name: Formulation development
+  category: method
+  aliases:
+  - formulation development
+  - pharmaceutical formulation development
+  - drug formulation development
+
+- id: analytical-method-development
+  name: Analytical-method development
+  category: method
+  aliases:
+  - analytical method development
+  - bioanalytical method development
+
+- id: analytical-method-validation
+  name: Analytical-method validation
+  category: method
+  aliases:
+  - analytical method validation
+  - bioanalytical method validation
+
+- id: stability-testing
+  name: Stability testing
+  category: method
+  aliases:
+  - stability testing
+  - stability studies
+  - accelerated stability testing
+
+- id: bioanalytical-assays
+  name: Bioanalytical assays
+  category: method
+  aliases:
+  - bioanalytical assay
+  - bioanalytical assays
+  - quantitative bioanalysis
+
+- id: in-vitro-studies
+  name: In-vitro studies
+  category: method
+  aliases:
+  - in vitro study
+  - in vitro studies
+  - in-vitro study
+  - in-vitro studies
+
+- id: in-vivo-studies
+  name: In-vivo studies
+  category: method
+  aliases:
+  - in vivo study
+  - in vivo studies
+  - in-vivo study
+  - in-vivo studies
+
+- id: ex-vivo-studies
+  name: Ex-vivo studies
+  category: method
+  aliases:
+  - ex vivo study
+  - ex vivo studies
+  - ex-vivo study
+  - ex-vivo studies
+
+- id: animal-models
+  name: Animal models
+  category: method
+  aliases:
+  - animal model
+  - animal models
+  - disease animal model
+  - preclinical animal model
+
+- id: efficacy-studies
+  name: Efficacy studies
+  category: method
+  aliases:
+  - efficacy study
+  - efficacy studies
+  - preclinical efficacy
+
+- id: toxicokinetics
+  name: Toxicokinetics
+  category: concept
+  aliases:
+  - toxicokinetics
+  - toxicokinetic analysis
+  case_sensitive_aliases:
+  - TK analysis
+
+- id: clinical-trial-design
+  name: Clinical-trial design
+  category: method
+  aliases:
+  - clinical trial design
+  - clinical study design
+  - clinical protocol design
+
+- id: clinical-trial-operations
+  name: Clinical-trial operations
+  category: method
+  aliases:
+  - clinical trial operations
+  - clinical study operations
+  - clinical operations for trials
+
+- id: clinical-protocol-development
+  name: Clinical-protocol development
+  category: method
+  aliases:
+  - clinical protocol development
+  - clinical study protocol development
+  - trial protocol development
+
+- id: clinical-data-management
+  name: Clinical-data management
+  category: method
+  aliases:
+  - clinical data management
+  - clinical trial data management
+
+- id: randomized-controlled-trials
+  name: Randomized controlled trials
+  category: method
+  aliases:
+  - randomized controlled trial
+  - randomized controlled trials
+  - randomised controlled trial
+  - randomised controlled trials
+  case_sensitive_aliases:
+  - RCT
+  - RCTs
+
+- id: institutional-review-board-submissions
+  name: Institutional Review Board submissions
+  category: method
+  aliases:
+  - Institutional Review Board submission
+  - Institutional Review Board submissions
+  - IRB submission
+  - IRB submissions
+  case_sensitive_aliases:
+  - IRB
+
+- id: informed-consent
+  name: Informed consent
+  category: method
+  aliases:
+  - informed consent
+  - informed-consent process
+  - informed consent documentation
+
+- id: adverse-event-reporting
+  name: Adverse-event reporting
+  category: method
+  aliases:
+  - adverse event reporting
+  - serious adverse event reporting
+  - safety event reporting
+
+- id: pharmacovigilance
+  name: Pharmacovigilance
+  category: method
+  aliases:
+  - pharmacovigilance
+  - drug safety surveillance
+  - postmarketing drug safety
+
+- id: electronic-data-capture
+  name: Electronic data capture
+  category: platform
+  aliases:
+  - electronic data capture system
+  - electronic data capture platform
+  case_sensitive_aliases:
+  - EDC system
+  - EDC platform
+
+- id: redcap
+  name: REDCap
+  category: platform
+  aliases:
+  - Research Electronic Data Capture
+  case_sensitive_aliases:
+  - REDCap
+
+- id: clinical-trial-management-systems
+  name: Clinical trial management systems
+  category: platform
+  aliases:
+  - clinical trial management system
+  - clinical trial management systems
+  case_sensitive_aliases:
+  - CTMS
+
+- id: electronic-trial-master-file
+  name: Electronic Trial Master File
+  category: platform
+  aliases:
+  - electronic Trial Master File
+  case_sensitive_aliases:
+  - eTMF
+
+- id: cdisc-standards
+  name: CDISC standards
+  category: protocol
+  aliases:
+  - Clinical Data Interchange Standards Consortium
+  - CDISC standards
+  case_sensitive_aliases:
+  - CDISC
+
+- id: study-data-tabulation-model
+  name: Study Data Tabulation Model
+  category: format
+  aliases:
+  - Study Data Tabulation Model
+  case_sensitive_aliases:
+  - SDTM
+
+- id: analysis-data-model
+  name: Analysis Data Model
+  category: format
+  aliases:
+  - Analysis Data Model
+  - Analysis Data Model Implementation Guide
+  case_sensitive_aliases:
+  - ADaM
+
+- id: meddra
+  name: MedDRA
+  category: protocol
+  aliases:
+  - Medical Dictionary for Regulatory Activities
+  case_sensitive_aliases:
+  - MedDRA
+
+- id: whodrug
+  name: WHODrug
+  category: protocol
+  aliases:
+  - WHO Drug Dictionary
+  - WHODrug Global
+  case_sensitive_aliases:
+  - WHODrug

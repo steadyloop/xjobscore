@@ -13,8 +13,29 @@ degree:
     patterns:
       - '(?i)\b(?:math(?:ematics)?|applied\s+math(?:ematics)?|mathematical\s+sciences?)\b'
 
-  - name: bioengineering
+  - name: med_device
     patterns:
-      - '(?i)\b(?:bio[- ]?engineering|bio[- ]?medical\s+engineering|b\.?m\.?e\.?)\b'
-      - (?i)\b(?:medical\s+device|clinical|bioinformatics|computational\s+bio(?:logy|engineering)?|bio[\s\-]?process(?:ing)?|bio[\s\-]?materials|tissue|rehabilitation)\s+(?:engineer|scientist|developer|specialist)\b
-      - (?i)\b(biomedical\s+engineer(ing)?|clinical\s+engineer(ing)?|cce|abet|tjc|the\s+joint\s+commission|nfpa|smda|medical\s+device(s)?|healthcare\s+technology|visn(\s*12)?|gs-1[34]|preventative\s+maintenance|recall\s+management)\b
+      - '(?i)\b(?:bio[- ]?medical(?:\s+engineering|\s+sciences?)?|b\.?m\.?e\.?|medical[- ]?device(?:s)?|med[- ]?tech|medical\s+technolog(?:y|ies)|medical\s+instrumentation)\b'
+      - '(?i)\b(?:clinical\s+engineering|healthcare\s+technology|biomechanic(?:al|s)?|(?:neuro|neural)[- ]?engineering|rehabilitation\s+engineering|bio[- ]?instrumentation|bio[- ]?sensors?|bio[- ]?compatib(?:ility|le))\b'
+      - '(?i)\b(?:ISO\s*13485|IEC\s*60601|21\s*CFR\s*(?:Part\s*)?820|SaMD|IVDs?|in[- ]vitro\s+diagnostics?)\b'
+    title_patterns:
+      - '(?i)\b(?:neuro[- ]?engineer(?:ing)?|surgical\s+robotics?|(?:neural|brain[- ]computer|brain[- ]machine)\s+interfaces?|biosensors?)\b'
+      - '(?i)\b(?:(?:medical|diagnostic)\s+imaging|(?:bio[- ]?medical|medical)\s+equipment|prosthetics?|orthotics?|medical\s+implants?)\b'
+
+  - name: biotech
+    patterns:
+      - '(?i)\b(?:bio[- ]?engineering|biological\s+engineering|biosystems?\s+engineering|biochemical\s+engineering|bioinformatics?|computational[- ]+bio(?:logy|engineering)?|systems?\s+biology)\b'
+      - '(?i)\b(?:bio[- ]?process(?:es|ing|ors?|\s+engineering)?|bio[- ]?materials?|tissue\s+engineering|protein\s+engineering|cell\s+engineering|genetic\s+engineering)\b'
+      - '(?i)\b(?:biotechnolog(?:y|ies|ist|ists|ical)|bio[- ]?tech|life[- ]+sciences?|molecular\s+biology|synthetic\s+biology|regenerative\s+medicine)\b'
+      - '(?i)\b(?:(?:cell|gene|cell\s+and\s+gene)[- ]+therap(?:y|ies)|genomics?|proteomics?|bio[- ]?pharma(?:ceutical)?s?|bio[- ]?therapeutics?|biologics?)\b'
+    title_patterns:
+      - '(?i)\b(?:immunolog(?:y|ist)|neuroscien(?:ce|tist)|neurobiolog(?:y|ist)|bio[- ]?statistic(?:s|ian|al))\b'
+      - '(?i)\b(?:pharmacolog(?:y|ist)|toxicolog(?:y|ist)|microbiolog(?:y|ist)|biochem(?:istry|ist)|bio[- ]?physic(?:s|ist))\b'
+      - '(?i)\b(?:pharmaceutical\s+sciences?|drug\s+(?:discovery|development|delivery)|assay\s+development|cell\s+(?:biology|culture|engineering)|protein\s+(?:design|engineering))\b'
+      - '(?i)\b(?:bio[- ]?manufactur(?:ing|e)|bio[- ]?refiner(?:y|ies)|(?:upstream|downstream)\s+process(?:ing|es)?|fermentation|lab(?:oratory)?\s+automation|microfluidics?|bio[- ]?sciences?)\b'
+
+  - name: clinical_affairs
+    patterns:
+      - '(?i)\b(?:clinical\s+affairs?|clinical\s+research|clinical\s+trials?|clinical\s+operations?|clinical\s+development|clinical\s+stud(?:y|ies)|clinical\s+data\s+management)\b'
+      - '(?i)\b(?:regulatory\s+affairs?|regulatory\s+science|regulatory\s+submissions?|medical\s+affairs?|pharmacovigilance|drug\s+safety|FDA)\b'
+      - '(?i)\b(?:good\s+clinical\s+practice|ICH[- /]?GCP|GCP\s+(?:guidelines?|regulations?|compliance|standards?|requirements?|training))\b'
