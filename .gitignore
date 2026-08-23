@@ -30,4 +30,9 @@ ats-optimizations.md
 /OPLAN
 /local
 /xjobscore/doc
+/xjobscore/migrations/*
+!/xjobscore/migrations/20260821_country.sql
+!/xjobscore/migrations/20260821_token_heartbeat.sql
+!/xjobscore/migrations/20260822_workday_count_probe.sql
+/oneshot-static
 /xjobscore/migrations
