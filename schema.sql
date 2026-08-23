@@ -49,9 +49,9 @@ CREATE TABLE token (
     ats        text NOT NULL, -- name of vendor
     token      text NOT NULL,
     company_id bigint REFERENCES company (id) ON DELETE SET NULL,
-    -- feed (enabled|disabled)
     status     text NOT NULL DEFAULT 'unknown'
         CHECK (status IN ('unknown', 'live', 'dead')),
+    muted      boolean NOT NULL DEFAULT false,
     
     -- discovery --
     source text,
@@ -59,15 +59,28 @@ CREATE TABLE token (
     discovered_at timestamptz,
     imported_at   timestamptz, -- set when a row is bulk-loaded from an external resolution (e.g. keyscan)
 
-    PRIMARY KEY (ats, token)
+    -- system --
+    tags text[],
+    note text,
+
+    PRIMARY KEY (ats, token),
+    CONSTRAINT token_workday_source_renamed
+        CHECK (ats <> 'workday'),
+    CONSTRAINT token_workday_list_key_lower
+        CHECK (ats <> 'workday-list' OR token = lower(token))
 );
 
 CREATE TABLE feed (
     id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     source   text NOT NULL, -- ashby, greenhouse, workable, etc.
     key      text NOT NULL, -- openai, anthropic, janestreet, etc.
-    enabled  boolean NOT NULL DEFAULT false,
-
+    polling  boolean NOT NULL DEFAULT false,
+    -- Runtime data belongs with the endpoint.  It must never be loaded from a
+    -- checked-in catalog: the worker and inspector both read these fields.
+    config       jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(config) = 'object'),
+    type         text NOT NULL DEFAULT 'ATS'
+        CHECK (type IN ('ATS', 'Direct', 'Board')),
     -- Config
     interval_s      integer NOT NULL DEFAULT 900 CHECK (interval_s > 0),
 
@@ -77,26 +90,38 @@ CREATE TABLE feed (
 
     -- Optimization
     etag            text,                                -- server's version token; 304 upon hit
+    -- The server that has no ETag but does honor Last-Modified (Trakstar):
+    -- raw header value, compared byte-for-byte, never parsed as a date. Only
+    -- meaningful alongside a HEAD probe -- a server that ignores
+    -- If-Modified-Since (Trakstar does) gets no benefit from a conditional
+    -- GET, but a cheap HEAD still reveals whether this value changed.
+    last_modified   text,
     res_hash        text,                                -- hash of listing response; skip parse when nothing moved
     last_change_at  timestamptz,                         -- last poll hash moved; back off keys on to slow a dormant board
+    list_total      integer CHECK (list_total >= 0),     -- last complete listing's vendor-reported total
+    last_full_poll_at timestamptz,                       -- last successful full reconciliation (probes/reuse do not advance it)
 
     -- Health
     strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0), -- fail strike; drives retry backoff/disable
     last_poll_at    timestamptz,
-    paused_at       timestamptz, -- operator hold; the feed stays enabled and stays visible, but is never claimed
+    paused_at       timestamptz, -- operator hold; the feed keeps polling=true and stays visible, but is never claimed
 
     -- Potential fields
-    -- feed.last_modified — add later if you meet a server that has no ETag. Trivial migration.
     -- feed.cursor — only needed for incremental pagination; skip until an adapter demands it.
     -- feed.last_change_at — adaptive backoff for dormant boards is an optimization, not MVP.
     -- feed.status, feed.last_success_at, feed.consecutive_failures — redundant with paused_at, last_poll_at + last_error, and strikes respectively.
 
-    UNIQUE (source, key)
+    UNIQUE (source, key),
+    CONSTRAINT feed_token_identity_fkey
+        FOREIGN KEY (source, key) REFERENCES token (ats, token) ON DELETE RESTRICT,
+    CONSTRAINT feed_workday_list_key_lower
+        CHECK (source <> 'workday-list' OR key = lower(key))
 );
 CREATE INDEX feed_due_idx ON feed (due_at) WHERE paused_at IS NULL;
 
--- One row per poll, append-only. Never updated or deleted: this is the history
--- the arrival-rate estimator, the replay simulator, and the feed sparkline read.
+-- One row per poll, append-only during normal operation. Dropping a feed
+-- removes its observations through the foreign-key cascade; otherwise this is
+-- the history the arrival-rate estimator, replay simulator, and feed sparkline read.
 CREATE TABLE poll_observation (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     feed_id      bigint NOT NULL REFERENCES feed (id) ON DELETE CASCADE,
@@ -119,7 +144,7 @@ CREATE INDEX poll_observation_feed_idx ON poll_observation (feed_id, polled_at D
 -- restart a non-event.
 --
 -- `running` defaults to false: a database brought up to this schema polls
--- nothing until an operator says so, which matters when `feed.enabled` covers
+-- nothing until an operator says so, which matters when `feed.polling` covers
 -- thousands of rows.
 CREATE TABLE scheduler_control (
     id         boolean PRIMARY KEY DEFAULT true CHECK (id),
@@ -128,6 +153,23 @@ CREATE TABLE scheduler_control (
     note       text
 );
 INSERT INTO scheduler_control (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+CREATE TABLE token_heartbeat (
+    id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+    due_at             timestamptz NOT NULL DEFAULT now(),
+    hold_until         timestamptz,
+    runner_seen_at     timestamptz,
+    last_started_at    timestamptz,
+    last_completed_at  timestamptz,
+    last_outcome       text NOT NULL DEFAULT 'never'
+        CHECK (last_outcome IN ('never', 'running', 'success', 'error')),
+    last_candidates    integer NOT NULL DEFAULT 0 CHECK (last_candidates >= 0),
+    last_validated     integer NOT NULL DEFAULT 0 CHECK (last_validated >= 0),
+    last_promoted      integer NOT NULL DEFAULT 0 CHECK (last_promoted >= 0),
+    last_rejected      integer NOT NULL DEFAULT 0 CHECK (last_rejected >= 0),
+    last_error         text
+);
+INSERT INTO token_heartbeat (id) VALUES (true) ON CONFLICT DO NOTHING;
 
 -- Deferred: adaptive polling. Intervals stay operator-set until poll_observation
 -- holds enough history to estimate an arrival rate from.
@@ -206,7 +248,9 @@ CREATE TABLE raw_posting (
     item_version text,        -- not NULL for two-phase (list req + detail req/job) sources only.
                               -- whatever list offers: updated-at, revision number, hash of list row
                               -- equal to stored value means skip detail request.
-    UNIQUE (source, source_key, data_hash)
+    UNIQUE (source, source_key, data_hash),
+    CONSTRAINT raw_posting_workday_source_lower
+        CHECK (source NOT LIKE 'workday-list:%' OR source = lower(source))
 );
 -- Resolves "current payload per posting" for detail reuse; off until a reader needs it:
 -- CREATE INDEX raw_posting_current_idx
@@ -217,18 +261,16 @@ CREATE TABLE job_posting (
     id                       bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     source                   text NOT NULL,
     source_key               text NOT NULL,
-
-    -- JOB SPECIFICS
     company_id               bigint NOT NULL REFERENCES company(id),  -- not in content_hash
-    ------------ CONTENT HASH -------------
-    -- 1. STABLE
+    ------------ STABLE (HASH) -------------
     title                    text NOT NULL,
     description              text,
     location_text            text,
     source_url               text,
     apply_url                text,
     posted_at                timestamptz,
-    -- 2. PARSED
+    content_hash             text NOT NULL,     -- to check if fetch updated the posting,
+    ------------ PARSED ---------------------
     remote                   text NOT NULL DEFAULT 'unknown'
         CHECK (remote IN ('yes', 'hybrid', 'unknown')),
     job_type                 text -- null means no signal
@@ -239,7 +281,8 @@ CREATE TABLE job_posting (
             'research',
             'part_time'
         )),
-    content_hash             text NOT NULL,     -- to check if fetch updated the posting,
+    locations jsonb NOT NULL DEFAULT '[]'::jsonb,
+
     ------------- System ------------------
     status                   text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
     first_seen_at            timestamptz NOT NULL DEFAULT now(),
@@ -272,6 +315,14 @@ CREATE TABLE job_posting (
                     '$.degree_fields[*] ? (@.type() != "string")'
                 )
             )
+        )
+        CONSTRAINT job_posting_summary_type CHECK (
+            NOT attributes ? 'summary'
+            OR jsonb_typeof(attributes -> 'summary') IN ('string', 'null')
+        )
+        CONSTRAINT job_posting_summary_meta_type CHECK (
+            NOT attributes ? 'summary_meta'
+            OR jsonb_typeof(attributes -> 'summary_meta') = 'object'
         ), 
     -- Traceability to the unmodified input
     raw_id                   bigint NOT NULL REFERENCES raw_posting(id),  -- raw version it produced current row
@@ -279,10 +330,12 @@ CREATE TABLE job_posting (
     -- Judgement, not a source fact: set by hand, never by the pipeline.
     removal_marked_at        timestamptz,       -- NULL = not marked for removal
 
-    UNIQUE (source, source_key)
+    UNIQUE (source, source_key),
+    CONSTRAINT job_posting_workday_source_lower
+        CHECK (source NOT LIKE 'workday-list:%' OR source = lower(source))
 );
 COMMENT ON COLUMN job_posting.attributes IS
-    'OneShot enrichment v1: version, term, remote, skills/meta, degree_fields/meta, deadline_at';
+    'OneShot enrichment v1: version, term, remote, skills/meta, degree_fields/meta, summary/meta, deadline_at';
 COMMENT ON COLUMN job_posting.removal_marked_at IS
     'When a human marked this posting for removal; NULL means not marked. Never written by ingest.';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
