@@ -42,18 +42,17 @@ frontend is static and has no build process; OneShot serves it from `frontend/`.
 uv run python -m xjobscore.run [OPTIONS]
 ```
 
-Each invocation seeds the registry, performs one selected operation, and exits.
-Use cron or another process manager to repeat polling.
+Each invocation performs one selected operation and exits. Use cron or another
+process manager to repeat polling.
 
 ### Modes
 
 | Mode | What it does |
 |---|---|
 | Fetch (default; no flag) | Fetch up to 20 due feeds and persist raw and canonical postings. |
-| `--seed` | Seed the TOML registry to PostgreSQL, then exit without fetching. |
 | `--fetch-all` | Fetch every enabled, unpaused, unheld feed, ignoring its due time. |
 | `--parse` | Replay stored raw postings through the current parsers without fetching. |
-| `--enrich [NAME]` | Run all enrichments, or only `job_type`/`skills`/`degrees`/`dedup` when named. |
+| `--enrich [NAME]` | Run all enrichments, or only `skills`/`degrees`/`summaries`/`dedup` when named. |
 
 ### Options
 
@@ -74,4 +73,5 @@ uv run python -m xjobscore.core
 ```
 
 Personal entrypoint, separate from `run.py`. Fetches all sources only if the
-DB is empty, then always replays silver and runs all gold enrichments.
+DB is empty, then always replays silver and runs all gold enrichments. Database
+feed and company inventory must already exist.
