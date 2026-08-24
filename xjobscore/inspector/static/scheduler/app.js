@@ -743,6 +743,19 @@ function pollNowBlocked(feed) {
   return null;
 }
 
+/* Sync fetch bypasses the queue and the runner, so it skips the
+   scheduler-running/runner-alive checks pollNowBlocked applies. */
+function fetchBlocked(feed) {
+  if (!state.connected) return "PostgreSQL is unavailable.";
+  if (!feed.policy?.in_postgres) return "Import this feed before fetching it.";
+  if (feed.policy?.enabled === false) return "Enable this feed on the Feeds page first.";
+  if (feed.policy?.paused_at) return "Resume this feed before fetching it now.";
+  if (feed.policy?.hold_until && new Date(feed.policy.hold_until) > new Date()) {
+    return "A poll of this feed is already running.";
+  }
+  return null;
+}
+
 /* Drop and mute both remove the feed; mute additionally mutes the discovery
    token so the heartbeat cannot promote it back. Panel-only on purpose: they
    are irreversible, so they stay behind an opened feed rather than sitting in
@@ -855,6 +868,17 @@ function renderDetailPanel(feed, events) {
           onclick: (event) => pollNow(feed, event.currentTarget),
         },
         "Poll now"
+      ),
+      el(
+        "button",
+        {
+          class: "btn",
+          type: "button",
+          disabled: fetchBlocked(feed) ? "" : null,
+          title: fetchBlocked(feed) ?? "Fetch this feed right now, bypassing the queue",
+          onclick: (event) => fetchFeedNow(feed, event.currentTarget),
+        },
+        "Fetch"
       ),
       el(
         "button",
@@ -1078,6 +1102,27 @@ async function pollNow(feed, button) {
     }, POLL_NOW_SETTLE_MS);
   } catch (error) {
     reportFeedMessage(feed, `Could not poll this feed: ${error.message}`, "error");
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function fetchFeedNow(feed, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Fetching…";
+  try {
+    const result = await api(`/api/scheduler/feeds/${feed.feed_ref}/fetch`, { body: {} });
+    await Promise.allSettled([loadOverview(), loadFeeds()]);
+    if (state.selectedRef === feed.feed_ref) await loadDetail(feed.feed_ref, false);
+    if (result?.status === "error") {
+      reportFeedMessage(feed, `Fetch finished with an error for ${feed.company_name || feed.key}.`, "error");
+    } else {
+      showToast(`${feed.company_name || feed.key} fetched.`);
+    }
+  } catch (error) {
+    reportFeedMessage(feed, `Could not fetch this feed: ${error.message}`, "error");
+  } finally {
     button.disabled = false;
     button.textContent = original;
   }
