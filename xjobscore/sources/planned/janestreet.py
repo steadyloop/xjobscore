@@ -20,6 +20,7 @@ Payload sample: notebooks/nATS-payloads.md#3-bespoke-quant-career-sites.
 
 from __future__ import annotations
 
+from xjobscore import classify
 from xjobscore.net import Net, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 
@@ -53,6 +54,15 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     # documented as "raw string, unmapped" anyway, so pass it through as-is.
     employment_type = job.get("availability")
 
+    # `availability` also doubles as our job_type signal -- titles here are
+    # shared between interns and full-timers (e.g. "Software Engineer"), so
+    # this field is the only reliable place internship status is stated.
+    job_type = (
+        "coop" if classify.hit(employment_type, "co-?ops?")
+        else "intern" if classify.hit(employment_type, "intern(s|ship|ships)?")
+        else None
+    )
+
     # min_salary / max_salary sometimes arrive as the literal string "None"
     # (not JSON null, not a number). Store exactly what was received --
     # source_extra is a verbatim long tail, coercion is downstream's job.
@@ -75,6 +85,7 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         description_html=job.get("overview"),
         requisition_id=None,
         employment_type=employment_type,
+        job_type=job_type,
         workplace_type_raw=None,
         published_at=None,
         published_at_precision="unknown",

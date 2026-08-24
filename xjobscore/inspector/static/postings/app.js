@@ -15,6 +15,7 @@ const PAGE = 50;
 const PREFS_KEY = "inspector-postings-prefs";
 const LABEL_KEYS = { 1: "relevant", r: "relevant", 2: "irrelevant", i: "irrelevant", 3: "unsure", u: "unsure" };
 const LABEL_STATES = ["all", "unlabeled", "labeled", "relevant", "irrelevant", "unsure"];
+const SEARCH_FIELDS = ["all", "title", "description", "location", "source_url", "apply_url"];
 const REVIEW_KEYS = { 1: "correct", 2: "incorrect", 3: "needs_review" };
 const REVIEW_STATES = ["unreviewed", "needs_review", "correct", "incorrect", "all", "hidden"];
 
@@ -28,6 +29,7 @@ const state = {
   labelState: LABEL_STATES.includes(prefs.labelState) ? prefs.labelState : "all",
   reviewState: REVIEW_STATES.includes(prefs.reviewState) ? prefs.reviewState : "unreviewed",
   search: "",
+  searchField: SEARCH_FIELDS.includes(prefs.searchField) ? prefs.searchField : "all",
   internSignal: Boolean(prefs.internSignal),
   order: ["newest", "company", "random"].includes(prefs.order) ? prefs.order : "newest",
   seed: "",
@@ -47,6 +49,7 @@ function savePrefs() {
   localStorage.setItem(PREFS_KEY, JSON.stringify({
     labelState: state.labelState, reviewState: state.reviewState,
     order: state.order, internSignal: state.internSignal,
+    searchField: state.searchField,
   }));
 }
 
@@ -60,6 +63,7 @@ const countEl = document.getElementById("count-info");
 const loadMoreBtn = document.getElementById("load-more");
 const progressEl = document.getElementById("label-progress");
 const searchInput = document.getElementById("posting-search");
+const searchFieldSelect = document.getElementById("search-field-select");
 const sourceSelect = document.getElementById("source-select");
 const statusSelect = document.getElementById("status-select");
 const orderSelect = document.getElementById("order-select");
@@ -128,6 +132,7 @@ function queryParams(offset) {
     status: state.status,
     label_state: state.labelState,
     search: state.search,
+    search_field: state.searchField,
     intern_signal: String(state.internSignal),
     order: state.order,
     seed: state.seed,
@@ -333,6 +338,7 @@ function refreshRow(index) {
 }
 
 function renderChrome() {
+  searchFieldSelect.hidden = duplicateMode();
   document.querySelectorAll(".posting-key-help").forEach((row) => {
     row.hidden = duplicateMode();
   });
@@ -840,6 +846,11 @@ searchInput.addEventListener("input", () => {
     load();
   }, 220);
 });
+searchFieldSelect.addEventListener("change", () => {
+  state.searchField = searchFieldSelect.value;
+  savePrefs();
+  if (state.search) load();
+});
 loadMoreBtn.addEventListener("click", () => loadMore());
 document.getElementById("help-btn").addEventListener("click", () => {
   if (helpDialog.open) helpDialog.close();
@@ -906,6 +917,7 @@ dedupButton.addEventListener("click", async () => {
 // Restore persisted control positions before first load.
 statusSelect.value = state.status;
 orderSelect.value = state.order;
+searchFieldSelect.value = state.searchField;
 
 // Top-level await keeps the load event behind the first full render.
 await load().catch((error) => {

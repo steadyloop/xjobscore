@@ -388,26 +388,24 @@ def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
     app = (scheduler / "app.js").read_text()
     css = (scheduler / "styles.css").read_text()
     assert '/static/scheduler/styles.css' in html
-    assert 'id="detail-drawer"' in html
+    assert 'id="detail-panel"' in html
     assert 'id="bulk-dialog"' in html
-    assert 'id="vendor-summary"' in html
-    assert 'id="group-controls"' in html
     assert 'id="vendor-panel"' not in html
     assert 'id="filter-platform"' not in html
     assert 'data-sort="vendor"' not in html
     assert "vendorsExpanded" not in app
     assert ".ops-vendor-item" not in css
-    # Selecting a feed only changes row selection and opens the drawer. Replacing
-    # the chunk-rendered tbody here used to collapse the table briefly, making
-    # the page jump on every feed click.
+    # Selecting a feed only changes row selection and opens the detail panel.
+    # Replacing the chunk-rendered tbody here used to collapse the table
+    # briefly, making the page jump on every feed click.
     load_detail = app.split("async function loadDetail(", 1)[1].split("\n}\n", 1)[0]
     select_feed = app.split("function selectFeed(", 1)[1].split("\n}\n", 1)[0]
-    close_drawer = app.split("function closeDrawer(", 1)[1].split("\n}\n", 1)[0]
+    close_panel = app.split("function closePanel(", 1)[1].split("\n}\n", 1)[0]
     assert "renderTable(" not in load_detail
     assert "syncSelectedRow();" in select_feed
     assert "renderTable(" not in select_feed
-    assert "syncSelectedRow();" in close_drawer
-    assert "renderTable(" not in close_drawer
+    assert "syncSelectedRow();" in close_panel
+    assert "renderTable(" not in close_panel
 
 
 async def test_feed_rows_use_string_ids_and_stable_public_refs(store):

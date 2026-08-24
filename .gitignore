@@ -4,35 +4,18 @@
 __pycache__/
 .pytest_cache/
 uv.lock
-/postings
-/prototypes
-/seeds
-/tests
-/viewer
-# /xjobscore/cc_ats
-xjobscore/sources/SOURCES.md
-xjobscore/discover.log
-xjobscore/.DS_Store
 .DS_Store
-/tech-debt
-/xjobscore/cc_ats
-/keyscan/work
-/companies
-ats-optimizations.md
-/doc
-/resume
-/xjobscore/sources/cs
-/xjobscore/sources/beng
-/study materials
-/xjobscore/registry/sample-resume
+xjobscore/discover.log
 /xjobscore.egg-info
+
+# Local scratch and generated output, never committed.
+/doc
 /docs
-/OPLAN
 /local
-/xjobscore/doc
-/xjobscore/migrations/*
-!/xjobscore/migrations/20260821_country.sql
-!/xjobscore/migrations/20260821_token_heartbeat.sql
-!/xjobscore/migrations/20260822_workday_count_probe.sql
-/oneshot-static
+/resume
+/study materials
+
+# Migrations are applied against the live database and kept locally; the
+# database itself is ground truth (see the "TOML RETIRED" commit). Nothing in
+# the tracked tree may assert on their contents.
 /xjobscore/migrations

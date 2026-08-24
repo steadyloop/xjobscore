@@ -65,7 +65,13 @@ def test_json_api_adapter_map_matches_the_config():
         "location_raw",
         "remote",
     ]
-    assert result["paths"]["offices[].name"] == ["locations_extra"]
+    # Offices feed normalization separately from the display list: unioning the
+    # normalized tuples is monotonic, where concatenating the strings first lets
+    # an unrelated office city suppress the primary country/state signal.
+    assert result["paths"]["offices[].name"] == [
+        "locations_extra",
+        "location_normalization_extra",
+    ]
     # "extra" lands under source_extra, which is bronze-only downstream.
     assert result["paths"]["language"] == ["source_extra.language"]
 

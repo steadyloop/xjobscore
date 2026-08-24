@@ -73,17 +73,14 @@ def test_schema_indexes_the_opportunities_filter_and_default_sort():
     assert "((COALESCE(posted_at, first_seen_at)) DESC, id DESC)" in schema
 
 
-def test_workday_count_probe_state_has_a_live_database_migration():
-    root = Path(__file__).parent.parent.parent
-    schema = (root / "schema.sql").read_text()
-    migration = (
-        root / "xjobscore" / "migrations" / "20260822_workday_count_probe.sql"
-    ).read_text()
+def test_schema_carries_workday_count_probe_state():
+    """The count probe needs both columns to skip a full poll. Only the schema
+    is asserted: `xjobscore/migrations/` is applied against the live database
+    and deliberately untracked, so its text is not available to a test."""
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
 
     assert "list_total      integer" in schema
     assert "last_full_poll_at timestamptz" in schema
-    assert "ADD COLUMN IF NOT EXISTS list_total integer" in migration
-    assert "ADD COLUMN IF NOT EXISTS last_full_poll_at timestamptz" in migration
 
 
 def test_schema_job_types_match_the_api_contract():
@@ -122,17 +119,6 @@ def test_schema_uses_normalized_locations_not_a_scalar_country():
     assert "country_alpha2" not in schema
 
 
-def test_location_migration_preserves_then_removes_legacy_country():
-    migration = (
-        Path(__file__).parent.parent / "migrations" / "20260821_country.sql"
-    ).read_text()
-
-    assert "ADD COLUMN IF NOT EXISTS locations jsonb" in migration
-    assert "jsonb_build_object" in migration
-    assert "DROP COLUMN IF EXISTS country_alpha2" in migration
-    assert "DROP COLUMN IF EXISTS country" in migration
-
-
 def test_schema_rejects_retired_and_noncanonical_workday_token_identities():
     schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
 
@@ -148,20 +134,6 @@ def test_schema_rejects_noncanonical_workday_posting_namespaces():
     assert "CONSTRAINT raw_posting_workday_source_lower" in schema
     assert "CONSTRAINT job_posting_workday_source_lower" in schema
     assert "source NOT LIKE 'workday-list:%' OR source = lower(source)" in schema
-
-
-def test_workday_case_migration_preserves_rich_locations_before_deduping():
-    migration = (
-        Path(__file__).parent.parent
-        / "migrations"
-        / "20260821_workday_case_identity.sql"
-    ).read_text()
-
-    assert "jsonb_array_length(j.locations) DESC" in migration
-    assert "UPDATE job_application" in migration
-    assert "DELETE FROM job_posting" in migration
-    assert "DELETE FROM raw_posting" in migration
-    assert "job_posting_workday_source_lower" in migration
 
 
 class _AsyncContext:

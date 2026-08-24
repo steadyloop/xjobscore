@@ -13,6 +13,7 @@ from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
+from xjobscore import classify
 from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 
@@ -220,16 +221,25 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         ),
         None,
     )
+    title = unlabeled[0] if unlabeled else ""
+    # Co-op before intern: a title can satisfy both ("Summer Intern Co-Op
+    # Conversion"), and co-op is the more specific claim.
+    job_type = (
+        "coop" if classify.hit(title, "co-?ops?")
+        else "intern" if classify.hit(title, "intern(s|ship|ships)?")
+        else None
+    )
     return [
         Posting(
             external_id=item.external_id,
-            title=unlabeled[0] if unlabeled else "",
+            title=title,
             url_posting=url,
             apply_url=apply_url,
             company_raw=feed.company_name or feed.key,
             location_raw=location,
             description_html=description,
             requisition_id=requisition,
+            job_type=job_type,
             source_extra=fields,
         )
     ]
