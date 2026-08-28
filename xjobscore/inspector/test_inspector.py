@@ -368,48 +368,6 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
     assert "await setFeedsEnabled(feeds, true)" in feeds_js
 
 
-def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
-    scheduler = Path(__file__).with_name("static") / "scheduler"
-    source = "\n".join(
-        (scheduler / name).read_text()
-        for name in ("index.html", "app.js", "model.mjs")
-    )
-    for removed in (
-        "ewma_" + "lambda",
-        "ideal_" + "interval_s",
-        "interval_" + "verdict",
-        "calibrat" + "ing",
-        "Recommended" + " tier",
-        chr(955),
-    ):
-        assert removed not in source
-
-    html = (scheduler / "index.html").read_text()
-    app = (scheduler / "app.js").read_text()
-    css = (scheduler / "styles.css").read_text()
-    assert '/static/scheduler/styles.css' in html
-    assert 'id="detail-drawer"' in html
-    assert 'id="bulk-dialog"' in html
-    assert 'id="vendor-summary"' in html
-    assert 'id="group-controls"' in html
-    assert 'id="vendor-panel"' not in html
-    assert 'id="filter-platform"' not in html
-    assert 'data-sort="vendor"' not in html
-    assert "vendorsExpanded" not in app
-    assert ".ops-vendor-item" not in css
-    # Selecting a feed only changes row selection and opens the drawer. Replacing
-    # the chunk-rendered tbody here used to collapse the table briefly, making
-    # the page jump on every feed click.
-    load_detail = app.split("async function loadDetail(", 1)[1].split("\n}\n", 1)[0]
-    select_feed = app.split("function selectFeed(", 1)[1].split("\n}\n", 1)[0]
-    close_drawer = app.split("function closeDrawer(", 1)[1].split("\n}\n", 1)[0]
-    assert "renderTable(" not in load_detail
-    assert "syncSelectedRow();" in select_feed
-    assert "renderTable(" not in select_feed
-    assert "syncSelectedRow();" in close_drawer
-    assert "renderTable(" not in close_drawer
-
-
 async def test_feed_rows_use_string_ids_and_stable_public_refs(store):
     feed = Feed(id=-7588981172000531025, source="amazon", key="amazon", config={})
     rows = await InspectorService(

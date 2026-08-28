@@ -56,29 +56,6 @@ export function intervalError(seconds) {
   return null;
 }
 
-export function providerRollups(feeds, errorSources = []) {
-  const errors = new Map(errorSources.map((row) => [row.source, row.errors]));
-  const providers = new Map();
-  for (const feed of feeds) {
-    let item = providers.get(feed.source);
-    if (!item) {
-      item = { source: feed.source, total: 0, attention: 0, paused: 0, requests: 0, errors: 0 };
-      providers.set(feed.source, item);
-    }
-    item.total += 1;
-    if (ATTENTION_STATES.has(feed.sched?.status?.state)) item.attention += 1;
-    if (feed.policy?.paused_at) {
-      item.paused += 1;
-    } else {
-      item.requests += feed.sched?.requests_per_day ?? 0;
-    }
-  }
-  for (const item of providers.values()) item.errors = errors.get(item.source) ?? 0;
-  return [...providers.values()].sort(
-    (a, b) => b.total - a.total || a.source.localeCompare(b.source)
-  );
-}
-
 export function summaryCounts(countsByStatus = {}) {
   const counts = countsByStatus ?? {};
   return {
@@ -163,4 +140,87 @@ export function sortFeeds(feeds, sort = { key: "due", direction: "asc" }, nowMs 
     return (a.company_name || a.key).localeCompare(b.company_name || b.key) ||
       a.source.localeCompare(b.source) || a.key.localeCompare(b.key);
   });
+}
+
+/* Provider grouping. A group's rows are the feeds that pass the current
+   filters, sorted by the active column; the group order is fixed by concern —
+   most failing feeds first, then size — so a column sort never moves the group
+   an operator is looking at. Groups with no matching rows are dropped. */
+export function groupFeeds(feeds, filters, sort = { key: "due", direction: "asc" }, nowMs = 0) {
+  const groups = new Map();
+  for (const feed of feeds) {
+    let group = groups.get(feed.source);
+    if (!group) {
+      group = { source: feed.source, total: 0, rows: [] };
+      groups.set(feed.source, group);
+    }
+    group.total += 1;
+    if (matchesFeed(feed, filters)) group.rows.push(feed);
+  }
+  const result = [];
+  for (const group of groups.values()) {
+    if (!group.rows.length) continue;
+    group.rows = sortFeeds(group.rows, sort, nowMs);
+    group.rollup = groupRollup(group.rows, nowMs);
+    result.push(group);
+  }
+  return result.sort(
+    (a, b) =>
+      b.rollup.failing - a.rollup.failing ||
+      b.rows.length - a.rows.length ||
+      a.source.localeCompare(b.source)
+  );
+}
+
+/* Header-row aggregates for one group. Sums stay unknown (null) when no row
+   carries the observation, matching the per-feed "—" rather than inventing 0. */
+export function groupRollup(rows, nowMs = 0) {
+  const counts = {};
+  const intervals = new Set();
+  let failing = 0;
+  let jobs = null;
+  let errors = null;
+  let soonestKey = Infinity;
+  let dueAt = null;
+  let latestPoll = -Infinity;
+  for (const feed of rows) {
+    const state = feed.sched.status.state;
+    counts[state] = (counts[state] ?? 0) + 1;
+    if (state === "backing_off") failing += 1;
+    const today = jobsToday(feed);
+    if (today != null) jobs = (jobs ?? 0) + today;
+    const errs = feed.telemetry?.error_count_7d;
+    if (errs != null) errors = (errors ?? 0) + errs;
+    const due = dueInfo(feed.policy?.due_at, feed.policy?.paused_at, nowMs);
+    if (due.sortKey < soonestKey) {
+      soonestKey = due.sortKey;
+      dueAt = feed.policy.due_at;
+    }
+    const poll = Date.parse(feed.policy?.last_poll_at ?? "");
+    if (!Number.isNaN(poll) && poll > latestPoll) latestPoll = poll;
+    if (feed.policy?.interval_s != null) intervals.add(feed.policy.interval_s);
+  }
+  const states = Object.keys(counts).sort(
+    (a, b) => (STATUS_PRIORITY[a] ?? 99) - (STATUS_PRIORITY[b] ?? 99)
+  );
+  return {
+    worst: states[0] ?? "unknown",
+    counts: states.map((state) => [state, counts[state]]),
+    failing,
+    jobs,
+    errors,
+    dueAt,
+    lastPollAt: latestPoll === -Infinity ? null : new Date(latestPoll).toISOString(),
+    intervals: [...intervals].sort((a, b) => a - b),
+  };
+}
+
+/* Collapsed groups are the default; a narrowing filter that leaves a small
+   result set opens every matching group so the rows are visible at once. */
+export const AUTO_EXPAND_ROWS = 150;
+
+export function autoExpand(groups, filters) {
+  if (filters.view === "all" && !filters.search) return false;
+  const rows = groups.reduce((sum, group) => sum + group.rows.length, 0);
+  return rows <= AUTO_EXPAND_ROWS;
 }

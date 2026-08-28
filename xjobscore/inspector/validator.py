@@ -7,7 +7,7 @@ three-valued result into the two-and-a-half-valued ``token.status`` column and
 record the check timestamp.
 
 We ask a narrower question than the crawl does, though: this page stores
-``status`` and ``checked_at`` and nothing else, so ``liveness_only=True`` lets
+``status``, ``checked_at``, and a ``token_log`` row, so ``liveness_only=True`` lets
 each rule swap in its cheap variant -- a lever board costs 12 KB instead of
 5.9 MB, an ashby one a bodiless HEAD instead of 1.29 MB. The crawl keeps the
 full path because it persists ``job_count``.
@@ -87,8 +87,21 @@ async def validate_token(
 
     if pool is not None:
         try:
+            # One statement, so the row and its log entry move together: no
+            # crash can record a check that the log misses, or the reverse.
+            # The INSERT is fed by the UPDATE's RETURNING, so a token that is
+            # not in the inventory logs nothing.
             await pool.execute(
-                "UPDATE token SET status = $1, checked_at = $2 WHERE ats = $3 AND token = $4",
+                """
+                WITH checked AS (
+                    UPDATE token
+                       SET status = $1, checked_at = $2
+                     WHERE ats = $3 AND token = $4
+                 RETURNING ats, token
+                )
+                INSERT INTO token_log (checked_at, ats, token, status)
+                SELECT $2, ats, token, $1 FROM checked
+                """,
                 status,
                 checked_at,  # timestamptz column -- pass a datetime, not a string
                 ats,

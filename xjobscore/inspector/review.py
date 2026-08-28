@@ -55,7 +55,7 @@ _SELECT = """
 SELECT p.id, p.source, p.source_key, c.name AS company, p.title,
        p.location_text, p.source_url, p.apply_url, p.posted_at, p.status,
        p.job_type, p.attributes,
-       (p.attributes->'degree_fields') ? 'computer_science' AS cs_field,
+       (p.attributes->'degree') ? 'cs' AS cs_field,
        c.labels->>'ck_list' AS ck_list,
        (p.description IS NOT NULL) AS has_description,
        count(*) OVER () AS total
@@ -86,7 +86,7 @@ _DETAIL = """
 SELECT p.id, p.source, p.source_key, c.name AS company, p.title,
        p.description, p.location_text, p.source_url, p.apply_url,
        p.posted_at, p.status, p.job_type, p.attributes,
-       (p.attributes->'degree_fields') ? 'computer_science' AS cs_field,
+       (p.attributes->'degree') ? 'cs' AS cs_field,
        c.labels->>'ck_list' AS ck_list
 FROM job_posting AS p
 JOIN company AS c ON c.id = p.company_id

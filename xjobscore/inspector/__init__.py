@@ -17,6 +17,12 @@ running, the inspector process *does* write bronze (``raw_posting``) and
 canonical (``job_posting``) rows, append to ``poll_observation``, and own the
 feed runtime columns for the feeds it polls. See ``runner.py``'s module
 docstring for the two-switch gate, and ``README.md`` for the full picture.
+
+``token_heartbeat.TokenHeartbeatRunner`` crosses the same boundary on a
+smaller scale, and is on by default: every six hours it probes a batch of
+inventory tokens for liveness and promotes the confirmed-live ones into
+``feed``. Its runtime pause is ``token_heartbeat.paused``, driven from the
+Tokens page.
 """
 
 from xjobscore.inspector.app import app, create_app

@@ -14,7 +14,7 @@ __all__ = ["CatalogDB", "feed_ref"]
 # `feed` owns the endpoint and its runtime metadata. `token` owns company
 # identity. The feed foreign key makes that one relationship mandatory.
 _PG_FEEDS = """
-    SELECT f.id, f.source, f.key, f.polling AS enabled, f.config,
+    SELECT f.id, f.source, f.key, f.polling AS enabled, t.config,
            f.type, c.description,
            f.interval_s, f.etag, f.res_hash, f.strikes, f.due_at, f.hold_until,
            t.company_id,

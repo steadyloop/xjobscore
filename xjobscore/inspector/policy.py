@@ -196,7 +196,7 @@ class PolicyStore:
                 rows = await conn.fetch(
                     """
                     SELECT a.alias_norm, c.id AS company_id, c.name AS company_name
-                    FROM alias a
+                    FROM company_alias a
                     JOIN company c ON c.id = a.company_id
                     """
                 )

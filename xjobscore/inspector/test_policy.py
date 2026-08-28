@@ -238,7 +238,7 @@ async def test_policy_store_connect_failure_is_degraded(monkeypatch):
 async def test_policy_store_reads_company_aliases_and_descriptions(monkeypatch):
     alias_sql = (
         "SELECT a.alias_norm, c.id AS company_id, c.name AS company_name "
-        "FROM alias a JOIN company c ON c.id = a.company_id"
+        "FROM company_alias a JOIN company c ON c.id = a.company_id"
     )
     description_sql = (
         "SELECT id, description FROM company "

@@ -1671,6 +1671,9 @@ class FakeTokensPool:
             "muted": 0,
             "unpromoted": 1,
             "promotable": 1,
+            "vendors": 1,
+            "never_checked": 0,
+            "checked_24h": 1,
         }
 
     @asynccontextmanager
@@ -1831,6 +1834,46 @@ def test_enable_rejects_an_empty_list(postings_client):
         ).status_code == 400
 
 
+def test_token_log_tails_the_newest_checks(postings_client, monkeypatch):
+    app_module = importlib.import_module("xjobscore.inspector.app")
+
+    async def fake_recent_checks(pool, *, limit):
+        assert limit == 25
+        return [
+            {
+                "id": 2,
+                "checked_at": "2026-08-27T22:54:22+00:00",
+                "ats": "greenhouse",
+                "token": "acme",
+                "status": "live",
+            }
+        ]
+
+    monkeypatch.setattr(app_module, "tokens_recent_checks", fake_recent_checks)
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.get("/api/tokens/log?limit=25")
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["log_available"] is True
+    assert payload["checks"][0]["token"] == "acme"
+
+
+def test_token_log_reports_an_unreadable_log_as_unavailable(postings_client, monkeypatch):
+    """A missing token_log is not an empty one -- the page must not say zero."""
+    app_module = importlib.import_module("xjobscore.inspector.app")
+
+    async def missing_table(pool, *, limit):
+        return None
+
+    monkeypatch.setattr(app_module, "tokens_recent_checks", missing_table)
+    with postings_client(FakeTokensPool()) as test_client:
+        payload = test_client.get("/api/tokens/log").json()
+
+    assert payload["log_available"] is False
+    assert payload["checks"] == []
+
+
 def test_heartbeat_status_and_run_now(postings_client, monkeypatch):
     app_module = importlib.import_module("xjobscore.inspector.app")
     queued = []
@@ -1858,6 +1901,45 @@ def test_heartbeat_status_and_run_now(postings_client, monkeypatch):
     assert status.json()["eligible"] == 4
     assert started.status_code == 202
     assert len(queued) == 1
+
+
+def test_heartbeat_run_now_refuses_a_paused_heartbeat(postings_client, monkeypatch):
+    app_module = importlib.import_module("xjobscore.inspector.app")
+
+    async def paused(pool, current):
+        raise app_module.HeartbeatPaused("Token heartbeat is paused")
+
+    monkeypatch.setattr(app_module, "token_heartbeat_enqueue", paused)
+    with postings_client(FakeTokensPool()) as test_client:
+        response = test_client.post("/api/tokens/heartbeat/run")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Token heartbeat is paused"
+
+
+def test_heartbeat_pause_and_resume_round_trip(postings_client, monkeypatch):
+    """The switch is written to PostgreSQL, not held in this process."""
+    app_module = importlib.import_module("xjobscore.inspector.app")
+    written = []
+
+    async def fake_set_paused(pool, paused, *, current):
+        written.append(paused)
+
+    async def fake_snapshot(pool, **kwargs):
+        return {"state": "paused" if written[-1] else "healthy", "paused": written[-1]}
+
+    monkeypatch.setattr(app_module, "token_heartbeat_set_paused", fake_set_paused)
+    monkeypatch.setattr(app_module, "token_heartbeat_snapshot", fake_snapshot)
+
+    with postings_client(FakeTokensPool()) as test_client:
+        paused = test_client.post("/api/tokens/heartbeat/control", json={"paused": True})
+        resumed = test_client.post(
+            "/api/tokens/heartbeat/control", json={"paused": False}
+        )
+
+    assert written == [True, False]
+    assert paused.json()["state"] == "paused"
+    assert resumed.json()["paused"] is False
 
 
 def test_heartbeat_run_now_refuses_an_active_cycle(postings_client, monkeypatch):

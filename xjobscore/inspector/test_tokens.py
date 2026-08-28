@@ -249,7 +249,8 @@ async def test_counts_survive_an_empty_inventory():
     assert body["counts"] == {}
 
 
-async def test_promotion_candidates_are_live_unmuted_and_absent_from_feed():
+async def test_promotion_candidates_are_dead_unmuted_and_absent_from_feed():
+    """Dead, not live: the heartbeat looks for resurrections, not confirmations."""
     pool = FakePool(
         [
             {"ats": "workable", "token": "snap", "total": 2},
@@ -260,7 +261,7 @@ async def test_promotion_candidates_are_live_unmuted_and_absent_from_feed():
     identities, total = await tokens.promotion_candidates(pool, limit=10)
 
     sql, args = pool.calls[-1]
-    assert "t.status = 'live'" in sql
+    assert "t.status = 'dead'" in sql
     assert "NOT t.muted" in sql
     assert "NOT EXISTS" in sql
     assert "FROM feed AS f" in sql

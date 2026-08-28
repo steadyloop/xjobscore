@@ -29,22 +29,34 @@ const state = {
   // whenever the filters change, because the set on screen no longer
   // describes what is checked.
   selected: new Map(),
-  // Vendor names collapsed by the user. Absent = expanded, so a fresh load
-  // reads the same as the old flat table until someone collapses one.
-  collapsed: new Set(),
+  // The one vendor group open, accordion-style; null = all closed. A single
+  // name rather than a set of collapsed ones, so "only one at a time" is the
+  // shape of the state instead of an invariant every writer must remember.
+  expanded: null,
   rows: [],
   firstLoad: true,
   groupValidate: new Map(), // vendor -> {completed, total}
   validateAllRunning: false,
   heartbeat: null,
+  // Newest-first probe log, and whether token_log could be read at all. An
+  // unreadable log is not an empty one -- see the header dot.
+  checks: [],
+  logAvailable: false,
 };
+
+// The tail is short and the page is not a monitor: slower than the Scheduler's
+// 5s, fast enough that a Validate-all shows up while you are watching it.
+const LOG_REFRESH_MS = 10_000;
+const LOG_LIMIT = 50;
 
 const COLUMN_COUNT = 12;
 
 const nodes = {
   filter: document.getElementById("status-feed-filter"),
   atsFilter: document.getElementById("ats-filter"),
-  counts: document.getElementById("counts"),
+  counts: document.getElementById("summary-line"),
+  logLines: document.getElementById("token-log-lines"),
+  logDot: document.getElementById("token-log-dot"),
   degraded: document.getElementById("degraded-banner"),
   error: document.getElementById("error-banner"),
   errorText: document.getElementById("error-text"),
@@ -58,6 +70,7 @@ const nodes = {
   heartbeatMeta: document.getElementById("heartbeat-meta"),
   heartbeatFacts: document.getElementById("heartbeat-facts"),
   heartbeatRun: document.getElementById("heartbeat-run"),
+  heartbeatPause: document.getElementById("heartbeat-pause"),
   validateAll: document.getElementById("validate-all-btn"),
   range: document.getElementById("range"),
   truncated: document.getElementById("truncated-banner"),
@@ -105,6 +118,7 @@ async function loadHeartbeat() {
     state.heartbeat = {
       state: "offline",
       runner_online: false,
+      paused: false,
       last_error: error.message ?? String(error),
     };
     renderHeartbeat();
@@ -148,6 +162,26 @@ async function enableTokens() {
   }
 }
 
+/* Pause/resume writes `token_heartbeat.paused` in PostgreSQL, so it holds
+   across restarts and applies to whichever process runs the loop -- not to
+   this browser. The button therefore stays live whenever the database is
+   reachable, even in an inspector whose own runner is off. */
+async function toggleHeartbeatPause() {
+  const paused = Boolean(state.heartbeat?.paused);
+  nodes.heartbeatPause.disabled = true;
+  try {
+    state.heartbeat = await api("/api/tokens/heartbeat/control", {
+      body: { paused: !paused },
+    });
+    showError(null);
+    renderHeartbeat();
+    note(paused ? "Token heartbeat resumed" : "Token heartbeat paused");
+  } catch (error) {
+    showError(error);
+    await loadHeartbeat();
+  }
+}
+
 async function runHeartbeat() {
   nodes.heartbeatRun.disabled = true;
   nodes.heartbeatRun.textContent = "Queueing…";
@@ -173,7 +207,7 @@ async function validateToken(row) {
       renderRows();
       syncPromote();
       await refreshCounts();
-      await loadHeartbeat();
+      await Promise.all([loadHeartbeat(), loadLog()]);
     }
   } catch (error) {
     showError(error);
@@ -216,7 +250,9 @@ async function validateVendor(vendor, rows) {
     state.groupValidate.delete(vendor);
     renderRows();
     syncPromote();
-    await refreshCounts();
+    // A vendor run writes a log row per token; do not make the reader wait a
+    // full tick to see the batch it just started.
+    await Promise.all([refreshCounts(), loadLog()]);
   }
 }
 
@@ -241,10 +277,15 @@ function renderHeartbeat() {
   nodes.heartbeatState.textContent = presentation.label;
 
   const timing = [];
+  if (heartbeat.paused && heartbeat.paused_changed_at) {
+    timing.push(`Paused ${relativeTime(heartbeat.paused_changed_at)}`);
+  }
   if (heartbeat.last_completed_at) {
     timing.push(`Last run ${relativeTime(heartbeat.last_completed_at)}`);
   }
-  if (heartbeat.due_at && heartbeat.state !== "running") {
+  // A paused heartbeat has a due_at, but nothing will act on it -- promising
+  // a next run would be a lie until someone resumes.
+  if (heartbeat.due_at && heartbeat.state !== "running" && !heartbeat.paused) {
     timing.push(`Next run ${relativeTime(heartbeat.due_at)}`);
   }
   nodes.heartbeatMeta.textContent = timing.join(" · ");
@@ -257,13 +298,23 @@ function renderHeartbeat() {
       `${formatCount(heartbeat.last_validated)} checked · ` +
       `${formatCount(heartbeat.last_promoted)} promoted`;
 
-  const runnable = heartbeat.postgres?.connected && heartbeat.runner_online
+  const paused = Boolean(heartbeat.paused);
+  const connected = Boolean(heartbeat.postgres?.connected);
+  const runnable = connected && heartbeat.runner_online && !paused
     && heartbeat.state !== "running";
   nodes.heartbeatRun.disabled = !runnable;
   nodes.heartbeatRun.textContent = heartbeat.state === "running" ? "Running…" : "Run now";
-  nodes.heartbeatRun.title = heartbeat.runner_online
-    ? "Queue one token heartbeat batch"
-    : "The token heartbeat runner is offline";
+  nodes.heartbeatRun.title = paused
+    ? "The token heartbeat is paused"
+    : heartbeat.runner_online
+      ? "Queue one token heartbeat batch"
+      : "The token heartbeat runner is offline";
+
+  nodes.heartbeatPause.disabled = !connected;
+  nodes.heartbeatPause.textContent = paused ? "Resume" : "Pause";
+  nodes.heartbeatPause.title = paused
+    ? "Resume scheduled token validation and promotion"
+    : "Stop scheduled token validation and promotion until resumed";
 }
 
 /* Grouped by vendor. Vendors are ordered alphabetically regardless of the
@@ -294,17 +345,20 @@ function renderRows() {
     groups.get(row.ats).push(row);
   }
   const vendors = [...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length);
-  // Collapse all vendors only on first load
+  // The biggest vendor opens itself on arrival, and again whenever the open
+  // one is filtered off screen -- landing on a page of nothing but headers
+  // reads as an empty inventory. A group the user closed by hand leaves
+  // `expanded` null, which is left alone: that one was deliberate.
   if (state.firstLoad) {
-    for (const vendor of vendors) {
-      state.collapsed.add(vendor);
-    }
+    state.expanded = vendors[0] ?? null;
     state.firstLoad = false;
+  } else if (state.expanded && !groups.has(state.expanded)) {
+    state.expanded = vendors[0] ?? null;
   }
   const fragment = document.createDocumentFragment();
   for (const vendor of vendors) {
     const vendorRows = groups.get(vendor);
-    const collapsed = state.collapsed.has(vendor);
+    const collapsed = state.expanded !== vendor;
     fragment.append(groupRow(vendor, vendorRows, collapsed));
     if (!collapsed) {
       for (const row of vendorRows) fragment.append(renderRow(row));
@@ -373,8 +427,8 @@ function groupRow(vendor, rows, collapsed) {
   );
   row.addEventListener("click", (e) => {
     if (e.target !== validateButton) {
-      if (collapsed) state.collapsed.delete(vendor);
-      else state.collapsed.add(vendor);
+      // Opening one closes whichever was open; clicking the open one closes it.
+      state.expanded = collapsed ? vendor : null;
       renderRows();
       syncPromote();
     }
@@ -387,13 +441,72 @@ function renderCounts(counts) {
     nodes.counts.textContent = "";
     return;
   }
-  nodes.counts.textContent = [
-    `${formatCount(counts.total)} tokens`,
-    `${formatCount(counts.live)} live`,
-    `${formatCount(counts.dead)} dead`,
+  // Status is only half the shape of an inventory; the freshness segments say
+  // how much of it is a current answer rather than a remembered one.
+  const parts = [
+    `${formatCount(counts.total)} tokens / ${formatCount(counts.vendors)} vendors`,
+    el("span", { class: "tok-sum-ok" }, `${formatCount(counts.live)} live`),
+    el("span", { class: counts.dead ? "tok-sum-bad" : null }, `${formatCount(counts.dead)} dead`),
     `${formatCount(counts.muted)} muted`,
     `${formatCount(counts.promotable)} live and unpromoted`,
-  ].join(" · ");
+    `${formatCount(counts.checked_24h)} checked today`,
+    el(
+      "span",
+      { class: counts.never_checked ? "tok-sum-bad" : null },
+      `${formatCount(counts.never_checked)} never checked`
+    ),
+  ];
+  nodes.counts.replaceChildren(
+    ...parts
+      .flatMap((part, index) => [
+        index ? el("span", { class: "tok-sum-sep", "aria-hidden": "true" }, "·") : null,
+        typeof part === "string" ? el("span", {}, part) : part,
+      ])
+      .filter(Boolean)
+  );
+}
+
+/* The tail log reads `token_log`, one row per probe. Rendered oldest-at-top so
+   new lines arrive at the bottom, and the scroll only follows when the reader
+   is already parked there -- scrolling back through history should stay put. */
+function renderLog() {
+  nodes.logDot.dataset.state = state.logAvailable ? "live" : "off";
+  if (!state.checks.length) {
+    nodes.logLines.replaceChildren(
+      el(
+        "div",
+        { class: "tok-log-empty" },
+        state.logAvailable ? "no checks recorded yet…" : "check log unavailable"
+      )
+    );
+    return;
+  }
+  const pinned =
+    nodes.logLines.scrollHeight - nodes.logLines.scrollTop - nodes.logLines.clientHeight < 12;
+  nodes.logLines.replaceChildren(
+    ...[...state.checks].reverse().map((check) =>
+      el(
+        "div",
+        { class: "tok-log-line" },
+        el("time", { title: check.checked_at ?? "" }, (check.checked_at ?? "").slice(11, 19)),
+        el("span", { class: "tok-log-st", "data-status": check.status }, check.status),
+        el("span", { class: "tok-log-token", title: `${check.ats}:${check.token}` }, check.token),
+        el("span", { class: "tok-log-vendor" }, check.ats)
+      )
+    )
+  );
+  if (pinned) nodes.logLines.scrollTop = nodes.logLines.scrollHeight;
+}
+
+async function loadLog() {
+  try {
+    const view = await api(`/api/tokens/log?limit=${LOG_LIMIT}`);
+    state.logAvailable = Boolean(view.log_available);
+    state.checks = view.checks ?? [];
+  } catch {
+    state.logAvailable = false;
+  }
+  renderLog();
 }
 
 async function saveNote(row, input) {
@@ -615,6 +728,7 @@ nodes.filter.addEventListener("change", (event) => {
 
 nodes.promote.addEventListener("click", enableTokens);
 nodes.heartbeatRun.addEventListener("click", runHeartbeat);
+nodes.heartbeatPause.addEventListener("click", toggleHeartbeatPause);
 
 nodes.validateAll.addEventListener("click", async () => {
   if (!state.rows.length) return;
@@ -640,4 +754,6 @@ nodes.validateAll.addEventListener("click", async () => {
 
 load();
 loadHeartbeat();
+loadLog();
 setInterval(loadHeartbeat, 30_000);
+setInterval(loadLog, LOG_REFRESH_MS);

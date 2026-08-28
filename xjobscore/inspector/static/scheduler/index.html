@@ -34,8 +34,6 @@
 
     <div class="ops-alert" id="system-alert" role="status" hidden></div>
 
-    <div class="ops-provider-chips" id="provider-chips" role="group" aria-label="Filter by provider"></div>
-
     <div class="ops-filterbar">
       <label class="ops-search">
         <span class="sr-only">Filter feeds</span>
@@ -50,9 +48,15 @@
         <button type="button" data-view="paused" aria-pressed="false">paused <span></span></button>
       </div>
 
+      <div class="ops-expand-links">
+        <button class="ops-linkish" type="button" id="expand-all">expand all</button>
+        <span aria-hidden="true">·</span>
+        <button class="ops-linkish" type="button" id="collapse-all">collapse all</button>
+      </div>
+
       <span class="ops-shown" id="row-count"></span>
       <button class="btn small" type="button" id="refresh">Refresh</button>
-      <button class="btn small" type="button" id="fetch-shown">Fetch shown</button>
+      <button class="btn small" type="button" id="fetch-matching">Fetch matching</button>
     </div>
 
     <div class="ops-layout" id="ops-layout">
@@ -62,7 +66,6 @@
             <tr>
               <th data-sort="status"><button type="button">st</button></th>
               <th data-sort="name"><button type="button">source</button></th>
-              <th data-sort="provider"><button type="button">provider</button></th>
               <th class="num" data-sort="interval"><button type="button">ivl</button></th>
               <th class="num" data-sort="due"><button type="button">next</button></th>
               <th class="num" data-sort="last_poll"><button type="button">last</button></th>
@@ -71,7 +74,6 @@
               <th class="ops-actions-col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
-          <tbody id="sched-body"></tbody>
         </table>
         <div class="empty-state" id="sched-empty" hidden></div>
       </div>

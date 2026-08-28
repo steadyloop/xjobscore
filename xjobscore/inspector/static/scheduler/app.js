@@ -19,14 +19,15 @@ import { sparkBars } from "/static/shared/spark.js";
 import {
   ATTENTION_STATES,
   INTERVAL_PRESETS,
+  autoExpand,
   dueInfo,
   formatRequestRate,
+  groupFeeds,
   intervalError,
   intervalInput,
   intervalSeconds,
   jobsToday,
   matchesFeed,
-  providerRollups,
   sortFeeds,
   summaryCounts,
 } from "/static/scheduler/model.mjs";
@@ -41,6 +42,8 @@ const LOG_REFRESH_MS = 5000;
 const COUNTDOWN_TICK_MS = 15_000;
 const POLL_NOW_SETTLE_MS = 3000;
 const BULK_FETCH_CONCURRENCY = 8;
+const BULK_POLICY_CONCURRENCY = 8;
+const EXPANDED_STORAGE_KEY = "scheduler-expanded-providers";
 
 const state = {
   feeds: [],
@@ -58,10 +61,10 @@ const state = {
   intervalDraft: null,
   search: "",
   view: "all",
-  provider: null,
-  providersExpanded: false,
+  expanded: loadExpanded(),
   sort: { key: "due", direction: "asc" },
   bulk: null,
+  bulkScope: null,
   logEvents: [],
   logAvailable: false,
 };
@@ -71,16 +74,16 @@ const runStateEl = document.getElementById("run-state");
 const runToggleEl = document.getElementById("run-toggle");
 const clockEl = document.getElementById("utc-clock");
 const summaryEl = document.getElementById("summary-line");
-const chipsEl = document.getElementById("provider-chips");
 const emptyEl = document.getElementById("sched-empty");
 const countEl = document.getElementById("row-count");
 const panelEl = document.getElementById("detail-panel");
 const logLinesEl = document.getElementById("live-log-lines");
 const logDotEl = document.getElementById("live-log-dot");
-const fetchShownEl = document.getElementById("fetch-shown");
+const fetchMatchingEl = document.getElementById("fetch-matching");
 const bulkDialogEl = document.getElementById("bulk-dialog");
 const toastEl = document.getElementById("toast");
-let bodyEl = document.getElementById("sched-body");
+const tableEl = document.getElementById("sched-table");
+let renderToken = 0;
 const tableWrapEl = document.querySelector(".ops-table-wrap");
 let searchTimer = null;
 let toastTimer = null;
@@ -232,65 +235,36 @@ function renderSummaryLine() {
 }
 
 /* One grid row holds the toggle plus this many chips. */
-const PROVIDER_COLLAPSE_COUNT = 9;
+/* Provider groups start collapsed; which ones an operator opened survives a
+   reload. Storage failures (private mode, quota) only cost that persistence. */
+function loadExpanded() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(EXPANDED_STORAGE_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored : []);
+  } catch {
+    return new Set();
+  }
+}
 
-function renderProviderChips() {
-  if (!state.feeds.length) {
-    chipsEl.replaceChildren();
-    return;
+function persistExpanded() {
+  try {
+    localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify([...state.expanded]));
+  } catch {
+    /* expansion just will not survive a reload */
   }
-  const rollups = providerRollups(state.feeds, state.overview?.tiles?.error_sources ?? []);
-  if (state.provider && !rollups.some((item) => item.source === state.provider)) {
-    state.provider = null;
-  }
-  const collapsed = !state.providersExpanded && rollups.length > PROVIDER_COLLAPSE_COUNT + 1;
-  let visible = rollups;
-  if (collapsed) {
-    visible = rollups.slice(0, PROVIDER_COLLAPSE_COUNT);
-    const selected = rollups.find((item) => item.source === state.provider);
-    if (selected && !visible.includes(selected)) visible[visible.length - 1] = selected;
-  }
-  const toggle = collapsed || state.providersExpanded
-    ? el(
-        "button",
-        {
-          class: "ops-chip-more",
-          type: "button",
-          "aria-expanded": String(state.providersExpanded),
-          onclick: () => {
-            state.providersExpanded = !state.providersExpanded;
-            renderProviderChips();
-          },
-        },
-        collapsed ? `+${formatCount(rollups.length - visible.length)} more` : "less"
-      )
-    : null;
-  chipsEl.replaceChildren(
-    ...visible.map((item) =>
-      el(
-        "button",
-        {
-          class: "ops-provider-chip",
-          type: "button",
-          "aria-pressed": String(state.provider === item.source),
-          title: [
-            `${formatCount(item.total)} feeds`,
-            item.paused ? `${formatCount(item.paused)} paused` : null,
-            `${formatRequestRate(item.requests)} req/day configured`,
-            item.errors ? `${formatCount(item.errors)} failed polls · 24h` : null,
-          ].filter(Boolean).join(" · "),
-          onclick: () => {
-            state.provider = state.provider === item.source ? null : item.source;
-            renderProviderChips();
-            renderTable();
-          },
-        },
-        el("span", { class: "ops-chip-name" }, item.source),
-        el("span", { class: "ops-chip-count" }, formatCount(item.total))
-      )
-    ),
-    toggle
-  );
+}
+
+function toggleGroup(source) {
+  if (state.expanded.has(source)) state.expanded.delete(source);
+  else state.expanded.add(source);
+  persistExpanded();
+  renderTable({ preserveScroll: true });
+}
+
+function setAllExpanded(expanded) {
+  state.expanded = new Set(expanded ? state.feeds.map((feed) => feed.source) : []);
+  persistExpanded();
+  renderTable();
 }
 
 function renderViewCounts() {
@@ -311,7 +285,6 @@ function renderSystem() {
   renderHeader();
   renderAlert();
   renderSummaryLine();
-  renderProviderChips();
   renderViewCounts();
 }
 
@@ -340,7 +313,6 @@ async function loadFeeds() {
     state.feedsError = null;
     state.lastFeedUpdate = new Date();
     renderSummaryLine();
-    renderProviderChips();
     renderViewCounts();
     renderTable({ preserveScroll: true });
   } catch (error) {
@@ -404,7 +376,6 @@ function filters() {
   return {
     search: state.search,
     view: state.view,
-    provider: state.provider,
   };
 }
 
@@ -469,6 +440,7 @@ function feedRow(feed, nowMs) {
   return el(
     "tr",
     {
+      class: "ops-feed",
       dataset: { feedRef: feed.feed_ref },
       "aria-selected": feed.feed_ref === state.selectedRef ? "true" : "false",
       onclick: (event) => {
@@ -492,7 +464,6 @@ function feedRow(feed, nowMs) {
       ),
       el("span", { class: "ops-feed-key" }, feed.key)
     ),
-    el("td", { class: "ops-provider-cell" }, feed.source),
     state.connected && feed.policy?.in_postgres
       ? el("td", { class: "num" }, formatIvl(feed.policy.interval_s))
       : dash("num"),
@@ -520,29 +491,146 @@ function feedRow(feed, nowMs) {
   );
 }
 
+function groupId(source) {
+  return `group-${source.replace(/[^\w-]/g, "_")}`;
+}
+
+function intervalsCell(intervals) {
+  if (!state.connected || !intervals.length) return dash("num");
+  const text = intervals.length === 1
+    ? formatIvl(intervals[0])
+    : `${formatIvl(intervals[0])}–${formatIvl(intervals.at(-1))}`;
+  return el("td", { class: "num secondary" }, text);
+}
+
+/* Group-level actions mirror the row pair. "poll all" reuses the bulk fetch
+   dialog scoped to this provider; pause/resume fans out the per-feed policy
+   write and reports one outcome. Both are gated on PostgreSQL like the rows. */
+function groupActionCell(group) {
+  const editable = group.rows.filter((feed) => feed.policy?.in_postgres);
+  const allPaused = editable.length > 0 && editable.every((feed) => feed.policy?.paused_at);
+  const pollable = group.rows.filter((feed) => !feed.policy?.paused_at);
+  return el(
+    "td",
+    { class: "ops-row-actions" },
+    el(
+      "button",
+      {
+        class: "ops-row-btn",
+        type: "button",
+        disabled: state.connected && pollable.length ? null : "",
+        title: state.connected
+          ? `Fetch ${formatCount(pollable.length)} unpaused ${group.source} feeds through the production pipeline`
+          : "PostgreSQL is unavailable.",
+        onclick: () => openBulkDialog({ feeds: group.rows, label: group.source }),
+      },
+      "poll all"
+    ),
+    el(
+      "button",
+      {
+        class: "ops-row-btn",
+        type: "button",
+        disabled: state.connected && editable.length ? null : "",
+        onclick: (event) => setPausedMany(editable, !allPaused, group.source, event.currentTarget),
+      },
+      allPaused ? "resume all" : "pause all"
+    )
+  );
+}
+
+/* One header row per provider: worst state, a "N err / N stale / N feeds"
+   breakdown ordered by concern, and the same aggregate columns as a feed row. */
+function groupRow(group, open, nowMs) {
+  const { rollup } = group;
+  const due = dueInfo(rollup.dueAt, null, nowMs);
+  const filtered = group.rows.length !== group.total;
+  const breakdown = rollup.counts.flatMap(([state, count]) => [
+    el("span", {}, `${formatCount(count)} `),
+    statusMark({ state, detail: null }),
+    el("span", { class: "ops-group-sep", "aria-hidden": "true" }, "/"),
+  ]);
+  return el(
+    "tr",
+    {
+      class: "ops-group",
+      onclick: (event) => {
+        if (!event.target.closest("button, a, input, select")) toggleGroup(group.source);
+      },
+    },
+    el("td", { class: "ops-status-cell" }, statusMark({ state: rollup.worst, detail: null })),
+    el(
+      "td",
+      { class: "ops-group-cell" },
+      el(
+        "button",
+        {
+          class: "ops-group-toggle",
+          type: "button",
+          "aria-expanded": String(open),
+          "aria-controls": groupId(group.source),
+          onclick: () => toggleGroup(group.source),
+        },
+        el("span", { class: "ops-chevron", "aria-hidden": "true" }, "▶"),
+        el("span", { class: "ops-group-name" }, group.source),
+        el(
+          "span",
+          { class: "ops-group-count" },
+          ...breakdown,
+          filtered
+            ? [el("b", {}, formatCount(group.rows.length)), ` of ${formatCount(group.total)} feeds`]
+            : [el("b", {}, formatCount(group.total)), " feeds"]
+        )
+      )
+    ),
+    intervalsCell(rollup.intervals),
+    el(
+      "td",
+      {
+        class: `num ops-next${due.imminent ? " ops-imminent" : ""}`,
+        "data-due-at": due.sortKey !== Infinity ? rollup.dueAt : null,
+        title: exactTime(rollup.dueAt),
+      },
+      el("span", {}, due.text)
+    ),
+    state.connected
+      ? el("td", { class: "num secondary", title: exactTime(rollup.lastPollAt) }, terseAgo(rollup.lastPollAt))
+      : dash("num"),
+    rollup.jobs != null ? el("td", { class: "num" }, formatCount(rollup.jobs)) : dash("num"),
+    el(
+      "td",
+      { class: "num ops-errors-cell" },
+      rollup.errors ? el("span", { class: "ops-err" }, `x${formatCount(rollup.errors)}`) : null
+    ),
+    groupActionCell(group)
+  );
+}
+
 function syncSelectedRow() {
-  for (const row of bodyEl.querySelectorAll("tr[data-feed-ref]")) {
+  for (const row of tableEl.querySelectorAll("tr[data-feed-ref]")) {
     row.setAttribute("aria-selected", String(row.dataset.feedRef === state.selectedRef));
   }
 }
 
 function renderTable({ preserveScroll = false } = {}) {
   const now = Date.now();
-  const rows = sortFeeds(matchingFeeds(), state.sort, now);
-  countEl.textContent = `${formatCount(rows.length)}/${formatCount(state.feeds.length)} shown`;
+  const active = filters();
+  const groups = groupFeeds(state.feeds, active, state.sort, now);
+  const shown = groups.reduce((sum, group) => sum + group.rows.length, 0);
+  const opened = autoExpand(groups, active);
+  countEl.textContent =
+    `${formatCount(shown)}/${formatCount(state.feeds.length)} shown · ${formatCount(groups.length)} providers`;
   renderSortHeaders();
 
-  emptyEl.hidden = rows.length > 0;
-  if (!rows.length) {
+  emptyEl.hidden = groups.length > 0;
+  if (!groups.length) {
     emptyEl.textContent = state.feedsError
       ? `Could not load feeds: ${state.feedsError}`
       : state.feeds.length
-        ? "No feeds match the current view. Clear the search, view, and provider filters to see the full fleet."
+        ? "No feeds match the current view. Clear the search and view filters to see the full fleet."
         : "No feeds are enabled. Enable a feed from the Feeds page to schedule it.";
   }
 
-  const cursor = document.createElement("tbody");
-  cursor.id = "sched-body";
   const scrollState = preserveScroll ? {
     windowX: window.scrollX,
     windowY: window.scrollY,
@@ -550,15 +638,42 @@ function renderTable({ preserveScroll = false } = {}) {
     height: tableWrapEl.offsetHeight,
   } : null;
   if (scrollState) tableWrapEl.style.minHeight = `${scrollState.height}px`;
-  bodyEl.replaceWith(cursor);
-  bodyEl = cursor;
+  for (const body of [...tableEl.tBodies]) body.remove();
 
-  let index = 0;
+  /* Collapsed groups cost one row each; feed rows render lazily, in chunks,
+     only for the groups that are open. */
+  const pending = [];
+  for (const group of groups) {
+    const open = opened || state.expanded.has(group.source);
+    const body = el("tbody", {
+      id: groupId(group.source),
+      class: "ops-group-body",
+      "data-expanded": String(open),
+    });
+    body.append(groupRow(group, open, now));
+    tableEl.append(body);
+    if (open) pending.push({ body, rows: group.rows });
+  }
+  tableEl.style.setProperty("--ops-thead-h", `${tableEl.tHead.offsetHeight}px`);
+
+  const token = ++renderToken;
+  let groupIndex = 0;
+  let rowIndex = 0;
   function step() {
-    if (!cursor.isConnected) return;
-    cursor.append(...rows.slice(index, index + RENDER_CHUNK).map((feed) => feedRow(feed, now)));
-    index += RENDER_CHUNK;
-    if (index < rows.length) {
+    if (token !== renderToken) return;
+    let budget = RENDER_CHUNK;
+    while (groupIndex < pending.length && budget > 0) {
+      const { body, rows } = pending[groupIndex];
+      const slice = rows.slice(rowIndex, rowIndex + budget);
+      body.append(...slice.map((feed) => feedRow(feed, now)));
+      rowIndex += slice.length;
+      budget -= slice.length;
+      if (rowIndex >= rows.length) {
+        groupIndex += 1;
+        rowIndex = 0;
+      }
+    }
+    if (groupIndex < pending.length) {
       requestAnimationFrame(step);
       return;
     }
@@ -573,7 +688,7 @@ function renderTable({ preserveScroll = false } = {}) {
 
 function tickCountdowns() {
   const now = Date.now();
-  for (const cell of bodyEl.querySelectorAll("td[data-due-at]")) {
+  for (const cell of tableEl.querySelectorAll("td[data-due-at]")) {
     const info = dueInfo(cell.dataset.dueAt, null, now);
     const label = cell.querySelector("span");
     if (label) label.textContent = info.text;
@@ -1083,8 +1198,50 @@ async function pollNow(feed, button) {
   }
 }
 
+async function setPausedMany(feeds, paused, label, button) {
+  const verb = paused ? "Pause" : "Resume";
+  const targets = feeds.filter((feed) => Boolean(feed.policy?.paused_at) !== paused);
+  if (!targets.length) return;
+  if (!window.confirm(`${verb} all ${formatCount(targets.length)} ${label} feeds?`)) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = paused ? "pausing…" : "resuming…";
+  let cursor = 0;
+  let failed = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const feed = targets[cursor++];
+      try {
+        await api(`/api/feeds/${feed.feed_ref}/policy`, { body: { paused } });
+      } catch {
+        failed += 1;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(BULK_POLICY_CONCURRENCY, targets.length) }, worker));
+  await Promise.allSettled([loadOverview(), loadFeeds()]);
+  if (state.selectedRef) await loadDetail(state.selectedRef, true);
+  const done = targets.length - failed;
+  showToast(
+    failed
+      ? `${verb}d ${formatCount(done)} of ${formatCount(targets.length)} ${label} feeds; ${formatCount(failed)} failed.`
+      : `${verb}d ${formatCount(done)} ${label} feeds.`,
+    failed ? "error" : "ok"
+  );
+  button.disabled = false;
+  button.textContent = original;
+}
+
+/* Bulk fetch targets: the provider group behind "poll all", otherwise every
+   feed matching the current filters — collapsed or not. Collapsing is a view
+   convenience and never changes what a bulk action touches. */
 function fetchCandidates() {
-  return visibleFeeds().filter((feed) => !feed.policy?.paused_at);
+  const pool = state.bulkScope?.feeds ?? visibleFeeds();
+  return pool.filter((feed) => !feed.policy?.paused_at);
+}
+
+function bulkScopeLabel() {
+  return state.bulkScope ? `${state.bulkScope.label} feeds` : "matching feeds";
 }
 
 function renderBulkDialog() {
@@ -1092,12 +1249,12 @@ function renderBulkDialog() {
   if (!progress) {
     const count = fetchCandidates().length;
     bulkDialogEl.replaceChildren(
-      el("header", { class: "ops-dialog-header" }, el("h2", { id: "bulk-title" }, "Fetch shown feeds")),
+      el("header", { class: "ops-dialog-header" }, el("h2", { id: "bulk-title" }, `Fetch ${bulkScopeLabel()}`)),
       el(
         "div",
         { class: "ops-dialog-body" },
         el("div", { class: "ops-bulk-count" }, formatCount(count)),
-        el("p", {}, "Each shown, unpaused feed will run through the production pipeline and write polling, raw-posting, and job-posting data. Vendor pacing remains active.")
+        el("p", {}, `Each unpaused ${state.bulkScope ? state.bulkScope.label : "matching"} feed will run through the production pipeline and write polling, raw-posting, and job-posting data. Vendor pacing remains active.`)
       ),
       el(
         "footer",
@@ -1112,7 +1269,7 @@ function renderBulkDialog() {
   const done = progress.phase === "done";
   const title = done
     ? progress.cancelled ? "Fetch stopped" : "Fetch complete"
-    : progress.cancelled ? "Stopping fetches…" : "Fetching shown feeds…";
+    : progress.cancelled ? "Stopping fetches…" : `Fetching ${bulkScopeLabel()}…`;
   const summary = `${formatCount(progress.completed)} of ${formatCount(progress.total)} completed`;
   bulkDialogEl.replaceChildren(
     el("header", { class: "ops-dialog-header" }, el("h2", { id: "bulk-title" }, title)),
@@ -1151,8 +1308,9 @@ function renderBulkDialog() {
   );
 }
 
-function openBulkDialog() {
+function openBulkDialog(scope = null) {
   state.bulk = null;
+  state.bulkScope = scope;
   renderBulkDialog();
   bulkDialogEl.showModal();
 }
@@ -1237,7 +1395,9 @@ for (const th of document.querySelectorAll("#sched-table th[data-sort]")) {
 
 runToggleEl.addEventListener("click", () => toggleRun(runToggleEl));
 document.getElementById("refresh").addEventListener("click", (event) => refreshAll(event.currentTarget));
-fetchShownEl.addEventListener("click", openBulkDialog);
+fetchMatchingEl.addEventListener("click", () => openBulkDialog());
+document.getElementById("expand-all").addEventListener("click", () => setAllExpanded(true));
+document.getElementById("collapse-all").addEventListener("click", () => setAllExpanded(false));
 
 bulkDialogEl.addEventListener("cancel", (event) => {
   if (state.bulk?.phase === "running") {
@@ -1248,7 +1408,10 @@ bulkDialogEl.addEventListener("cancel", (event) => {
 });
 
 bulkDialogEl.addEventListener("close", () => {
-  if (state.bulk?.phase !== "running") state.bulk = null;
+  if (state.bulk?.phase !== "running") {
+    state.bulk = null;
+    state.bulkScope = null;
+  }
 });
 
 document.addEventListener("keydown", (event) => {

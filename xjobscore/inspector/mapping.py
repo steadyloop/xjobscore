@@ -241,7 +241,7 @@ def adapter_map(adapter: str) -> dict[str, Any]:
 
 # Mirrors schema.sql's job_type CHECK. NULL is a real member of the domain --
 # it is what a vendor with no measured signal emits -- so it is named here.
-_JOB_TYPE_DOMAIN = ["intern", "coop", "student_program", "research", "part_time", None]
+_JOB_TYPE_DOMAIN = ["intern", "coop", "student", "new_grad", "research", None]
 
 
 def _degree_domain() -> list[str]:
@@ -302,7 +302,9 @@ COLLAPSE: dict[str, dict[str, Any]] = {
     "description_html": {
         "column": "description",
         "collapse": "silver._plain_text() -> skills.extract, degrees.extract",
-        "target": "attributes.skills, attributes.degree_fields",
+        "target": "attributes.skills, attributes.degree",
+        "note": "The only text a degree field's patterns match; a title reaches "
+        "degrees.extract() through explicit title_patterns alone.",
     },
     "state": {"column": "status", "collapse": None, "target": "status"},
     "source_active": {"column": "status", "collapse": None, "target": "status"},
@@ -325,11 +327,14 @@ def domains() -> dict[str, list[str]]:
     return {
         "job_type": _JOB_TYPE_DOMAIN,
         "remote": ["yes", "hybrid", "unknown"],
+        # Schedule, orthogonal to job_type. No 'no' member: a stated full-time
+        # value is not reliable enough to assert, exactly as with `remote`.
+        "part_time": ["yes", "unknown"],
         # The legacy silver-derived attribute, still the only remote signal for
         # vendors whose parse-time rules have not been transcribed yet. It has
         # no 'unknown' member: absence is how it says "no signal".
         "attributes.remote": ["yes", "hybrid"],
-        "attributes.degree_fields": _degree_domain(),
+        "attributes.degree": _degree_domain(),
         "status": ["active", "closed"],
     }
 

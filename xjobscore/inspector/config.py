@@ -122,7 +122,15 @@ def runner_lease_s() -> int:
 
 
 def token_heartbeat_enabled() -> bool:
-    return _env_bool("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", False)
+    """Whether this process may run the token validation/promotion heartbeat.
+
+    On by default, unlike runner_enabled(): one leased batch of liveness probes
+    every six hours is the behaviour every inspector should have, and the
+    operator's runtime pause lives in ``token_heartbeat.paused`` where the
+    Tokens page can reach it. Set the env var falsy for a process that must
+    never probe -- ``inspector/conftest.py`` pins it off for the test suite.
+    """
+    return _env_bool("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", True)
 
 
 def token_heartbeat_tick_s() -> float:

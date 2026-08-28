@@ -2,6 +2,7 @@ const HEARTBEAT_STATES = {
   healthy: { label: "Healthy", tone: "healthy" },
   running: { label: "Running", tone: "running" },
   queued: { label: "Queued", tone: "queued" },
+  paused: { label: "Paused", tone: "paused" },
   offline: { label: "Offline", tone: "offline" },
   attention: { label: "Attention", tone: "attention" },
   never: { label: "Never run", tone: "never" },

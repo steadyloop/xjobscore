@@ -46,6 +46,13 @@
 .tok-heartbeat-dot[data-state="running"] { background: var(--accent); }
 .tok-heartbeat-dot[data-state="queued"] { background: var(--warn); }
 .tok-heartbeat-dot[data-state="attention"] { background: var(--err); }
+/* paused, offline, and never share the muted default: nothing is happening. */
+
+.tok-heartbeat-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
 
 .tok-heartbeat-meta,
 .tok-heartbeat-facts {
@@ -63,6 +70,107 @@
 
 .tok-heartbeat-facts[data-error="true"] {
   color: var(--err);
+}
+
+/* The inventory's shape in one line, and the probe tail under it. Both borrow
+   the page's own tokens rather than the Scheduler's --ops-* palette, which is
+   scoped to that page's stylesheet. */
+
+.tok-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+  margin-bottom: var(--space-4);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tok-summary .tok-sum-ok { color: var(--ok-text); }
+.tok-summary .tok-sum-bad { color: var(--err); }
+.tok-summary .tok-sum-sep { color: var(--border); }
+
+.tok-log {
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.tok-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tok-log-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.tok-log-dot[data-state="live"] { background: var(--ok); }
+
+.tok-log-tail {
+  color: var(--text-muted);
+  font: 12px/1 var(--font-mono);
+  font-weight: 400;
+}
+
+.tok-log-lines {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font: 11px/1.75 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tok-log-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.tok-log-line time {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.tok-log-st {
+  flex: none;
+  width: 4.5ch;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.tok-log-st[data-status="live"] { color: var(--ok-text); }
+.tok-log-st[data-status="dead"] { color: var(--err); }
+
+.tok-log-token {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.tok-log-vendor {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.tok-log-empty {
+  color: var(--text-muted);
 }
 
 .tok-muted-toggle {

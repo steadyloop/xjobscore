@@ -25,6 +25,10 @@ class HeartbeatAlreadyRunning(RuntimeError):
     pass
 
 
+class HeartbeatPaused(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class HeartbeatLease:
     hold_until: datetime
@@ -48,7 +52,7 @@ async def heartbeat_snapshot(
                    (
                        SELECT count(*)::int
                          FROM token AS t
-                        WHERE t.status = 'live'
+                        WHERE t.status = 'dead'
                           AND NOT t.muted
                           AND NOT EXISTS (
                               SELECT 1
@@ -69,11 +73,17 @@ async def heartbeat_snapshot(
         runner_seen_at
         and runner_seen_at >= current - timedelta(seconds=offline_after_s)
     )
-    running = bool(value.get("hold_until") and value["hold_until"] > current)
+    in_flight = bool(value.get("hold_until") and value["hold_until"] > current)
+    paused = bool(value["paused"])
     due = value["due_at"] <= current
 
-    if running:
+    if in_flight:
         state = "running"
+    elif paused:
+        # A deliberate pause outranks "offline": it is the operator's own
+        # doing, and the payload still carries runner_online for the
+        # process-level fact underneath it.
+        state = "paused"
     elif not runner_online:
         state = "offline"
     elif value["last_outcome"] == "error":
@@ -88,6 +98,8 @@ async def heartbeat_snapshot(
     return {
         "state": state,
         "configured": configured,
+        "paused": paused,
+        "paused_changed_at": _iso(value.get("paused_changed_at")),
         "runner_online": runner_online,
         "due_at": _iso(value.get("due_at")),
         "hold_until": _iso(value.get("hold_until")),
@@ -104,9 +116,28 @@ async def heartbeat_snapshot(
     }
 
 
-async def touch_runner(pool, current: datetime) -> None:
+async def touch_runner(pool, current: datetime) -> bool:
+    """Stamp liveness and read the operator's switch back in the same write.
+
+    Returns whether the heartbeat is paused. One statement rather than two,
+    because every tick needs both facts and neither is worth a second round
+    trip. Liveness is stamped even while paused, so the Tokens page can tell a
+    paused heartbeat apart from one nothing is listening to.
+    """
+    row = await pool.fetchrow(
+        "UPDATE token_heartbeat SET runner_seen_at = $1 WHERE id RETURNING paused",
+        current,
+    )
+    if row is None:
+        raise RuntimeError("token_heartbeat has no singleton row")
+    return bool(row["paused"])
+
+
+async def set_paused(pool, paused: bool, *, current: datetime) -> None:
+    """Flip the pause switch. Persistent: a restart cannot undo a pause."""
     result = await pool.execute(
-        "UPDATE token_heartbeat SET runner_seen_at = $1 WHERE id",
+        "UPDATE token_heartbeat SET paused = $1, paused_changed_at = $2 WHERE id",
+        paused,
         current,
     )
     if result != "UPDATE 1":
@@ -201,11 +232,18 @@ async def finish_failure(
 
 
 async def enqueue_now(pool, current: datetime) -> None:
+    """Pull the next cycle forward to now. Refuses rather than lying.
+
+    A paused heartbeat has no loop to consume the queue and an in-flight one
+    already holds the lease, so both say so instead of silently queueing work
+    that nothing will pick up.
+    """
     row = await pool.fetchrow(
         """
         UPDATE token_heartbeat
            SET due_at = LEAST(due_at, $1)
          WHERE id
+           AND NOT paused
            AND (hold_until IS NULL OR hold_until <= $1)
      RETURNING id
         """,
@@ -213,13 +251,15 @@ async def enqueue_now(pool, current: datetime) -> None:
     )
     if row is not None:
         return
-    running = await pool.fetchval(
-        "SELECT hold_until > $1 FROM token_heartbeat WHERE id",
-        current,
-    )
-    if running:
-        raise HeartbeatAlreadyRunning("Token heartbeat is already running")
-    raise RuntimeError("token_heartbeat has no singleton row")
+    state = await pool.fetchrow("SELECT paused FROM token_heartbeat WHERE id")
+    if state is None:
+        raise RuntimeError("token_heartbeat has no singleton row")
+    if state["paused"]:
+        raise HeartbeatPaused("Token heartbeat is paused")
+    # The row exists and is not paused, so the update can only have missed a
+    # held lease -- or one that expired between the two statements, where
+    # "already running" is a harmless answer to retry against.
+    raise HeartbeatAlreadyRunning("Token heartbeat is already running")
 
 
 async def run_claimed_cycle(
@@ -335,7 +375,8 @@ class TokenHeartbeatRunner:
         if pool is None:
             return None
         current = now_utc()
-        await touch_runner(pool, current)
+        if await touch_runner(pool, current):
+            return None
         lease = await claim_due(
             pool,
             current=current,

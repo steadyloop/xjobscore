@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncpg
+
 # These are the operator-facing views for the token table.  Keep the tuple in
 # the same order as the status filter in the page.
 FILTERS = ("inactive", "muted", "dead", "all")
@@ -62,9 +64,23 @@ SELECT count(*)::int AS total,
        count(*) FILTER (
            WHERE t.status = 'live' AND NOT t.muted AND f.id IS NULL
        )::int
-           AS promotable
+           AS promotable,
+       count(DISTINCT t.ats)::int AS vendors,
+       -- Freshness, the half of the inventory's shape that status alone does
+       -- not show: a page of "live" means nothing without when it was asked.
+       count(*) FILTER (WHERE t.checked_at IS NULL)::int AS never_checked,
+       count(*) FILTER (WHERE t.checked_at >= now() - interval '24 hours')::int
+           AS checked_24h
 FROM token AS t
 LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
+"""
+
+
+_RECENT_CHECKS = """
+SELECT l.id, l.checked_at, l.ats, l.token, l.status
+  FROM token_log AS l
+ ORDER BY l.id DESC
+ LIMIT $1
 """
 
 
@@ -116,6 +132,34 @@ async def query(
         "limit": limit,
         "rows": [_shape(record) for record in records],
     }
+
+
+async def recent_checks(pool, *, limit: int = 50) -> list[dict[str, Any]] | None:
+    """The newest liveness probes, newest first -- the page's tail log.
+
+    Ordered by ``id``, not ``checked_at``: a batch probes three boards at once
+    and their timestamps can tie or land out of order, which would make the
+    tail jitter. ``None`` means ``token_log`` does not exist yet -- the DDL in
+    ``schema.sql`` has not been applied -- which the page reports as "log
+    unavailable" rather than as an empty log. An empty log is a claim that
+    nothing has been checked; those are different statements.
+    """
+    limit = max(1, min(limit, 200))
+    try:
+        async with pool.acquire() as conn:
+            records = await conn.fetch(_RECENT_CHECKS, limit)
+    except asyncpg.UndefinedTableError:
+        return None
+    return [
+        {
+            "id": record["id"],
+            "checked_at": _iso(record["checked_at"]),
+            "ats": record["ats"],
+            "token": record["token"],
+            "status": record["status"],
+        }
+        for record in records
+    ]
 
 
 async def set_note(
@@ -203,13 +247,25 @@ async def promotion_candidates(
     *,
     limit: int = PROMOTION_BATCH,
 ) -> tuple[list[tuple[str, str]], int]:
+    """Dead, unmuted, feed-absent tokens -- the heartbeat's re-probe queue.
+
+    Dead rather than live: a board that has gone quiet can come back, and
+    nothing else in the system would ever ask again. Live tokens absent from
+    ``feed`` are the operator's promotion backlog, promoted deliberately from
+    this page; re-probing them would spend the batch confirming what is
+    already known.
+
+    Oldest check first, so a resurrection is found in bounded time rather than
+    whenever a token happens to come up. ``promote_verified`` still requires
+    ``status = 'live'``, which by then means the probe flipped it back.
+    """
     limit = max(1, min(limit, PROMOTION_BATCH))
     async with pool.acquire() as conn:
         records = await conn.fetch(
             """
             SELECT t.ats, t.token, count(*) OVER ()::int AS total
               FROM token AS t
-             WHERE t.status = 'live'
+             WHERE t.status = 'dead'
                AND NOT t.muted
                AND NOT EXISTS (
                    SELECT 1

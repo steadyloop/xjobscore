@@ -50,7 +50,7 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
     as a synthetic first row.
   - *Parsed*: `parse()` run over the harvested items in-process, classified
     exactly like `silver.process` — resolved / feed-fallback / would-park
-    company resolution (against PostgreSQL's `alias` table), secondhand,
+    company resolution (against PostgreSQL's `company_alias` table), secondhand,
     unsupported — with per-item parser errors isolated and rendered.
     Harvest-only sources show a "no parser" state, not an error.
   - *Network*: a latency line over the run (one point per attempt, placed at
@@ -68,6 +68,18 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   first; the workspace can be searched or narrowed to attention, paused, or
   interval views.
 
+  Groups start collapsed (the fleet is a few dozen vendors, one of which holds
+  most feeds), and the ones an operator opens are remembered per browser. Each
+  vendor header is a rollup in the feed columns: worst state, a
+  `N err / N stale / N feeds` breakdown ordered by concern, the soonest due,
+  the most recent poll, and `new·1d` / `err·7d` sums that stay `—` when no
+  feed carries the observation. A narrowing filter (`failing`, or a search)
+  that leaves a small result opens every matching group and hides the rest;
+  column sorts reorder feeds inside a group and never reorder the groups.
+  `poll all` on a header opens the bulk fetch dialog scoped to that vendor;
+  `pause all` / `resume all` fan out the per-feed policy write after a
+  confirmation.
+
   Selecting a feed opens a fixed detail drawer with Poll now / Pause controls,
   operational timestamps, a 14-day new-postings chart, and recent poll events.
   Cadence is entirely operator-owned: five presets and a custom interval from
@@ -84,9 +96,11 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   in flight. The sentinel `due_at` never persists — the poll's own
   `finish_schedule_success`/`_failure` overwrites it.
 
-  **Fetch visible feeds** lives under the secondary Actions menu and opens a
-  confirmation/progress dialog. It does not queue: the browser drives a small
-  worker pool over the visible (filtered) feeds, one
+  **Fetch matching feeds** (the filter bar's Fetch matching button, or a
+  vendor header's `poll all`) opens a confirmation/progress dialog. It does not
+  queue: the browser drives a small worker pool over the matching (filtered)
+  feeds — collapsed groups included, since collapsing is a view convenience
+  and never changes what a bulk action touches — one
   `POST /api/scheduler/feeds/{ref}/fetch` each, and every request claims a
   lease and runs `run.poll` — the production path, `raw_posting` through
   `poll_observation` — before answering. It needs PostgreSQL but neither the
@@ -256,18 +270,45 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   back on.
 
   The token heartbeat applies the same guarded promotion after a fresh
-  liveness probe. When `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT=1`, one leased
-  batch of 20 runs every six hours. Its compact status strip persists the
-  last outcome and counts in `public.token_heartbeat`; **Run now** queues one
-  batch without bypassing the lease.
+  liveness probe: one leased batch of 20 every six hours. Its compact status
+  strip persists the last outcome and counts in `public.token_heartbeat`;
+  **Run now** queues one batch without bypassing the lease.
+
+  Two switches gate it, mirroring the scheduler's pair. `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT`
+  (on by default) is the deploy-time decision that this process may run the
+  loop at all. **Pause** / **Resume** writes `token_heartbeat.paused`, the
+  operator's runtime switch: persistent across restarts, shared by every
+  inspector pointed at the database, and readable by a process whose own loop
+  is off — so the button works even where nothing is listening. A paused
+  heartbeat still stamps `runner_seen_at` every tick, which is how the strip
+  tells *paused* apart from *offline*; it claims no lease, and **Run now**
+  refuses with 409 rather than queueing a batch nothing would pick up.
+
+  A summary line carries the shape of the whole inventory — total, vendors,
+  live/dead/muted, the unpromoted backlog — plus the freshness half that
+  status alone cannot show: how many were checked today, and how many have
+  never been checked at all. It is deliberately unfiltered, so the backlog
+  number does not move when someone narrows the table.
+
+  Under it, the **token check log** tails `public.token_log`, one append-only
+  row per liveness probe (`checked_at`, `ats`, `token`, `status`). This is the
+  only place a token's history exists: `token.status`/`checked_at` hold just
+  the latest answer, so a live → dead → live flip leaves three rows here and
+  no trace there. The row is written in the same statement that updates
+  `token`, so the two cannot disagree. Ordered by `id`, not `checked_at` —
+  a batch probes three boards at once and their timestamps can tie. A missing
+  `token_log` reads as *log unavailable*, never as an empty log; "nothing is
+  recording" and "nothing was checked" are different statements. Nothing
+  prunes it yet: at one batch of 20 every six hours it grows by roughly 2.4k
+  rows a month, plus whatever **Check** and **Validate all** add.
 
   The page is read + enable only — no delete. `token.status` belongs to the
   liveness prober here, separate from `feed.polling`; removing a feed
   entirely is **Drop**, on the Feeds page (see above) — a hard delete that
   also erases the feed's `poll_observation` history.
 
-  `feed.config` is PostgreSQL data. A config-driven feed must have its adapter
-  values stored there before it is enabled.
+  `token.config` is PostgreSQL data. A config-driven feed must have its adapter
+  values stored on its token row before it is enabled.
 
 ## Architecture
 
@@ -356,7 +397,7 @@ pollers still double the outbound request rate against every ATS.
 | `XJOBSCORE_INSPECTOR_RUNNER_TICK_S` | `60` | Seconds between scheduler ticks |
 | `XJOBSCORE_INSPECTOR_RUNNER_BATCH` | `20` | Feeds claimed per `run.cycle` call, same meaning as `run.py`'s `--batch` |
 | `XJOBSCORE_INSPECTOR_RUNNER_LEASE_S` | `3600` | Schedule lease duration, same meaning as `run.py`'s `--lease-seconds` |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT` | `false` | Allow this process to run the token validation/promotion heartbeat |
+| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT` | `true` | Allow this process to run the token validation/promotion heartbeat (`token_heartbeat.paused` is the runtime pause) |
 | `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_TICK_S` | `60` | Seconds between heartbeat queue checks |
 | `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_BATCH` | `20` | Maximum tokens revalidated in one cycle |
 | `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_INTERVAL_S` | `21600` | Delay after a successful cycle (six hours) |

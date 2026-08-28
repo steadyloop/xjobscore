@@ -65,7 +65,14 @@ def test_json_api_adapter_map_matches_the_config():
         "location_raw",
         "remote",
     ]
-    assert result["paths"]["offices[].name"] == ["locations_extra"]
+    # Two canonical fields, on purpose: greenhouse normalizes offices
+    # independently of `location.name` so an unrelated office city cannot
+    # suppress the posting's primary country/state signal. `adapter_map`
+    # reports every field a raw path feeds, so both belong here.
+    assert result["paths"]["offices[].name"] == [
+        "locations_extra",
+        "location_normalization_extra",
+    ]
     # "extra" lands under source_extra, which is bronze-only downstream.
     assert result["paths"]["language"] == ["source_extra.language"]
 
@@ -103,8 +110,10 @@ def test_a_selected_bag_entry_reports_both_halves_of_the_pair():
     value would hide which entry the rule actually selects, and `first` must
     not append a second "[]" to paths `map` already made element-level."""
     result = mapping.adapter_map("greenhouse")
-    assert result["paths"]["metadata[].name"] == ["job_type", "remote"]
-    assert result["paths"]["metadata[].value"] == ["job_type", "remote"]
+    # `part_time` reads the same bag since it split out of `job_type`: the
+    # Time Type / Employment Type entries are its only signal.
+    assert result["paths"]["metadata[].name"] == ["job_type", "part_time", "remote"]
+    assert result["paths"]["metadata[].value"] == ["job_type", "part_time", "remote"]
     assert "metadata[].value[]" not in result["paths"]
 
 
@@ -186,7 +195,7 @@ def test_domains_come_from_the_live_canons():
     assert domains["remote"] == ["yes", "hybrid", "unknown"]
     # The legacy silver attribute, still live for un-migrated vendors.
     assert domains["attributes.remote"] == ["yes", "hybrid"]
-    assert "computer_science" in domains["attributes.degree_fields"]
+    assert "cs" in domains["attributes.degree"]
 
 
 def test_preview_reproduces_the_real_collapse():

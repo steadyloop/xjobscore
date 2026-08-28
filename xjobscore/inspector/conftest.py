@@ -32,9 +32,13 @@ def _runner_stays_off(monkeypatch):
     suite spawn a task that polls live feeds and writes ``public``. Cleared
     here rather than in individual fixtures so it cannot be forgotten; a test
     that wants the runner on sets it back explicitly.
+
+    The token heartbeat is *on* by default, so that one is pinned off rather
+    than cleared -- clearing it would enable it. It probes vendor endpoints
+    and promotes tokens into ``feed``, which no test process may do either.
     """
     monkeypatch.delenv("XJOBSCORE_INSPECTOR_RUNNER", raising=False)
-    monkeypatch.delenv("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", raising=False)
+    monkeypatch.setenv("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", "0")
 
 
 def _staging_ddl() -> str:

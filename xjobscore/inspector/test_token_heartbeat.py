@@ -38,6 +38,8 @@ class FakePool:
 def heartbeat_row(**overrides):
     row = {
         "id": True,
+        "paused": False,
+        "paused_changed_at": None,
         "due_at": NOW + timedelta(hours=4),
         "hold_until": None,
         "runner_seen_at": NOW - timedelta(seconds=30),
@@ -64,6 +66,15 @@ def heartbeat_row(**overrides):
         ({"last_outcome": "error", "last_error": "boom"}, "attention"),
         ({"due_at": NOW - timedelta(seconds=1)}, "queued"),
         ({"last_outcome": "never"}, "never"),
+        ({"paused": True}, "paused"),
+        # The switch outranks a stale runner and a due queue alike.
+        (
+            {"paused": True, "runner_seen_at": NOW - timedelta(minutes=10)},
+            "paused",
+        ),
+        ({"paused": True, "due_at": NOW - timedelta(seconds=1)}, "paused"),
+        # ...but not a cycle already in flight, which is a fact, not a plan.
+        ({"paused": True, "hold_until": NOW + timedelta(minutes=5)}, "running"),
     ],
 )
 async def test_snapshot_derives_system_state(overrides, state):
@@ -191,10 +202,41 @@ async def test_system_failure_is_persisted_with_retry(monkeypatch):
 
 
 async def test_enqueue_refuses_an_active_lease():
-    pool = FakePool(rows=[None], values=[True])
+    pool = FakePool(rows=[None, {"paused": False}])
 
     with pytest.raises(heartbeat.HeartbeatAlreadyRunning):
         await heartbeat.enqueue_now(pool, NOW)
+
+
+async def test_enqueue_refuses_a_paused_heartbeat():
+    pool = FakePool(rows=[None, {"paused": True}])
+
+    with pytest.raises(heartbeat.HeartbeatPaused):
+        await heartbeat.enqueue_now(pool, NOW)
+
+    _, sql, _ = pool.calls[0]
+    assert "NOT paused" in sql
+
+
+async def test_set_paused_stamps_the_switch():
+    pool = FakePool()
+
+    await heartbeat.set_paused(pool, True, current=NOW)
+
+    _, sql, args = pool.calls[0]
+    assert "SET paused = $1, paused_changed_at = $2" in sql
+    assert args == (True, NOW)
+
+
+async def test_touch_runner_reports_the_switch():
+    pool = FakePool(rows=[{"paused": True}])
+
+    paused = await heartbeat.touch_runner(pool, NOW)
+
+    _, sql, args = pool.calls[0]
+    assert paused is True
+    assert "RETURNING paused" in sql
+    assert args == (NOW,)
 
 
 class FakePolicy:
@@ -203,6 +245,24 @@ class FakePolicy:
 
     async def pool_or_none(self):
         return self.pool
+
+
+async def test_tick_stamps_liveness_but_claims_nothing_while_paused(monkeypatch):
+    claims = []
+
+    async def touch(pool, current):
+        return True
+
+    async def claim(pool, **kwargs):
+        claims.append(kwargs)
+        return heartbeat.HeartbeatLease(NOW)
+
+    monkeypatch.setattr(heartbeat, "touch_runner", touch)
+    monkeypatch.setattr(heartbeat, "claim_due", claim)
+    runner = heartbeat.TokenHeartbeatRunner(FakePolicy(FakePool()), enabled=True)
+
+    assert await runner.tick() is None
+    assert claims == []
 
 
 async def test_runner_is_inert_until_explicitly_enabled():

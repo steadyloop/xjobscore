@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AUTO_EXPAND_ROWS,
+  autoExpand,
   dueInfo,
   formatRequestRate,
+  groupFeeds,
+  groupRollup,
   intervalError,
   intervalInput,
   intervalSeconds,
   jobsToday,
   matchesFeed,
-  providerRollups,
   sortFeeds,
   summaryCounts,
 } from "./model.mjs";
@@ -33,29 +36,88 @@ function feed(source, state, interval = 900, options = {}) {
   };
 }
 
-test("provider rollups count feeds, attention, and pauses per source", () => {
+const ALL = { view: "all", search: "" };
+
+test("groups order by failing count, then size, and sort rows inside each group", () => {
+  const now = Date.parse("2026-08-22T12:00:00Z");
   const rows = [
-    feed("ashby", "healthy", 900, { key: "a" }),
-    feed("ashby", "stale", 900, { key: "b" }),
-    feed("ashby", "paused", 900, { paused: true, key: "c" }),
-    feed("lever", "healthy", 3600),
+    feed("ashby", "stale", 900, { key: "b", name: "Bravo", dueAt: "2026-08-22T11:00:00Z" }),
+    feed("ashby", "stale", 900, { key: "a", name: "Alpha", dueAt: "2026-08-22T11:00:00Z" }),
+    feed("ashby", "backing_off", 900, { key: "c", name: "Charlie", dueAt: "2026-08-22T12:20:00Z" }),
+    feed("workable", "stale", 900, { key: "w1" }),
+    feed("workable", "stale", 900, { key: "w2" }),
+    feed("workable", "stale", 900, { key: "w3" }),
+    feed("workable", "stale", 900, { key: "w4" }),
+    feed("lever", "backing_off", 900, { key: "l1", dueAt: "2026-08-22T12:10:00Z" }),
+    feed("lever", "backing_off", 900, { key: "l2", dueAt: "2026-08-22T12:05:00Z" }),
   ];
-  const rollups = providerRollups(rows, [{ source: "ashby", errors: 4 }]);
-  assert.deepEqual(rollups.map((item) => item.source), ["ashby", "lever"]);
-  assert.equal(rollups[0].total, 3);
-  assert.equal(rollups[0].attention, 1);
-  assert.equal(rollups[0].paused, 1);
-  assert.equal(rollups[0].errors, 4);
-  assert.equal(rollups[1].errors, 0);
+  const groups = groupFeeds(rows, ALL, undefined, now);
+  // lever has the most failing feeds; ashby beats workable on failing count despite being smaller.
+  assert.deepEqual(groups.map((group) => group.source), ["lever", "ashby", "workable"]);
+  assert.deepEqual(groups[1].rows.map((row) => row.key), ["a", "b", "c"]);
+  assert.equal(groups[1].total, 3);
+  const byName = groupFeeds(rows, ALL, { key: "name", direction: "desc" }, now);
+  assert.deepEqual(byName.map((group) => group.source), ["lever", "ashby", "workable"]);
+  assert.deepEqual(byName[1].rows.map((row) => row.key), ["c", "b", "a"]);
 });
 
-test("provider rollups exclude paused feeds from configured load", () => {
+test("groups drop providers with no matching rows but keep the full total", () => {
   const rows = [
-    feed("ashby", "healthy"),
-    feed("ashby", "paused", 900, { paused: true, key: "paused" }),
+    feed("ashby", "backing_off", 900, { key: "a" }),
+    feed("ashby", "stale", 900, { key: "b" }),
+    feed("workable", "stale", 900, { key: "w" }),
   ];
-  const [ashby] = providerRollups(rows);
-  assert.equal(ashby.requests, 96);
+  const groups = groupFeeds(rows, { view: "failing", search: "" });
+  assert.deepEqual(groups.map((group) => group.source), ["ashby"]);
+  assert.equal(groups[0].rows.length, 1);
+  assert.equal(groups[0].total, 2);
+  assert.deepEqual(groupFeeds(rows, { view: "all", search: "zzz" }), []);
+});
+
+test("group rollup reports worst state, counts by concern, sums, and soonest due", () => {
+  const now = Date.parse("2026-08-22T12:00:00Z");
+  const rows = [
+    feed("ashby", "stale", 900, {
+      key: "a", dueAt: "2026-08-22T11:00:00Z", lastPoll: "2026-08-21T10:00:00Z",
+      spark: [1, 5], telemetry: { error_count_7d: 2 },
+    }),
+    feed("ashby", "stale", 3600, {
+      key: "b", dueAt: "2026-08-22T11:30:00Z", lastPoll: "2026-08-21T11:00:00Z",
+      spark: [0, 7], telemetry: { error_count_7d: 0 },
+    }),
+    feed("ashby", "backing_off", 900, {
+      key: "c", dueAt: "2026-08-22T12:15:00Z", lastPoll: "2026-08-22T09:00:00Z",
+      spark: [2, 1], telemetry: { error_count_7d: 14 },
+    }),
+    feed("ashby", "paused", 900, { key: "d", paused: true, dueAt: "2026-08-22T10:00:00Z" }),
+  ];
+  const rollup = groupRollup(rows, now);
+  assert.equal(rollup.worst, "backing_off");
+  assert.deepEqual(rollup.counts, [["backing_off", 1], ["stale", 2], ["paused", 1]]);
+  assert.equal(rollup.failing, 1);
+  assert.equal(rollup.jobs, 13);
+  assert.equal(rollup.errors, 16);
+  assert.equal(rollup.dueAt, "2026-08-22T11:00:00Z"); // paused row's earlier due_at is ignored
+  assert.equal(rollup.lastPollAt, "2026-08-22T09:00:00.000Z");
+  assert.deepEqual(rollup.intervals, [900, 3600]);
+});
+
+test("group rollup keeps sums unknown when no row carries the observation", () => {
+  const rollup = groupRollup([feed("ashby", "never_polled"), feed("ashby", "never_polled", 900, { key: "b" })]);
+  assert.equal(rollup.jobs, null);
+  assert.equal(rollup.errors, null);
+  assert.equal(rollup.dueAt, null);
+  assert.equal(rollup.lastPollAt, null);
+  assert.equal(rollup.worst, "never_polled");
+});
+
+test("auto-expand opens groups only for a narrowing filter with a small result", () => {
+  const small = [{ rows: Array(AUTO_EXPAND_ROWS - 10) }, { rows: Array(10) }];
+  const large = [{ rows: Array(AUTO_EXPAND_ROWS + 1) }];
+  assert.equal(autoExpand(small, ALL), false);
+  assert.equal(autoExpand(small, { view: "failing", search: "" }), true);
+  assert.equal(autoExpand(small, { view: "all", search: "acme" }), true);
+  assert.equal(autoExpand(large, { view: "failing", search: "" }), false);
 });
 
 test("summary counts map scheduler states to the header vocabulary", () => {

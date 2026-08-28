@@ -156,7 +156,7 @@ async def test_rows_are_shaped_and_labels_merged():
         posting_row(total=2),
         posting_row(
             id=2, source_key="j3", title="Chef", posted_at=None,
-            job_type="student_program",
+            job_type="student",
             attributes='{"version": 1}',
             dup_group_id=UUID("00000000-0000-0000-0000-000000000001"),
             total=2,
@@ -173,7 +173,7 @@ async def test_rows_are_shaped_and_labels_merged():
     assert labeled["posted_at"] == NOW.isoformat()
     assert unlabeled["label"] is None
     assert unlabeled["posted_at"] is None
-    assert unlabeled["job_type"] == "student_program"
+    assert unlabeled["job_type"] == "student"
     assert unlabeled["dup_group_id"] == "00000000-0000-0000-0000-000000000001"
 
 

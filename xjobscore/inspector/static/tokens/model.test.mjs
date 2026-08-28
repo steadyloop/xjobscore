@@ -9,6 +9,7 @@ test("heartbeat states have quiet, explicit labels", () => {
     tone: "healthy",
   });
   assert.equal(heartbeatPresentation("attention").label, "Attention");
+  assert.equal(heartbeatPresentation("paused").label, "Paused");
   assert.equal(heartbeatPresentation("unexpected").label, "Offline");
 });
 

@@ -36,8 +36,9 @@
       <input type="search" id="search" placeholder="Filter token or company…" autocomplete="off" hidden>
       <div class="grow"></div>
       <button class="btn small" type="button" id="validate-all-btn" title="Validate all visible tokens">Validate all</button>
-      <span class="secondary" id="counts"></span>
     </div>
+
+    <div class="tok-summary" id="summary-line" aria-live="polite">Loading inventory…</div>
 
     <section class="tok-heartbeat" aria-labelledby="heartbeat-title" aria-live="polite">
       <div class="tok-heartbeat-main">
@@ -51,7 +52,19 @@
         </div>
         <div class="tok-heartbeat-facts" id="heartbeat-facts">Reading system state…</div>
       </div>
-      <button class="btn small" type="button" id="heartbeat-run" disabled>Run now</button>
+      <div class="tok-heartbeat-actions">
+        <button class="btn small" type="button" id="heartbeat-pause" disabled>Pause</button>
+        <button class="btn small" type="button" id="heartbeat-run" disabled>Run now</button>
+      </div>
+    </section>
+
+    <section class="tok-log" aria-label="Token check log">
+      <header class="tok-log-header">
+        <span>token check log</span>
+        <span class="tok-log-dot" id="token-log-dot"></span>
+        <span class="tok-log-tail">tail -f</span>
+      </header>
+      <div class="tok-log-lines" id="token-log-lines" aria-live="off"></div>
     </section>
 
     <div class="banner" id="degraded-banner" hidden>

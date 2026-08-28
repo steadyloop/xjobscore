@@ -40,11 +40,14 @@ from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.inspector.service import InspectorService
 from xjobscore.inspector.token_heartbeat import (
     HeartbeatAlreadyRunning,
+    HeartbeatPaused,
     TokenHeartbeatRunner,
     enqueue_now as token_heartbeat_enqueue,
     heartbeat_snapshot as token_heartbeat_snapshot,
+    set_paused as token_heartbeat_set_paused,
 )
 from xjobscore.inspector.tokens import query as tokens_query
+from xjobscore.inspector.tokens import recent_checks as tokens_recent_checks
 from xjobscore.inspector.tokens import promote_verified as tokens_promote_verified
 from xjobscore.inspector.tokens import set_muted as tokens_set_muted
 from xjobscore.inspector.tokens import set_note as tokens_set_note
@@ -77,6 +80,10 @@ class PollNowOptions(BaseModel):
 class SchedulerControlOptions(BaseModel):
     running: bool
     note: str | None = None
+
+
+class TokenHeartbeatControl(BaseModel):
+    paused: bool
 
 
 class PostingLabel(BaseModel):
@@ -1166,6 +1173,25 @@ def create_app(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
             ) from exc
 
+    @application.get("/api/tokens/log")
+    async def token_log(limit: int = 50) -> dict[str, Any]:
+        """The newest liveness probes -- the page's tail log.
+
+        Degrades the way the scheduler's fetch log does: a missing table or an
+        unreachable database reports ``log_available: false`` rather than an
+        empty list, because "nothing is recording" and "nothing was checked"
+        must not render the same.
+        """
+        pool = await policy_store.pool_or_none()
+        checks = None
+        if pool is not None:
+            checks = await tokens_recent_checks(pool, limit=limit)
+        return {
+            "postgres": policy_store.status(),
+            "log_available": checks is not None,
+            "checks": checks or [],
+        }
+
     @application.get("/api/tokens/heartbeat")
     async def token_heartbeat_get() -> dict[str, Any]:
         return await heartbeat_payload()
@@ -1175,13 +1201,33 @@ def create_app(
         pool = await _public_pool()
         try:
             await token_heartbeat_enqueue(pool, now_utc())
-        except HeartbeatAlreadyRunning as exc:
+        except (HeartbeatAlreadyRunning, HeartbeatPaused) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (OSError, asyncpg.PostgresError, RuntimeError) as exc:
             raise HTTPException(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
             ) from exc
         heartbeat_runner.nudge()
+        return await heartbeat_payload()
+
+    @application.post("/api/tokens/heartbeat/control")
+    async def token_heartbeat_control(body: TokenHeartbeatControl) -> dict[str, Any]:
+        """The operator's pause/resume, written straight to PostgreSQL.
+
+        Deliberately independent of whether this process runs the loop: the
+        switch is shared state, so the button works from any inspector and a
+        process with the env var off can still pause the one that does.
+        """
+        pool = await _public_pool()
+        try:
+            await token_heartbeat_set_paused(pool, body.paused, current=now_utc())
+        except (OSError, asyncpg.PostgresError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        if not body.paused:
+            # Resume acts now rather than at the next tick.
+            heartbeat_runner.nudge()
         return await heartbeat_payload()
 
     @application.put("/api/tokens/note")
