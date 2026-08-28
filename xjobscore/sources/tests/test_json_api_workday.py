@@ -1,9 +1,11 @@
-"""`workday-list` -- the Workday list leg, now the only Workday source.
+"""`workday` -- the list leg plus a GATED detail leg.
 
-The point of the source is what it does *not* do, so the fake net serves list
-pages and turns any detail GET into a failure: a call means the config regrew a
-`detail` block. These fakes used to be shared with the `workday` detail source's
-tests and moved here when that source was removed.
+Most of this file drives `ListOnlyNet`, whose `get` raises: those tests assert
+the pagination and partition behaviour of the list leg, where a detail request
+would mean the gate leaked. `DetailNet` at the bottom serves detail and covers
+the gate itself and the two payload shapes that reach `fields` -- a skipped row
+carrying its bare `jobPostings[]` payload, and an admitted row carrying the
+detail response merged over that list row.
 """
 
 from __future__ import annotations
@@ -87,16 +89,16 @@ class ListOnlyNet:
         )
 
     async def get(self, url, **kwargs):
-        raise AssertionError(f"workday-list must issue no detail request, got {url}")
+        raise AssertionError(f"workday must issue no detail request, got {url}")
 
 
 @pytest.fixture
-def workday_list_config(monkeypatch):
-    config = copy.deepcopy(json_api.CONFIGS["workday-list"])
+def workday_config(monkeypatch):
+    config = copy.deepcopy(json_api.CONFIGS["workday"])
     config["list"]["body"]["limit"] = 2
     config["list"]["page"].update(size=2, step=2, concurrency=3)
     config["list"]["partition"]["window"] = 4
-    monkeypatch.setitem(json_api.CONFIGS, "workday-list-test", config)
+    monkeypatch.setitem(json_api.CONFIGS, "workday-test", config)
     return config
 
 
@@ -104,14 +106,14 @@ NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
 
 
 def feed(**kwargs) -> Feed:
-    return Feed(id=1, source="workday-list-test", key="tenant/wd1/Site", **kwargs)
+    return Feed(id=1, source="workday-test", key="tenant/wd1/Site", **kwargs)
 
 
 async def harvest(net: ListOnlyNet):
-    return await json_api.harvest("workday-list-test", feed(), net)
+    return await json_api.harvest("workday-test", feed(), net)
 
 
-async def test_no_detail_request_is_issued(workday_list_config):
+async def test_no_detail_request_is_issued(workday_config):
     jobs = [job(index) for index in range(3)]
     net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
 
@@ -123,7 +125,7 @@ async def test_no_detail_request_is_issued(workday_list_config):
     assert record.truncated is False
 
 
-async def test_items_are_the_verbatim_list_rows(workday_list_config):
+async def test_items_are_the_verbatim_list_rows(workday_config):
     jobs = [job(index) for index in range(3)]
     net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
 
@@ -134,12 +136,12 @@ async def test_items_are_the_verbatim_list_rows(workday_list_config):
     assert record.items[0].payload == jobs[0]
 
 
-async def test_recent_equal_total_stops_after_the_first_page(workday_list_config):
+async def test_recent_equal_total_stops_after_the_first_page(workday_config):
     jobs = [job(index) for index in range(3)]
     net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
 
     record = await json_api.harvest(
-        "workday-list-test",
+        "workday-test",
         feed(list_total=3, last_full_poll_at=NOW),
         net,
         options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=23)),
@@ -151,12 +153,12 @@ async def test_recent_equal_total_stops_after_the_first_page(workday_list_config
     assert len(net.posts) == 1
 
 
-async def test_changed_total_paginates_immediately(workday_list_config):
+async def test_changed_total_paginates_immediately(workday_config):
     jobs = [job(index) for index in range(3)]
     net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
 
     record = await json_api.harvest(
-        "workday-list-test",
+        "workday-test",
         feed(list_total=2, last_full_poll_at=NOW),
         net,
         options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=1)),
@@ -168,12 +170,12 @@ async def test_changed_total_paginates_immediately(workday_list_config):
     assert len(net.posts) == 2
 
 
-async def test_equal_total_forces_full_listing_at_24_hours(workday_list_config):
+async def test_equal_total_forces_full_listing_at_24_hours(workday_config):
     jobs = [job(index) for index in range(3)]
     net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
 
     record = await json_api.harvest(
-        "workday-list-test",
+        "workday-test",
         feed(list_total=3, last_full_poll_at=NOW),
         net,
         options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=24)),
@@ -184,7 +186,7 @@ async def test_equal_total_forces_full_listing_at_24_hours(workday_list_config):
     assert record.count_unchanged is False
 
 
-async def test_capped_total_never_takes_count_shortcut(workday_list_config):
+async def test_capped_total_never_takes_count_shortcut(workday_config):
     jobs = [job(index) for index in range(6)]
     net = ListOnlyNet(
         jobs,
@@ -194,7 +196,7 @@ async def test_capped_total_never_takes_count_shortcut(workday_list_config):
     )
 
     record = await json_api.harvest(
-        "workday-list-test",
+        "workday-test",
         feed(list_total=4, last_full_poll_at=NOW),
         net,
         options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=1)),
@@ -205,7 +207,7 @@ async def test_capped_total_never_takes_count_shortcut(workday_list_config):
     assert record.result_window_truncated is True
 
 
-async def test_capped_board_is_still_partitioned_and_deduplicated(workday_list_config):
+async def test_capped_board_is_still_partitioned_and_deduplicated(workday_config):
     jobs = [job(index) for index in range(6)]
     net = ListOnlyNet(
         jobs,
@@ -225,7 +227,7 @@ async def test_capped_board_is_still_partitioned_and_deduplicated(workday_list_c
     assert net.gets == []
 
 
-def test_parse_maps_list_fields_and_synthesizes_the_posting_url(workday_list_config):
+def test_parse_maps_list_fields_and_synthesizes_the_posting_url(workday_config):
     row = {
         "title": "Distinguished Software Architect",
         "externalPath": "/job/US-CA-Santa-Clara/Distinguished-Software-Architect_JR1980127",
@@ -237,7 +239,7 @@ def test_parse_maps_list_fields_and_synthesizes_the_posting_url(workday_list_con
     }
 
     posting = json_api.parse(
-        "workday-list-test", feed(), Item(row["externalPath"], row), {}
+        "workday-test", feed(), Item(row["externalPath"], row), {}
     )[0]
 
     url = (
@@ -247,6 +249,7 @@ def test_parse_maps_list_fields_and_synthesizes_the_posting_url(workday_list_con
     assert posting.url_posting == url
     assert posting.apply_url == url
     assert posting.title == "Distinguished Software Architect"
+    assert posting.job_type is None  # untyped, which is why the gate skipped it
     assert posting.location_raw == "US, CA, Santa Clara"
     assert posting.employment_type == "Full time"
     assert posting.workplace_type_raw == "Hybrid"
@@ -265,7 +268,7 @@ def test_parse_maps_list_fields_and_synthesizes_the_posting_url(workday_list_con
 def test_relative_posted_bucket_does_not_churn_the_bronze_hash():
     """`postedOn` re-buckets daily; without the VOLATILE entry every poll would
     rewrite the whole tenant."""
-    live = Feed(id=1, source="workday-list", key="tenant/wd1/Site")
+    live = Feed(id=1, source="workday", key="tenant/wd1/Site")
     payload = {"title": "Engineer", "externalPath": "/job/0"}
     today = Record(items=[Item("/job/0", {**payload, "postedOn": "Posted Today"})])
     later = Record(items=[Item("/job/0", {**payload, "postedOn": "Posted Yesterday"})])
@@ -276,3 +279,140 @@ def test_relative_posted_bucket_does_not_churn_the_bronze_hash():
     # Stripped from the hash only -- the payload stays verbatim and replayable.
     assert first.data["payload"]["postedOn"] == "Posted Today"
     assert router.unwrap(first.data)[0].payload == today.items[0].payload
+
+
+# The gate and the two payload shapes -------------------------------------
+
+
+class DetailNet(ListOnlyNet):
+    """Serves detail, and records every path it was asked for."""
+
+    def __init__(self, jobs, memberships=None, *, missing=()):
+        super().__init__(jobs, memberships or {})
+        self.missing = set(missing)
+
+    async def get(self, url, **kwargs):
+        self.gets.append({"url": url})
+        path = url.split("/Site", 1)[1]
+        if path in self.missing:
+            raise AssertionError(f"detail fetched for a row that should 404: {path}")
+        return response(url, {
+            "jobPostingInfo": {
+                "title": self.jobs[path]["title"],
+                "location": "Austin, TX",
+                "jobDescription": "<p>Build things</p>",
+                "jobReqId": "R99",
+                "timeType": "Part time",
+                "startDate": "2026-08-01",
+            },
+        })
+
+
+def typed(number: int, title: str) -> dict:
+    return {"title": title, "externalPath": f"/job/{number}", "bulletFields": [f"R{number}"]}
+
+
+async def test_detail_is_fetched_only_for_rows_the_job_type_table_types(workday_config):
+    rows = [
+        typed(0, "Software Engineer Intern"),      # intern  -> fetched
+        typed(1, "Staff Software Engineer"),       # untyped -> skipped
+        typed(2, "Chemist 1 New College Grad"),    # new_grad -> fetched
+        typed(3, "Pharmacy Intern"),               # EXCLUDED -> skipped, on purpose
+    ]
+    net = DetailNet(rows, {"category": {"A": [r["externalPath"] for r in rows]}})
+
+    record = await harvest(net)
+
+    assert record.detail_fetched_count == 2
+    assert record.detail_skipped_count == 2
+    assert sorted(g["url"].split("/Site")[1] for g in net.gets) == ["/job/0", "/job/2"]
+    # Every row still emits -- a skipped row is not a dropped row.
+    assert len(record.items) == 4
+
+
+async def test_the_gate_skips_a_title_less_stub_before_it_costs_a_request(workday_config):
+    """Workday's orphaned index stubs carry only `externalPath` + `bulletFields`
+    and 404 on detail. No rule in the table can match a row with no title, so
+    the gate declines them for free."""
+    stub = {"externalPath": "/job/9", "bulletFields": ["R9"]}
+    net = DetailNet([stub], {"category": {"A": ["/job/9"]}}, missing={"/job/9"})
+
+    record = await harvest(net)
+
+    assert net.gets == []
+    assert record.detail_skipped_count == 1
+    assert record.items[0].payload == stub
+
+
+async def test_identity_is_external_path_on_both_shapes(workday_config):
+    """`merge` keeps the list row under the detail response, so the list leg's
+    `id` survives. Without it a fetched row would fall back to a different
+    identity scheme than a skipped one on the same feed."""
+    rows = [typed(0, "Software Engineer Intern"), typed(1, "Staff Software Engineer")]
+    net = DetailNet(rows, {"category": {"A": ["/job/0", "/job/1"]}})
+
+    record = await harvest(net)
+
+    assert sorted(item.external_id for item in record.items) == ["/job/0", "/job/1"]
+
+
+def test_a_detail_merged_row_prefers_detail_where_it_is_better(workday_config):
+    """Concrete `location` over an `N Locations` rollup, and detail's 98.9%-fill
+    `timeType` over the list's 29.1%."""
+    row = {
+        "title": "Software Engineer Intern",
+        "externalPath": "/job/Austin/SWE-Intern_R99",
+        "locationsText": "3 Locations",
+        "jobPostingInfo": {
+            "title": "Software Engineer Intern",
+            "location": "Austin, TX",
+            "jobDescription": "<p>Build things</p>",
+            "jobReqId": "R99",
+            "timeType": "Part time",
+            "startDate": "2026-08-01",
+        },
+    }
+
+    posting = json_api.parse("workday-test", feed(), Item(row["externalPath"], row), {})[0]
+
+    assert posting.location_raw == "Austin, TX"
+    assert posting.employment_type == "Part time"
+    assert posting.part_time == "yes"
+    assert posting.description_html == "<p>Build things</p>"
+    assert posting.requisition_id == "R99"
+    assert posting.published_at_precision == "date"
+    assert posting.job_type == "intern"
+    # Templated from `externalPath`, which only survives because of `merge`.
+    assert posting.url_posting.endswith("/job/Austin/SWE-Intern_R99")
+
+
+def test_additional_locations_become_normalizer_extras(workday_config):
+    """An `N Locations` row carries the other N-1 sites only on detail. They are
+    appended to `locations[]`, never replacing the primary."""
+    row = {
+        "title": "Software Engineer Intern",
+        "externalPath": "/job/Remote-Georgia-USA/SWE-Intern_R99",
+        "locationsText": "3 Locations",
+        "jobPostingInfo": {
+            "location": "Remote, Georgia, USA",
+            "additionalLocations": ["Remote, Ohio, USA", "Remote, Indiana, USA"],
+        },
+    }
+
+    posting = json_api.parse("workday-test", feed(), Item(row["externalPath"], row), {})[0]
+
+    assert posting.location_raw == "Remote, Georgia, USA"
+    assert posting.location_normalization_extra == [
+        "Remote, Ohio, USA", "Remote, Indiana, USA",
+    ]
+
+
+def test_a_row_without_detail_gets_an_empty_extras_list(workday_config):
+    """`location_normalization_extra` backs a list[str] and has no absent-default
+    in the adapter, so a skipped row must resolve to [] rather than None."""
+    row = {"title": "Staff Engineer", "externalPath": "/job/Austin/Staff_R1",
+           "locationsText": "Austin, TX"}
+
+    posting = json_api.parse("workday-test", feed(), Item(row["externalPath"], row), {})[0]
+
+    assert posting.location_normalization_extra == []

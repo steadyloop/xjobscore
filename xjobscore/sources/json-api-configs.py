@@ -6,6 +6,120 @@ else is a literal.  Keep a configuration declarative; only add engine support
 when a pattern is shared by several vendors.
 """
 
+# The SHARED job_type table of doc/raw_postings/regex/job_type.md, transcribed
+# verbatim and lifted out of the configs so its consumers DERIVE from it rather
+# than transcribe it again. Three read it: `workday`'s job_type, `workday`'s
+# detail `only` gate, and `eightfold`'s job_type through `_job_type_from`.
+#
+# The gate re-runs this same ladder inside harvest(), on the raw list row, to
+# decide which rows are worth a detail fetch -- it cannot read parse()'s
+# `job_type`, because harvest returns a Record long before silver parses it.
+# Hand-maintained copies would drift; one list and a comprehension cannot.
+#
+# `from` is `@title` here because that is Workday's key. A vendor that spells
+# it differently rebinds with `_job_type_from` and changes nothing else.
+_SHARED_JOB_TYPE: list[dict] = [
+            # EXCLUDED first, and terminal. A licensure-, service- or degree-gated
+            # posting is not a student one whatever else the title says, so
+            # `is: None` voids the row rather than letting it fall through.
+            # job_type.md:13-16
+            {"from": "@title", "re": "skillbridge", "is": None},
+            {"from": "@title", "re": "pharmacy|pharmacist", "is": None},
+            {"from": "@title", "re": "rns?|nurses?|nursing|bsn", "is": None},
+            {"from": "@title", "re": "ph\\.?d\\.?s?|postdoc(s|toral)?|doctoral", "is": None},
+            # Co-op ahead of intern: co-op titles are a subset of the
+            # intern-ish set, so the intern rule would otherwise consume
+            # them. Both boundaries load-bearing -- dropping the trailing one
+            # admits "Security Cooperation" (5) and "Design Technology
+            # Co-Optimization (DTCO) Engineer" (1). job_type.md:20
+            {"from": "@title", "re": "co-?ops?", "is": "coop"},
+            # A research-flavoured internship, both word orders. The
+            # [ /&,()-]+ and [^a-z] separators are load-bearing: matcher()
+            # boundaries apply to the whole match only, so without them
+            # "International ... Research" could parse as intern+al.
+            # job_type.md:25
+            {"from": "@title",
+             "re": "research[a-z]*[ /&,()-]+[a-z0-9 /&,()-]*intern(s|ship|ships)?"
+                   "|intern(s|ship|ships)?[^a-z][a-z0-9 /&,()-]*research[a-z]*",
+             "is": "research"},
+            # `intern(s|ship|ships)?`, not `interns?`: the shorter form fails
+            # the trailing boundary on "internships" and misses ~30 rows of
+            # one tenant's "X Internships: City - Fall 2026"
+            # (workday.md:24-27). The boundaries reject "International" (88).
+            # job_type.md:30
+            {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},
+            # An internship that never says "intern". job_type.md:33
+            {"from": "@title", "re": "summer analysts?|summer associates?", "is": "intern"},
+            # `not` SKIPS this rule rather than ending the scan, so a title
+            # vetoed as student still reaches the new-grad rules below. That
+            # fall-through is the doc's semantics; a terminal exclusion here
+            # would silently cost new_grad rows. job_type.md:38-49
+            {"from": "@title",
+             "re": "students?|apprentice(s|ship|ships)?",
+             "not": "student affairs|student success|student accounts|student accountability"
+                    "|student engagement|student collective|student event"
+                    "|community (manager|coordinator)|editorial (lead|manager)"
+                    "|marketing manager|program coordinator"
+                    "|recruiters?|recruiting|recruitment|talent acquisition"
+                    "|externs?|externship|clerkship|student rotation"
+                    "|pre.employment training|bpet"
+                    "|nationals only|j1 students",
+             "is": "student"},
+            # New grad, two title groups sharing one `not` list: channel
+            # naming first, then the named rotation into a first job. The
+            # veto covers enrolled-at-the-school roles, the institution
+            # itself, and anyone who RUNS the channel rather than entering
+            # it -- but not a candidate role whose occupation is manager
+            # (`New College Grad - Product Manager, HBM` is real).
+            # job_type.md:55-57, 62-63, 68-72
+            {"from": "@title",
+             "re": "grad(uate|uates|s)?|ncg"
+                   "|early careers?|early talent|emerging talent"
+                   "|campus hires?|school leavers?",
+             "not": "grad(uate)? (assistants?|assistantship)"
+                    "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                    "|graduate medical education"
+                    "|recruiters?|recruiting|recruitment|talent acquisition"
+                    "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+             "is": "new_grad"},
+            {"from": "@title",
+             "re": "(leadership|analyst|engineer(ing)?|rotational) development program"
+                   "|rotational program|launch program",
+             "not": "grad(uate)? (assistants?|assistantship)"
+                    "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                    "|graduate medical education"
+                    "|recruiters?|recruiting|recruitment|talent acquisition"
+                    "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+             "is": "new_grad"},
+            # NO `$site` rules. The board names a recruiting channel, not the
+            # audience of every row it carries, and measured live it was
+            # 15-for-35 wrong. Removed 2026-08-26 with the Workday table.
+]
+
+
+# The detail `only` gate: the SAME ladder, same order, same `not` lists, with
+# every verdict rewritten to True. A row the table types is worth one detail
+# request; the excluded tier's `is: None` and the absent default both evaluate
+# to "not True", which is exactly the skip the engine tests for
+# (json-api.py: `if gate is not None and _value(gate, row, context) is not True`).
+# Excluded rows are skipped ON PURPOSE -- a pharmacy or RN posting is out of
+# scope, so it should not cost a request either.
+_WORKDAY_DETAIL_ONLY: list[dict] = [
+    rule if rule["is"] is None else {**rule, "is": True}
+    for rule in _SHARED_JOB_TYPE
+]
+
+
+def _job_type_from(path: str) -> list[dict]:
+    """The shared ladder read from a vendor's own title key.
+
+    Order, patterns and `not` lists are untouched -- only `from` moves. A
+    vendor whose title needs more than a rebind (a second field, an extra
+    veto) writes its own table and says why; this helper exists for the case
+    where the shared rules apply as-is to a differently-named field.
+    """
+    return [{**rule, "from": path} for rule in _SHARED_JOB_TYPE]
+
 SIMPLE: dict[str, dict] = {
     "ashby": {
         # concurrency: single shared host (api.ashbyhq.com) across all tenants,
@@ -36,91 +150,145 @@ SIMPLE: dict[str, dict] = {
             "workplace_type_raw": "@workplaceType", "published_at": {"date": "@publishedAt"},
             "published_at_precision": "exact", "source_active": "@isListed",
             "locations_extra": {"map": "@secondaryLocations", "value": "@location"},
-            # DERIVED -- every pattern and count below is measured on Ashby's own
-            # corpus (doc/raw_postings/ashby.md, 18,715 rows / 696 boards) and is
-            # not portable. The `classify` form is shared across vendors; its
-            # contents never are.
+            # DERIVED -- job_type is the SHARED table in
+            # doc/raw_postings/regex/job_type.md, transcribed verbatim and read
+            # from `title` alone. This replaces the Ashby-measured table that
+            # stood here until 2026-08-26, after a head-to-head over all 59,792
+            # Ashby rows in raw_posting: the shared table fired on 1,498 rows to
+            # the Ashby table's 896, agreed with it on 890, and disagreed on the
+            # label for 2 (both SkillBridge -- the shared excluded tier voids
+            # them where the Ashby table said `intern`). Of the 608 it adds, 493
+            # are the excluded tier Ashby had no equivalent for and 115 are
+            # career-stage catches Ashby's narrower patterns missed.
+            #
+            # KNOWN GAP, deliberately carried: the shared table misses 6 rows
+            # the Ashby one claimed -- 4 German Werkstudent recruiting titles
+            # its student `not` list vetoes on purpose, and 2 campus-ambassador
+            # rows it has no rule for. The Ashby-only `campus( growth)?
+            # ambassadors?` rule is NOT kept: the gap belongs upstream in the
+            # shared doc, not in a per-vendor patch.
+            #
+            # TITLE ONLY. The `employmentType` enum leg, the department and team
+            # legs, and the `descriptionPlain` leg all went with the old table.
             "job_type": {"classify": [
-                # Co-op FIRST, ahead of `employmentType` -- 4 of the 7 co-op
-                # titles are typed `Intern` (md:82), so the enum rule below would
-                # consume them. Both boundaries load-bearing: dropping them adds
-                # 4 "Cooperative"/"Cooperation" titles (md:80-81).
-                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 7, md:77
-                # The enum is a closed 5-value set with no false positives on
-                # `Intern` (md:52), so it outranks the title regex. Research is
-                # a subject tag, not a mutually exclusive opportunity type:
-                # the current Gold audit found every Ashby `research` row was
-                # explicitly an internship, including seven that welcome
-                # undergraduates. They therefore stay visible as `intern`.
-                {"from": "@employmentType", "re": "intern", "is": "intern"},  # 145, md:48
+                # EXCLUDED first, and terminal. A licensure-, service- or degree-gated
+                # posting is not a student one whatever else the title says, so
+                # `is: None` voids the row rather than letting it fall through --
+                # same shape as the workday adapter's skillbridge rule.
+                # job_type.md:13-16
+                {"from": "@title", "re": "skillbridge", "is": None},
+                {"from": "@title", "re": "pharmacy|pharmacist", "is": None},
+                {"from": "@title", "re": "rns?|nurses?|nursing|bsn", "is": None},
+                {"from": "@title", "re": "ph\\.?d\\.?s?|postdoc(s|toral)?|doctoral", "is": None},
+                # Co-op ahead of intern: co-op titles are a subset of the
+                # intern-ish set, so the intern rule would otherwise consume
+                # them. Both boundaries load-bearing -- dropping the trailing one
+                # admits "Cooperative"/"Cooperation". job_type.md:20
+                {"from": "@title", "re": "co-?ops?", "is": "coop"},
+                # A research-flavoured internship, both word orders. The
+                # [ /&,()-]+ and [^a-z] separators are load-bearing: matcher()
+                # boundaries apply to the whole match only, so without them
+                # "International ... Research" could parse as intern+al.
+                # job_type.md:25
+                {"from": "@title",
+                 "re": "research[a-z]*[ /&,()-]+[a-z0-9 /&,()-]*intern(s|ship|ships)?"
+                       "|intern(s|ship|ships)?[^a-z][a-z0-9 /&,()-]*research[a-z]*",
+                 "is": "research"},
                 # `intern(s|ship|ships)?`, not `interns?`: the shorter form fails
-                # the trailing boundary on "internships". Boundaries reject the
-                # 66 Internal/International titles (md:34-36).
-                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 276, md:27
-                # Student titles begin after the posting-level internship
-                # signals (`employmentType` and title), but before department /
-                # team. That distinction matters on current Statista rows whose
-                # exact role is Working Student while the deliberately mixed
-                # bucket says "Working students / Interns / Trainees". Of the
-                # 10 survey Working Student/Werkstudent titles, 3 are explicit
-                # internships and resolve above; the other 7 are enrolled-
-                # student jobs (md:Student Programs). `werkstudent` keeps its
-                # inflected tail because WerkstudentIn / Werkstudent/in are 3
-                # of the 4 German hits.
+                # the trailing boundary on "internships". The boundaries reject
+                # Internal/International. job_type.md:30
+                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},
+                # An internship that never says "intern". job_type.md:33
+                {"from": "@title", "re": "summer analysts?|summer associates?", "is": "intern"},
+                # `not` SKIPS this rule rather than ending the scan, so a title
+                # vetoed as student still reaches the new-grad rules below. That
+                # fall-through is the doc's semantics; a terminal exclusion here
+                # would silently cost new_grad rows. job_type.md:38-49
                 {"from": "@title",
-                 "re": "working students?|werkstudent[a-z]*",
-                 "is": "student_program"},  # 7 net / 10 gross, md:Student Programs
-                # `new grad` in the survey count also includes the four spelled
-                # "new graduate". College/university-grad and named graduate
-                # programs are the same undergraduate recruiting channel. An
-                # explicit PhD title is outside this bucket and terminates before
-                # any generic title or department label can claim it.
-                {"from": "@title", "re": "ph\\.?d\\.?", "is": None},
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts|student accountability"
+                        "|student engagement|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+                # New grad, two title groups sharing one `not` list: channel
+                # naming first, then the named rotation into a first job. The
+                # veto covers enrolled-at-the-school roles, the institution
+                # itself, and anyone who RUNS the channel rather than entering
+                # it. job_type.md:55-57, 62-63, 68-72
                 {"from": "@title",
-                 "re": "new grad(uate)?s?|new college grad(uate)?s?"
-                       "|university grad(uate)?s?|graduate programs?",
-                 "is": "student_program"},
-                # Unlike bare `campus` (which catches recruiters and physical
-                # sites), this title phrase is the student-held role itself.
-                # It was absent from the 2026-08-19 survey and validated on the
-                # two live Ashby rows added by 2026-08-21.
-                {"from": "@title", "re": "campus( growth)? ambassadors?",
-                 "is": "student_program"},
-                # department and team are equal on 62% of rows (md:61); querying
-                # both covers the 38% where they differ. These broader grouping
-                # labels sit below role-specific title/enum evidence. Boundaries
-                # reject "Internal Ops" (13) and "Internal IT" (md:59).
-                {"from": "@department", "re": "intern(s|ship|ships)?", "is": "intern"},  # 17 + 12 + 4, md:58
-                {"from": "@team", "re": "intern(s|ship|ships)?", "is": "intern"},  # 8 + 4, md:63
-                {"from": "@department",
-                 "re": "early career|new grads?|campus recruit(ing|ment)",
-                 "is": "student_program"},  # 9 + 6 + 4, md:58
-                {"from": "@team",
-                 "re": "early career|new grads?|campus recruit(ing|ment)",
-                 "is": "student_program"},  # 10 + 6 + 4, md:63
-                # One residency explicitly welcomes "strong undergrads"; the
-                # exact phrase is safe where broad description phrases such as
-                # "currently enrolled" are not. A second exact phrase covers
-                # the live Bachelor's-level Student Ambassador without claiming
-                # the law-school ambassador rows (md:Student Programs).
-                {"from": "@descriptionPlain",
-                 "re": "strong undergrads|currently enrolled at a university[ -]+bachelors? level",
-                 "is": "student_program"},
-                # LAST: part-time. The enum decides it -- "PartTime" lowercases to
-                # "parttime", which `part.?time` matches with the separator absent.
-                {"from": "@employmentType", "re": "part.?time", "is": "part_time"},  # 29, md:93
+                 "re": "grad(uate|uates|s)?|ncg"
+                       "|early careers?|early talent|emerging talent"
+                       "|campus hires?|school leavers?",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": "@title",
+                 "re": "(leadership|analyst|engineer(ing)?|rotational) development program"
+                       "|rotational program|launch program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                # The one non-title leg, and it is LAST on purpose -- it may only
+                # speak for a row every title rule above left silent.
+                #
+                # ONLY the internship tier is read off `department`. The rest of
+                # job_type.md measured badly here: run whole, department added 15
+                # rows of which ~2 were right (`Student Support` -> Student
+                # Success Coach, `Student Operations` -> Director of Strategy,
+                # `Emerging Talent` -> an evergreen "Future Opportunities" req).
+                # Restricted to this pattern it adds 3 rows and no false
+                # positives -- 76 of its 95 matches are rows the title already
+                # calls `intern`, and 13 more the title types better.
+                #
+                # The 3 are residency titles filed under an `Internships`
+                # department: AI Research Resident, Thermodynamic Hardware
+                # Residency, Thermodynamic Hardware Resident. The department is
+                # the only place their internship status is stated.
+                #
+                # SkillBridge is safe without a guard here: the excluded tier is
+                # terminal, so the 2 `Internships & Co-ops` SkillBridge rows stop
+                # at the top of the table and never reach this rule. Moving this
+                # rule any higher would revive them as `coop`.
+                {"from": "@department", "re": "intern(s|ship|ships)?", "is": "intern"},  # 3
+            ]},
+            # The enum decides it -- "PartTime" lowercases to "parttime", which
+            # `part.?time` matches with the separator absent.
+            # COUNTS RECOUNTED 2026-08-26 against raw_posting, on the 50,449
+            # DISTINCT ashby postings (latest fetch each), not the 18,715-row
+            # survey the md: citations point at. The corpus is 2.7x the survey,
+            # so every number below is a different denominator, not a drift.
+            "part_time": {"classify": [
+                {"from": "@employmentType", "re": "part.?time", "is": "yes"},  # 683 (md:93 measured 29)
                 # TERMINAL: the title phrase disagrees with the enum on more than
                 # half its rows -- "[CONTRACT] Part-Time Recruiting Coordinator"
                 # is typed Contract (md:100). Trust the enum, so a Contract or
                 # Temporary row stops here rather than reaching the title rule.
-                {"from": "@employmentType", "re": "contract|temporary", "is": None},  # 239, md:94
-                # Which leaves the title as a tie-breaker for the 4 FullTime rows
-                # only, exactly as md:101 prescribes.
-                {"from": "@title", "re": "part.?time", "is": "part_time"},  # 4, md:98-101
-                # `research` has no Ashby signal, and hourly `compensation`
-                # interval is explicitly NOT a part-time signal (md:103-106), so
-                # neither gets a rule.
-            ]},
+                # Now suppresses 15 title-says-part-time rows the survey never
+                # saw: Physician (Part-Time, Off-hours), Telepsychiatrist
+                # (Contract, Part Time), YouTube Podcast Producer (Part-Time
+                # Contract) and siblings.
+                {"from": "@employmentType", "re": "contract|temporary", "is": "unknown"},  # 2,079 (md:94 measured 239)
+                # NO LONGER A TIE-BREAKER. md:101 prescribed this as cover for 4
+                # FullTime rows; it now decides 142 -- a sixth of every part-time
+                # verdict this table reaches. The rule is unchanged and still
+                # correct (the enum has already claimed or killed everything it
+                # disagrees with), but it is load-bearing now, not a rounding
+                # error, so a change here moves real volume.
+                {"from": "@title", "re": "part.?time", "is": "yes"},  # 142 (md:98-101 measured 4)
+                # Uncovered by the survey's design: 1 row typed `Intern` with a
+                # part-time title falls through to the title rule and reads yes.
+            ], "default": "unknown"},
             "remote": {"classify": [
                 # The closed 3-value enum is the field (md:114). `isRemote` is
                 # derived from it and lossy -- it counts Hybrid as remote, 53% of
@@ -128,24 +296,44 @@ SIMPLE: dict[str, dict] = {
                 # OnSite terminates at unknown rather than being a `not` clause:
                 # a structured on-site statement must also suppress the location
                 # rules below, which contradict it on 15 rows (md:133).
-                {"from": "@workplaceType", "re": "onsite", "is": "unknown"},  # 7,413, md:115
-                {"from": "@workplaceType", "re": "hybrid", "is": "hybrid"},  # 4,464, md:116
-                {"from": "@workplaceType", "re": "remote", "is": "yes"},  # 3,919, md:117
-                # The enum is missing on 2,919 rows, and 231 of the 246 affected
-                # boards are mixed, so the gap is per-posting (md:118-119). The
-                # payoff is the 261 remote-in-location rows with no enum at all
-                # (md:135). Hybrid first, as on every other vendor.
-                {"from": "@location", "re": "hybrid", "is": "hybrid"},  # 300, md:130
+                {"from": "@workplaceType", "re": "onsite", "is": "unknown"},  # 15,667 (md:115 measured 7,413)
+                {"from": "@workplaceType", "re": "hybrid", "is": "hybrid"},  # 13,024 (md:116 measured 4,464)
+                {"from": "@workplaceType", "re": "remote", "is": "yes"},  # 14,158 (md:117 measured 3,919)
+                # The enum is missing on 7,600 of the 50,449 distinct postings,
+                # and 710 of the 783 affected boards are mixed, so the gap is
+                # per-posting, not per-board (md:118-119). Hybrid first, as on
+                # every other vendor.
+                #
+                # THE LOCATION LEGS SHRANK IN ABSOLUTE TERMS while the corpus
+                # grew 2.7x -- enum fill improved, so fewer rows reach them.
+                # They are cover for a narrowing gap, not a growing one.
+                {"from": "@location", "re": "hybrid", "is": "hybrid"},  # 119 (md:130 measured 300)
                 # "work from home", "home-based" and "distributed" are all 0 here
                 # -- Greenhouse's pattern list is deliberately not ported (md:131).
-                {"from": "@location", "re": "remote|anywhere|virtual", "is": "yes"},  # 2,148 + 5 + 2, md:127-130
-                # 359 rows pair a non-remote primary location with a remote
-                # secondary; a single-site read calls all of them onsite (md:138-144).
-                # 245 already resolved above via the enum, so this adds ~114.
+                {"from": "@location", "re": "remote|virtual", "is": "yes"},  # 640 (md:127-130 measured 2,148 + 5 + 2)
+                # `anywhere` SPLIT 2026-08-26. It used to sit in the alternation
+                # above and was the single largest error source in this table.
+                # Validated against `workplaceType` on the rows that carry both:
+                #
+                #   bare "Anywhere"        20 Remote /  0 Hybrid  -> 100% remote
+                #   "Anywhere in <place>"   5 Remote / 20 Hybrid  ->  20% remote
+                #
+                # "Anywhere in Belgium" is a hiring radius, not a remote
+                # statement -- the employer means anywhere *within* the country
+                # and types it Hybrid. Bare "Anywhere" is the real thing.
+                # The veto costs nothing: a row that also says remote outright
+                # ("Anywhere - remote US") is already claimed by the rule above.
+                {"from": "@location", "re": "anywhere",
+                 "not": "anywhere (in|-)", "is": "yes"},  # 6
+
+                # Rows pairing a non-remote primary location with a remote
+                # secondary; a single-site read calls all of them onsite
+                # (md:138-144). Most are already resolved by the enum above, so
+                # these two only decide what is left.
                 {"from": {"concat": {"map": "@secondaryLocations", "value": "@location"}, "sep": " ; "},
-                 "re": "hybrid", "is": "hybrid"},
+                 "re": "hybrid", "is": "hybrid"},  # 2
                 {"from": {"concat": {"map": "@secondaryLocations", "value": "@location"}, "sep": " ; "},
-                 "re": "remote|anywhere|virtual", "is": "yes"},  # 359 gross, md:139
+                 "re": "remote|anywhere|virtual", "is": "yes"},  # 142 net (md:139 measured 359 gross)
                 # No polarity trap: 0 rows say non-remote / not remote (md:132).
             ], "default": "unknown"},
         },
@@ -168,6 +356,38 @@ SIMPLE: dict[str, dict] = {
             "location_raw": {"fallback": ["@location.name", {"join": ["@location.city", "@location.state", "@location.country"]}]},
             "description_html": {"concat": {"map": "@details", "value": "@value"}},
             "employment_type": "@employment_type", "workplace_type_raw": "@workplace_type",
+            # DERIVED -- measured on vendors-tbd/comeet.md, 361 rows.
+            "job_type": {"classify": [
+                {"from": "@employment_type", "re": "co-?ops?", "is": "coop"},  # 0, md:24, forward cover
+                {"from": "@name", "re": "co-?ops?", "is": "coop"},  # 0, md:24, forward cover
+                # Closed 5-value seniority set with `Intern` as a member (md:17-22).
+                # `intern` cannot reach "Intermediate" -- different stem.
+                {"from": "@experience_level", "re": "intern", "is": "intern"},  # 1, md:22
+                {"from": "@name", "re": "intern(s|ship|ships)?", "is": "intern"},  # 1, md:14
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@name",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
+            "part_time": {"classify": [
+                {"from": "@employment_type", "re": "part.?time", "is": "yes"},  # 54, md:30
+            ], "default": "unknown"},
             "source_updated_at": {"date": "@time_updated"},
             "content_sections": {"sections": "@details", "sort": "@order", "heading": "@name", "html": "@value"},
         },
@@ -200,84 +420,283 @@ SIMPLE: dict[str, dict] = {
             # `metadata` is a tenant-defined [{name, value, value_type}] bag, so
             # one entry is selected by predicate rather than by path. The three
             # entries read below are the only ones the doc measures a signal on.
+            # DERIVED -- job_type.md applied FIELD-MAJOR: the full cascade runs
+            # on `title` first, then Employment Type, Workday Job Profile and
+            # departments. Title outranks the rest because a title says what the
+            # role IS while a department names the team it SITS IN -- a Jane Street
+            # "Machine Learning Researcher" typed Summer Internship is an intern,
+            # not a researcher, and Verkada's "Intern/Co-op" enum is a combined
+            # bucket that must not outrank a title saying Intern.
+            #
+            # `metadata` is a tenant-defined [{name, value, value_type}] bag, so
+            # one entry is selected by predicate rather than by path.
+            # `content` is DO NOT USE for co-op: 47 hits are Riot Games perks
+            # boilerplate (doc/raw_postings/greenhouse.md:74-80).
             "job_type": {"classify": [
-                # Eligibility / relevance exclusions that remain exclusions even
-                # if a future title also contains Intern or Co-op.
-                {"from": "@title", "re": "skillbridge|campus ambassadors?", "is": None},
-                # Co-op FIRST -- co-op titles are a subset of the intern-ish set.
-                # Boundaries are load-bearing: dropping the trailing one admits
-                # "Software Engineer, Scoop Core", since Scoop contains coop (md:67).
-                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 5, md:65
-                {"from": {"first": {"map": "@metadata",
-                                    "where": {"eq": ["@name", "Employment Type"]},
-                                    "value": "@value"}},
-                 "re": "co-?ops?", "is": "coop"},  # 1 "Winter Co-Op", md:72
-                # `intern(s|ship|ships)?`, not the doc's `intern|interns|internship`:
-                # the trailing boundary rejects the plural of the last alias.
-                # Boundaries reject 261 Internal/International titles (md:24-26).
-                # Research describes the subject, not a separate opportunity
-                # type: all 64 active Greenhouse research rows explicitly carry
-                # this internship title signal (md:Student Programs).
-                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 456, md:20
-                # Substring, not equality -- tenant-prefixed values exist
-                # ("Jump Trading - Intern", 60 rows) and classify searches (md:39).
-                {"from": {"first": {"map": "@metadata",
-                                    "where": {"eq": ["@name", "Employment Type"]},
-                                    "value": "@value"}},
-                 "re": "intern(s|ship|ships)?", "is": "intern"},  # 88 + 60 + 42 + 4 + 3 + 2, md:29-37
-                {"from": {"first": {"map": "@metadata",
-                                    "where": {"eq": ["@name", "Workday Job Profile"]},
-                                    "value": "@value"}},
-                 "re": "intern(s|ship|ships)?", "is": "intern"},  # 28 + 4 + 4 + 4 + 4 + 3 + 3, md:52-59
-                # departments is an array of {name}; flattened so one rule reads
-                # all of them. Boundaries reject "Internal Audit" (25), "Internal
-                # Fleet Operations" (14) and "International G and A" (10) (md:50).
-                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
-                 "re": "intern(s|ship|ships)?", "is": "intern"},  # 47 + 18, md:43
-                # The ten active AQR Summer Analyst titles are one recruiting
-                # family; nine descriptions explicitly call it an internship.
-                # The bounded phrase claims the tenth consistently without
-                # admitting generic analyst roles (md:Student Programs).
-                {"from": "@title", "re": "summer analyst", "is": "intern"},
-                # Stronger title-level exclusions precede tenant grouping labels.
-                # An internship/co-op above still wins when its title carries one
-                # of these words (for example, a PhD research internship).
-                {"from": "@title", "re": "ph\\.?d\\.?s?|postdocs?|doctoral", "is": None},
+                # ---- title ----
+                {"from": "@title",
+                 "re": "skillbridge|pharmacy|pharmacist|rns?|nurses?|nursing|bsn"
+                       "|ph\\.?d\\.?s?|postdoc(s|toral)?|doctoral",
+                 "is": None},
+                {"from": "@title",
+                 "re": "co-?ops?",
+                 "is": "coop"},
+                {"from": "@title",
+                 "re": "research[a-z]*[ /&,()-]+[a-z0-9 /&,()-]*intern(s|ship|ships)?"
+                       "|intern(s|ship|ships)?[^a-z][a-z0-9 /&,()-]*research[a-z]*",
+                 "is": "research"},
+                {"from": "@title",
+                 "re": "intern(s|ship|ships)?",
+                 "is": "intern"},
+                {"from": "@title",
+                 "re": "summer analysts?|summer associates?",
+                 "is": "intern"},
+                # TERMINAL: `not` only skips a rule; these must stop the scan so
+                # a department label below cannot claim the row.
+                {"from": "@title", "re": "campus ambassadors?", "is": None},
                 {"from": "@title",
                  "re": "recruiters?|recruiting|recruitment|talent acquisition",
                  "is": None},
-                # Role-specific student evidence precedes the broader metadata
-                # and department buckets. Apprenticeships are deliberately kept
-                # broad for early usage so niche technical programs are not lost;
-                # SkillBridge is excluded at the start of the table.
                 {"from": "@title",
-                 "re": "working students?|werkstudent[a-z]*"
-                       "|new grad(uate)?s?|new college grad(uate)?s?"
-                       "|university grad(uate)?s?|graduate programs?"
-                       "|apprentices?|apprenticeships?",
-                 "is": "student_program"},
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts|student accountability"
+                        "|student engagement|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet|nationals only|j1 students",
+                 "is": "student"},
+                {"from": "@title",
+                 "re": "grad(uate|uates|s)?|ncg",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": "@title",
+                 "re": "early careers?|early talent|emerging talent",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": "@title",
+                 "re": "campus hires?|school leavers?",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": "@title",
+                 "re": "(leadership|analyst|engineer(ing)?|rotational) development program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": "@title",
+                 "re": "rotational program|launch program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                # ---- Employment Type ----
                 {"from": {"first": {"map": "@metadata",
                                     "where": {"eq": ["@name", "Employment Type"]},
                                     "value": "@value"}},
-                 "re": "new grad(uate)?s?|campus", "is": "student_program"},  # 28 + 23, md:32-33
+                 "re": "skillbridge|pharmacy|pharmacist|rns?|nurses?|nursing|bsn",
+                 "is": None},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "co-?ops?",
+                 "is": "coop"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "research[a-z]*[ /&,()-]+[a-z0-9 /&,()-]*intern(s|ship|ships)?"
+                       "|intern(s|ship|ships)?[^a-z][a-z0-9 /&,()-]*research[a-z]*",
+                 "is": "research"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "intern(s|ship|ships)?",
+                 "is": "intern"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "summer analysts?|summer associates?",
+                 "is": "intern"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts|student accountability"
+                        "|student engagement|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet|nationals only|j1 students",
+                 "is": "student"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "grad(uate|uates|s)?|ncg",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "early careers?|early talent|emerging talent",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "campus hires?|school leavers?",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "(leadership|analyst|engineer(ing)?|rotational) development program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "rotational program|launch program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                # Bare noun: unambiguous in this field, unlike a title (md:24).
+                {"from": {"first": {"map": "@metadata",
+                                    "where": {"eq": ["@name", "Employment Type"]},
+                                    "value": "@value"}},
+                 "re": "campus",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},  # 16, md:25
+                # ---- departments ----
                 {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
-                 "re": "campus|universit(y|ies)|early career|new grads?",
-                 "is": "student_program"},  # 35 + 21 + 20 + 14 + 13 + 10, md:42-49
-                # LAST: part-time. `Time Type` is a closed set split three ways by
-                # casing and hyphenation (md:100); the subject is lowercased and
-                # `.?` absorbs the separator, so one pattern covers all three.
+                 "re": "skillbridge|pharmacy|pharmacist|rns?|nurses?|nursing|bsn",
+                 "is": None},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "co-?ops?",
+                 "is": "coop"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "research[a-z]*[ /&,()-]+[a-z0-9 /&,()-]*intern(s|ship|ships)?"
+                       "|intern(s|ship|ships)?[^a-z][a-z0-9 /&,()-]*research[a-z]*",
+                 "is": "research"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "intern(s|ship|ships)?",
+                 "is": "intern"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "summer analysts?|summer associates?",
+                 "is": "intern"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts|student accountability"
+                        "|student engagement|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet|nationals only|j1 students",
+                 "is": "student"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "grad(uate|uates|s)?|ncg",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "early careers?|early talent|emerging talent",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "campus hires?|school leavers?",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "(leadership|analyst|engineer(ing)?|rotational) development program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "rotational program|launch program",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},
+                # Bare noun: unambiguous in this field, unlike a title (md:33).
+                {"from": {"concat": {"map": "@departments", "value": "@name"}, "sep": " ; "},
+                 "re": "campus|universit(y|ies)",
+                 "not": "grad(uate)? (assistants?|assistantship)"
+                        "|grad(uate)? (research|school|schools|studies|admissions|advisors?)"
+                        "|graduate medical education"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|(program|programme) (managers?|leads?|directors?|coordinators?)",
+                 "is": "new_grad"},  # 9 + 6, md:33
+            ]},
+            # `Time Type` is a closed set split three ways by casing and
+            # hyphenation (md:100); the subject is lowercased and `.?` absorbs
+            # the separator, so one pattern covers all three.
+            "part_time": {"classify": [
                 {"from": {"first": {"map": "@metadata",
                                     "where": {"eq": ["@name", "Time Type"]},
                                     "value": "@value"}},
-                 "re": "part.?time", "is": "part_time"},  # 56 + 20, md:97-98
+                 "re": "part.?time", "is": "yes"},  # 29 + 13, md:49-50
                 {"from": {"first": {"map": "@metadata",
                                     "where": {"eq": ["@name", "Employment Type"]},
                                     "value": "@value"}},
-                 "re": "part.?time", "is": "part_time"},  # 2, md:89
-                # `content` is DO NOT USE for both co-op and part-time: 47 co-op
-                # hits are dominated by Riot Games' perks boilerplate (md:74-80)
-                # and "hours per week" appears in full-time benefits copy (md:85).
-            ]},
+                 "re": "part.?time", "is": "yes"},  # 1 + 2, md:40
+            ], "default": "unknown"},
             "remote": {"classify": [
                 # `Location Type` fills only 2.8% of rows but is the one
                 # structured statement. On-Site terminates at unknown so it also
@@ -339,7 +758,7 @@ SIMPLE: dict[str, dict] = {
                 # "Zoox Internships" (5): department is the only intern signal on
                 # those rows, title and commitment both miss (md:53-55).
                 {"from": "@categories.department", "re": "intern(s|ship|ships)?", "is": "intern"},  # 5, md:54
-                {"from": "@categories.team", "re": "campus", "is": "student_program"},  # 3 + 2, md:58-59
+                {"from": "@categories.team", "re": "campus", "is": "new_grad"},  # 3 + 2, md:58-59
                 # The doc measures the loose `new grad|graduate program|university
                 # |campus` at 32 (md:36) and calls out "Recruiter, University and
                 # Alternative Channel" as a false positive (md:42), so the bare
@@ -348,18 +767,19 @@ SIMPLE: dict[str, dict] = {
                 # rule at all, unlike workday-list.
                 {"from": "@text",
                  "re": "new grads?|graduate program|university talent|campus hire",
-                 "is": "student_program"},  # <=32, md:36
-                # LAST: part-time, 1 row on the enum and 2 on the title. Thin, but
-                # measured. `additionalPlain` is DO NOT USE -- shieldai's closing
-                # boilerplate negates part-time on 366 rows, 15% of the corpus
-                # (md:95-97).
-                {"from": "@categories.commitment", "re": "part.?time", "is": "part_time"},  # 1, md:84
-                {"from": "@text", "re": "part.?time", "is": "part_time"},  # 2, md:93
+                 "is": "new_grad"},  # <=32, md:36
                 # The CJK values 正社員 (58) and 契約社員 (2) separate full-time from
                 # contract (md:87-88); neither is in this column's domain, so
                 # there is nothing to write a rule against. `research` likewise
                 # has no Lever signal and is never emitted.
             ]},
+            # 1 row on the enum and 2 on the title. Thin, but measured.
+            # `additionalPlain` is DO NOT USE -- shieldai's closing boilerplate
+            # negates part-time on 366 rows, 15% of the corpus (md:95-97).
+            "part_time": {"classify": [
+                {"from": "@categories.commitment", "re": "part.?time", "is": "yes"},  # 1, md:84
+                {"from": "@text", "re": "part.?time", "is": "yes"},  # 2, md:93
+            ], "default": "unknown"},
             # 100% fill on a closed 3-value enum: "this is the field; no string
             # parsing, no keyword list. Nothing else on Lever comes close"
             # (md:103-104). Because the enum never misses, no rule below it could
@@ -389,6 +809,19 @@ SIMPLE: dict[str, dict] = {
             "company_raw": {"fallback": ["$envelope.name", "$key"]},
             "location_raw": {"join": ["@city", "@state", "@country"]}, "description_html": "@description",
             "requisition_id": "@code", "employment_type": "@employment_type", "published_at": {"date": "@published_on"},
+            # DERIVED -- measured on vendors-tbd/workable.md, 136 rows.
+            "job_type": {"classify": [
+                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 0, md:89, forward cover
+                # `experience` is the intern field here and agrees with the title
+                # regex 8/8 in both directions (md:57-60). NOT `employment_type`:
+                # md:64-68 measures the 8 interns landing on Temporary/''/Part-time,
+                # so it would silently bucket them as temps.
+                {"from": "@experience", "re": "intern(s|ship|ships)?", "is": "intern"},  # 8, md:59
+                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 8, md:73
+            ]},
+            "part_time": {"classify": [
+                {"from": "@employment_type", "re": "part.?time", "is": "yes"},  # 3, md:95
+            ], "default": "unknown"},
             "published_at_precision": "date", "source_updated_at": {"date": "@created_at"},
             "locations_extra": {"map": "@locations", "value": {"fallback": ["@city", "@country"]}},
             "workplace_type_raw": {"lookup": [{"True": "remote"}, "@telecommuting"]},
@@ -431,35 +864,51 @@ SIMPLE: dict[str, dict] = {
             #   tags1..tags4 -- the same slot carries unrelated meanings per
             #      tenant; tags4 is a careers-site name on amd and an office
             #      city on sig (md:97-102).
-            "job_type": {"classify": [
-                # Spelling is NOT uniform here: the corpus carries a
-                # spaced-hyphen form ("University Co - Op Placement") that the
-                # plain co-?op pattern misses, so the separators are optional on
-                # both sides (md:104-108). No Scoop-style false positive exists
-                # in this corpus, but the boundaries stay regardless.
-                {"from": "@title", "re": "co\\s?-?\\s?ops?", "is": "coop"},  # 2, md:107
-                # Boundaries reject only 3 extra rows here -- Internal Audit and
-                # "Rivian Internal Mobile App" (md:49-51) -- the smallest such
-                # gap of any vendor, but the pattern is the same one everywhere.
-                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 57, md:46
-                # `apprentice|apprenticeship` is 0 -- md:48 records that the word
-                # does not occur -- so it earns no rule of its own here beyond
-                # the shared phrase list. Bare `university|campus` is explicitly
-                # excluded: md:52-54 measures it as retail-store and recruiter
-                # noise ("Sales Advisor IV - University Village Seattle",
-                # "University Recruiting Coordinator (Contract)").
-                {"from": "@title",
-                 "re": "new grads?|graduate programs?|early careers?",
-                 "is": "student_program"},  # 6, md:47
-                # LAST: part-time. Unlike INTERN above, PART_TIME is filled by
-                # three tenants (costco 150, rivian 33, amd 6) and is the only
-                # clean part-time field in the corpus (md:120-122). The title
-                # agrees but adds nothing -- all 33 of its hits are one rivian
-                # retail family that fills both (md:130-133) -- and the
-                # description is the Greenhouse trap, "part-time" inside
-                # full-time benefits boilerplate (md:135-139).
-                {"from": "@employment_type", "re": "part.?time", "is": "part_time"},  # 189, md:121
-            ]},
+            #
+            # The TABLE is the shared one in doc/raw_postings/regex/job_type.md,
+            # rebound onto `title`. It replaced the iCIMS-measured table on
+            # 2026-08-27 after a head-to-head over all 3,496 distinct postings
+            # in raw_posting. Typed 137 rows before, 158 after, and on the 111
+            # both type they agree on the label EVERY time, 0 disagreements.
+            #
+            # Adds 29 new_grad, where the old rule needed the exact phrase
+            # `new grads?|graduate programs?`: "Graduate Trainee - Systems
+            # Design Engineer" and its siblings, plus "Commercial Sales Rep
+            # (2026 NCG)" via `ncg`. Adds 6 student from bare `apprentice`
+            # ("Apprentice, Private Equity", "Apprentice, Data Operations") --
+            # md:48 recorded the word as absent, and it is not absent any more.
+            # Moves 12 intern -> research (the UIUC Research Park block), a
+            # refinement the old table had no tier for.
+            #
+            # Drops 10 to the excluded tier, 9 of them sig's PhD-gated quant
+            # internships ("Quantitative Research Internship - PhD: Summer
+            # 2027") plus "2027 PhD Research Engineering Intern/Co-op"; and 1
+            # new_grad, "Early Career - Emerging Talent Programs and Recruiting
+            # Coordinator", which runs the channel (job_type.md:71).
+            #
+            # KNOWN REGRESSION, deliberately carried: md:104-108 measured a
+            # spaced-hyphen co-op form here ("Hardware Engineer University Co -
+            # Op Placement 2027", 2 rows) and widened the pattern to
+            # `co\\s?-?\\s?ops?` for it. The shared table's `co-?ops?`
+            # (job_type.md:20) does not reach those two, so they go untyped.
+            # The fix belongs upstream in the shared doc -- widening the pattern
+            # there needs its own head-to-head across Workday and Eightfold
+            # first -- not as a per-vendor override that re-forks this table.
+            #
+            # Bare `university|campus` noise md:52-54 measured here ("Sales
+            # Advisor IV - University Village Seattle", "University Recruiting
+            # Coordinator") stays out: the shared table carries neither bare
+            # word, only `campus hires?`, and vetoes recruiters outright.
+            "job_type": {"classify": _job_type_from("@title")},
+            # Unlike INTERN, PART_TIME is filled by three tenants (costco 150,
+            # rivian 33, amd 6) and is the only clean part-time field in the
+            # corpus (md:120-122). The title agrees but adds nothing -- all 33
+            # of its hits are one rivian retail family that fills both
+            # (md:130-133) -- and the description is the Greenhouse trap,
+            # "part-time" inside full-time benefits boilerplate (md:135-139).
+            "part_time": {"classify": [
+                {"from": "@employment_type", "re": "part.?time", "is": "yes"},  # 189, md:121
+            ], "default": "unknown"},
             # No `remote` rule. The survey finds nothing to key one on:
             # `location_type` is flagged DO NOT USE -- despite matching the
             # Greenhouse metadata key name it is a geocoding-precision hint
@@ -495,6 +944,47 @@ SIMPLE: dict[str, dict] = {
             "location_raw": {"fallback": ["@location", {"join": ["@city", "@state_name", "@country"]}]},
             "description_html": {"concat": ["@description", "@requirements"], "sep": "\n"},
             "requisition_id": "@guid", "employment_type": "@employment_type_code",
+            # DERIVED -- measured on vendors-tbd/recruitee.md, 606 rows.
+            "job_type": {"classify": [
+                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 0, md:38, forward cover
+                # Closed 9-value enum, md:13-22. 11/11 `internship` rows also match
+                # the title regex (md:27), so the two corroborate rather than compete.
+                {"from": "@employment_type_code", "re": "intern(s|ship|ships)?", "is": "intern"},  # 11, md:18
+                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 13, md:25
+                # Apprenticeship is its own enum member and sits below every intern
+                # signal, matching the ordering every other vendor uses.
+                # NOT `experience_code = student_college` (10, md:34): that is a
+                # seniority band saying the role accepts college students, not a
+                # statement that the posting *is* a student program.
+                # `employment_type_code` is a closed 9-value enum and the only
+                # apprenticeship signal here: md:22's row is titled "Bakker",
+                # which no title rule can reach. Ahead of the shared title rule.
+                {"from": "@employment_type_code",
+                 "re": "apprentices?|apprenticeships?", "is": "student"},  # 1, md:22
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@title",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
+            "part_time": {"classify": [
+                {"from": "@employment_type_code", "re": "part.?time", "is": "yes"},  # 3, md:43-45
+            ], "default": "unknown"},
             "source_active": {"eq": ["@status", "published"]},
             "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
             "workplace_type_raw": {
@@ -648,6 +1138,42 @@ SIMPLE: dict[str, dict] = {
             # positionId is a JSON number; requisition_id is typed str.
             "requisition_id": {"template": "{positionId}"},
             "employment_type": "@contractType",
+            # DERIVED -- measured on vendors-tbd/talentreef.md, 8,519 rows.
+            "job_type": {"classify": [
+                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 0, md:22, forward cover
+                # Boundaries are load-bearing here: bare /intern/ matches 15, i.e.
+                # 11 extra, all Internal / Internet (md:15-17).
+                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 4, md:13
+                # NO `student` rule. The 141 `Courtesy Clerk (Bagger) - Student`
+                # rows (md:19-20) are one grocery tenant's hourly job title, not a
+                # student program -- the same retail-noise trap icms.md:52-54 documents.
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@title",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
+            # Closed 3-value set (md:27-30). NOT the inline title tags: md:36-39
+            # measures "Server (PT/FT)" as the dominant form, which advertises
+            # *either* schedule and means neither on its own.
+            "part_time": {"classify": [
+                {"from": "@contractType", "re": "part.?time", "is": "yes"},  # 3,192, md:29
+            ], "default": "unknown"},
             "published_at": {"date": "@createdDate"}, "published_at_precision": "date",
         },
         "extra": {
@@ -857,6 +1383,37 @@ SIMPLE: dict[str, dict] = {
             },
             "description_html": "@BriefDescription",
             "requisition_id": "@RequisitionNumber",
+            # DERIVED -- measured on vendors-tbd/ukg.md, 500 rows. Every rule here
+            # is forward cover: md:10-14 measures intern and co-op at 0.
+            "job_type": {"classify": [
+                {"from": "@Title", "re": "co-?ops?", "is": "coop"},  # 0, md:13
+                {"from": "@Title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 0, md:11
+                # NO part_time rule. `FullTime` is the only signal (false on 51,
+                # md:16-20) and it is a JSON *boolean*; the classify engine skips
+                # non-str values, so a rule on it could never fire. Reading it would
+                # also mean equating not-full-time with part-time, which the survey
+                # does not measure -- seasonal and contract land in the same `false`.
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@Title",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
             "published_at": {"date": "@PostedDate"},
             "published_at_precision": "exact",
         },
@@ -939,9 +1496,12 @@ SIMPLE: dict[str, dict] = {
     # numbers are measured -- doc/raw_postings/workday-fields.md, 4,748 sampled
     # list rows against 100,068 stored detail payloads.
     #
-    # With no detail leg the list row *is* the stored payload, so every path
-    # below reads a `jobPostings[]` element directly.
-    "workday-list": {
+    # Two shapes reach `fields` here. A row the `only` gate below declines is
+    # emitted with its bare `jobPostings[]` payload; a row it admits is emitted
+    # with the detail response merged OVER that list row (`merge`), so every
+    # list path stays readable and `jobPostingInfo.*` is additionally present.
+    # Read a list path unless detail genuinely carries a better value.
+    "workday": {
         # Compound key: tenant/wd_host/site. Workday treats all three parts
         # case-insensitively, so ingestion stores the identity in lowercase.
         "key_parts": ("tenant", "wd_host", "site"),
@@ -967,190 +1527,157 @@ SIMPLE: dict[str, dict] = {
             # the first page. A changed count paginates immediately; expiry
             # forces a full reconciliation even when the count stayed equal.
             "count_probe": {"window_s": 86_400},
-            # Same 2,000-row result window as `workday` -- it is a property of
-            # the endpoint, not of the detail leg, so partitioning stays.
+            # 2,000-row result window -- a property of the endpoint, not of the
+            # detail leg, so partitioning stays.
             "partition": {"window": 2000, "facets": "facets"},
-            # Held at `workday`'s measured optimum. Its note establishes that
-            # retries track total request volume against Workday's sustained
-            # limiter rather than fan-out width, and dropping the detail leg
-            # already cuts volume ~11x, so 10 is safe here by construction.
+            # Measured optimum. Retries track total request volume against
+            # Workday's sustained limiter rather than fan-out width.
             # Re-measure through the inspector before raising it.
             "page": {"total": "@total", "size": 20, "step": 20, "concurrency": 10},
         },
+        # GATED detail. An ungated leg is one GET per posting and was ~91% of
+        # the run -- that is why it was removed on 2026-08-22. Gated to the rows
+        # the job_type table already types, it costs 2,518 requests over the
+        # whole 153,325-row corpus (1.6%, a 98.4% cut): median 9 per feed, max
+        # 148 (micron/wd1/external). At concurrency 10 that is under a second of
+        # fan-out on almost every feed.
+        #
+        # `merge` is load-bearing, not an optimisation. Without it a detail row
+        # loses `externalPath` -- which is the LIST leg's `id`, so identity
+        # would silently differ between gated and skipped rows -- along with
+        # `locationsText`, `remoteType` and the live `title`. For the same
+        # reason there is deliberately NO `item_id` override: the old ungated
+        # config pointed it at `jobPostingInfo.jobReqId`, which under a gate
+        # would give two rows of one feed two different identity schemes.
+        #
+        # Detail 404s on Workday's orphaned index stubs (a list row carrying
+        # only `externalPath` + `bulletFields`, no title). They carry no title,
+        # so every rule in the gate misses and they are skipped before costing a
+        # request -- test_workday_detail_gate_skips_a_title_less_stub pins it.
+        "detail": {
+            "url": "https://{tenant}.{wd_host}.myworkdayjobs.com/wday/cxs/{tenant}/{site}{id}",
+            "url_override": False,
+            "id": "@externalPath",
+            "dedupe": "@externalPath",
+            "merge": True,
+            "only": {"classify": _WORKDAY_DETAIL_ONLY},
+            "concurrency": 10,
+        },
         "last_status": True,
         "fields": {
-            "title": "@title",
+            # List title is the live one; detail's is a backup for the rare row
+            # whose list entry is degraded.
+            "title": {"fallback": ["@title", "@jobPostingInfo.title"]},
             # Detail's `externalUrl` carries no locale segment (see
             # fixtures/workday_detail.json), so this template reproduces the
             # real candidate-facing form rather than inventing an /en-US/ one.
+            # Templated from `externalPath`, which `merge` keeps on both shapes.
             "url_posting": {"template": "https://{tenant}.{wd_host}.myworkdayjobs.com/{site}{externalPath}"},
             "apply_url": {"template": "https://{tenant}.{wd_host}.myworkdayjobs.com/{site}{externalPath}"},
-            # company_raw is deliberately unmapped: the list carries no
-            # hiringOrganization, and silver falls back to the feed's company
-            # for ATS sources, which is the right answer for a tenant board.
-            "location_raw": "@locationsText",
-            "employment_type": "@timeType",
+            # company_raw is deliberately unmapped on BOTH shapes. Detail
+            # carries `hiringOrganization.name`, but mapping it would give
+            # gated and skipped rows of one feed two different company sources.
+            # Silver falls back to the feed's company for ATS sources, which is
+            # the right answer for a tenant board either way.
+            #
+            # Detail's `location` is a concrete site; the list's `locationsText`
+            # is an `N Locations` rollup on 13.6% of the corpus and absent on
+            # another 1.7%. Prefer detail where it exists.
+            "location_raw": {"fallback": ["@jobPostingInfo.location", "@locationsText"]},
+            # Detail-only, and the whole answer to `locationsText`'s rollups. An
+            # `N Locations` row carries the other N-1 sites here and nowhere
+            # else: measured over the stored detail payloads, the key is present
+            # on 290/290 rollup rows, absent on all 1,694 single-location rows,
+            # and `1 + len(additionalLocations)` equals N on every one. No gate
+            # needed -- it is empty exactly where it would contribute nothing.
+            #
+            # `map`, not a bare `@path`, on purpose: this field backs a
+            # `list[str]` and is NOT in the absent-default list below, so a
+            # plain path would hand silver `None` on every skipped row. `map`
+            # returns [] when the key is missing.
+            "location_normalization_extra": {"map": "@jobPostingInfo.additionalLocations"},
+            # 98.9% fill on detail vs 29.1% at list-time (workday.md).
+            "employment_type": {"fallback": ["@jobPostingInfo.timeType", "@timeType"]},
             # Raw and unmapped by contract; the derived value is `remote` below.
             "workplace_type_raw": "@remoteType",
-            # No ISO date exists on a list row, so `published_at` stays NULL
-            # rather than being faked from a "Posted Today" bucket.
-            "published_at_precision": "unknown",
-            # DERIVED -- every pattern and count below is measured on Workday's
-            # own corpus (doc/raw_postings/workday.md, 4,748 sampled list rows)
-            # and is not portable to any other vendor. The `classify` *form* is
-            # shared; its contents never are. Another ATS names different
-            # fields, fills them at different rates, and produces different
-            # false positives, so each one is transcribed from its own doc.
+            # Detail-only, and the reason the leg exists. NULL on a skipped row.
+            "description_html": "@jobPostingInfo.jobDescription",
+            "requisition_id": "@jobPostingInfo.jobReqId",
+            # `startDate` is the only ISO date Workday exposes and it is
+            # detail-only. On a skipped row `published_at` resolves to NULL and
+            # the engine downgrades this precision to `unknown` for us, so
+            # "Posted Today" is never faked into a date.
+            "published_at": {"date": "@jobPostingInfo.startDate"},
+            "published_at_precision": "date",
+            # DERIVED -- the SHARED table in doc/raw_postings/regex/job_type.md,
+            # transcribed verbatim and read from `title` alone. It replaced the
+            # Workday-measured table on 2026-08-26 after a head-to-head over all
+            # 153,325 rows in raw_posting: the shared table fires on 2,518 rows
+            # to the Workday table's 6,118, and on the 2,092 both type it agrees
+            # on the label EVERY time -- 0 disagreements. The whole difference is
+            # which rows get typed at all.
             #
-            # With no detail leg there is no `jobDescription`, so the whole
-            # description-level signal is unavailable here by construction --
-            # which is convenient, since that field ran ~85% false positives for
-            # co-op (senior reqs that *supervise* co-ops, a product named
-            # "Co-op", and "(COOP)" for Continuity Of Operations Plan).
-            "job_type": {"classify": [
-                # Co-op FIRST. workday.md:57-58: co-op titles are a subset of
-                # the intern-ish set, so this has to resolve before the intern
-                # rule ever sees them. Both boundaries are load-bearing --
-                # dropping the trailing one admits "Security Cooperation" (5)
-                # and "Design Technology Co-Optimization (DTCO) Engineer" (1).
-                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 36
-                {"from": "@externalPath", "re": "co-?ops?", "is": "coop"},  # 30
-                # `research` is a research-flavoured internship, not an
-                # undergraduate research post: (undergraduate|student) research
-                # is 1 row corpus-wide, and `research assistant|associate` is a
-                # clinical career title (Clinical Research Associate II), never
-                # a student one. Two branches for both word orders;
-                # `research[a-z]*` admits "Researcher Intern". The
-                # [ /&,()-]+ and [^a-z] separators are load-bearing -- matcher()
-                # boundaries apply only to the whole match, so without them
-                # "International ... Research" could parse as intern+al.
-                # md:83
-                {"from": "@title",
-                 "re": "research[a-z]*[ /&,()-]+[a-z0-9 /&,()-]*intern(s|ship|ships)?"
-                       "|intern(s|ship|ships)?[^a-z][a-z0-9 /&,()-]*research[a-z]*",
-                 "is": "research"},  # 11, md:83
-                # `intern(s|ship|ships)?`, not `interns?`: the shorter form
-                # fails the trailing boundary on "internships" and misses ~30
-                # rows of one tenant's "X Internships: City - Fall 2026"
-                # (workday.md:24-27). The boundaries reject "International" (88).
-                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 555
-                # The slug survives a title edited after generation -- 2 known
-                # cases carry "Intern" here but not in the live title.
-                {"from": "@externalPath", "re": "intern(s|ship|ships)?", "is": "intern"},
-                # German tenants: "Werkstudent (m/w/d) im Bereich E-Commerce".
-                # The [a-z]* tails cover WerkstudentIn / Praktikanten inflections.
-                {"from": "@title",
-                 "re": "werkstudent[a-z]*|praktikum|praktikant[a-z]*|trainee",
-                 "is": "intern"},  # 115 with the bucket above
-                {"from": "@title",
-                 "re": "new grads?|graduate program|university talent|campus hire"
-                       "|apprentices?|apprenticeships?",
-                 "is": "student_program"},  # 134 + 31
-                # PROGRAM-NAMED STUDENT ROLES, ENGLISH ONLY. Measured on the
-                # 69,421 live `workday-list` rows, not on the 4,748-row survey.
-                # Every rule below fires only on rows the seven rules above leave
-                # at NULL, so none can retype an existing verdict: 0 regressions
-                # over the full corpus. +153 rows, +11.4% on the 1,339 the table
-                # types today.
-                #
-                # These are buckets a list-only feed loses *for free* -- all are
-                # readable from the title, so none needs the detail leg back. The
-                # description-only signal that motivated this survey was worth
-                # only 32 further rows corpus-wide, and ~85% of naive description
-                # matches are false (a staff req that says "internship experience
-                # does not apply", or a clinician who "supports the dietetic
-                # internship program").
-                #
-                # Non-English student vocabularies were measured and are
-                # deliberately NOT carried: German `ausbildung|duales studium|
-                # dhbw` (92 rows), French `alternance|stagiaire|apprenti` (48),
-                # CJK `实习生|인턴|インターンシップ` (43). 183 rows stay NULL as a
-                # result. Note the `werkstudent|praktikum|praktikant` rule above
-                # predates this block and still carries German; left as found.
-                #
-                # "Working Student" is the English rendering German and Nordic
-                # tenants use when the title itself is in English, so it stays.
-                {"from": "@title",
-                 "re": "student worker|working student|student trainee|student assistant"
-                       "|student placement|placement student|industrial placement"
-                       "|student employee",
-                 # NOT `student researcher`: the research rule above documents
-                 # that phrase as 1 row corpus-wide and a career title, not a
-                 # student one. test_workday_research_is_a_research_flavoured_internship
-                 # pins it.
-                 "is": "intern"},  # 24
-                # Finance-sector naming: an internship that never says "intern".
-                # 0 rows in the corpus today because no bulge-bracket tenant has
-                # a live list feed -- Citi's 3,307 detail rows carry 8 of these
-                # and its list leg is not configured. Cheap to carry, and the
-                # bucket is unreachable without it the day one is added.
-                {"from": "@title",
-                 "re": "summer analysts?|summer associates?|summer scholars?|spring insight"
-                       "|off.?cycle analyst|vacation scheme|vacation work"
-                       "|sandwich (year|placement)|year in industry|placement year",
-                 "is": "intern"},  # 0 live, forward cover
-                # US DoD SkillBridge: a real internship for transitioning service
-                # members. 11 rows already say "Internship" in the title and are
-                # caught above; these 44 say only "SkillBridge". Retarget to
-                # `student_program` if the product means "student" strictly.
-                {"from": "@title", "re": "skillbridge", "is": "intern"},  # 44
-                {"from": "@externalPath", "re": "skillbridge", "is": "intern"},
-                # Early-career program branding. Title only: the slug carries no
-                # early-career signal on any corpus row (0 slug-only hits), so a
-                # slug leg would be dead weight.
-                {"from": "@title",
-                 "re": "early career|early talent|emerging talent|entry.level program",
-                 "is": "student_program"},  # 82
-                {"from": "@title",
-                 "re": "graduate (scheme|analyst|trainee|development program)|school leaver"
-                       "|leadership development program",
-                 "is": "student_program"},  # 5
-                # LAST RESORT: the site is known for free from the request URL,
-                # so this costs nothing, but it is weak recall and fires only
-                # when title and slug are both silent. Boeing's INTERN site also
-                # carries non-internship pathway programs (workday.md:44-46), so
-                # this is the first rule to drop if it proves noisy.
-                {"from": "$site", "re": "intern", "is": "intern"},  # 38
-                {"from": "$site",
-                 "re": "campus|campus_careers|graduate_careers|university_talent"
-                       "|workday_early_career",
-                 "is": "student_program"},  # 41 + 5 + 4 + 5 + 1
-                # LAST: part-time is the weakest signal of the set (closed
-                # `timeType` field but only 29.1% fill at list-time, vs 98.9%
-                # on Detail -- workday.md:79-83) and never overlaps with the
-                # intern/coop/student_program buckets above, so it can safely
-                # sit after them without a priority conflict.
-                {"from": "@timeType", "re": "part time", "is": "part_time"},  # 103
-                {"from": "@title",
+            # Drops 4,026: 3,901 to `pharmacy|pharmacist` (`Pharmacy Intern`,
+            # one tenant), 118 to `rns?|nurses?|nursing|bsn` (`New Grad RN
+            # Resident - <unit>`, one hospital system), 6 to the new-grad `not`
+            # list, 1 to a real gap. Six of those 124 new-grad drops are rows
+            # the Workday table got WRONG -- `University Talent Acquisition
+            # Business Partner`, `Vice President, Asia Early Career Program
+            # Manager` -- which its `university talent` and `launch program`
+            # rules had no recruiter or programme-operator veto for.
+            #
+            # Adds 426: 328 from `grad(uate|uates|s)?|ncg` where the old rule
+            # needed an exact phrase (`Chemist 1 New College Grad`), 61 from
+            # bare `apprentice`, 23 from bare `students?`, 12 from the
+            # development-program group, 2 from `early careers?`.
+            #
+            # KNOWN REGRESSIONS, deliberately carried and pinned by tests:
+            # `industrial placement` (1 row) has no shared pattern; bare
+            # `apprentice` re-admits 61 trades rows this vendor measured and
+            # excluded. Both belong upstream in the shared doc's `not` lists,
+            # not in a per-vendor override.
+            #
+            # TITLE ONLY. The two `@externalPath` slug legs went with the old
+            # table: re-measured they add 45 rows, 20 of them junk the slug's
+            # hyphenation smuggles past every `not` list (`J1-Students-Only`,
+            # `Pharmacy-Intern`) or the location segment invents outright
+            # (`/job/Zagreb-Grad-Zagreb-Croatia/` -> new_grad; "Grad" is
+            # Croatian for city). Normalised the honest yield is 22, and 15 are
+            # non-English titles whose slug is English. US-only: 7, none CS.
+            "job_type": {"classify": _SHARED_JOB_TYPE},
+            # The weakest signal of the set: a closed `timeType` field, only
+            # 29.1% filled at list-time vs 98.9% on detail (workday.md).
+            "part_time": {"classify": [
+                {"from": {"fallback": ["@jobPostingInfo.timeType", "@timeType"]},
+                 "re": "part time", "is": "yes"},  # 103
+                {"from": {"fallback": ["@title", "@jobPostingInfo.title"]},
                  "re": "part.?time|per diem|prn|casual",
-                 "is": "part_time"},  # workday.md:86-89, blank-timeType rows
-                # `research` has no Workday signal at all -- no field, no title
-                # bucket -- so this vendor never emits it. Absence is the
-                # honest answer; it arrives with a vendor whose doc measures one.
-            ]},
+                 "is": "yes"},  # workday.md, blank-timeType rows
+            ], "default": "unknown"},
             "remote": {"classify": [
-                # THE TRAP (workday.md:99-101): the presence of "remote" in
-                # remoteType is not remote-positive. "Office Worker (NOT Remote)"
-                # is the canonical example. It terminates at `unknown` rather
-                # than being a `not` clause, because a structured on-site
-                # statement must also stop the weaker title rules below from
-                # firing on the same row.
+                # THE TRAP (workday.md): the presence of "remote" in remoteType
+                # is not remote-positive. "Office Worker (NOT Remote)" is the
+                # canonical example. It terminates at `unknown` rather than
+                # being a `not` clause, because a structured on-site statement
+                # must also stop the weaker title rules below from firing.
                 {"from": "@remoteType", "re": "not remote", "is": "unknown"},
-                # Hybrid before remote, so "Remote/Hybrid" (1) lands on hybrid.
+                # Hybrid before remote, so "Remote/Hybrid" (99) lands on hybrid.
                 {"from": "@remoteType", "re": "hybrid", "is": "hybrid"},  # 190
                 {"from": "@remoteType", "re": "remote", "is": "yes"},  # 60
-                # 97.4% fill but coarse: multi-site postings collapse to a
-                # rollup like "3 Locations" (487/187) instead of naming the
-                # sites. Those rows simply match nothing, so the location
-                # patterns are self-limiting to single-location rows.
-                {"from": "@locationsText", "re": "hybrid", "is": "hybrid"},
-                {"from": "@locationsText",
+                # Multi-site postings collapse to a rollup like "3 Locations"
+                # instead of naming the sites. Those rows match nothing, so the
+                # location patterns are self-limiting to single-location rows.
+                {"from": {"fallback": ["@jobPostingInfo.location", "@locationsText"]},
+                 "re": "hybrid", "is": "hybrid"},
+                {"from": {"fallback": ["@jobPostingInfo.location", "@locationsText"]},
                  "re": "remote|virtual|work at home|teleworker|nationwide",
                  "is": "yes"},
                 # Low recall, high precision. "Remote Sensing Software Engineer"
                 # (3) is satellite imagery, not a work location.
-                {"from": "@title", "re": "hybrid", "is": "hybrid"},
-                {"from": "@title", "re": "remote|virtual|work from home",
+                {"from": {"fallback": ["@title", "@jobPostingInfo.title"]},
+                 "re": "hybrid", "is": "hybrid"},
+                {"from": {"fallback": ["@title", "@jobPostingInfo.title"]},
+                 "re": "remote|virtual|work from home",
                  "not": "remote sensing", "is": "yes"},  # 456 + 62 + 14
             ], "default": "unknown"},
         },
@@ -1190,6 +1717,39 @@ COMPANY_JSON: dict[str, dict] = {
             "location_raw": "@normalized_location",
             "description_html": "@description",
             "requisition_id": "@id_icims",
+            # DERIVED -- measured on amazon.md, 445 rows. Co-op first, as everywhere:
+            # 2 of the 6 co-op titles also say Intern (md:27-28).
+            "job_type": {"classify": [
+                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 6, md:23
+                # md:15 -- bare /intern/ also matches 234 here, 0 false positives,
+                # but the boundaries are kept: 445 rows cannot rule the trap out.
+                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 234, md:11
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@title",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
+            # Closed 2-value set, md:30. NOT `is_intern` / `university_job`:
+            # both keys exist and are null on 445/445 (md:17-19).
+            "part_time": {"classify": [
+                {"from": "@job_schedule_type", "re": "part.?time", "is": "yes"},  # 160, md:32
+            ], "default": "unknown"},
             # posted_date is rendered, not ISO: "August 13, 2026".
             "published_at": {"date": "@posted_date", "fmt": "%B %d, %Y"},
             "published_at_precision": "date",
@@ -1240,6 +1800,40 @@ COMPANY_JSON: dict[str, dict] = {
             "company_raw": "Apple",
             "location_raw": {"join": ["@locations[0].city", "@locations[0].stateProvince", "@locations[0].countryName"]},
             "description_html": "@jobSummary",
+            # DERIVED -- measured on apple.md, 4,656 rows.
+            "job_type": {"classify": [
+                # 0 live (md:27); forward cover, and the boundaries cost nothing.
+                {"from": "@postingTitle", "re": "co-?ops?", "is": "coop"},  # 0, md:27
+                # Boundaries reject 12 Internal/International/Internationalization
+                # titles (md:20-21). The plural tail is load-bearing: md:15 notes
+                # Internships-titled reqs are missed entirely without it.
+                {"from": "@postingTitle", "re": "intern(s|ship|ships)?", "is": "intern"},  # 25, md:16
+                # NO part_time rule. `standardWeeklyHours` is the only signal
+                # (88 rows under 40, md:30-39) and it is a JSON *number*; the
+                # classify engine skips any non-str value (json-api.py `_field`),
+                # so a rule on it could never fire. It also needs a < threshold,
+                # which the bare-alternation dialect cannot express.
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@postingTitle",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
             "published_at": {"date": "@postDateInGMT"},
             "published_at_precision": "exact",
         },
@@ -1305,45 +1899,57 @@ DETAIL_A: dict[str, dict] = {
             "workplace_type_raw": "@workLocationOption",
             "published_at": {"epoch_s": "@postedTs"},
             "published_at_precision": "exact",
-            # DERIVED -- measured on Eightfold's own corpus
-            # (doc/raw_postings/eightfold.md, 7,949 rows / 6 boards).
+            # DERIVED -- the SHARED table in doc/raw_postings/regex/job_type.md,
+            # rebound onto `name`, this vendor's title key. It replaced the
+            # Eightfold-measured table on 2026-08-27 after a head-to-head over
+            # all 9,719 distinct postings in raw_posting across the 6 boards.
             #
             # `name` is the ONLY intern signal in the payload: no employment-type
-            # enum, no metadata bag, and no description at all (md:90-92).
-            "job_type": {"classify": [
-                # Co-op first for consistency, though it is effectively absent
-                # here -- and unusually the bounded and unbounded regexes agree
-                # exactly, so there is no Cooper St trap in this corpus (md:122).
-                {"from": "@name", "re": "co-?ops?", "is": "coop"},  # 2, md:124
-                # md:93-102 warns that word boundaries MISS real interns here,
-                # because Qualcomm joins title tokens with underscores
-                # ("Intern_Systems") and `_` is a word character in POSIX regex,
-                # so Postgres `\M` fails on them. That warning is about the
-                # SURVEY's dialect and does not apply to this one:
-                # classify.matcher() wraps patterns in an explicit
-                # `(?![a-z0-9])` lookaround, and `_` is not in that class -- so
-                # the plain pattern already matches all of Intern_Systems,
-                # Intern_OneIT and Internship_SW_CDC while still rejecting the
-                # 34 Internal / International rows. Do NOT add the underscore
-                # alternative md:100 prescribes; test_classify_rules.py pins
-                # both halves of this.
-                {"from": "@name", "re": "intern(s|ship|ships)?", "is": "intern"},  # 151, md:101
-                # md:104-106 measures `new grad|graduate program|university|
-                # campus|early career|apprentice|trainee|student` together (95).
-                # Only the phrase forms are transcribed -- bare `student` alone
-                # would claim "Student Intern" for the wrong bucket, and bare
-                # `university|campus` is the pair iCIMS measured as recruiter
-                # noise (icms.md:52-54). "Early Careers - ..." is SLB's program
-                # prefix and the highest-yield of the phrases (md:106).
-                {"from": "@name",
-                 "re": "new grads?|graduate programs?|early careers?"
-                       "|apprentices?|apprenticeships?",
-                 "is": "student_program"},  # 44, md:104-106
-                # No part_time rule: md:127-131 calls it **Undetectable** -- no
-                # employment-type field exists and `name` matches part-time on
-                # 4 rows in 7,949. A bucket the survey measures nothing for gets
-                # no rule.
-            ]},
+            # enum, no metadata bag, and no description at all (md:90-92), so
+            # the shared table's title-only reading costs this vendor nothing.
+            #
+            # Typed 235 rows before, 248 after, and on the 224 both type they
+            # agree on the label EVERY time -- 0 disagreements.
+            #
+            # Adds 16 new_grad (32 -> 48), every one from a pattern the old
+            # table did not carry: 8 to `campus hires?` (Qualcomm's whole
+            # "2026 Campus Hire_ Engineer_ HW" / "2027 Campus Hire_..." block),
+            # 7 to `grad(uate|uates|s)?|ncg` where the old rule needed the
+            # exact phrase `new grads?` or `graduate programs?` ("New Graduate-
+            # AI SW SDK Engineer", "Graduate Geosolutions Geophysicist",
+            # "Technology Consultant: Graduate Opportunities"), and 1 to
+            # `rotational program` ("Equity Research - Associate, Rotational
+            # Program (New York)").
+            #
+            # Moves 8 intern -> research, a REFINEMENT and not a loss: the old
+            # table had no research tier, so "Research Intern - Self-Improving
+            # AI" landed on plain intern.
+            #
+            # Voids 6 to the excluded tier, 3 of which the old table typed as
+            # intern: "Applied Science PhD Intern - Clipchamp" and two siblings
+            # are doctoral-enrolment-gated (job_type.md:16), plus 2 PhD/postdoc
+            # rows and 1 nurse row that were already untyped. Nothing else is
+            # dropped -- there are no plain gaps.
+            #
+            # `coop` (4) and `student` (4) are unchanged: the old table already
+            # carried those two rules from this same shared doc verbatim.
+            #
+            # STILL NO part_time rule. md:127-131 calls it **Undetectable** --
+            # no employment-type field exists and `name` matches part-time on
+            # 4 rows in 7,949 -- and the shared table has no part_time tier
+            # either, so the bucket keeps no rule.
+            #
+            # md:93-102 warns that word boundaries MISS real interns here,
+            # because Qualcomm joins title tokens with underscores
+            # ("Intern_Systems") and `_` is a word character in POSIX regex, so
+            # Postgres `\M` fails on them. That warning is about the SURVEY's
+            # dialect and does not apply to this one: classify.matcher() wraps
+            # patterns in an explicit `(?![a-z0-9])` lookaround, and `_` is not
+            # in that class -- so the shared `intern(s|ship|ships)?` still
+            # reaches all 7 underscore rows while rejecting the 38 Internal /
+            # International ones. Do NOT add the underscore alternative md:100
+            # prescribes; test_classify_rules.py pins both halves of this.
+            "job_type": {"classify": _job_type_from("@name")},
             # A 100%-fill closed 3-value enum, but `onsite` is the UNSET DEFAULT
             # rather than a statement: Microsoft is 2,228 of 2,228 `onsite`, zero
             # hybrid, zero remote, which is not a credible description of its
@@ -1411,6 +2017,37 @@ DETAIL_A: dict[str, dict] = {
             "location_raw": {"join": ["@location.city", "@location.state"]},
             "description_html": "@description",
             "employment_type": "@employmentStatusLabel",
+            # DERIVED -- measured on vendors-tbd/bamboohr.md, and the corpus is only
+            # 16 rows. Every count below is an existence statement, not a rate.
+            "job_type": {"classify": [
+                {"from": "@jobOpeningName", "re": "co-?ops?", "is": "coop"},  # 0, md:41, forward cover
+                {"from": "@jobOpeningName", "re": "intern(s|ship|ships)?", "is": "intern"},  # 1, md:21
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@jobOpeningName",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
+            # "Part-Time Temporary" (2), md:45-47. NOT `description`: md:36-37
+            # measures 0 hits on part-time there and 0 on intern (md:30-32).
+            "part_time": {"classify": [
+                {"from": "@employmentStatusLabel", "re": "part.?time", "is": "yes"},  # 2, md:46
+            ], "default": "unknown"},
             "published_at": {"date": "@datePosted"},
             "published_at_precision": "date",
             "source_active": {"eq": ["@jobOpeningStatus", "Open"]},
@@ -1509,6 +2146,7 @@ DETAIL_A: dict[str, dict] = {
             #   requisitionFlexFields:"Job Type" -- 6,382 rows, ONE board
             #      (md:41-45). A rule keyed on it is a rule about one company.
             #   StudyLevel -- 0.16% fill, 40 rows. md:47 says not usable.
+<<<<<<< Updated upstream
             "job_type": {"classify": [
                 # Co-op first, as on every vendor. Only 2 rows here, and one of
                 # them ("Summer Intern Co-op Conversion") also matches the
@@ -1547,6 +2185,48 @@ DETAIL_A: dict[str, dict] = {
                 # false-positive surface (md:72).
                 {"from": "@JobSchedule", "re": "part.?time", "is": "part_time"},  # 724, md:69
             ]},
+=======
+            #
+            # The TABLE is the shared one in doc/raw_postings/regex/job_type.md,
+            # rebound onto `Title`. It replaced the Oracle-measured table on
+            # 2026-08-27 after a head-to-head over all 14,129 distinct postings
+            # in raw_posting. Typed 222 rows before, 469 after -- the largest
+            # gain of any vendor swapped so far -- and on the 213 both type they
+            # agree on the label EVERY time, 0 disagreements.
+            #
+            # 218 of the 247 adds are ONE rule the old table did not carry:
+            # `summer analysts?|summer associates?` (job_type.md:33), an
+            # internship that never says "intern". Two investment-bank boards
+            # spell their entire summer programme that way and were invisible
+            # here -- hdpc (Morgan Stanley) 172 rows, jpmc 46, titles like
+            # "2027 | APEJ | Sydney | Operations | Summer Analyst".
+            #
+            # The rest: 23 student from bare `students?` where the old table
+            # had only `apprentices?` ("Student - Mfg", "Placement Student -
+            # Customer Engineering", "School to Work - Engineering (Student)"),
+            # 11 new_grad from `grad(uate|uates|s)?|ncg` where it needed an
+            # exact phrase ("Fresh Graduate", "Recent Grad/Full Time"), and
+            # 4 intern -> research, a refinement the old table had no tier for.
+            #
+            # Drops 5, all to a `not` list or the excluded tier: "Intern -
+            # Pharmacy" and "AI&I/Data Science Intern (PhD in progress)" are
+            # licensure- and doctoral-gated (job_type.md:14,16); three "Early
+            # Careers Recruiter" / "Early Career Development Program Manager"
+            # rows run the channel rather than enter it (job_type.md:71-72),
+            # which the old table had no veto for and typed wrong.
+            #
+            # The 267 Internal / International rows md:26-27 calls the largest
+            # such gap of any vendor stay rejected: the shared `intern` pattern
+            # carries the same boundaries the measured one did.
+            "job_type": {"classify": _job_type_from("@Title")},
+            # From JobSchedule -- a closed two-value field, null on the 7,006 rows
+            # of the one board that never sets it, which simply means no rule
+            # fires (md:67-70). The title agrees on 925 of its own 942 hits, so
+            # it adds nothing worth its false-positive surface (md:72).
+            "part_time": {"classify": [
+                {"from": "@JobSchedule", "re": "part.?time", "is": "yes"},  # 724, md:69
+            ], "default": "unknown"},
+>>>>>>> Stashed changes
             # WorkplaceTypeCode, not WorkplaceType: same 3,451 rows, but the
             # code is machine-readable and closed, while the label spells a
             # fourth value ("On-site with Flexibility") that maps onto
@@ -1604,6 +2284,45 @@ DETAIL_A: dict[str, dict] = {
             "locations_extra": {"fallback": [{"rest": "@workLocations"}, {"rest": "@locations"}]},
             "description_html": {"fallback": [{"concat": ["@description.role", "@description.company"]}, "@description"]},
             "employment_type": "@employmentType.label",
+            # DERIVED -- measured on vendors-tbd/rippling.md, 448 rows. Read the two
+            # encoding traps at md:14 before changing anything here.
+            "job_type": {"classify": [
+                {"from": "@name", "re": "co-?ops?", "is": "coop"},  # 0, md:84, forward cover
+                # Boundaries are the whole rule: 1 true positive against 2
+                # International false positives is a 67% error rate without them
+                # (md:56-59). NOT `employmentType` -- md:53-55 measures `TEMP` as
+                # "Temporary / Intern", one enum value for two concepts, and says
+                # outright not to map it to intern without a title check.
+                {"from": "@name", "re": "intern(s|ship|ships)?", "is": "intern"},  # 1, md:54
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@name",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
+            # md:88-89. The alternation covers both encodings the survey shows:
+            # the human label ("Salaried, part-time") and the bare code, since
+            # md:60-63 warns `label` is null on 2 rows and the id string is the
+            # documented fallback.
+            "part_time": {"classify": [
+                {"from": "@employmentType.label",
+                 "re": "part.?time|salaried_pt|hourly_pt", "is": "yes"},  # 2, md:89
+            ], "default": "unknown"},
             "published_at": {"date": "@createdOn"},
             "published_at_precision": "exact",
         },
@@ -1692,6 +2411,43 @@ DETAIL_B: dict[str, dict] = {
             "location_raw": {"first": {"map": "@locations", "value": "@name"}},
             "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
             "employment_type": "@job.employmentType",
+            # DERIVED -- measured on vendors-tbd/gem.md, 236 rows. Read the corpus-size
+            # warning at md:14 before trusting any count here.
+            "job_type": {"classify": [
+                # md:73-75 -- 0 observed; the doc's instruction is to carry the
+                # boundary-anchored form from Greenhouse rather than invent one.
+                {"from": "@title", "re": "co-?ops?", "is": "coop"},  # 0, md:74
+                # `INTERN` is a first-class enum member and the doc prefers it
+                # outright: it needs no false-positive handling (md:47-48). The
+                # title regex agrees 4/4 and finds nothing the enum misses.
+                {"from": "@job.employmentType", "re": "intern", "is": "intern"},  # 4, md:43
+                # NOT `fellow`: md:53-54 measures `Governance & Policy Fellow` as
+                # FULL_TIME and warns against folding it in on the strength of the word.
+                {"from": "@title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 4, md:56
+                # NO part_time rule. md:77-80 is explicit: `employmentType` has no
+                # PART_TIME value in 236 rows and the title matches on 0, so whether
+                # the enum even defines the value is unknown. Do not assume it.
+                # Student: enrolled, but not a fixed-term internship. Shared
+                # across vendors from doc/raw_postings/regex/job_type.md -- the
+                # intern and co-op rules above still win a title saying both.
+                # The `not` list is the operator/gate cohort measured corpus-wide:
+                # staff who serve students, roles that run the program, graduate
+                # clinical rotations, trade pre-hire training, and nationality or
+                # visa gates. A `not` hit skips this rule rather than ending the
+                # scan, so those rows stay reachable by a later signal.
+                {"from": "@title",
+                 "re": "students?|apprentice(s|ship|ships)?",
+                 "not": "student affairs|student success|student accounts"
+                        "|student accountability|student engagement"
+                        "|student collective|student event"
+                        "|community (manager|coordinator)|editorial (lead|manager)"
+                        "|marketing manager|program coordinator"
+                        "|recruiters?|recruiting|recruitment|talent acquisition"
+                        "|externs?|externship|clerkship|student rotation"
+                        "|pre.employment training|bpet"
+                        "|nationals only|j1 students",
+                 "is": "student"},
+            ]},
             "workplace_type_raw": "@job.locationType",
             "requisition_id": "@job.requisitionId",
             "published_at": {"epoch_s": "@firstPublishedTsSec"},
@@ -1858,21 +2614,18 @@ DETAIL_B: dict[str, dict] = {
                 # Werkstudent (m/w/d)" is tagged `en-GB`, because the code
                 # describes the ad, not the title. Match unconditionally.
                 #
-                # Leading `[a-z]*` on the German stems is load-bearing: these
-                # compound, and matcher()'s left boundary rejects the compound
-                # form otherwise -- "Pharmaziepraktikum" and "Pflichtpraktikum"
-                # both fail a bare `praktikum`. Pflichtpraktikum is a *mandatory*
-                # university placement, i.e. always a student role (md:63-64).
-                {"from": "@name", "re": "[a-z]*praktikum|[a-z]*praktikant[a-z]*", "is": "intern"},  # 26, md:63
-                # Term-time part-time student work (md:65). `werkstudent[a-z]*`
-                # for the same reason ashby needs it: WerkstudentIn and
-                # Werkstudent/in carry no right boundary.
-                {"from": "@name", "re": "werkstudent[a-z]*|working student", "is": "intern"},  # 23, md:65
-                {"from": "@name", "re": "est[aá]gi[a-z]*", "is": "intern"},  # 12, md:68, pt-BR
-                # Non-Latin scripts are exactly why classify.py uses an explicit
-                # lookaround rather than `\\b` -- this pattern is unmatchable
-                # under a word-boundary escape.
-                {"from": "@name", "re": "นักศึกษาฝึกงาน", "is": "intern"},  # 7, md:68, th
+                # ENGLISH-ONLY. Four non-English intern rules were dropped here:
+                #   [a-z]*praktikum|[a-z]*praktikant[a-z]*   26, md:63  (de)
+                #   werkstudent[a-z]*                        part of 23, md:65 (de)
+                #   est[aá]gi[a-z]*                          12, md:68  (pt-BR)
+                #   นักศึกษาฝึกงาน                            7, md:68  (th)
+                # Their surveys in smartRecruiters.md are unchanged and still
+                # measure these; restore from there if non-English is re-enabled.
+                # `working student` stays -- it is the English rendering German
+                # and Nordic tenants use when the title itself is in English.
+                # The 23 at md:65 counted werkstudent and working student
+                # together, so this rule is now unmeasured on its own.
+                {"from": "@name", "re": "working student", "is": "intern"},
                 # md:47 measures `new grad|graduate program|university|campus|
                 # early career` as one number (118), so the bare
                 # `university|campus` share is unmeasured -- and where iCIMS did
@@ -1880,9 +2633,11 @@ DETAIL_B: dict[str, dict] = {
                 # recruiter noise (icms.md:52-54). Only the phrase forms are
                 # transcribed; the count is this corpus, not md:47's union.
                 {"from": "@name",
-                 "re": "new grads?|graduate programs?|early careers?"
-                       "|apprentices?|apprenticeships?",
-                 "is": "student_program"},  # 4, md:47-48
+                 "re": "apprentices?|apprenticeships?",
+                 "is": "student"},
+                {"from": "@name",
+                 "re": "new grads?|graduate programs?|early careers?",
+                 "is": "new_grad"},  # 4, md:47-48
                 # The German apprenticeship, and the largest single non-English
                 # bucket in the corpus. AFTER the intern tokens above, not
                 # before: "Praktikum - HR Ausbildung, Recruiting &
@@ -1891,20 +2646,22 @@ DETAIL_B: dict[str, dict] = {
                 # compound, as above -- "Berufsausbildung" is the dominant form
                 # and a bare `ausbildung` misses every one of them.
                 #
+                # ENGLISH-ONLY: the German apprenticeship rule
+                # `[a-z]*ausbildung` -> `student` (84, md:66) was dropped.
                 # md:66 counts `ausbildung|abschlussarbeit|referendar` together
-                # (90), but they are three unrelated tracks -- apprenticeship,
-                # thesis, legal clerkship -- so only the one with an unambiguous
-                # bucket is transcribed and the count is this corpus, not md's
-                # union. abschlussarbeit (3) and referendar (1) stay unread.
-                {"from": "@name", "re": "[a-z]*ausbildung", "is": "student_program"},  # 84, md:66
-                # LAST: part-time, from the enum only. `name` is DO NOT USE --
-                # 246 hits, 107 of them typeOfEmployment=permanent, because
-                # "Full/Part time" advertises *either* schedule (md:98-100); so
-                # is jobDescription, 748 of its 1,221 hits being permanent rows
-                # (md:104-110). Trust the field, not the corpus rate: 4,846 of
-                # the 4,877 are dominos (md:88-90).
-                {"from": "@typeOfEmployment.id", "re": "part.?time", "is": "part_time"},  # 4,877, md:91
+                # (90); the other two tracks -- thesis (3) and legal clerkship
+                # (1) -- were never transcribed and stay unread. smartRecruiters.md
+                # still measures all three; restore from there if non-English
+                # is re-enabled.
             ]},
+            # From the enum only. `name` is DO NOT USE -- 246 hits, 107 of them
+            # typeOfEmployment=permanent, because "Full/Part time" advertises
+            # *either* schedule (md:98-100); so is jobDescription, 748 of its
+            # 1,221 hits being permanent rows (md:104-110). Trust the field, not
+            # the corpus rate: 4,846 of the 4,877 are dominos (md:88-90).
+            "part_time": {"classify": [
+                {"from": "@typeOfEmployment.id", "re": "part.?time", "is": "yes"},  # 4,877, md:91
+            ], "default": "unknown"},
             # `location.remote` / `location.hybrid` are real JSON booleans at
             # 100% fill and mutually exclusive -- remote=true,hybrid=true is 0
             # rows, so there is no ambiguity to resolve. The survey calls this

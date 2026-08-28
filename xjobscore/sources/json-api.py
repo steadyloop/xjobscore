@@ -765,10 +765,28 @@ async def harvest(
             # `list_total=NULL` on every full pass and the probe could never
             # find a stored baseline to compare against.
             list_total=observed_total if isinstance(observed_total, int) else None,
+            # Two ways to earn a full listing, and both require `not truncated`.
+            #
             # A forced all-detail pass is the reconciliation boundary for a
-            # time-bounded reuse policy such as Gem's. Only advance the clock
-            # when every list and detail request completed successfully.
-            full_listing=bool(options is not None and options.force_full and not truncated),
+            # time-bounded reuse policy such as Gem's.
+            #
+            # A `count_probe` source earns one by enumerating the whole board,
+            # exactly as the no-detail return above does. Without this clause a
+            # vendor that configures both -- workday, since its detail leg came
+            # back gated on 2026-08-26 -- would report `full_listing=False` on
+            # every ordinary poll, so the probe would never store a baseline to
+            # compare the next `total` against and the 24h reconciliation would
+            # never fire.
+            #
+            # `not truncated` is load-bearing beyond tidiness here: a detail
+            # request that exhausts its retries DROPS that row from `items`
+            # (see the `continue` below), so a poll that claimed to be a full
+            # listing while a detail leg failed would present a live posting as
+            # absent. `truncated` covers detail_failed and detail_capped, which
+            # is exactly the guard that needs.
+            full_listing=(
+                bool(count_probe) or bool(options is not None and options.force_full)
+            ) and not truncated,
         )
 
     batch = detail.get("batch")
@@ -912,15 +930,27 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     context.update(zip(config.get("key_parts", ()), feed.key.split("/", len(config.get("key_parts", ())) - 1)))
     context.update(settings)
     fields = {key: _value(value, item.payload, context) for key, value in config.get("fields", {}).items()}
-    fields.setdefault("title", "")
-    fields.setdefault("url_posting", "")
-    fields.setdefault("fidelity", "origin")
-    fields.setdefault("state", "open")
-    fields.setdefault("published_at_precision", "unknown")
+    # `setdefault` fills a key the config never mapped; these fill a key it
+    # mapped to a payload that turned out not to carry it. `fields` above comes
+    # from a comprehension over every configured field, so such a field arrives
+    # present-and-None and `setdefault` sees nothing to do -- all 27 configs map
+    # `title`, which is why its default has never once fired despite backing a
+    # NOT NULL column. Workday listings are where that surfaced: a requisition
+    # pulled between the list walk and the detail fetch comes back as a bare
+    # `externalPath` with no title, and the insert died on the constraint.
+    for key, absent in (
+        ("title", ""),
+        ("url_posting", ""),
+        ("fidelity", "origin"),
+        ("state", "open"),
+        ("published_at_precision", "unknown"),
+        ("locations_extra", []),
+        ("content_sections", []),
+    ):
+        if fields.get(key) is None:
+            fields[key] = absent
     if fields.get("published_at") is None and fields.get("published_at_precision") in {"exact", "date"}:
         fields["published_at_precision"] = "unknown"
-    fields.setdefault("locations_extra", [])
-    fields.setdefault("content_sections", [])
     fields["source_extra"] = {
         key: _value(value, item.payload, context) for key, value in config.get("extra", {}).items()
     }

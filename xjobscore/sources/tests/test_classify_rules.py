@@ -70,8 +70,8 @@ def test_a_missing_or_non_string_field_is_skipped_not_raised(payload):
 def test_rules_read_context_not_only_payload():
     """`$site` is known for free at list-call time because the site is part of
     the request URL, so the feed key is a legitimate signal source."""
-    spec = {"classify": [{"from": "$site", "re": "campus", "is": "student_program"}]}
-    assert resolve(spec, {}, {"site": "Campus"}) == "student_program"
+    spec = {"classify": [{"from": "$site", "re": "campus", "is": "new_grad"}]}
+    assert resolve(spec, {}, {"site": "Campus"}) == "new_grad"
 
 
 def test_boundaries_reject_a_substring_inside_a_longer_word():
@@ -123,15 +123,19 @@ def test_an_unmatched_name_does_not_leak_a_sibling_entry():
     assert pick("Location Type", {"metadata": BAG}) is None
 
 
-# workday-list, from doc/raw_postings/workday.md ---------------------------
+# workday, from doc/raw_postings/workday.md ---------------------------
 
-WORKDAY = json_api.CONFIGS["workday-list"]["fields"]
+WORKDAY = json_api.CONFIGS["workday"]["fields"]
 
 
 def workday_job_type(title="", external_path="", site="", time_type=""):
     return resolve(WORKDAY["job_type"],
                    {"title": title, "externalPath": external_path, "timeType": time_type},
                    {"site": site})
+
+
+def workday_part_time(title="", time_type=""):
+    return resolve(WORKDAY["part_time"], {"title": title, "timeType": time_type})
 
 
 def workday_remote(remote_type="", locations_text="", title=""):
@@ -142,11 +146,28 @@ def workday_remote(remote_type="", locations_text="", title=""):
 @pytest.mark.parametrize(("title", "expected"), [
     ("Software Engineering Intern", "intern"),                      # md:17, 555 hits
     ("Metrology Co-Op", "coop"),                                    # md:61, 36 hits
-    ("Werkstudent (m/w/d) im Bereich E-Commerce", "intern"),        # md:23, German tenants
-    ("Praktikanten Marketing", "intern"),                           # md:19
-    ("Auto Damage Trainee (Field)", "intern"),                      # md:22
-    ("Software Engineer, New Grad", "student_program"),             # md:18, 134 hits
-    ("Apprentice Electrician", "student_program"),                  # md:20, 31 hits
+    # ENGLISH-ONLY: md:23 and md:19 still measure these as German intern rows,
+    # but the werkstudent/praktikum stems were dropped from the rule table, so
+    # they now fall through unclassified, and bare `trainee` was dropped too:
+    # on its own it is on-the-job training for a full-time hire (GEICO claims,
+    # BofA advisors), not a student opportunity. A `Graduate Trainee` is still
+    # claimed by the graduate-programme rule and lands in `new_grad`.
+    ("Werkstudent (m/w/d) im Bereich E-Commerce", None),            # md:23, was "intern"
+    ("Praktikanten Marketing", None),                               # md:19, was "intern"
+    ("Auto Damage Trainee (Field)", None),                          # md:22, was "intern"
+    ("ACE Graduate Trainee", "new_grad"),
+    ("Software Engineer, New Grad", "new_grad"),             # md:18, 134 hits
+    # CARRIED REGRESSION. Bare `apprentice` is vocational here -- of the 63 rows
+    # the broad rule claimed, ~3 were student opportunities and the rest were
+    # trades, offshore graduate-entry ops schemes, or bare "Apprentice"
+    # (workday.md:73-89). The shared table's `students?|apprentice(s|ship|ships)?`
+    # (job_type.md:40) re-admits 61 of them. Pinned as `student` so the
+    # regression is visible: the fix is a trades veto in the shared `not` list,
+    # not a Workday override.
+    ("Apprentice Electrician", "student"),
+    ("Student Youth Apprentice", "student"),
+    ("Working Student, Software Engineering", "student"),
+    ("Intern / Working Student", "intern"),
     ("Software Engineer", None),
 ])
 def test_titles_classify_as_the_doc_measured(title, expected):
@@ -170,44 +191,53 @@ def test_the_plural_internships_is_not_missed():
     assert workday_job_type(title="Data Science Internships: Austin - Fall 2026") == "intern"
 
 
-def test_the_slug_carries_the_signal_when_the_title_does_not():
-    """md:34-35 -- 2 known cases where the title was edited after the slug was
-    generated, so externalPath is the only surviving evidence."""
-    assert workday_job_type(
-        title="Mechanical Engineer",
-        external_path="/job/Austin/Mechanical-Engineering---System-Packaging-Intern_R00338192",
-    ) == "intern"
-
-
 def test_coop_wins_over_intern_when_a_title_carries_both():
     """md:57-58 -- co-op titles are a subset of the intern-ish set, so the
     co-op rules must resolve first or every co-op is filed as an internship."""
     assert workday_job_type(title="Co-op Intern, Robotics") == "coop"
 
 
-def test_feed_identity_is_a_last_resort_not_an_override():
-    assert workday_job_type(title="Software Engineer", site="INTERN") == "intern"
-    # A real title signal must not be overridden by the site it came from.
+def test_feed_identity_is_not_read_at_all():
+    """The board names a recruiting channel, not the audience of every row on
+    it. Measured live the `$site` rules were 15-for-35 wrong: `boeing/wd1/intern`
+    alone contributed 15 rows of trade hiring and an International Tax Project
+    Manager. The campus sites' real rows are reachable from the title instead."""
+    assert workday_job_type(title="Software Engineer", site="INTERN") is None
+    assert workday_job_type(title="International Tax Project Manager",
+                            site="INTERN") is None
     assert workday_job_type(title="Software Engineering Co-op", site="INTERN") == "coop"
 
 
+@pytest.mark.parametrize(("title", "expected"), [
+    # Recovered from the title now that `$site` no longer stands in for them.
+    ("Associate Consultant, Launch Program 2027 - Toronto, Canada", "new_grad"),
+    ("Adams Application Software Developer  (Recent Grad 2026)", "new_grad"),
+    ("Recent Graduates - Data Engineer", "new_grad"),
+    # Bare titles the campus sites used to claim carry no audience signal.
+    ("Quantitative Researcher", None),
+    ("Field Analytics Advisor", None),
+])
+def test_workday_new_grad_phrases_replace_the_site_rule(title, expected):
+    assert workday_job_type(title=title) == expected
+
+
 @pytest.mark.parametrize(("time_type", "expected"), [
-    ("Part time", "part_time"),   # md:83, 103 hits
-    ("part TIME", "part_time"),   # md:83 -- case-insensitive, same as Detail
-    ("Full time", None),          # md:82, 1,278 hits -- must not fire
+    ("Part time", "yes"),   # md:83, 103 hits
+    ("part TIME", "yes"),   # md:83 -- case-insensitive, same as Detail
+    ("Full time", "unknown"),     # md:82, 1,278 hits -- must not fire
 ])
 def test_time_type_maps_part_time_as_the_doc_measured(time_type, expected):
-    assert workday_job_type(time_type=time_type) == expected
+    assert workday_part_time(time_type=time_type) == expected
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Pharmacy Technician - Inpatient, PRN", "part_time"),               # md:89
-    ("Bilingual Spanish Part Time Retail Sales Consultant", "part_time"),  # md:87
-    ("Doradca Klienta (Part-time)", "part_time"),                        # md:88
+    ("Pharmacy Technician - Inpatient, PRN", "yes"),               # md:89
+    ("Bilingual Spanish Part Time Retail Sales Consultant", "yes"),  # md:87
+    ("Doradca Klienta (Part-time)", "yes"),                        # md:88
 ])
 def test_title_carries_part_time_when_time_type_is_blank(title, expected):
     """md:85-89 -- blank-timeType rows still carry the signal in the title."""
-    assert workday_job_type(title=title) == expected
+    assert workday_part_time(title=title) == expected
 
 
 @pytest.mark.parametrize(("remote_type", "expected"), [
@@ -253,8 +283,13 @@ def test_remote_never_asserts_a_negative():
 
 @pytest.mark.parametrize(("title", "expected"), [
     ("Research Intern", "research"),                              # md:Research
-    ("PhD Research Intern, Generative AI - 2026", "research"),
-    ("Student Researcher, Robotics", None),  # "research" with no internship signal
+    # "PhD Research Intern, Generative AI - 2026" moved to the exclusion test
+    # below: job_type.md:16 voids a doctoral title before `research` is reached.
+    # Was None under the Workday-measured table. The shared table's bare
+    # `students?` (job_type.md:40) claims it as `student` -- enrolled work, not
+    # a research internship. workday.md:126-130 measures the phrase at 1 row
+    # corpus-wide, so the change is real but not material.
+    ("Student Researcher, Robotics", "student"),
     ("Research Scientist", None),            # same -- a career title, not a student one
 ])
 def test_workday_research_is_a_research_flavoured_internship(title, expected):
@@ -276,6 +311,11 @@ def ashby_job_type(title="", employment_type="", department="", team="", descrip
                                        "descriptionPlain": description})
 
 
+def ashby_part_time(title="", employment_type=""):
+    return resolve(ASHBY["part_time"],
+                   {"title": title, "employmentType": employment_type})
+
+
 def ashby_remote(workplace_type="", location="", secondary=()):
     return resolve(ASHBY["remote"],
                    {"workplaceType": workplace_type, "location": location,
@@ -283,22 +323,63 @@ def ashby_remote(workplace_type="", location="", secondary=()):
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Software Engineering Intern", "intern"),                  # md:32, 276 title hits
-    ("Intern, Financial Planning", "intern"),                   # md:32
-    ("Software Engineer, New Grad", "student_program"),         # md:29, 47 hits
-    ("December 2026 New Graduate Engineer, Software", "student_program"),
-    ("CoDesign & NextGen - New College Grad", "student_program"),
-    ("Software Engineer (2027 University Grad)", "student_program"),
-    ("Quantitative Trader - 2027 Graduate Program", "student_program"),
-    ("Apprentice Electrician", None),                            # vocational, not college
+    ("Software Engineering Intern", "intern"),                   # job_type.md:30
+    ("Intern, Financial Planning", "intern"),
+    ("Software Engineer, New Grad", "new_grad"),                 # job_type.md:55
+    ("December 2026 New Graduate Engineer, Software", "new_grad"),
+    ("CoDesign & NextGen - New College Grad", "new_grad"),
+    ("Software Engineer (2027 University Grad)", "new_grad"),
+    ("Quantitative Trader - 2027 Graduate Program", "new_grad"),
+    ("Summer Analyst, Markets", "intern"),                       # job_type.md:33
     ("Software Engineer", None),
 ])
-def test_ashby_titles_classify_as_the_doc_measured(title, expected):
+def test_ashby_titles_classify_under_the_shared_table(title, expected):
     assert ashby_job_type(title=title) == expected
 
 
-def test_ashby_phd_new_grad_is_not_an_undergraduate_program():
-    assert ashby_job_type(title="Applied Scientist, PhD New Grad") is None
+@pytest.mark.parametrize("title", [
+    "Registered Nurse, ICU",       # job_type.md:15
+    "Pharmacy Technician",         # job_type.md:14
+    "SkillBridge Intern",          # job_type.md:13 -- voids despite "Intern"
+])
+def test_ashby_excluded_tier_voids_licensure_and_service_gated_titles(title):
+    """The Ashby table had no excluded tier at all; the shared one adds 493
+    rows of it on this corpus. SkillBridge is the load-bearing order case --
+    it carries "Intern" and would resolve as one if excluded ran later."""
+    assert ashby_job_type(title=title) is None
+
+
+def test_ashby_apprentice_is_a_student_under_the_shared_table():
+    """BEHAVIOUR CHANGE, 2026-08-26. The Ashby table had no apprentice rule and
+    left this NULL; job_type.md:38 carries a bare `apprentice(s|ship|ships)?`.
+
+    The workday adapter documents the same pattern measuring ~3 student rows in
+    63 (Apprentice Machinist, EEG Technologist Apprentice) and narrows it to
+    `students? (youth )?apprentices?` for that reason. The shared table does
+    not, so a vocational trade title now reads as `student` here. Pinned as the
+    known cost of adopting the shared table verbatim."""
+    assert ashby_job_type(title="Apprentice Electrician") == "student"
+
+
+@pytest.mark.parametrize("title", [
+    "Applied Scientist, PhD New Grad",           # else new_grad, via `grad(uate|uates|s)?`
+    "PhD Research Intern, Generative AI - 2026",  # else research
+    "PhD Software Engineering Intern",            # else intern
+    "Postdoctoral Research Associate",            # the joined word `postdoc` alone misses
+    "Postdoc Researcher",
+    "Doctoral Intern",
+])
+def test_a_doctoral_title_is_voided_whatever_else_it_says(title):
+    """job_type.md:16 -- terminal, and ahead of every typing rule, so a doctoral
+    posting cannot reach intern/research/new_grad on its other words.
+
+    This REVERSES the 2026-08-26 behaviour change: the Ashby table had opened
+    with a terminal `ph\\.?d\\.?` rule, the shared table dropped it, and the shared
+    table has now taken it back. Measured cost corpus-wide is 1 row -- Pika's
+    `Research Intern (BS/MS/PhD)`, the only doctoral-flagged title that also
+    admits a bachelor's student."""
+    assert ashby_job_type(title=title) is None
+    assert workday_job_type(title=title) is None
 
 
 @pytest.mark.parametrize("title", [
@@ -311,7 +392,7 @@ def test_ashby_boundaries_reject_the_66_internal_titles(title):
     assert ashby_job_type(title=title) is None
 
 
-def test_ashby_university_recruiter_is_not_a_student_program():
+def test_ashby_university_recruiter_is_not_a_new_grad():
     """md:37 -- it hires interns, it is not one. `university` and `campus` measure
     only 5 titles between them and 2 are this, so neither bare form has a rule."""
     assert ashby_job_type(title="University Recruiter") is None
@@ -322,66 +403,102 @@ def test_ashby_university_recruiter_is_not_a_student_program():
     "Werkstudent/in Recruiting",
     "Werkstudent Content & Brand (m/w/d)",
 ])
-def test_ashby_werkstudent_matches_with_no_right_boundary(title):
-    """md:Student Programs -- three of the four German rows carry an inflected
-    tail, so the pattern ends in `[a-z]*` rather than at a boundary."""
-    assert ashby_job_type(title=title) == "student_program"
+def test_ashby_werkstudent_is_unclassified_under_english_only(title):
+    """ENGLISH-ONLY. md:43-44 measures these as new_grad and the rule
+    used to carry `werkstudent[a-z]*` with an inflected tail for exactly the
+    three rows below. The German stem is gone, so they fall through. The
+    English `working students?` form still resolves -- see the test below."""
+    assert ashby_job_type(title=title) is None
 
 
 def test_ashby_working_student_is_reachable_by_no_other_signal():
     """md:Student Programs -- the English form of Werkstudent. Four of its
     seven rows say neither Intern in the title nor Intern in employmentType."""
-    assert ashby_job_type(title="Working Student, IT") == "student_program"
+    assert ashby_job_type(title="Working Student, IT") == "student"
 
 
-@pytest.mark.parametrize(("kwargs", "expected"), [
-    ({"title": "Founder's Associate Intern / Working Student"}, "intern"),
-    ({"title": "Working Student- Ecodesign", "employment_type": "Intern"}, "intern"),
-])
-def test_ashby_explicit_internship_evidence_precedes_working_student(kwargs, expected):
-    """Three of the ten measured Working Student/Werkstudent rows carry an
-    explicit internship signal; that narrower evidence must still win."""
-    assert ashby_job_type(**kwargs) == expected
+def test_ashby_explicit_internship_evidence_precedes_working_student():
+    """An internship signal in the TITLE still wins -- the intern rule runs
+    ahead of the student rule. The `employmentType` half of this case is gone
+    with the enum leg; see the title-only test below."""
+    assert ashby_job_type(title="Founder's Associate Intern / Working Student") == "intern"
 
 
-def test_ashby_working_student_outranks_a_mixed_early_talent_department():
-    """Current Statista roles use one mixed bucket for working students,
-    interns, and trainees. The role-specific title is the stronger fact."""
+def test_ashby_reads_only_the_title_and_the_department_intern_tier():
+    """BEHAVIOUR CHANGE, 2026-08-26. The enum, team and description legs were
+    dropped with the Ashby-measured table. `department` survives for the
+    internship tier alone -- see the test below."""
+    assert ashby_job_type(employment_type="Intern") is None
+    assert ashby_job_type(team="Early Career") is None
+    # Only the intern tier is read off department: the student and new_grad
+    # patterns measured 15 rows here of which ~2 were right.
+    assert ashby_job_type(department="Early Career") is None
+    assert ashby_job_type(department="Student Support") is None
+    assert ashby_job_type(
+        description="No degree required; strong undergrads, grad students, and builders welcome.",
+    ) is None
+    # The title alone decides it, whatever the mixed bucket around it says.
     assert ashby_job_type(
         title="Working Student Billing & Receivable Operations",
         department="Working students / Interns / Trainees",
         team="Working students / Interns / Trainees",
-    ) == "student_program"
+    ) == "student"
 
 
-def test_ashby_campus_ambassador_is_the_student_not_the_program_staff():
-    assert ashby_job_type(title="Nolla Skin Campus Ambassador") == "student_program"
+def test_ashby_department_speaks_only_where_the_title_is_silent():
+    """The department leg is LAST, and only for the internship tier. 3 rows
+    corpus-wide, all residency titles filed under an `Internships` department --
+    the department is the only place their internship status is stated."""
+    assert ashby_job_type(title="AI Research Resident",
+                          department="Internships") == "intern"
+    # A title that already classified is not retyped by the department.
+    assert ashby_job_type(title="Software Engineer, New Grad",
+                          department="Internships") == "new_grad"
+
+
+def test_ashby_department_cannot_revive_an_excluded_title():
+    """The excluded tier is terminal, so these stop at the top of the table and
+    never reach the department leg. Moving that rule higher would retype the 2
+    `Internships & Co-ops` SkillBridge rows as coop."""
+    assert ashby_job_type(title="SkillBridge: Production Control Warehouse Specialist",
+                          department="Internships & Co-ops") is None
+
+
+def test_ashby_campus_ambassador_is_the_known_gap():
+    """BEHAVIOUR CHANGE, 2026-08-26 -- the one place the shared table is not a
+    superset of the Ashby one. `campus( growth)? ambassadors?` was an
+    Ashby-only rule and is deliberately NOT carried over as a per-vendor patch;
+    it belongs upstream in job_type.md. 2 rows corpus-wide.
+
+    `campus hires?` (job_type.md:57) does not reach these -- "Campus
+    Ambassador" is not "Campus Hire"."""
+    assert ashby_job_type(title="Nolla Skin Campus Ambassador") is None
     assert ashby_job_type(title="Technical Community Lead, Campus Leaders") is None
 
 
-def test_ashby_exact_description_evidence_reaches_undergraduate_programs():
-    assert ashby_job_type(
-        title="AI Resident",
-        description="No degree required; strong undergrads, grad students, and builders welcome.",
-    ) == "student_program"
-    assert ashby_job_type(
-        title="Student Ambassador",
-        description="Currently enrolled at a university - Bachelors Level",
-    ) == "student_program"
-    assert ashby_job_type(
-        title="Law School Student Ambassador",
-        description="Current JD candidate",
-    ) is None
+def test_ashby_student_titles_no_longer_need_description_evidence():
+    """The bare `students?` rule reaches Student Ambassador from the title, so
+    the two exact description phrases the Ashby table needed are redundant.
+
+    The law-school row is the cost: the Ashby table kept it NULL by requiring
+    a Bachelors-level description phrase, and the shared table's student `not`
+    list has no clause for a JD candidate, so it now reads as `student`."""
+    assert ashby_job_type(title="Student Ambassador") == "student"
+    assert ashby_job_type(title="Law School Student Ambassador") == "student"
+    # AI Resident carried no title signal at all -- only the description did.
+    assert ashby_job_type(title="AI Resident") is None
 
 
 @pytest.mark.parametrize(("payload", "expected"), [
-    ({"title": "Working Student, IT", "employmentType": "FullTime"}, "student_program"),
+    ({"title": "Working Student, IT", "employmentType": "FullTime"}, "student"),
     ({"title": "Intern / Working Student, IT", "employmentType": "FullTime"}, "intern"),
-    ({"title": "Working Student, IT", "employmentType": "Intern"}, "intern"),
+    # employmentType no longer reaches job_type, so the enum cannot retype the
+    # title the way it did while the Ashby table read it.
+    ({"title": "Working Student, IT", "employmentType": "Intern"}, "student"),
     ({"title": "Applied Scientist, PhD New Grad", "employmentType": "FullTime"}, None),
-    ({"title": "Nolla Skin Campus Ambassador", "employmentType": "PartTime"}, "student_program"),
+    ({"title": "Nolla Skin Campus Ambassador", "employmentType": "PartTime"}, None),
 ])
-def test_ashby_parse_emits_student_program_with_narrower_signals_first(payload, expected):
+def test_ashby_parse_reads_the_title_through_the_adapter(payload, expected):
     """Exercise the adapter boundary, not only the rule resolver used above."""
     posting = json_api.parse(
         "ashby",
@@ -399,28 +516,32 @@ def test_ashby_parse_emits_student_program_with_narrower_signals_first(payload, 
 
 
 def test_ashby_praktikum_has_no_rule_because_it_measures_zero_here():
-    """md:45 -- praktikum and praktikant are both 0 in this corpus. workday-list
-    carries them; porting them here would be a guess wearing a measurement's
-    clothes, so the row falls through to no signal."""
+    """md:45 -- praktikum and praktikant are both 0 in this corpus, so there was
+    never a rule here to remove. (workday used to carry them and no longer
+    does under ENGLISH-ONLY.) The row falls through to no signal."""
     assert ashby_job_type(title="Praktikum Marketing") is None
 
 
-def test_ashby_employment_type_reaches_rows_the_title_cannot():
-    """Explicit internship metadata outranks the student-program title rule."""
-    assert ashby_job_type(title="Working Student- Ecodesign", employment_type="Intern") == "intern"
-
-
-def test_ashby_research_internships_use_the_visible_intern_type():
-    assert ashby_job_type(title="Research Internships", employment_type="Intern") == "intern"
+def test_ashby_employment_type_no_longer_reaches_job_type():
+    """BEHAVIOUR CHANGE, 2026-08-26. This row used to resolve `intern` off the
+    enum; with the enum leg gone the title's own signal decides it."""
+    assert ashby_job_type(title="Working Student- Ecodesign",
+                          employment_type="Intern") == "student"
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Research Scientist Intern", "intern"),
-    ("AI Research Engineer Intern", "intern"),   # word before "Intern"
-    ("ML Research Intern (Fall 2026)", "intern"),
+    ("Research Internships", "research"),
+    ("Research Scientist Intern", "research"),
+    ("AI Research Engineer Intern", "research"),   # word before "Intern"
+    ("ML Research Intern (Fall 2026)", "research"),
     ("Research Assistant - Structural Bioinformatics", None),  # no internship signal
 ])
-def test_ashby_research_is_a_subject_not_a_job_type(title, expected):
+def test_ashby_research_internships_carry_the_research_label(title, expected):
+    """BEHAVIOUR CHANGE, 2026-08-26. The Ashby table deliberately folded these
+    into `intern` so they stayed visible as internships; job_type.md:25 gives
+    research its own tier ahead of internship, matching workday. 61 rows.
+
+    Anything downstream that filtered on `intern` alone now misses them."""
     assert ashby_job_type(title=title) == expected
 
 
@@ -446,33 +567,43 @@ def test_ashby_coop_boundaries_reject_cooperative(title):
 
 
 @pytest.mark.parametrize(("title", "employment_type", "expected"), [
-    ("Brand Ambassador", "PartTime", "part_time"),                        # md:95
+    ("Brand Ambassador", "PartTime", "yes"),                        # md:95
     # md:100 -- typed Contract, not PartTime. The enum wins, so the title
     # phrase below it never runs.
-    ("[CONTRACT] Part-Time Recruiting Coordinator", "Contract", None),
+    ("[CONTRACT] Part-Time Recruiting Coordinator", "Contract", "unknown"),
     # md:101 -- which leaves the title as a tie-breaker for the FullTime rows.
-    ("Part-Time Studio Coordinator", "FullTime", "part_time"),
+    ("Part-Time Studio Coordinator", "FullTime", "yes"),
 ])
 def test_ashby_employment_type_outranks_the_part_time_title_phrase(
         title, employment_type, expected):
-    assert ashby_job_type(title=title, employment_type=employment_type) == expected
+    assert ashby_part_time(title=title, employment_type=employment_type) == expected
 
 
 def test_ashby_hourly_pay_is_not_a_part_time_signal():
     """md:103-106 -- 277 hourly components, 174 of them FullTime. It tracks
     interns and shift work, so `compensation` has no rule at all."""
-    assert ashby_job_type(title="Audiobook Specialist", employment_type="FullTime") is None
+    assert ashby_part_time(
+        title="Audiobook Specialist", employment_type="FullTime") == "unknown"
 
 
 @pytest.mark.parametrize(("department", "expected"), [
-    ("Internship Program", "intern"),        # md:58, 17 rows
-    ("Early Career", "student_program"),     # md:58, 9 rows
-    ("Internal Ops", None),                  # md:59, 13 rows -- the false positive
+    ("Internship Program", "intern"),   # md:58 -- the one tier still read
+    ("Early Career", None),             # md:58, 9 rows -- new_grad tier dropped
+    ("Internal Ops", None),             # md:59, 13 rows -- the false positive
 ])
-def test_ashby_department_and_team_carry_the_same_signal(department, expected):
-    """md:61 -- the two are equal on 62% of rows, so both are queried."""
+def test_ashby_department_reads_the_intern_tier_only(department, expected):
+    """BEHAVIOUR CHANGE, 2026-08-26. The team leg went with the Ashby table and
+    department kept only its internship pattern.
+
+    Measured before removal: department/team fired on 188 rows, of which 139
+    only repeated what the title already said, 26 contradicted it, and 23 were
+    the sole signal -- and only 3 of those 23 were correct. Restricting
+    department to the intern tier keeps those 3 and drops the false positives
+    (`PHARMACY` -> Shipping Coordinator, `Student Support` -> Student Success
+    Coach)."""
     assert ashby_job_type(department=department) == expected
-    assert ashby_job_type(team=department) == expected
+    # team is not read at all, whatever it says.
+    assert ashby_job_type(team=department) is None
 
 
 @pytest.mark.parametrize(("workplace_type", "expected"), [
@@ -562,13 +693,13 @@ def bag(**entries):
 @pytest.mark.parametrize(("title", "expected"), [
     ("Campus Systems Engineer (Intern)", "intern"),       # md:23
     ("Naval Architect Co-op - Winter 2027", "coop"),      # md:68, 5 hits
-    ("Software Engineer, New Grad", "student_program"),   # md:21
-    ("New Graduate Engineer, Software", "student_program"),
-    ("Technical Support Engineer - University Graduate 2026", "student_program"),
-    ("Working Student - Tech", "student_program"),
-    ("Werkstudent", "student_program"),
-    ("Data Center Apprentice Program", "student_program"),
-    ("Apprentice Weld Support Technician", "student_program"),
+    ("Software Engineer, New Grad", "new_grad"),   # md:21
+    ("New Graduate Engineer, Software", "new_grad"),
+    ("Technical Support Engineer - University Graduate 2026", "new_grad"),
+    ("Working Student - Tech", "student"),
+    ("Werkstudent", None),  # ENGLISH-ONLY: German stem dropped, was "student"
+    ("Data Center Apprentice Program", "student"),
+    ("Apprentice Weld Support Technician", "student"),
     ("Software Engineer", None),
 ])
 def test_greenhouse_titles_classify_as_the_doc_measured(title, expected):
@@ -576,10 +707,6 @@ def test_greenhouse_titles_classify_as_the_doc_measured(title, expected):
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Quantitative Research Intern", "intern"),
-    ("2026 BSc/MSc/PhD Quantitative Research/Strat Internship", "intern"),
-    ("Research Engineer Intern (Fall 2026)", "intern"),
-    ("Researcher Intern", "intern"),
     ("International Sector Analyst, Market Intelligence (MI)-Data Research", None),
     ("Internal Audit Research Manager", None),
     ("Research Scientist", None),               # research with no internship signal
@@ -591,9 +718,7 @@ def test_greenhouse_research_is_a_subject_not_a_job_type(title, expected):
 
 def test_greenhouse_research_coop_stays_coop():
     assert greenhouse_job_type(
-        title="Applied Research Intern, Proactive Intelligence & Customer "
-        "World Models (PhD / Graduate Co-op)"
-    ) == "coop"
+        title="Summer 2027 Research Internship/Co-op") == "coop"
 
 
 @pytest.mark.parametrize("title", [
@@ -613,10 +738,25 @@ def test_greenhouse_coop_boundaries_reject_scoop():
 
 
 def test_greenhouse_coop_resolves_before_intern_on_a_title_carrying_both():
-    """md:69 -- "Applied Research Intern, ... (PhD / Graduate Co-op)" matches
+    """md:69 -- "Summer 2027 Software Engineering Internship/Co-op" matches
     both, and co-op is the narrower bucket."""
     assert greenhouse_job_type(
-        title="Applied Research Intern, Systems (PhD / Graduate Co-op)") == "coop"
+        title="Summer 2027 Software Engineering Internship/Co-op") == "coop"
+
+
+@pytest.mark.parametrize("title", [
+    # The doc-measured co-op/intern fixtures above used to be PhD titles. The
+    # Excluded block fires first and terminally now, so the degree gate wins
+    # over every bucket the rest of the title would otherwise earn.
+    "Applied Research Intern, Systems (PhD / Graduate Co-op)",
+    "PhD GenAI Research Scientist Intern",
+    "Quantitative Trader Intern, PhD",
+    "Campus AI Researcher, PhD/Postdoc (Intern)",
+    "Postdoctoral Research Scientist",
+])
+def test_greenhouse_degree_gate_pre_empts_every_bucket(title):
+    """job_type.md:16 -- a doctoral-only posting is not a student one."""
+    assert greenhouse_job_type(title=title) is None
 
 
 def test_greenhouse_employment_type_matches_a_tenant_prefixed_value():
@@ -624,7 +764,6 @@ def test_greenhouse_employment_type_matches_a_tenant_prefixed_value():
     substring rather than compared for equality."""
     assert greenhouse_job_type(metadata=bag(Employment_Type="Jump Trading - Intern")) == "intern"
     assert greenhouse_job_type(metadata=bag(Employment_Type="Summer Internship")) == "intern"
-    assert greenhouse_job_type(metadata=bag(Employment_Type="Full-time - Campus")) == "student_program"
 
 
 def test_greenhouse_summer_analyst_is_an_internship_family():
@@ -632,41 +771,19 @@ def test_greenhouse_summer_analyst_is_an_internship_family():
 
 
 @pytest.mark.parametrize(("title", "departments"), [
-    ("Machine Learning Engineer (PhD, New Grad)", ("Early Career",)),
     ("Algorithm Developer - 2027 PhDs", ("Campus",)),
     ("University Recruiter", ("University Recruiting",)),
     ("ICML 2026 - University Recruiting", ("University",)),
     ("Campus Ambassador", ("University Relations",)),
-    ("Mission Ops Engineer - SkillBridge", ("Early Career/New Grad",)),
 ])
-def test_greenhouse_student_program_exclusions_precede_broad_groups(title, departments):
+def test_greenhouse_new_grad_exclusions_precede_broad_groups(title, departments):
     assert greenhouse_job_type(title=title, departments=departments) is None
-
-
-def test_greenhouse_explicit_internship_precedes_phd_exclusion():
-    assert greenhouse_job_type(title="PhD Research Intern") == "intern"
-
-
-@pytest.mark.parametrize("title", [
-    "SkillBridge Software Engineering Intern",
-    "Skillbridge Administrative Operations Apprentice",
-    "Campus Ambassador Intern",
-])
-def test_greenhouse_eligibility_exclusions_are_terminal(title):
-    assert greenhouse_job_type(title=title) is None
-
-
-def test_greenhouse_workday_job_profile_is_read_as_well():
-    """md:52-59 -- 239 rows, a second tenant-defined home for the same fact."""
-    assert greenhouse_job_type(metadata=bag(Workday_Job_Profile="Technology Intern")) == "intern"
 
 
 @pytest.mark.parametrize(("department", "expected"), [
     ("Internships", "intern"),                             # md:43, 47 rows
     ("Mechanical Engineering Internships", "intern"),      # md:46, 18 rows
-    ("Campus", "student_program"),                         # md:44, 35 rows
-    ("University - Open Positions", "student_program"),    # md:46, 20 rows
-    ("Templates : Early Career/New Grad", "student_program"),  # md:49, 10 rows
+    ("Templates : Early Career/New Grad", "new_grad"),  # md:49, 10 rows
     ("Internal Audit", None),                              # md:50, 25 rows
     ("Internal Fleet Operations", None),                   # md:50, 14 rows
     ("International G and A", None),                       # md:50, 10 rows
@@ -681,9 +798,11 @@ def test_greenhouse_time_type_is_the_only_real_part_time_signal():
     """md:93-100 -- three casings of a closed set. The subject is lowercased and
     `.?` absorbs the hyphen, so one pattern covers all of them."""
     for value in ("Part time", "Part Time", "Part-time"):
-        assert greenhouse_job_type(metadata=bag(Time_Type=value)) == "part_time"
+        assert resolve(GREENHOUSE["part_time"],
+                       {"metadata": bag(Time_Type=value)}) == "yes"
     for value in ("Full time", "Full Time", "Full-time", ""):
-        assert greenhouse_job_type(metadata=bag(Time_Type=value)) is None
+        assert resolve(GREENHOUSE["part_time"],
+                       {"metadata": bag(Time_Type=value)}) == "unknown"
 
 
 def test_greenhouse_content_has_no_rule_at_all():
@@ -749,7 +868,6 @@ def lever_remote(workplace_type=""):
     ("Software Engineer, Internship", "intern"),                            # md:38, 47 hits
     ("Quantitative Trading Intern - Summer 2027", "intern"),                # md:38
     ("Electrical Engineering Spring Co-op (January 2027)", "coop"),         # md:71, the only one
-    ("Junior Consumer Support Navigator (Part-Time)", "part_time"),         # md:93
     ("Software Engineer", None),
 ])
 def test_lever_titles_classify_as_the_doc_measured(text, expected):
@@ -758,7 +876,7 @@ def test_lever_titles_classify_as_the_doc_measured(text, expected):
 
 def test_lever_research_has_no_rule_because_it_measures_zero_here():
     """lever.md's corpus (2,404 rows / 16 boards) carries zero research∩intern
-    titles -- unlike ashby, greenhouse and workday-list, which each measure a
+    titles -- unlike ashby, greenhouse and workday, which each measure a
     real one. Porting the pattern here anyway would be a guess wearing a
     measurement's clothes, so a research-flavoured title on lever falls
     through to whatever its other signals say -- here, plain `intern`."""
@@ -775,14 +893,14 @@ def test_lever_boundaries_reject_the_7_internal_titles(text):
     assert lever_job_type(text=text) is None
 
 
-def test_lever_university_recruiter_is_not_a_student_program():
+def test_lever_university_recruiter_is_not_a_new_grad():
     """md:42 -- hires interns, is not one. The bare `university` and `campus`
     title forms are dropped for it; only the phrase forms survive."""
     assert lever_job_type(text="Recruiter, University and Alternative Channel") is None
 
 
 def test_lever_apprentice_has_no_rule_because_it_measures_zero_here():
-    """md:37 -- 0 hits on Lever, where workday-list measures 31. A bucket the
+    """md:37 -- 0 hits on Lever, where workday measures 31. A bucket the
     survey measures nothing for gets no rule."""
     assert lever_job_type(text="Apprentice Electrician") is None
 
@@ -790,13 +908,20 @@ def test_lever_apprentice_has_no_rule_because_it_measures_zero_here():
 @pytest.mark.parametrize(("commitment", "expected"), [
     ("Internship", "intern"),         # md:47, 41 rows
     ("Intern", "intern"),             # md:48, 5 rows
-    ("Part-Time", "part_time"),       # md:84, 1 row
     ("International Office Entity", None),   # md:49, 34 rows
     ("International EOR", None),             # md:49, 28 rows
 ])
 def test_lever_commitment_is_tenant_free_text_not_an_enum(commitment, expected):
     """md:49 -- bare /intern/ would add 62 rows of these two values alone."""
     assert lever_job_type(commitment=commitment) == expected
+
+
+def test_lever_part_time_reads_commitment_then_text():
+    """md:84 (1 row on the enum) and md:93 (2 on the title). Thin, but measured."""
+    assert resolve(LEVER["part_time"], {"categories": {"commitment": "Part-Time"}}) == "yes"
+    assert resolve(LEVER["part_time"],
+                   {"text": "Junior Consumer Support Navigator (Part-Time)"}) == "yes"
+    assert resolve(LEVER["part_time"], {"text": "Software Engineer"}) == "unknown"
 
 
 def test_lever_cjk_commitments_have_no_rule_because_the_domain_has_no_bucket():
@@ -814,8 +939,8 @@ def test_lever_department_is_the_only_signal_on_the_zoox_rows():
 
 
 @pytest.mark.parametrize(("team", "expected"), [
-    ("Campus - Quantitative Trading", "student_program"),   # md:58, 3 rows
-    ("Campus", "student_program"),                          # md:59, 2 rows
+    ("Campus - Quantitative Trading", "new_grad"),   # md:58, 3 rows
+    ("Campus", "new_grad"),                          # md:59, 2 rows
     ("International Business Development", None),           # md:60, 25 rows
 ])
 def test_lever_team_carries_the_campus_signal(team, expected):
@@ -900,25 +1025,40 @@ def test_smartrecruiters_co_op_resolves_before_the_internship_enum():
 
 
 @pytest.mark.parametrize(("name", "expected"), [
-    ("Praktikum (all genders) im Bereich Clinical Supply Management", "intern"),  # md:63
-    ("Pflichtpraktikum - Vertrieb / Sales - REF95665X", "intern"),                # md:63
-    ("Pharmaziepraktikum in der Forschung und Entwicklung", "intern"),            # compound
-    ("Praktikant (all genders) im Bereich Human Resources", "intern"),            # md:63
-    ("Werkstudent (m/w/d) im Bereich R&D Engineering", "intern"),                 # md:65, 69
-    ("Werkstudent/in Marketing", "intern"),                                       # no right boundary
-    ("Revenue Operations Analyst - Working Student", "intern"),                   # md:65
-    ("Estagio Juridico Trabalhista e Recursos Humanos", "intern"),                # md:68, pt-BR
-    ("Estágio Jurídico", "intern"),                                               # md:68, accented
-    ("Intern - Maintenance Technician (นักศึกษาฝึกงาน) Start in January 2027", "intern"),  # md:68, th
-    ("Berufsausbildung Kfz-Mechatroniker (m/w/d)", "student_program"),            # md:66
-    ("Ausbildung Werkstoffprüfer (m/w/d)", "student_program"),                    # md:66
+    ("Praktikum (all genders) im Bereich Clinical Supply Management", None),  # md:63
+    ("Pflichtpraktikum - Vertrieb / Sales - REF95665X", None),                # md:63
+    ("Pharmaziepraktikum in der Forschung und Entwicklung", None),            # compound
+    ("Praktikant (all genders) im Bereich Human Resources", None),            # md:63
+    ("Werkstudent (m/w/d) im Bereich R&D Engineering", None),                 # md:65, 69
+    ("Werkstudent/in Marketing", None),                                       # no right boundary
+    ("Estagio Juridico Trabalhista e Recursos Humanos", None),                # md:68, pt-BR
+    ("Estágio Jurídico", None),                                               # md:68, accented
+    ("Berufsausbildung Kfz-Mechatroniker (m/w/d)", None),                     # md:66
+    ("Ausbildung Werkstoffprüfer (m/w/d)", None),                             # md:66
 ])
-def test_smartrecruiters_non_english_titles_are_matched_unconditionally(name, expected):
-    """md:57-71 -- 777 rows (2.5%) are non-English across 20 language codes, and
-    an English-only rule misses them. md:69-71 is why `language.code` cannot
-    gate this: "Werkstudent (m/w/d) im Bereich R&D Engineering" is tagged `en`
-    and "Praktikant / Werkstudent (m/w/d)" is tagged `en-GB`, because the code
+def test_smartrecruiters_non_english_titles_are_dropped_under_english_only(name, expected):
+    """ENGLISH-ONLY. md:57-71 measures 777 rows (2.5%) as non-English across 20
+    language codes and every title below as a student role; the de / pt-BR / th
+    rules that read them were removed, so they now fall through unclassified.
+    This is the measured cost of the English-only scope, pinned so the loss is
+    visible rather than silent.
+
+    md:69-71 remains the reason `language.code` could not gate this instead:
+    "Werkstudent (m/w/d) im Bereich R&D Engineering" is tagged `en` and
+    "Praktikant / Werkstudent (m/w/d)" is tagged `en-GB`, because the code
     describes the ad, not the title."""
+    assert sr_job_type(name=name) == expected
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    # md:65 -- the English rendering German and Nordic tenants use when the
+    # title itself is in English. Deliberately kept.
+    ("Revenue Operations Analyst - Working Student", "intern"),
+    # A non-English token in an otherwise English title is still reachable:
+    # the English `intern` rule matches, the Thai one is not needed.
+    ("Intern - Maintenance Technician (นักศึกษาฝึกงาน) Start in January 2027", "intern"),
+])
+def test_smartrecruiters_english_titles_survive_the_non_english_removal(name, expected):
     assert sr_job_type(name=name) == expected
 
 
@@ -927,23 +1067,27 @@ def test_smartrecruiters_non_english_titles_are_matched_unconditionally(name, ex
     "Berufsausbildung Industriemechaniker (m/w/d)",
     "Pflichtpraktikum - Product Data Management - REF96583W",
 ])
-def test_smartrecruiters_german_compounds_need_the_leading_wildcard(name):
-    """The stems compound, and matcher()'s left boundary rejects the compound
-    form: a bare `praktikum` cannot match "Pharmaziepraktikum", nor `ausbildung`
-    "Berufsausbildung". Dropping the leading `[a-z]*` silently loses most of
-    this vocabulary -- which is the failure mode the dialect is designed to make
-    loud, but here it would be a rule that merely under-fires."""
+def test_smartrecruiters_german_compounds_are_unclassified_under_english_only(name):
+    """ENGLISH-ONLY. These compounds are unclassified now that the stems are
+    gone. The first assertion is kept as a live note for whoever restores them:
+    the stems compound, and matcher()'s left boundary rejects the compound form,
+    so a bare `praktikum` cannot match "Pharmaziepraktikum" nor `ausbildung`
+    "Berufsausbildung". Any restored rule needs the leading `[a-z]*` back or it
+    silently under-fires on most of this vocabulary."""
     assert classify.hit(name, "praktikum|ausbildung") is False
-    assert sr_job_type(name=name) is not None
+    assert sr_job_type(name=name) is None
 
 
-def test_smartrecruiters_an_internship_in_the_training_department_is_an_intern():
-    """The ordering trap the ausbildung rule creates: "Praktikum - HR
-    Ausbildung" matches both, and it is an internship *in* the apprenticeship
-    team, not an apprenticeship. Intern tokens must resolve first."""
+def test_smartrecruiters_the_ausbildung_ordering_trap_is_moot_under_english_only():
+    """ENGLISH-ONLY. This row used to exercise an ordering trap: "Praktikum - HR
+    Ausbildung" matched both the intern and the apprenticeship rule, and it is an
+    internship *in* the apprenticeship team, not an apprenticeship, so the intern
+    token had to resolve first. Both rules are gone and the row is unclassified.
+    Restoring either one alone would silently mistype it -- restore both, in the
+    original order."""
     assert sr_job_type(
         name="Praktikum - HR Ausbildung, Recruiting & Personalentwicklung - REF98048S",
-    ) == "intern"
+    ) is None
 
 
 def test_smartrecruiters_the_enums_still_carry_rows_no_token_matches():
@@ -980,8 +1124,9 @@ def test_smartrecruiters_title_is_not_a_part_time_signal(name):
     """md:98-100 -- DO NOT USE. 246 title hits but 107 are
     typeOfEmployment=permanent, because `Full/Part time` advertises *either*
     schedule and is the dominant form of the match."""
-    assert sr_job_type(name=name) is None
-    assert sr_job_type(name=name, employment="part-time") == "part_time"
+    assert resolve(SMARTRECRUITERS["part_time"], {"name": name}) == "unknown"
+    assert resolve(SMARTRECRUITERS["part_time"],
+                   {"name": name, "typeOfEmployment": {"id": "part-time"}}) == "yes"
 
 
 @pytest.mark.parametrize(("remote", "hybrid", "expected"), [
@@ -1039,6 +1184,46 @@ def test_oracle_boundaries_reject_the_267_internal_rows(title):
     assert oracle_job_type(title=title) is None
 
 
+@pytest.mark.parametrize(("title", "expected"), [
+    # BEHAVIOUR CHANGE, 2026-08-27 -- the shared table replaced the
+    # Oracle-measured one. Measured over all 14,129 distinct postings: typed
+    # 222 before, 469 after, 0 label disagreements on the 213 both type.
+    #
+    # 218 of the 247 adds are `summer analysts?|summer associates?` alone --
+    # an internship that never says "intern", and the entire summer programme
+    # of two investment-bank boards (hdpc 172, jpmc 46).
+    ("2027 | APEJ | Sydney | Operations | Summer Analyst", "intern"),  # job_type.md:33
+    ("2027 | Americas | Detroit | Wealth Management, Financial Planning "
+     "| Summer Analyst", "intern"),                                   # job_type.md:33
+    # Bare `students?`, where the old table carried only `apprentices?`.
+    ("Student - Mfg", "student"),                                     # job_type.md:40
+    ("Placement Student - Customer Engineering", "student"),          # job_type.md:40
+    # `grad(uate|uates|s)?|ncg`, where the old rule needed an exact phrase.
+    ("CX Sales Support Specialist - Fresh Graduate", "new_grad"),     # job_type.md:55
+    ("Future Finance Leaders Program - Recent Grad/Full Time", "new_grad"),
+    # A tier the old table did not have at all.
+    ("2027 Quantitative Research - Risk and Treasury - Summer Internship "
+     "- Associate - United States", "research"),                      # job_type.md:25
+])
+def test_oracle_shared_table_types_rows_the_measured_one_missed(title, expected):
+    """The largest gain of any vendor swapped so far -- 2.1x the typed rows,
+    and every one of them a pattern the measured table simply did not carry."""
+    assert oracle_job_type(title=title) == expected
+
+
+@pytest.mark.parametrize("title", [
+    "Intern - Pharmacy",                                  # job_type.md:14, was intern
+    "AI&I/Data Science Intern (PhD in progress) On-site",  # job_type.md:16, was intern
+    "Early Careers Campus Recruiter - Corporate Functions",   # job_type.md:71, was new_grad
+    "Early Career Development Program Manager, US Private Bank & Solutions",
+])
+def test_oracle_shared_table_drops_are_all_deliberate(title):
+    """The swap drops 5 rows and no more -- there are no plain gaps. Two are
+    licensure- or doctoral-gated, three run the early-careers channel rather
+    than enter it, which the measured table had no veto for and typed wrong."""
+    assert oracle_job_type(title=title) is None
+
+
 def test_oracle_co_op_conversion_resolves_as_co_op_not_intern():
     """md:62 -- "2025 - Summer Intern Co-op Conversion" matches both patterns,
     which is precisely why co-op is declared first."""
@@ -1060,11 +1245,14 @@ def test_oracle_requisition_type_is_not_a_signal(requisition_type):
 def test_oracle_part_time_comes_from_job_schedule_last():
     """md:67-70 -- a closed two-value field, null on the 7,006 rows of the one
     board that never sets it, which simply means no rule fires."""
-    assert oracle_job_type(job_schedule="Part time") == "part_time"
-    assert oracle_job_type(job_schedule="Full time") is None
-    assert oracle_job_type(job_schedule="") is None
-    # An intern row that is also part time is an intern first.
+    assert resolve(ORACLE["part_time"], {"JobSchedule": "Part time"}) == "yes"
+    assert resolve(ORACLE["part_time"], {"JobSchedule": "Full time"}) == "unknown"
+    assert resolve(ORACLE["part_time"], {"JobSchedule": ""}) == "unknown"
+    # The two axes are independent: a part-time internship is both at once,
+    # which the old single-valued job_type could not express.
     assert oracle_job_type(title="Summer Intern", job_schedule="Part time") == "intern"
+    assert resolve(ORACLE["part_time"],
+                   {"Title": "Summer Intern", "JobSchedule": "Part time"}) == "yes"
 
 
 @pytest.mark.parametrize(("code", "expected"), [
@@ -1079,7 +1267,7 @@ def test_oracle_remote_reads_the_machine_code_not_the_label(code, expected):
     assert oracle_remote(code=code) == expected
 
 
-# eightfold, from doc/raw_postings/eightfold.md -------------------------------
+# eightfold, from doc/raw_postings/eightfold.md and regex/job_type.md ---------
 
 EIGHTFOLD = json_api.CONFIGS["eightfold"]["fields"]
 
@@ -1136,8 +1324,45 @@ def test_eightfold_boundaries_still_reject_the_34_internal_rows(name):
 def test_eightfold_has_no_part_time_rule():
     """md:127-131 -- **Undetectable**. No employment-type field exists and the
     title matches part-time on 4 rows in 7,949, so the bucket gets no rule at
-    all rather than a rule measured somewhere else."""
+    all rather than a rule measured somewhere else. The shared table has no
+    part_time tier either, so adopting it changed nothing here."""
     assert ef_job_type(name="Part-Time Maintenance Technician") is None
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    # BEHAVIOUR CHANGE, 2026-08-27 -- the shared table replaced the
+    # Eightfold-measured one. These are the 24 rows whose label moved,
+    # measured over all 9,719 distinct postings in the 6 boards.
+    #
+    # 16 new new_grad, from patterns the old table did not carry.
+    ("2026 Campus Hire_ Engineer_ HW", "new_grad"),      # job_type.md:57, 8 rows
+    ("New Graduate- AI SW SDK Engineer", "new_grad"),    # job_type.md:55, 7 rows
+    ("Graduate Geosolutions Geophysicist", "new_grad"),  # job_type.md:55
+    ("Equity Research - Associate, Rotational Program (New York)",
+     "new_grad"),                                        # job_type.md:63, 1 row
+    # 8 intern -> research. A refinement: the old table had no research tier.
+    ("Research Intern - Self-Improving AI", "research"),  # job_type.md:25
+    ("Research Sciences INTERN", "research"),             # job_type.md:25
+])
+def test_eightfold_shared_table_types_rows_the_measured_one_missed(name, expected):
+    """The old table typed 235 of 9,719 rows, the shared one 248, and on the
+    224 both type they agree on the label EVERY time -- 0 disagreements. The
+    whole difference is which rows get typed at all, and how finely."""
+    assert ef_job_type(name=name) == expected
+
+
+@pytest.mark.parametrize("name", [
+    "Applied Science PhD Intern - Clipchamp",                # was intern
+    "Applied Science: PhD Microsoft AI Internship Opportunities",
+    "PhD Internship- AI Research",
+])
+def test_eightfold_doctoral_internships_now_void(name):
+    """job_type.md:16 -- terminal and ahead of every typing rule, so a
+    doctoral-enrolment-gated posting is voided whatever else the title says.
+    These 3 are the ONLY rows the shared table stops typing; there are no
+    plain gaps. Three more rows join them from the untyped side (2 PhD /
+    postdoc, 1 nurse), for 6 excluded corpus-wide."""
+    assert ef_job_type(name=name) is None
 
 
 @pytest.mark.parametrize(("option", "expected"), [
@@ -1174,12 +1399,40 @@ def icims_job_type(title="", employment_type="", categories=None):
 
 
 @pytest.mark.parametrize(("title", "expected"), [
-    ("Quantitative Research Internship - PhD: Summer 2027", "intern"),  # md:47, 3 hits
     ("Equity Analyst Internship: Summer 2027", "intern"),               # md:47, 3 hits
     ("ETF Sales Internship: Summer 2027", "intern"),
 ])
 def test_icims_title_intern(title, expected):
     assert icims_job_type(title=title) == expected
+
+
+@pytest.mark.parametrize(("title", "expected"), [
+    # BEHAVIOUR CHANGE, 2026-08-27 -- the shared table replaced the
+    # iCIMS-measured one. Measured over all 3,496 distinct postings: typed 137
+    # before, 158 after, 0 label disagreements on the 111 both type.
+    ("Graduate Trainee - Systems Design Engineer", "new_grad"),   # job_type.md:55
+    ("Commercial Sales Rep (2026 NCG)", "new_grad"),              # job_type.md:55, `ncg`
+    ("Apprentice, Private Equity", "student"),                    # job_type.md:40
+    ("UIUC Research Park Intern - Validation", "research"),       # job_type.md:25
+])
+def test_icims_shared_table_types_rows_the_measured_one_missed(title, expected):
+    """29 new_grad where the old rule needed the exact phrase `new grads?|
+    graduate programs?`, 6 student from bare `apprentice` (md:48 recorded the
+    word as absent; it is not absent any more), and 12 intern -> research."""
+    assert icims_job_type(title=title) == expected
+
+
+@pytest.mark.parametrize("title", [
+    "Quantitative Research Internship - PhD: Summer 2027",   # was intern, md:47
+    "Machine Learning Internship - PhD: 2027",
+    "2027 PhD Research Engineering Intern/Co-op",            # was coop
+])
+def test_icims_doctoral_internships_now_void(title):
+    """job_type.md:16 -- terminal and ahead of every typing rule. sig spells its
+    whole quant programme this way, so this is 9 of the 10 rows the shared table
+    stops typing. The tenth is "Early Career - Emerging Talent Programs and
+    Recruiting Coordinator", vetoed as a channel operator (job_type.md:71)."""
+    assert icims_job_type(title=title) is None
 
 
 @pytest.mark.parametrize("title", [
@@ -1193,12 +1446,17 @@ def test_icims_boundaries_reject_the_three_internal_rows(title):
     assert icims_job_type(title=title) is None
 
 
-def test_icims_co_op_spelling_is_not_uniform():
-    """md:104-108 -- the corpus carries a spaced-hyphen form the plain co-?op
-    pattern misses, so the separators are optional on both sides. Bounded and
-    unbounded agree here, but the boundaries stay regardless."""
+def test_icims_spaced_hyphen_co_op_is_a_carried_regression():
+    """KNOWN REGRESSION, 2026-08-27, and the only cost of the swap that is not
+    a policy decision. md:104-108 measured a spaced-hyphen form here and widened
+    this vendor's pattern to `co\\s?-?\\s?ops?` for it; the shared table's
+    `co-?ops?` (job_type.md:20) does not reach it, so 2 rows go untyped.
+
+    Pinned as the regression it is, NOT re-forked with a per-vendor override:
+    the fix belongs upstream in the shared doc, and widening it there needs its
+    own head-to-head across Workday and Eightfold first."""
     assert icims_job_type(title="Equity Options AI Co-op with Drexel University") == "coop"
-    assert icims_job_type(title="Hardware Engineer University Co - Op Placement 2027") == "coop"
+    assert icims_job_type(title="Hardware Engineer University Co - Op Placement 2027") is None
 
 
 def test_icims_intern_employment_type_is_not_a_signal():
@@ -1227,9 +1485,9 @@ def test_icims_categories_are_a_single_tenants_vocabulary():
 ])
 def test_icims_bare_university_and_campus_are_excluded(title):
     """md:52-54 -- measured as retail-store and recruiter noise, which is why
-    the student_program pattern carries only the phrase forms on every vendor.
+    the new_grad pattern carries only the phrase forms on every vendor.
     A recruiter hires interns; they are not one."""
-    assert icims_job_type(title=title) != "student_program"
+    assert icims_job_type(title=title) != "new_grad"
 
 
 def test_icims_part_time_comes_from_the_enum():
@@ -1237,8 +1495,8 @@ def test_icims_part_time_comes_from_the_enum():
     150, rivian 33, amd 6) and is the only clean part-time field in the corpus.
     The title agrees but adds nothing: all 33 of its hits are one rivian retail
     family that fills both (md:130-133)."""
-    assert icims_job_type(employment_type="PART_TIME") == "part_time"
-    assert icims_job_type(employment_type="FULL_TIME") is None
+    assert resolve(ICIMS["part_time"], {"employment_type": "PART_TIME"}) == "yes"
+    assert resolve(ICIMS["part_time"], {"employment_type": "FULL_TIME"}) == "unknown"
 
 
 def test_icims_has_no_remote_rule():
@@ -1301,9 +1559,150 @@ def _rules(spec):
 
 
 _DOMAINS = {
-    "job_type": {"intern", "coop", "student_program", "research", "part_time"},
+    "job_type": {"intern", "coop", "student", "new_grad", "research"},
     "remote": {"yes", "hybrid", "unknown"},
+    # Schedule, not opportunity kind. No 'no': a stated full-time value is not
+    # trustworthy enough to assert, exactly as with `remote`.
+    "part_time": {"yes", "unknown"},
 }
+
+
+# Vendors that had no job_type table until the coverage pass ---------------
+#
+# Each table below is transcribed from that vendor's own survey. The counts in
+# the config comments are the measured ones; the cases here are the survey's
+# own example values, so a rule that stops firing fails loudly rather than
+# quietly emptying a tab.
+
+
+def vendor_job_type(vendor, payload):
+    return resolve(json_api.CONFIGS[vendor]["fields"]["job_type"], payload)
+
+
+def vendor_part_time(vendor, payload):
+    return resolve(json_api.CONFIGS[vendor]["fields"]["part_time"], payload)
+
+
+@pytest.mark.parametrize(("vendor", "payload", "expected"), [
+    # amazon.md -- co-op first, and 2 of the 6 co-op titles also say Intern.
+    ("amazon", {"title": "Robotics - Applied Scientist II Intern / Co-op - 2026"}, "coop"),
+    ("amazon", {"title": "2026 Software Development Engineer Intern"}, "intern"),
+
+    # apple.md -- the plural tail carries Internships-titled reqs (md:15).
+    ("apple", {"postingTitle": "Engineering Program Management Masters Internships"}, "intern"),
+    ("apple", {"postingTitle": "Senior Manager, International Sales"}, None),
+
+    # comeet.md -- `Intern` is a member of the closed seniority enum (md:22).
+    ("comeet", {"name": "Customer Engineer Intern", "experience_level": "Entry-level"}, "intern"),
+    ("comeet", {"name": "Support Rep", "experience_level": "Intern"}, "intern"),
+
+    # workable.md -- `experience` is the intern field and agrees with the title 8/8.
+    ("workable", {"title": "Intern, AML Compliance", "experience": "Internship"}, "intern"),
+    ("workable", {"title": "Analyst", "experience": "Internship"}, "intern"),
+
+    # recruitee.md -- a closed 9-value employment enum carries three buckets.
+    ("recruitee", {"title": "Digital Forensics Intern", "employment_type_code": "internship"}, "intern"),
+    ("recruitee", {"title": "Bakker", "employment_type_code": "apprenticeship"}, "student"),
+
+    # talentreef.md -- 8,519 rows, and partTime is 37% of them.
+    ("talentreef", {"title": "Pharmacy Intern", "contractType": "fullTime"}, "intern"),
+
+    # ukg.md -- both rules are forward cover; the survey measures 0 of each.
+    ("ukg", {"Title": "Nursing Intern"}, "intern"),
+    ("ukg", {"Title": "Registered Nurse"}, None),
+
+    # gem.md -- INTERN is a first-class enum member; prefer it to the title.
+    ("gem", {"title": "Software Engineer Intern (US)", "job": {"employmentType": "INTERN"}}, "intern"),
+
+    # rippling.md -- the part-time codes and the human label are both covered.
+    ("rippling", {"name": "Machine Learning Software Engineer Intern - Winter 2027"}, "intern"),
+
+    # bamboohr.md -- a 16-row corpus; these are existence statements, not rates.
+    ("bamboohr", {"jobOpeningName": "Marketing, Communication, and Events Intern"}, "intern"),
+])
+def test_newly_covered_vendors_classify_as_their_survey_measured(vendor, payload, expected):
+    assert vendor_job_type(vendor, payload) == expected
+
+
+@pytest.mark.parametrize(("vendor", "payload", "expected"), [
+    # The same survey rows as above, now read from the orthogonal `part_time`
+    # column. Each vendor's own schedule field, never the title or description
+    # except where its survey measured the title to be the only carrier.
+    ("amazon", {"title": "Warehouse Associate", "job_schedule_type": "part-time"}, "yes"),
+    ("amazon", {"title": "Software Development Engineer",
+                "job_schedule_type": "full-time"}, "unknown"),
+    ("comeet", {"name": "Barista", "employment_type": "Part-time"}, "yes"),
+    ("workable", {"title": "Coordinator", "employment_type": "Part-time"}, "yes"),
+    ("recruitee", {"title": "Verkoper", "employment_type_code": "parttime_fixed_term"}, "yes"),
+    ("talentreef", {"title": "Server (PT/FT)", "contractType": "partTime"}, "yes"),
+    ("rippling", {"name": "Analyst", "employmentType": {"label": "Salaried, part-time"}}, "yes"),
+    ("rippling", {"name": "Tech", "employmentType": {"label": "HOURLY_PT"}}, "yes"),
+    ("bamboohr", {"jobOpeningName": "Recruiter",
+                  "employmentStatusLabel": "Part-Time Temporary"}, "yes"),
+])
+def test_newly_covered_vendors_part_time_as_their_survey_measured(vendor, payload, expected):
+    assert vendor_part_time(vendor, payload) == expected
+
+
+def test_part_time_is_orthogonal_to_job_type():
+    """The split's whole point: a part-time internship is both at once. The
+    single-valued job_type ranked part-time last, so it stored `intern` and
+    dropped the schedule entirely."""
+    payload = {"title": "2027 Software Dev Engineer Intern", "job_schedule_type": "part-time"}
+    assert vendor_job_type("amazon", payload) == "intern"
+    assert vendor_part_time("amazon", payload) == "yes"
+
+
+@pytest.mark.parametrize(("vendor", "payload"), [
+    # The Internal / International trap, which each of these surveys measured
+    # firing on its own corpus. Boundaries are the only thing rejecting them.
+    ("apple", {"postingTitle": "Senior Manager, International Sales"}),        # 12 extra, md:20
+    ("talentreef", {"title": "Shift Leader - INTERNAL ONLY"}),                 # 11 extra, md:15
+    ("rippling", {"name": "Group Product Manager, International"}),            # 67% error rate, md:56
+])
+def test_newly_covered_vendors_reject_the_internal_trap(vendor, payload):
+    assert vendor_job_type(vendor, payload) is None
+
+
+@pytest.mark.parametrize(("vendor", "payload", "why"), [
+    # Each survey names a field that looks authoritative and is not. Pinning the
+    # negative keeps a future "obvious" improvement from reintroducing it.
+    ("gem", {"title": "Governance & Policy Fellow", "job": {"employmentType": "FULL_TIME"}},
+     "gem.md:53 -- a fellowship is not an internship; do not fold in `fellow`"),
+    ("rippling", {"name": "Eng", "employmentType": {"label": "Temporary / Intern"}},
+     "rippling.md:53 -- TEMP is one enum value for two concepts, needs a title check"),
+    ("workable", {"title": "Analyst", "experience": "Mid-Senior level", "employment_type": "Temporary"},
+     "workable.md:64 -- Temporary is one tenant's intern convention, not a vendor meaning"),
+    ("recruitee", {"title": "Analyst", "experience_code": "student_college"},
+     "recruitee.md:34 -- a seniority band, not a statement that the posting is a student program"),
+])
+def test_newly_covered_vendors_do_not_read_the_fields_their_surveys_reject(vendor, payload, why):
+    assert vendor_job_type(vendor, payload) is None, why
+
+
+@pytest.mark.parametrize(("vendor", "payload"), [
+    # Both fields are non-str in the payload, and the classify engine skips any
+    # non-str value -- so a rule on either could never fire. Pinned so the
+    # absence reads as measured rather than forgotten.
+    ("apple", {"postingTitle": "Software Engineer", "standardWeeklyHours": 20}),
+    ("ukg", {"Title": "Analyst", "FullTime": False}),
+])
+def test_numeric_and_boolean_part_time_signals_are_deliberately_unread(vendor, payload):
+    assert vendor_job_type(vendor, payload) is None
+
+
+def test_every_vendor_with_a_job_type_table_ranks_coop_first():
+    """Co-ops are rarer than interns and their titles are a subset of the
+    intern-ish set on every surveyed vendor, so an intern rule that ran first
+    would consume them. Enforced across all vendors, not per table."""
+    for name, config in json_api.CONFIGS.items():
+        spec = config.get("fields", {}).get("job_type")
+        if not isinstance(spec, dict) or "classify" not in spec:
+            continue
+        buckets = [rule["is"] for rule in spec["classify"]]
+        if "coop" not in buckets or "intern" not in buckets:
+            continue
+        assert buckets.index("coop") < buckets.index("intern"), name
 
 
 def test_every_configured_pattern_is_in_the_right_dialect():

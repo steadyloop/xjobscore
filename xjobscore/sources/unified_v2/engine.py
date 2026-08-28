@@ -545,8 +545,17 @@ class UnifiedAdapter:
         if "external_id" in field_names:
             values.setdefault("external_id", item.external_id)
         if output.kind == "posting":
-            values.setdefault("title", "")
-            values.setdefault("url_posting", "")
+            # `title` and `url_posting` back NOT NULL columns, so neither may
+            # reach the projection as None. `setdefault` alone cannot hold that
+            # line: the caller builds `values` from a comprehension over every
+            # configured field, so a field the spec maps but the payload omits
+            # arrives present-and-None rather than absent. Workday listing rows
+            # do exactly that -- a requisition pulled mid-walk comes back as
+            # bare `externalPath` with no `title` -- and the insert failed on
+            # the constraint instead of falling back here.
+            for required in ("title", "url_posting"):
+                if values.get(required) is None:
+                    values[required] = ""
             precision = values.get("published_at_precision", "unknown")
             if values.get("published_at") is None and precision in {"exact", "date"}:
                 values["published_at_precision"] = "unknown"

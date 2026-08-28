@@ -26,7 +26,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from xjobscore.net import Net, NetError, etag
-from xjobscore.records import Canonical, Feed, Item, Posting, Record
+from xjobscore.records import Canonical, Feed, Item, Posting, Record, Unparseable
 
 # One width for both legs on purpose.  `Net._host_semaphores` is keyed by
 # (host, concurrency), so two widths take two semaphores and the true in-flight
@@ -110,7 +110,7 @@ def _definition(text: str, list_name: str) -> tuple[list[str], list[str], int]:
         re.S,
     )
     if not match:
-        raise ValueError(f"Taleo page did not define {list_name}")
+        raise Unparseable(f"Taleo page did not define {list_name}")
     return _array(match.group(2)), _array(match.group(3)), int(match.group(1))
 
 
@@ -121,7 +121,7 @@ def _fill(text: str, list_name: str) -> list[str]:
         re.S,
     )
     if not match:
-        raise ValueError(f"Taleo page did not fill {list_name}")
+        raise Unparseable(f"Taleo page did not fill {list_name}")
     return _array(match.group(1))
 
 
@@ -348,8 +348,18 @@ def _date(value: str | None) -> datetime | None:
 
 def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     assert isinstance(item.payload, str)
+    # No descRequisition block at all means this response was never a detail
+    # page: Taleo answers 200 with the career section's landing page for a
+    # requisition pulled between the listing walk and the detail fetch, and for
+    # a JSESSIONID that expired in between. Both are the origin's answer about
+    # this one posting, so `_definition` and `_fill` raise `Unparseable` and
+    # silver skips the item instead of losing every other posting in the batch.
+    # A block that *is* present but malformed still raises, and still fails the
+    # batch -- that is the shape changing under us.
     fields, labels, _ = _definition(item.payload, "descRequisition")
     rows = _rows(_fill(item.payload, "descRequisition"), fields, labels)
+    if not rows:
+        raise Unparseable("Taleo detail page listed no requisition")
     if len(rows) != 1:
         raise ValueError("Taleo detail page did not contain exactly one requisition")
     row = rows[0]
