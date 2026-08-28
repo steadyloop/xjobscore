@@ -19,3 +19,5 @@ xjobscore/discover.log
 # database itself is ground truth (see the "TOML RETIRED" commit). Nothing in
 # the tracked tree may assert on their contents.
 /xjobscore/migrations
+/keyscan/work
+/xjobscore/doc
