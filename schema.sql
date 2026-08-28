@@ -34,15 +34,15 @@ CREATE TABLE company (
     domain             text UNIQUE,
     domain_verified_at timestamptz, -- NULL if unverified
     description        text,        -- 6-8 words
-    labels             jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(labels) = 'object')
+    labels             jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(labels) = 'object') -- ck_list, bio_eng
 );
 
-CREATE TABLE alias (
+CREATE TABLE company_alias (
     alias_norm text PRIMARY KEY,
     company_id bigint NOT NULL REFERENCES company (id) ON DELETE CASCADE,
     alias      text NOT NULL
 );
-CREATE INDEX alias_company_idx ON alias (company_id);
+CREATE INDEX company_alias_company_idx ON company_alias (company_id);
 
 -- FEEDS --
 CREATE TABLE token (
@@ -52,6 +52,14 @@ CREATE TABLE token (
     status     text NOT NULL DEFAULT 'unknown'
         CHECK (status IN ('unknown', 'live', 'dead')),
     muted      boolean NOT NULL DEFAULT false,
+    -- Endpoint-specific adapter values the URL templates and params in
+    -- sources/*-configs.py interpolate: a board hostname, an API token, a
+    -- career-section URL. Operator-entered -- no code path writes it -- and
+    -- never loaded from a checked-in catalog, because the worker and the
+    -- inspector both read it and must agree. It rides with the token rather
+    -- than the feed so that `token` + `company` reproduces a feed completely.
+    config     jsonb NOT NULL DEFAULT '{}'::jsonb
+        CONSTRAINT token_config_object CHECK (jsonb_typeof(config) = 'object'),
     
     -- discovery --
     source text,
@@ -65,9 +73,9 @@ CREATE TABLE token (
 
     PRIMARY KEY (ats, token),
     CONSTRAINT token_workday_source_renamed
-        CHECK (ats <> 'workday'),
-    CONSTRAINT token_workday_list_key_lower
-        CHECK (ats <> 'workday-list' OR token = lower(token))
+        CHECK (ats <> 'workday-list'),
+    CONSTRAINT token_workday_key_lower
+        CHECK (ats <> 'workday' OR token = lower(token))
 );
 
 CREATE TABLE feed (
@@ -75,8 +83,14 @@ CREATE TABLE feed (
     source   text NOT NULL, -- ashby, greenhouse, workable, etc.
     key      text NOT NULL, -- openai, anthropic, janestreet, etc.
     polling  boolean NOT NULL DEFAULT false,
+<<<<<<< Updated upstream
     config       jsonb NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(config) = 'object'),
+=======
+    -- Per-tenant adapter values live on `token.config`, not here: `feed` is
+    -- rebuilt from `token` by promotion, and config is the one input nothing
+    -- can re-derive. See migrations/20260827_token_config.sql.
+>>>>>>> Stashed changes
     type         text NOT NULL DEFAULT 'ATS'
         CHECK (type IN ('ATS', 'Direct', 'Board')),
     -- Config
@@ -107,8 +121,8 @@ CREATE TABLE feed (
     UNIQUE (source, key),
     CONSTRAINT feed_token_identity_fkey
         FOREIGN KEY (source, key) REFERENCES token (ats, token) ON DELETE RESTRICT,
-    CONSTRAINT feed_workday_list_key_lower
-        CHECK (source <> 'workday-list' OR key = lower(key))
+    CONSTRAINT feed_workday_key_lower
+        CHECK (source <> 'workday' OR key = lower(key))
 );
 CREATE INDEX feed_due_idx ON feed (due_at) WHERE paused_at IS NULL;
 
@@ -149,6 +163,11 @@ INSERT INTO scheduler_control (id) VALUES (true) ON CONFLICT DO NOTHING;
 
 CREATE TABLE token_heartbeat (
     id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
+    -- The operator's runtime switch, driven from the Tokens page. Persistent
+    -- so a process restart cannot silently undo a deliberate pause, and false
+    -- by default because the heartbeat is on by default (unlike the poller).
+    paused             boolean NOT NULL DEFAULT false,
+    paused_changed_at  timestamptz,
     due_at             timestamptz NOT NULL DEFAULT now(),
     hold_until         timestamptz,
     runner_seen_at     timestamptz,
@@ -163,6 +182,20 @@ CREATE TABLE token_heartbeat (
     last_error         text
 );
 INSERT INTO token_heartbeat (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+-- Append-only: one row per liveness probe, written beside the token UPDATE
+-- that records the same result. token.checked_at/status only ever hold the
+-- latest answer, so this is the only place a token's history exists -- a
+-- live -> dead -> live flip leaves three rows here and no trace there.
+-- Deliberately five columns: when, which, what, and a stable tail order.
+-- No FK: a log that a delete could cascade away is not a log.
+CREATE TABLE token_log (
+    id         bigserial PRIMARY KEY,
+    checked_at timestamptz NOT NULL,
+    ats        text NOT NULL,
+    token      text NOT NULL,
+    status     text NOT NULL CHECK (status IN ('unknown', 'live', 'dead'))
+);
 
 -- Deferred: adaptive polling. Intervals stay operator-set until poll_observation
 -- holds enough history to estimate an arrival rate from.
@@ -243,7 +276,7 @@ CREATE TABLE raw_posting (
                               -- equal to stored value means skip detail request.
     UNIQUE (source, source_key, data_hash),
     CONSTRAINT raw_posting_workday_source_lower
-        CHECK (source NOT LIKE 'workday-list:%' OR source = lower(source))
+        CHECK (source NOT LIKE 'workday:%' OR source = lower(source))
 );
 -- Resolves "current payload per posting" for detail reuse; off until a reader needs it:
 -- CREATE INDEX raw_posting_current_idx
@@ -266,13 +299,20 @@ CREATE TABLE job_posting (
     ------------ PARSED ---------------------
     remote                   text NOT NULL DEFAULT 'unknown'
         CHECK (remote IN ('yes', 'hybrid', 'unknown')),
+    -- 'yes', never 'no': a stated full-time signal is not reliable enough to
+    -- assert. Ashby types "Part-Time Studio Coordinator" as FullTime, so the
+    -- absence of a part-time statement stays indistinguishable from no signal.
+    -- Orthogonal to job_type on purpose: a part-time internship is `intern`
+    -- here and 'yes' there, which the single-valued job_type could not say.
+    part_time                text NOT NULL DEFAULT 'unknown'
+        CHECK (part_time IN ('yes', 'unknown')),
     job_type                 text -- null means no signal
         CHECK (job_type IS NULL OR job_type IN (
             'intern',
             'coop',
-            'student_program',
-            'research',
-            'part_time'
+            'student',
+            'new_grad',
+            'research'
         )),
     locations jsonb NOT NULL DEFAULT '[]'::jsonb,
 
@@ -300,12 +340,12 @@ CREATE TABLE job_posting (
             )
         )
         CHECK (
-            NOT attributes ? 'degree_fields'
+            NOT attributes ? 'degree'
             OR (
-                jsonb_typeof(attributes -> 'degree_fields') = 'array'
+                jsonb_typeof(attributes -> 'degree') = 'array'
                 AND NOT jsonb_path_exists(
                     attributes,
-                    '$.degree_fields[*] ? (@.type() != "string")'
+                    '$.degree[*] ? (@.type() != "string")'
                 )
             )
         )
@@ -316,7 +356,13 @@ CREATE TABLE job_posting (
         CONSTRAINT job_posting_summary_meta_type CHECK (
             NOT attributes ? 'summary_meta'
             OR jsonb_typeof(attributes -> 'summary_meta') = 'object'
-        ), 
+        ),
+    -- Taxonomy revision that produced attributes.degree. NULL means the row has
+    -- never been enriched, or that ingest invalidated the tag because the title
+    -- or description it was derived from changed. A scalar column, not a key in
+    -- attributes: the enrichment loop scans it on every pass to find stale rows,
+    -- and that predicate must stay indexable rather than digging through JSONB.
+    degree_version           smallint,
     -- Traceability to the unmodified input
     raw_id                   bigint NOT NULL REFERENCES raw_posting(id),  -- raw version it produced current row
     dup_group_id             uuid,              -- groups suspected duplicates together
@@ -325,16 +371,22 @@ CREATE TABLE job_posting (
 
     UNIQUE (source, source_key),
     CONSTRAINT job_posting_workday_source_lower
-        CHECK (source NOT LIKE 'workday-list:%' OR source = lower(source))
+        CHECK (source NOT LIKE 'workday:%' OR source = lower(source))
 );
 COMMENT ON COLUMN job_posting.attributes IS
-    'OneShot enrichment v1: version, term, remote, skills/meta, degree_fields/meta, summary/meta, deadline_at';
+    'OneShot enrichment v1: version, term, remote, skills/meta, degree, summary/meta, deadline_at';
+COMMENT ON COLUMN job_posting.degree_version IS
+    'Taxonomy revision behind attributes.degree; NULL means unenriched or invalidated by an input change.';
 COMMENT ON COLUMN job_posting.removal_marked_at IS
     'When a human marked this posting for removal; NULL means not marked. Never written by ingest.';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
-CREATE INDEX job_posting_degree_fields_active_idx
-    ON job_posting USING gin ((attributes -> 'degree_fields'))
+CREATE INDEX job_posting_degree_active_idx
+    ON job_posting USING gin ((attributes -> 'degree'))
     WHERE status = 'active';
+-- The enrichment loop pages stale rows by id. Leading with the version keeps
+-- the steady state -- every row already at the current revision -- an empty
+-- index scan instead of a full pass over a 2 GB table.
+CREATE INDEX job_posting_degree_version_idx ON job_posting (degree_version, id);
 -- OneShot Opportunities filters this scalar on every list/count request.
 CREATE INDEX job_posting_job_type_active_idx
     ON job_posting (job_type)
