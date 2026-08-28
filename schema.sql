@@ -75,8 +75,6 @@ CREATE TABLE feed (
     source   text NOT NULL, -- ashby, greenhouse, workable, etc.
     key      text NOT NULL, -- openai, anthropic, janestreet, etc.
     polling  boolean NOT NULL DEFAULT false,
-    -- Runtime data belongs with the endpoint.  It must never be loaded from a
-    -- checked-in catalog: the worker and inspector both read these fields.
     config       jsonb NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(config) = 'object'),
     type         text NOT NULL DEFAULT 'ATS'
@@ -90,11 +88,6 @@ CREATE TABLE feed (
 
     -- Optimization
     etag            text,                                -- server's version token; 304 upon hit
-    -- The server that has no ETag but does honor Last-Modified (Trakstar):
-    -- raw header value, compared byte-for-byte, never parsed as a date. Only
-    -- meaningful alongside a HEAD probe -- a server that ignores
-    -- If-Modified-Since (Trakstar does) gets no benefit from a conditional
-    -- GET, but a cheap HEAD still reveals whether this value changed.
     last_modified   text,
     res_hash        text,                                -- hash of listing response; skip parse when nothing moved
     last_change_at  timestamptz,                         -- last poll hash moved; back off keys on to slow a dormant board

@@ -1514,6 +1514,18 @@ DETAIL_A: dict[str, dict] = {
                 # them ("Summer Intern Co-op Conversion") also matches the
                 # intern rule below -- which is exactly why the order matters.
                 {"from": "@Title", "re": "co-?ops?", "is": "coop"},  # 2, md:60
+                # Finance-sector naming: an internship that never says "intern".
+                # Same rule as workday-list (md:workday.md, 0 live there) -- here
+                # it is live: Goldman Sachs (162) and JPMorganChase (40) title
+                # their programs this way exclusively, e.g. "2027 | Americas |
+                # Dallas Metro Area | Investment Banking Quantitative Strats |
+                # Summer Analyst".
+                {"from": "@Title",
+                 "re": "summer analysts?|summer associates?|summer scholars?"
+                       "|spring insight|off.?cycle analyst|vacation scheme"
+                       "|vacation work|sandwich (year|placement)|year in industry"
+                       "|placement year",
+                 "is": "intern"},  # 202
                 # Boundaries reject the 267 Internal / International rows that a
                 # bare /intern/ admits -- the largest such gap of any vendor
                 # surveyed (md:26-27).

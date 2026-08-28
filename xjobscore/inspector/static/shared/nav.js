@@ -5,8 +5,8 @@ import { el } from "/static/shared/format.js";
 
 const LINKS = [
   ["Tokens", "/tokens"],
-  ["Feeds", "/"],
   ["Scheduler", "/scheduler"],
+  ["Feeds", "/"],
   ["Postings", "/postings"],
   ["Review", "/review"],
   ["Query", "/query"],

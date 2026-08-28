@@ -36,8 +36,16 @@
               title="Only titles matching intern/co-op/fellow/extern — the dense stratum for labeling">
         Intern titles
       </button>
-      <input type="search" id="posting-search" placeholder="Search title, company, location…"
+      <input type="search" id="posting-search" placeholder="Search…"
              autocomplete="off" style="flex:1;max-width:320px">
+      <select id="search-field-select" title="Search field">
+        <option value="all">All fields</option>
+        <option value="title">Title</option>
+        <option value="description">Description</option>
+        <option value="location">Location</option>
+        <option value="source_url">Source URL</option>
+        <option value="apply_url">Apply URL</option>
+      </select>
       <div class="grow"></div>
       <span class="secondary" id="label-progress" title="Labels stored so far"></span>
       <button class="btn small" type="button" id="help-btn" title="Keyboard shortcuts (?)">?</button>

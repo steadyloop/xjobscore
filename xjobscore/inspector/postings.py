@@ -22,6 +22,7 @@ LABELS = ("relevant", "irrelevant", "unsure")
 LABEL_STATES = ("all", "unlabeled", "labeled") + LABELS
 ORDERS = ("newest", "company", "random")
 STATUSES = ("active", "closed", "duplicates", "removal")
+SEARCH_FIELDS = ("all", "title", "description", "location", "source_url", "apply_url")
 
 # POSIX character classes, not \b: PostgreSQL ARE word boundaries ([[:<:]])
 # read poorly and \b means backspace inside a bracket expression.
@@ -41,6 +42,24 @@ _ORDER_CLAUSES = {
     "company": "c.name, p.first_seen_at DESC, p.id DESC",
     # Stable for a fixed seed, so pagination never repeats or skips a row.
     "random": "md5($9::text || p.id::text), p.id",
+}
+# Stable content only -- title/description/location/source_url/apply_url.
+# Company and source/vendor are excluded: both are already visible and
+# filterable elsewhere on the page, and including them in "all" made the
+# search box match on things it wasn't obviously searching.
+_SEARCH_PREDICATES = {
+    "all": (
+        "p.title ILIKE '%' || $6 || '%'"
+        " OR p.description ILIKE '%' || $6 || '%'"
+        " OR p.location_text ILIKE '%' || $6 || '%'"
+        " OR p.source_url ILIKE '%' || $6 || '%'"
+        " OR p.apply_url ILIKE '%' || $6 || '%'"
+    ),
+    "title": "p.title ILIKE '%' || $6 || '%'",
+    "description": "p.description ILIKE '%' || $6 || '%'",
+    "location": "p.location_text ILIKE '%' || $6 || '%'",
+    "source_url": "p.source_url ILIKE '%' || $6 || '%'",
+    "apply_url": "p.apply_url ILIKE '%' || $6 || '%'",
 }
 
 _SELECT = """
@@ -62,10 +81,7 @@ WHERE ($4::text IS NULL OR split_part(p.source, ':', 1) = $4)
   AND (($5::text IN ('active', 'closed') AND p.status = $5)
        OR ($5::text = 'duplicates' AND p.dup_group_id IS NOT NULL)
        OR ($5::text = 'removal' AND p.removal_marked_at IS NOT NULL))
-  AND ($6::text = '' OR p.title ILIKE '%' || $6 || '%'
-       OR c.name ILIKE '%' || $6 || '%'
-       OR p.location_text ILIKE '%' || $6 || '%'
-       OR p.source ILIKE '%' || $6 || '%')
+  AND ($6::text = '' OR {search_predicate})
   AND (NOT $7::bool OR p.title ~* $8)
   -- $9 is the shuffle seed; referenced here so the parameter list is stable
   -- across every order mode (asyncpg rejects unused arguments).
@@ -144,6 +160,7 @@ async def query(
     status: str = "active",
     label_state: str = "all",
     search: str = "",
+    search_field: str = "all",
     intern_signal: bool = False,
     order: str = "newest",
     seed: str = "",
@@ -154,6 +171,7 @@ async def query(
     _validate("status", status, STATUSES)
     _validate("label_state", label_state, LABEL_STATES)
     _validate("order", order, ORDERS)
+    _validate("search_field", search_field, SEARCH_FIELDS)
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     if order == "random" and not seed:
@@ -163,6 +181,7 @@ async def query(
     sql = _SELECT.format(
         label_predicate=_LABEL_PREDICATES[label_state],
         order_clause=_ORDER_CLAUSES[order],
+        search_predicate=_SEARCH_PREDICATES[search_field],
     )
     async with pool.acquire() as conn:
         sources = [
@@ -193,6 +212,7 @@ async def query(
             "status": status,
             "label_state": label_state,
             "search": search.strip(),
+            "search_field": search_field,
             "intern_signal": intern_signal,
             "order": order,
             "seed": seed,
