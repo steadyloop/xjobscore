@@ -50,8 +50,6 @@ kbd, .meta, .filter, .section-kicker { font-family: var(--mono); font-variant-nu
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .discover-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 25px; margin-bottom: 0; }
 .discover-page-head .section-kicker { margin: 0 0 6px; color: var(--green); font-size: 10px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
-.preview-link { display: inline-flex; margin-bottom: 9px; border-bottom: 1px solid currentColor; color: var(--green); font-size: 10px; font-weight: 750; }
-.preview-link:hover, .preview-link:focus-visible { color: var(--ink); outline: none; }
 .discover-page-head h1 { margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: -.045em; }
 
 /* The same switch as application/styles.css:56-65 and resume/styles.css:45-54,

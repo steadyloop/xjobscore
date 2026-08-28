@@ -11,7 +11,7 @@
   // job_type filter as this classified scope, not as "everything" — job_type is
   // NULL when no vendor rule matched, and that pool is opt-in via the
   // "unclassified" token.
-  const DEFAULT_JOB_TYPES = ["intern", "coop", "student_program", "research", "part_time"];
+  const DEFAULT_JOB_TYPES = ["intern", "coop", "student", "new_grad", "research"];
   // The fixture mirrors the live read-time policy for the normalized cities it
   // contains. The full production metro map remains server-side.
   const SAMPLE_US_HUBS = new Set([
@@ -539,7 +539,7 @@
         summary: "Research sharded optimizer state and fault-tolerant training for multi-node machine-learning workloads. You will prototype ideas, evaluate them on production-scale clusters, and present results to the research systems team.",
         job_type: "research",
         remote: "yes",
-        attributes: { version: 1, term: "Spring 2027", skills: ["JAX", "Python", "Ray"], degree_fields: ["computer_science", "mathematics"], deadline_at: dateIn(18) },
+        attributes: { version: 1, term: "Spring 2027", skills: ["JAX", "Python", "Ray"], degree: ["cs", "mathematics"], deadline_at: dateIn(18) },
         apply_url: "https://example.com/apply/sample-research",
       },
       {
@@ -557,7 +557,7 @@
         summary: "Build research infrastructure used to test and deploy systematic trading strategies. Projects include low-latency data processing, simulation tooling, and production monitoring.",
         job_type: "intern",
         remote: "unknown",
-        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "C++", "Linux", "Microsoft Excel", "FIX Protocol"], degree_fields: ["mathematics"] },
+        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "C++", "Linux", "Microsoft Excel", "FIX Protocol"], degree: ["mathematics"] },
         apply_url: "https://example.com/apply/sample-quant",
       },
       {
@@ -575,7 +575,7 @@
         summary: "Join the platform team building services for fleet operations. You will own a scoped backend project, write production code, and work with engineers across infrastructure and product.",
         job_type: "intern",
         remote: "hybrid",
-        attributes: { version: 1, skills: ["Go", "Kubernetes", "PostgreSQL"], degree_fields: ["computer_science"] },
+        attributes: { version: 1, skills: ["Go", "Kubernetes", "PostgreSQL"], degree: ["cs"] },
         apply_url: "https://example.com/apply/sample-software",
       },
       {
@@ -593,7 +593,7 @@
         summary: "Develop firmware and systems software for industrial control hardware. The role includes driver development, hardware bring-up, automated testing, and debugging real-time systems.",
         job_type: "coop",
         remote: "unknown",
-        attributes: { version: 1, term: "Fall 2027", skills: ["C++", "FreeRTOS", "Linux", "FPGA"], degree_fields: ["computer_science"] },
+        attributes: { version: 1, term: "Fall 2027", skills: ["C++", "FreeRTOS", "Linux", "FPGA"], degree: ["cs"] },
         apply_url: "https://example.com/apply/sample-embedded",
       },
       {
@@ -629,7 +629,7 @@
         summary: "Develop evaluation methods for biological foundation models and collaborate with research scientists on reproducible experiments.",
         job_type: "intern",
         remote: "unknown",
-        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "PyTorch", "Hugging Face Transformers", "Model evaluation", "Artificial intelligence"], degree_fields: ["biotech"] },
+        attributes: { version: 1, term: "Summer 2027", skills: ["Python", "PyTorch", "Hugging Face Transformers", "Model evaluation", "Artificial intelligence"], degree: ["biotech"] },
         apply_url: "https://example.com/apply/sample-ml-research",
       },
       {
@@ -663,7 +663,7 @@
         source: "lever:civic-ai",
         source_url: "https://example.com/jobs/sample-fellowship",
         summary: "Join a twelve-week cohort studying practical governance approaches for deployed AI systems.",
-        job_type: "student_program",
+        job_type: "student",
         remote: "hybrid",
         attributes: { version: 1, term: "Summer 2027", skills: ["Policy research", "Python"] },
         apply_url: "https://example.com/apply/sample-fellowship",
@@ -681,7 +681,7 @@
         source: "workday:forge-automation",
         source_url: "https://example.com/jobs/sample-apprentice",
         summary: "Learn production software development through mentored rotations across platform and automation teams.",
-        job_type: "student_program",
+        job_type: "student",
         remote: "unknown",
         attributes: { version: 1, skills: ["Java", "SQL"] },
         apply_url: "https://example.com/apply/sample-apprentice",
@@ -699,7 +699,7 @@
         source: "ashby:atlas-compute",
         source_url: "https://example.com/jobs/sample-new-grad",
         summary: "Start in a structured engineering cohort with rotations through distributed systems and developer infrastructure.",
-        job_type: "student_program",
+        job_type: "new_grad",
         remote: "unknown",
         attributes: { version: 1, skills: ["Go", "Linux"] },
         apply_url: "https://example.com/apply/sample-new-grad",
@@ -717,7 +717,7 @@
         source: "smartrecruiters:helix-cloud",
         source_url: "https://example.com/jobs/sample-working-student",
         summary: "Support build tooling and internal developer workflows alongside your university studies.",
-        job_type: "student_program",
+        job_type: "student",
         remote: "hybrid",
         attributes: { version: 1, skills: ["TypeScript", "CI/CD"] },
         apply_url: "https://example.com/apply/sample-working-student",
@@ -902,7 +902,7 @@
       const available = state.jobs.filter(job => {
         if (locationBucket(job) === null) return false;
         const searchable = `${job.title} ${job.company} ${(job.skills || []).map(skill => skill.name).join(" ")}`.toLowerCase();
-        const postingFields = job.attributes.degree_fields || [];
+        const postingFields = job.attributes.degree || [];
         const matchesDegree = !degreeFields.length || degreeFields.some(field =>
           field === "bioengineering"
             ? ["biotech", "med_device", "clinical_affairs"].some(value => postingFields.includes(value))

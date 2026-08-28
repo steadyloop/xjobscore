@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Opportunities · OneShot</title>
-  <link rel="stylesheet" href="/static/opportunities-v2/styles.css?v=skill-bundles-20260822">
+  <link rel="stylesheet" href="/static/opportunities/styles.css?v=skill-bundles-20260827b">
   <link rel="stylesheet" href="/static/navigation.css?v=stable-nav-20260817">
   <!-- No sample-data toggle on this page, but api-client.js and nav-count.js
        both read window.OneShotVisitorData (the guest workspace) as they
@@ -13,7 +13,7 @@
   <script defer src="/static/sample-data.js?v=skill-bundles-20260822"></script>
   <script defer src="/static/api-client.js?v=visitor-local-20260816"></script>
   <script defer src="/static/nav-count.js?v=visitor-local-20260816"></script>
-  <script defer src="/static/opportunities-v2/app.js?v=skill-bundles-20260822"></script>
+  <script defer src="/static/opportunities/app.js?v=skill-bundles-20260822"></script>
 </head>
 <body>
   <a class="skip-link" href="#view">Skip to opportunities</a>
@@ -34,7 +34,6 @@
       <a class="brand" href="/"><img class="brand-mark" src="/static/brand-mark.svg?v=20260813" alt="" width="32" height="32"><span class="brand-word">OneShot</span><span class="brand-sub">Application Pipeline</span></a>
       <nav class="side-nav">
         <a class="active" href="/" aria-current="page"><svg class="nav-icon" aria-hidden="true"><use href="#icon-compass"/></svg>Opportunities <b data-opportunity-count>—</b></a>
-        <a href="/opportunities-v3/"><svg class="nav-icon" aria-hidden="true"><use href="#icon-compass"/></svg>Opportunities (v2)</a>
         <a href="/application/"><svg class="nav-icon" aria-hidden="true"><use href="#icon-pipeline"/></svg>Applications</a>
         <a href="/resume/"><svg class="nav-icon" aria-hidden="true"><use href="#icon-doc"/></svg>Resume</a>
         <p>System</p>
@@ -44,7 +43,7 @@
 
     <main class="main">
       <div id="flash" class="flash" role="status" aria-live="polite"></div>
-      <section id="view" class="view opportunities-v2-view" aria-live="polite">
+      <section id="view" class="view opportunities-view" aria-live="polite">
         <div class="state loading"><i></i><h1>Loading Opportunities</h1><p>Reading the latest API data.</p></div>
       </section>
     </main>

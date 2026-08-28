@@ -1,20 +1,21 @@
 (function (root) {
   "use strict";
 
-  const STUDENT_JOB_TYPES = ["intern", "coop", "student_program", "research", "part_time"];
+  const STUDENT_JOB_TYPES = ["intern", "coop", "student", "new_grad", "research"];
   const FILTERS = [
     { key: "all", label: "All", types: [] },
     { key: "internships", label: "Internships", types: ["intern"] },
     { key: "coops", label: "Co-ops", types: ["coop"] },
-    { key: "student_programs", label: "Student Programs", types: ["student_program"] },
-    { key: "part_time", label: "Part Time", types: ["part_time"] },
+    { key: "students", label: "Student Jobs", types: ["student"] },
+    { key: "new_grads", label: "New Grad", types: ["new_grad"] },
   ];
   const DEGREE_FILTERS = [
-    { key: "computer_science", label: "Software" },
-    { key: "mathematics", label: "Finance" },
+    { key: "software", label: "Software" },
+    { key: "finance", label: "Finance" },
     { key: "med_device", label: "MedTech" },
     { key: "biotech", label: "BioTech" },
     { key: "clinical_affairs", label: "Regulatory" },
+    { key: "unlabeled", label: "Unlabeled" },
   ];
   const SOURCE_LABELS = {
     adp: "ADP",
@@ -286,7 +287,7 @@
 
   const $ = selector => root.document.querySelector(selector);
   const view = $("#view"), flash = $("#flash");
-  const state = { jobs: null, total: 0, typeCounts: {}, loadingMore: false, selected: null, filters: ["all"], degreeFilters: ["computer_science"], sort: "fresh", query: "" };
+  const state = { jobs: null, total: 0, typeCounts: {}, loadingMore: false, selected: null, filters: ["all"], degreeFilters: ["software"], sort: "fresh", query: "" };
 
   const paint = html => {
     view.innerHTML = html;
@@ -369,11 +370,11 @@
   }
 
   function render() {
-    const search = $("#opportunities-v2-search"), restoreFocus = search && root.document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
+    const search = $("#opportunities-search"), restoreFocus = search && root.document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
     const jobs = state.jobs || [], selected = jobs.find(job => String(job.id) === String(state.selected));
-    paint(`<section class="discover-page"><header class="discover-page-head"><div><div class="section-kicker">Discover</div><h1>Opportunities</h1></div></header><div class="discover-grid"><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div><div class="degree-filterbar" role="group" aria-label="Focus area mentioned"><span class="degree-filter-label">Focus area mentioned</span>${degreeFiltersMarkup()}</div></section><div class="discover-search-surface"><label class="discover-search"><svg aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="opportunities-v2-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘ K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? opportunitiesMarkup(jobs) : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
+    paint(`<section class="discover-page"><header class="discover-page-head"><div><div class="section-kicker">Discover</div><h1>Opportunities</h1></div></header><div class="discover-grid"><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div><div class="degree-filterbar" role="group" aria-label="Focus area mentioned"><span class="degree-filter-label">Focus area mentioned</span>${degreeFiltersMarkup()}</div></section><div class="discover-search-surface"><label class="discover-search"><svg aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="opportunities-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘ K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? opportunitiesMarkup(jobs) : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
     if (restoreFocus) {
-      const next = $("#opportunities-v2-search");
+      const next = $("#opportunities-search");
       next?.focus();
       if (next && selectionStart != null) next.setSelectionRange(selectionStart, selectionStart);
     }
@@ -479,7 +480,7 @@
   root.document.addEventListener("keydown", event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      return $("#opportunities-v2-search")?.focus();
+      return $("#opportunities-search")?.focus();
     }
     const focused = event.target.closest?.("[data-job]");
     if (focused && ["Enter", " "].includes(event.key)) {

@@ -2,22 +2,22 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { FILTERS, jobTypes, relativeTime, postedPresentation } = require("./app.js");
-const opportunitiesV2 = require("./opportunities-v2/app.js");
+const opportunities = require("./opportunities/app.js");
 const sampleData = require("./sample-data.js");
 const { ROUTES, query } = require("./api-client.js");
 const { opportunityTotal } = require("./nav-count.js");
 
 test("visible filters map to PostgreSQL job types", () => {
-  const labels = ["All", "Internships", "Co-ops", "Student Programs", "Part Time"];
-  const keys = ["all", "internships", "coops", "student_programs", "part_time"];
-  const types = ["intern", "coop", "student_program", "part_time"];
+  const labels = ["All", "Internships", "Co-ops", "Student Jobs", "New Grad"];
+  const keys = ["all", "internships", "coops", "students", "new_grads"];
+  const types = ["intern", "coop", "student", "new_grad"];
 
   assert.deepEqual(FILTERS.map(filter => filter.label), labels);
   assert.deepEqual(jobTypes(keys), types);
-  assert.deepEqual(opportunitiesV2.FILTERS.map(filter => filter.label), labels);
-  assert.deepEqual(opportunitiesV2.jobTypes(keys), types);
+  assert.deepEqual(opportunities.FILTERS.map(filter => filter.label), labels);
+  assert.deepEqual(opportunities.jobTypes(keys), types);
   assert.equal(FILTERS.some(filter => filter.types.includes("research")), false);
-  assert.equal(opportunitiesV2.FILTERS.some(filter => filter.types.includes("research")), false);
+  assert.equal(opportunities.FILTERS.some(filter => filter.types.includes("research")), false);
   assert.deepEqual(jobTypes([]), [], "no tab active defers to the API's default scope");
 });
 
@@ -56,7 +56,7 @@ test("sample jobs match the live list contract", async () => {
     assert.equal(job.attributes.version, 1);
     // Parse-time columns, alongside attributes rather than inside it. job_type
     // is NULL when no vendor rule matched; remote always states a value.
-    assert.ok(job.job_type === null || ["intern", "coop", "student_program", "research", "part_time"].includes(job.job_type));
+    assert.ok(job.job_type === null || ["intern", "coop", "student", "new_grad", "research"].includes(job.job_type));
     assert.ok(["yes", "hybrid", "unknown"].includes(job.remote));
   }
 });
@@ -118,7 +118,7 @@ test("sample jobs honor limit and offset like the live API", async () => {
   assert.equal(second.jobs.length, 2);
   assert.equal(second.total, first.total);
   assert.deepEqual(first.job_type_counts, {
-    intern: 3, coop: 1, student_program: 3, research: 1, part_time: 0,
+    intern: 3, coop: 1, student: 2, new_grad: 1, research: 1,
   });
   assert.deepEqual(
     second.jobs.map(job => job.id).filter(id => first.jobs.some(job => job.id === id)),
@@ -208,9 +208,9 @@ test("visitor workspace starts blank and stays separate from sample fixtures", a
 test("frontend client builds current API routes", () => {
   assert.equal(ROUTES.addToApplications("job 1"), "/jobs/job%201/applications");
   assert.equal(ROUTES.application("app 1"), "/applications/app%201");
-  assert.equal(query({ q: "python", job_type: ["intern", "student_program"] }), "?q=python&job_type=intern&job_type=student_program");
+  assert.equal(query({ q: "python", job_type: ["intern", "new_grad"] }), "?q=python&job_type=intern&job_type=new_grad");
   assert.equal(query({ exclude_job_id: [41, 42] }), "?exclude_job_id=41&exclude_job_id=42");
-  assert.equal(query({ degree_field: ["computer_science", "mathematics"] }), "?degree_field=computer_science&degree_field=mathematics");
+  assert.equal(query({ degree_field: ["cs", "mathematics"] }), "?degree_field=cs&degree_field=mathematics");
   const source = fs.readFileSync(require.resolve("./api-client.js"), "utf8");
   assert.match(source, /OneShotVisitorData\.isLocal\(\)/);
   assert.match(source, /applications:[\s\S]*privateData|applications:[\s\S]*, true\)/);
@@ -229,7 +229,7 @@ test("navigation count uses the unfiltered opportunity total on every page", () 
 });
 
 test("Opportunities exposes its action and workspace navigation", () => {
-  const source = fs.readFileSync(require.resolve("./opportunities-v2/app.js"), "utf8");
+  const source = fs.readFileSync(require.resolve("./opportunities/app.js"), "utf8");
   const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
   assert.match(source, /data-action=\"add-to-applications\"/);
   assert.match(source, /class=\"discover-controls-pane\".*class=\"discover-search-surface\".*class=\"discover-sort\"/);
@@ -238,8 +238,10 @@ test("Opportunities exposes its action and workspace navigation", () => {
   assert.match(html, /href=\"\/application\/\"/);
   assert.match(html, /href=\"\/source-coverage\/\"/);
   assert.doesNotMatch(html, /href=\"\/static\/[a-z-]+\/index\.html\"/);
-  assert.match(html, /href=\"\/static\/opportunities-v2\/styles\.css\?v=skill-bundles-/);
-  assert.match(html, /src=\"\/static\/opportunities-v2\/app\.js\?v=skill-bundles-/);
+  assert.match(html, /href=\"\/static\/opportunities\/styles\.css\?v=skill-bundles-/);
+  assert.match(html, /src=\"\/static\/opportunities\/app\.js\?v=skill-bundles-/);
+  // The versioned directories are gone; no shell may still point at them.
+  assert.doesNotMatch(html, /opportunities-v[23]/);
   assert.match(html, /href=\"\/static\/navigation\.css\?v=stable-nav-/);
 });
 
@@ -267,7 +269,7 @@ test("the sample switch is per page, guest-only, and present only on Application
   const opportunities = shellFor("./index.html");
   assert.match(opportunities, /sample-data\.js/);
   assert.doesNotMatch(opportunities, /sample-toggle/);
-  const page = fs.readFileSync(require.resolve("./opportunities-v2/app.js"), "utf8");
+  const page = fs.readFileSync(require.resolve("./opportunities/app.js"), "utf8");
   assert.doesNotMatch(page, /sample-toggle|sampleToggle|OneShotSampleData/);
 
   // Source coverage is a read-only report on the harvest, so a demo mode there
@@ -311,10 +313,10 @@ test("Opportunities exposes only its canonical layout", () => {
     fs.readFileSync(require.resolve("./application/index.html"), "utf8"),
     fs.readFileSync(require.resolve("./source-coverage/index.html"), "utf8"),
   ];
-  const styles = fs.readFileSync(require.resolve("./opportunities-v2/styles.css"), "utf8");
+  const styles = fs.readFileSync(require.resolve("./opportunities/styles.css"), "utf8");
 
   for (const page of pages) {
-    assert.doesNotMatch(page, /opportunities-(?:full|split)|Opportunities \((?:Left|Full|Split)\)/);
+    assert.doesNotMatch(page, /opportunities-(?:full|split|v2|v3)|Opportunities \((?:Left|Full|Split|v2|v3)\)/);
   }
   assert.doesNotMatch(styles, /data-opportunities-layout/);
   assert.match(styles, /\.discover-search-surface \{[^}]*display: flex/);

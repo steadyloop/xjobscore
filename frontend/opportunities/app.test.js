@@ -33,8 +33,8 @@ const {
 } = require("./app.js");
 
 test("V2 job type tabs default to all student opportunities", () => {
-  const counts = { intern: 42, coop: 7, student_program: 11, research: 3, part_time: 5 };
-  assert.deepEqual(FILTERS.map(filter => filter.label), ["All", "Internships", "Co-ops", "Student Programs", "Part Time"]);
+  const counts = { intern: 42, coop: 7, student: 11, new_grad: 5, research: 3 };
+  assert.deepEqual(FILTERS.map(filter => filter.label), ["All", "Internships", "Co-ops", "Student Jobs", "New Grad"]);
   assert.equal(tabCount(counts, FILTERS[0]), 68);
   assert.equal(tabCount(counts, FILTERS[1]), 42);
   assert.equal(tabCount(counts, FILTERS[2]), 7);
@@ -61,21 +61,24 @@ test("V2 labels the outer recency buckets by calendar day", () => {
 });
 
 test("V2 exposes the three bio-career focus filters", () => {
+  // Keys are the API's degree_field values (VALID_DEGREE_FIELDS in
+  // oneshot_ui/repository.py); anything else is rejected with 400.
   assert.deepEqual(DEGREE_FILTERS, [
-    { key: "computer_science", label: "Software" },
-    { key: "mathematics", label: "Finance" },
+    { key: "software", label: "Software" },
+    { key: "finance", label: "Finance" },
     { key: "med_device", label: "MedTech" },
     { key: "biotech", label: "BioTech" },
     { key: "clinical_affairs", label: "Regulatory" },
+    { key: "unlabeled", label: "Unlabeled" },
   ]);
-  assert.deepEqual(degreeFields(["bioengineering", "computer_science", "unknown", "med_device", "biotech", "clinical_affairs"]), [
-    "computer_science",
+  assert.deepEqual(degreeFields(["bioengineering", "software", "computer_science", "unknown", "med_device", "biotech", "clinical_affairs"]), [
+    "software",
     "med_device",
     "biotech",
     "clinical_affairs",
   ]);
   const design = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  assert.match(design, /degreeFilters: \["computer_science"\]/);
+  assert.match(design, /degreeFilters: \["software"\]/);
   assert.match(design, /Focus area mentioned/);
   assert.match(design, /data-degree-filter/);
   assert.match(design, /degree_field: degreeFields\(state\.degreeFilters\)/);
@@ -318,6 +321,19 @@ test("V2 leads the detail with the posted date, not an always-true liveness chip
   assert.match(design, /detailMetaMarkup\(job\)\}\$\{detailPostedMarkup\(job\)\}<div class="detail-actions"/);
 });
 
+test("V2 action row ends where the role summary wraps instead of tracking the pane", () => {
+  const styles = fs.readFileSync(require.resolve("./styles.css"), "utf8");
+  // Both measures are 55ch at 11px, so the buttons and the summary share a right edge.
+  assert.match(styles, /\.detail-actions \{[^}]*max-width: 55ch[^}]*font-size: 11px/);
+  assert.match(styles, /\.role-summary \{[^}]*max-width: 55ch[^}]*font-size: 11px/);
+  // Below 560px the row stacks and goes back to full width.
+  assert.match(styles, /@media \(max-width: 560px\)[\s\S]*\.detail-actions \{ grid-template-columns: 1fr; max-width: none; \}/);
+  // The pane column has a pixel ceiling and the canvas is sized to it, so neither
+  // the sticky pane nor the cards stretch around empty space on wide screens.
+  assert.match(styles, /\.view \{[^}]*max-width: 1320px[^}]*margin: 0;/);
+  assert.match(styles, /\.discover-grid \{[^}]*grid-template-columns: minmax\(430px, 1fr\) minmax\(360px, 460px\)/);
+});
+
 test("V2 detail header carries the company and the location on one line, with no initials mark", () => {
   const markup = detailHeadMarkup({ company: "Manatal", location: "Bangkok, Thailand" });
   assert.match(markup, /class="detail-headline"/);
@@ -382,7 +398,7 @@ test("V2 card gives remote work a quiet cue distinct from skill chips", () => {
 });
 
 test("V2 opportunity metadata icons are defined in the shared icon sprite", () => {
-  for (const page of ["../index.html", "./index.html"]) {
+  for (const page of ["../index.html"]) {
     const html = fs.readFileSync(require.resolve(page), "utf8");
     for (const icon of ["icon-pin", "icon-calendar", "icon-globe", "icon-clock"]) {
       assert.match(html, new RegExp(`id="${icon}"`));
@@ -437,14 +453,14 @@ test("V2 list card leads with company, drops the left accent, and states the pos
 test("V2 is the main Opportunities design and exposes accessible source disclosure", () => {
   const main = fs.readFileSync(require.resolve("../index.html"), "utf8");
   const design = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  const shell = fs.readFileSync(require.resolve("./index.html"), "utf8");
-  assert.match(main, /opportunities-v2\/styles\.css\?v=skill-bundles-/);
-  assert.match(main, /opportunities-v2\/app\.js\?v=skill-bundles-/);
+  assert.match(main, /\/static\/opportunities\/styles\.css\?v=skill-bundles-/);
+  assert.match(main, /\/static\/opportunities\/app\.js\?v=skill-bundles-/);
+  // The versioned directories are gone; no shell may still point at them.
+  assert.doesNotMatch(main, /opportunities-v[23]|Opportunities \(v[23]\)/);
+  assert.match(main, /class="active" href="\/" aria-current="page"/);
   assert.doesNotMatch(design, /Design preview|View current Opportunities/);
   assert.match(design, /aria-controls=/);
   assert.match(design, /aria-expanded=/);
   assert.match(design, /data-action="toggle-sources"/);
   assert.doesNotMatch(design, /Show full description|Show less/);
-  assert.match(shell, /opportunities-v2\/styles\.css\?v=skill-bundles-/);
-  assert.match(shell, /opportunities-v2\/app\.js\?v=skill-bundles-/);
 });

@@ -121,9 +121,9 @@ own still needs:
    `credentials: "include"` on every call plus `SameSite=None` on the cookie.
 
 Page links also assume the API's URL space and would be rewritten to plain paths
-under a static host. Every page shell has one canonical URL — `/`, the legacy
-`/opportunities-v2/` alias, `/application/`, `/source-coverage/`,
-`/resume/`, `/login/`, `/discover/` — served by a route in
+under a static host. Every page shell has one canonical URL — `/`,
+`/application/`, `/source-coverage/`, `/resume/`, `/login/`, `/discover/` —
+served by a route in
 `oneshot_ui/app.py`; the `/static` mount answers on the same files, so a shell must
 reference its assets by absolute `/static/...` path rather than `./` or `../`,
 which resolve differently at the two depths.
