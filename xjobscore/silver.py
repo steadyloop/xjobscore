@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from xjobscore import router, sources, store
 from xjobscore.location_normalizer import normalize_location
-from xjobscore.records import LINK_DEAD, Feed, Item, Posting
+from xjobscore.records import LINK_DEAD, Feed, Item, Posting, Unparseable
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -117,6 +117,7 @@ def _projection(posting: Posting) -> dict[str, Any]:
         # vendor has not been transcribed yet leaves these at their defaults.
         "job_type": posting.job_type,
         "remote": posting.remote,
+        "part_time": posting.part_time,
         "locations": locations,
         "attributes": attributes,
         "status": "closed"
@@ -132,12 +133,13 @@ def _projection(posting: Posting) -> dict[str, Any]:
 #                 Hashing it would report a change on the active->active and
 #                 closed->active transitions the stored row cannot reflect.
 #   attributes -- deadline_at and a silver-derived remote signal. No gold step
-#                 reads either (skills_input_hash and degree_fields_input_hash
-#                 both hash `description` alone), and the upsert merges
+#                 reads either (skills_input_hash hashes `description` alone,
+#                 and the degree step stamps a column), and the upsert merges
 #                 attributes in both CASE branches regardless of content_hash,
 #                 so excluding it here costs no data -- only a churn signal
 #                 that was never wanted.
-#   job_type, remote, locations -- parse-time derivations. Parser improvements
+#   job_type, remote, part_time, locations -- parse-time derivations. Parser
+#                 improvements
 #                 may replace them without pretending the source posting
 #                 changed or invalidating unrelated Gold enrichment.
 _HASHED_FIELDS = (
@@ -161,6 +163,10 @@ class Counts:
     unresolved: int = 0
     unsupported: int = 0
     secondhand: int = 0
+    # Items an adapter refused as not-a-posting. Counted, never silent: this is
+    # the only channel that tells an operator a feed's detail pages have gone
+    # from requisitions to session walls.
+    unparseable: int = 0
 
     def __add__(self, other: "Counts") -> "Counts":
         return Counts(
@@ -170,6 +176,7 @@ class Counts:
             unresolved=self.unresolved + other.unresolved,
             unsupported=self.unsupported + other.unsupported,
             secondhand=self.secondhand + other.secondhand,
+            unparseable=self.unparseable + other.unparseable,
         )
 
 
@@ -200,16 +207,30 @@ async def process(
     dry_run: bool = False,
     aliases: dict[str, int] | None = None,
     touch_seen: bool = True,
+    whole_batch: bool = True,
 ) -> Counts:
     """Parse and project raw items. Parser exceptions intentionally propagate.
+
+    The one exception is ``Unparseable``, which an adapter raises only for a
+    payload it can positively identify as not-a-posting. That item is counted
+    and skipped so one dead detail page cannot cost the batch every other
+    posting beside it. If *every* item is unparseable the batch still fails:
+    that is not one closed requisition, it is a feed whose detail pages stopped
+    being detail pages, and it must reach the scheduler as an error.
 
     ``touch_seen`` is false when the caller did not observe the live listing --
     a replay over stored payloads, or a probe of a single posting. Only a fetch
     that actually returned the posting may advance ``last_seen_at``.
+
+    ``whole_batch`` is false when ``stored`` is a slice of the caller's batch
+    rather than the batch itself. The all-unparseable check only means anything
+    against the full set, so a caller feeding items in chunks must run it once
+    over its own total instead -- see ``replay``.
     """
     parse = sources.parser(feed.source)
     total = Counts()
     source = store.source_instance(feed)
+    refused: Unparseable | None = None
     for raw in stored:
         item = raw.item
         item_envelope = envelope
@@ -220,7 +241,18 @@ async def process(
                 payload=reconstructed.payload,
                 kind=reconstructed.kind,
             )
-        canonicals = parse(feed, item, item_envelope)
+        try:
+            canonicals = parse(feed, item, item_envelope)
+        except Unparseable as error:
+            refused = error
+            logger.warning(
+                "unparseable item source=%s source_key=%s: %s",
+                source,
+                raw.item.external_id,
+                error,
+            )
+            total += Counts(unparseable=1)
+            continue
         postings = []
         for canonical in canonicals:
             if not isinstance(canonical, Posting):
@@ -282,6 +314,14 @@ async def process(
                 if changed
                 else Counts(unchanged=1)
             )
+    if whole_batch and refused is not None and total.unparseable == len(stored):
+        # Nothing survived. A per-item skip is a vendor answering about one
+        # posting; a whole batch of them is the adapter reading a page it no
+        # longer recognises, and reporting "ok, zero postings" for that would
+        # hide a broken feed behind a healthy schedule.
+        raise ValueError(
+            f"every item was unparseable source={source} items={len(stored)}"
+        ) from refused
     return total
 
 
@@ -303,7 +343,8 @@ async def replay(
     total = Counts()
     sources.parser(feed.source)  # fail before writing any replayed rows
     source = store.source_instance(feed)
-    for row in await store.latest_raw(conn, source):
+    rows = await store.latest_raw(conn, source)
+    for row in rows:
         item, envelope = router.unwrap(row["data"])
         item = Item(external_id=row["source_key"], payload=item.payload, kind=item.kind)
         stored = router.StoredRaw(
@@ -313,8 +354,16 @@ async def replay(
             created=False,
             data=row["data"],
         )
+        # One call per row, because each revision carries its own envelope. That
+        # makes every call a one-item batch, so `process` cannot run the
+        # all-unparseable check for us without failing the feed on the first
+        # skippable page; the same check runs once below, over the whole feed.
         total += await process(
             conn, feed, [stored], envelope, seen_at=seen_at, dry_run=dry_run,
-            aliases=aliases, touch_seen=False,
+            aliases=aliases, touch_seen=False, whole_batch=False,
+        )
+    if rows and total.unparseable == len(rows):
+        raise ValueError(
+            f"every item was unparseable source={source} items={len(rows)}"
         )
     return total

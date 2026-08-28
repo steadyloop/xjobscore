@@ -44,6 +44,7 @@ __all__ = [
     "Provenance",
     "Record",
     "Target",
+    "Unparseable",
 ]
 
 # The vendor transport format stored inside raw_posting.data's versioned
@@ -72,6 +73,22 @@ Precision = Literal["exact", "date", "unknown"]
 # probed channel may claim a dead link, and a vendor flag flipping must not be
 # mistaken for one.
 LINK_DEAD = "probe: origin url gone"
+
+
+class Unparseable(ValueError):
+    """This payload is not a posting, and the adapter is certain of it.
+
+    A detail URL the vendor stopped serving between the listing walk and the
+    fetch, a session wall answering 200 with the career section's landing page:
+    the origin's answer about one item, not drift in the parser. `silver`
+    counts and skips these. Every other exception a parser raises still fails
+    the batch, because a source that silently parses nothing is
+    indistinguishable from a board with no jobs -- and noticing absence is the
+    whole point.
+
+    A skip is not a closure. The item simply stops being touched, goes absent,
+    and `reconcile` probes the origin before anything is closed.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,10 +224,15 @@ class Posting:
     # not an undergraduate research position -- that phrase measures 1 row
     # across the whole corpus, so no vendor's table treats it as its own
     # bucket. See doc/raw_postings/{ashby,greenhouse,workday}.md's ### Research.
-    job_type: str | None = None  # intern | coop | student_program | research | part_time
+    job_type: str | None = None  # intern | coop | student | new_grad | research
     # 'unknown', never 'no': a stated on-site signal is not reliable enough to
     # assert, so it is left indistinguishable from no signal at all.
     remote: str = "unknown"  # yes | hybrid | unknown
+    # Schedule, not opportunity kind -- orthogonal to job_type, so a part-time
+    # internship carries `intern` above and 'yes' here. Same "never assert the
+    # negative" rule as `remote`: vendors type "Part-Time Studio Coordinator"
+    # as FullTime, so a stated full-time value cannot be trusted as 'no'.
+    part_time: str = "unknown"  # yes | unknown
 
     published_at: datetime | None = None
     published_at_precision: Precision = "unknown"

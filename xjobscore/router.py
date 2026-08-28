@@ -27,9 +27,11 @@ __all__ = [
 ]
 
 VOLATILE: dict[str, frozenset[str]] = {
-    # A list harvest stores the jobPostings[] row itself, so `postedOn` sits at
-    # the payload root. `_strip` matches on key name at any depth.
-    "workday-list": frozenset({"postedOn"}),
+    # A skipped row stores the jobPostings[] row itself, so `postedOn` sits at
+    # the payload root; a detail-merged row keeps it there too (`merge` puts the
+    # list row underneath). `_strip` matches on key name at any depth, so one
+    # entry covers both shapes.
+    "workday": frozenset({"postedOn"}),
     "rippling": frozenset({"logo"}),
     "icims": frozenset({"opensearch", "last_mod"}),
     "oracle": frozenset({"Relevancy", "SearchId", "Facets"}),

@@ -305,13 +305,15 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
         await _finish_failure(pool, feed, now, "error")
         return "error"
 
-    if counts.unresolved or counts.unsupported or counts.secondhand:
+    if counts.unresolved or counts.unsupported or counts.secondhand or counts.unparseable:
         logger.info(
-            "silver skips source=%s unresolved=%d unsupported=%d secondhand=%d",
+            "silver skips source=%s unresolved=%d unsupported=%d secondhand=%d "
+            "unparseable=%d",
             source,
             counts.unresolved,
             counts.unsupported,
             counts.secondhand,
+            counts.unparseable,
         )
 
     outcome: Outcome = "partial" if record.truncated else "ok"

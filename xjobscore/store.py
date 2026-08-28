@@ -120,7 +120,7 @@ def _feed_from_row(row: asyncpg.Record) -> Feed:
 
 _FEED_SELECT = """
     SELECT
-        f.id, f.source, f.key, f.polling AS enabled, f.config,
+        f.id, f.source, f.key, f.polling AS enabled, t.config,
         f.type, c.description,
         f.interval_s, f.etag, f.last_modified, f.res_hash, f.list_total, f.last_full_poll_at,
         f.strikes, f.due_at, f.hold_until,
@@ -161,7 +161,7 @@ async def claim_due_feeds(
             RETURNING f.id, f.hold_until
         )
         SELECT
-            f.id, f.source, f.key, f.polling AS enabled, f.config,
+            f.id, f.source, f.key, f.polling AS enabled, t.config,
             f.type, c.description,
             f.interval_s, f.etag, f.last_modified, f.res_hash, f.list_total, f.last_full_poll_at,
             f.strikes, f.due_at,
@@ -221,7 +221,7 @@ async def claim_feed(
             RETURNING f.id, f.hold_until
         )
         SELECT
-            f.id, f.source, f.key, f.polling AS enabled, f.config,
+            f.id, f.source, f.key, f.polling AS enabled, t.config,
             f.type, c.description,
             f.interval_s, f.etag, f.last_modified, f.res_hash, f.list_total, f.last_full_poll_at,
             f.strikes, f.due_at,
@@ -559,7 +559,7 @@ async def load_alias_map(conn: Connection) -> dict[str, int]:
     A few thousand rows. Trading one query per posting for one query per run is
     only sound while nothing writes aliases mid-pass, as in the parse path.
     """
-    rows = await conn.fetch("SELECT alias_norm, company_id FROM alias")
+    rows = await conn.fetch("SELECT alias_norm, company_id FROM company_alias")
     return {row["alias_norm"]: row["company_id"] for row in rows}
 
 
@@ -579,7 +579,7 @@ async def resolve_company(
     row = await conn.fetchrow(
         """
         SELECT company_id
-        FROM alias
+        FROM company_alias
         WHERE alias_norm = ANY($1::text[])
         ORDER BY array_position($1::text[], alias_norm)
         LIMIT 1
@@ -668,11 +668,11 @@ async def upsert_job_posting(
         ), ins AS (
             INSERT INTO job_posting(
                 source, source_key, company_id, title, description, location_text,
-                source_url, apply_url, posted_at, job_type, remote, locations,
-                attributes, status, last_seen_at, content_hash, raw_id,
+                source_url, apply_url, posted_at, job_type, remote, part_time,
+                locations, attributes, status, last_seen_at, content_hash, raw_id,
                 vendor_closed_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                      $15, $16, $17, $19)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $20, $12, $13,
+                      $14, $15, $16, $17, $19)
             ON CONFLICT (source, source_key) DO UPDATE SET
                 company_id = EXCLUDED.company_id,
                 title = EXCLUDED.title,
@@ -686,6 +686,7 @@ async def upsert_job_posting(
                 -- unconditionally rather than being invalidated like gold below.
                 job_type = EXCLUDED.job_type,
                 remote = EXCLUDED.remote,
+                part_time = EXCLUDED.part_time,
                 locations = EXCLUDED.locations,
                 -- Skills consume only description; degree fields and summaries
                 -- consume title and description. Comparing those inputs avoids
@@ -695,15 +696,25 @@ async def upsert_job_posting(
                     WHEN job_posting.description IS DISTINCT FROM EXCLUDED.description
                     THEN (job_posting.attributes
                           - 'skills' - 'skills_meta'
-                          - 'degree_fields' - 'degree_fields_meta'
+                          - 'degree'
                           - 'summary' - 'summary_meta')
                          || EXCLUDED.attributes
                     WHEN job_posting.title IS DISTINCT FROM EXCLUDED.title
                     THEN (job_posting.attributes
-                          - 'degree_fields' - 'degree_fields_meta'
+                          - 'degree'
                           - 'summary' - 'summary_meta')
                          || EXCLUDED.attributes
                     ELSE job_posting.attributes || EXCLUDED.attributes
+                END,
+                -- The degree tag's revision stamp lives in a column, so
+                -- invalidating the tag has to clear the column in the same
+                -- statement. Dropping one without the other would either strand
+                -- a stamp with no tag or re-enrich a row on every single pass.
+                degree_version = CASE
+                    WHEN job_posting.description IS DISTINCT FROM EXCLUDED.description
+                        OR job_posting.title IS DISTINCT FROM EXCLUDED.title
+                    THEN NULL
+                    ELSE job_posting.degree_version
                 END,
                 -- status is monotonic, not write-once: a stated closure lands,
                 -- and nothing reopens the row. A list harvest projects 'active'
@@ -753,6 +764,7 @@ async def upsert_job_posting(
         raw_id,
         touch_seen,
         vendor_closed_at,
+        values.get("part_time", "unknown"),
     )
     return row["id"], row["changed"], row["created"]
 
