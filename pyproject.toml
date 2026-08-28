@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 keyscan = "keyscan:main"
 location-normalizer = "xjobscore.location_normalizer:main"
+xjobscore-backup = "xjobscore.backup:cli"
 
 [build-system]
 requires = ["setuptools>=61.0"]
