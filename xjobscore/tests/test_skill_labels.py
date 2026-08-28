@@ -7,8 +7,13 @@ from xjobscore.skills import SKILLS_PATH, canon
 def test_compact_labels_are_display_only_and_cover_the_reviewed_set() -> None:
     display = labels()
 
-    assert len(display) == 174
+    assert len(display) == 173
     assert max(map(len, display.values())) <= MAX_LABEL_LENGTH
+    # A label for an id the taxonomy no longer carries is dead weight that
+    # renders nowhere and silently rots. The bare count above only notices that
+    # *something* moved; this names what. `metal-shading-language` was removed
+    # on 2026-08-26 after it left skills.yaml.
+    assert set(display) <= set(canon()), sorted(set(display) - set(canon()))
     assert skill_label("artificial-intelligence", "unused") == "AI"
     assert skill_label("triton-kernel-language", "unused") == "Triton"
     assert skill_label("nvidia-triton-inference-server", "unused") == "Triton Server"

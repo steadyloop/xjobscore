@@ -80,7 +80,7 @@ def test_extract_returns_a_short_source_only_when_it_describes_the_work() -> Non
     assert summaries.extract("Backend Intern", legal) is None
 
 
-def test_extract_handles_student_program_language_without_inventing_a_job() -> None:
+def test_extract_handles_student_language_without_inventing_a_job() -> None:
     description = """
     About Example Trading
     Example Trading is a global firm founded by experienced market professionals.

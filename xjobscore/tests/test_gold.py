@@ -410,39 +410,37 @@ def test_empty_skill_result_is_stamped_as_processed() -> None:
 # Degree-field enrichment --------------------------------------------------
 
 
-def test_degree_fields_payload_records_matches_hash_and_timestamp() -> None:
+def test_degree_payload_records_every_match() -> None:
     description = "Bachelor's degree in Computer Science, Applied Mathematics, or BME."
 
-    payload = gold.degree_fields_payload("Engineer", description, parsed_at=NOW)
+    payload = gold.degree_payload("Engineer", description)
 
-    assert payload == {
-        "degree_fields": ["computer_science", "mathematics", "med_device"],
-        "degree_fields_meta": {
-            "version": 3,
-            "parsed_at": "2026-08-17T21:34:00Z",
-            "input_hash": gold.degree_fields_input_hash("Engineer", description),
-        },
-    }
+    # The taxonomy revision is not in the patch: it is written to
+    # job_posting.degree_version by the rebuild statement instead.
+    assert payload == {"degree": ["cs", "mathematics", "med_device"]}
 
 
-def test_empty_degree_result_is_stamped_as_processed() -> None:
-    payload = gold.degree_fields_payload("Engineer", None, parsed_at=NOW)
+def test_empty_degree_result_is_still_a_patch() -> None:
+    assert gold.degree_payload("Engineer", None) == {"degree": []}
 
-    assert payload["degree_fields"] == []
-    assert payload["degree_fields_meta"]["input_hash"] == gold.degree_fields_input_hash(
-        "Engineer", None
+
+def test_degree_ignores_a_title_that_only_matches_patterns() -> None:
+    payload = gold.degree_payload("Biomedical Engineering Intern", "Join our summer program.")
+
+    assert payload["degree"] == []
+
+
+def test_degree_still_honors_an_explicit_title_pattern() -> None:
+    payload = gold.degree_payload(
+        "Field Service Engineer, Surgical Robotics", "Join our summer program."
     )
 
-
-def test_degree_fields_include_title_when_description_has_no_signal() -> None:
-    payload = gold.degree_fields_payload(
-        "Biomedical Engineering Intern", "Join our summer program.", parsed_at=NOW
-    )
-
-    assert payload["degree_fields"] == ["med_device"]
+    assert payload["degree"] == ["med_device"]
 
 
 class _DegreesConnection:
+    """Models degree_version as the scalar column the rebuild now reads."""
+
     def __init__(self) -> None:
         self.rows = {
             1: {
@@ -450,17 +448,24 @@ class _DegreesConnection:
                 "title": "Engineer",
                 "description": "Degree in Computer Science.",
                 "attributes": {},
+                "degree_version": None,
             },
-            2: {"id": 2, "title": "Engineer", "description": None, "attributes": {}},
+            2: {
+                "id": 2,
+                "title": "Engineer",
+                "description": None,
+                "attributes": {},
+                "degree_version": None,
+            },
         }
         self.update_calls = 0
 
-    async def fetch(self, query, last_id: int, limit: int, version: str):
+    async def fetch(self, query, last_id: int, limit: int, version: int):
         return [
             {"id": row["id"], "title": row["title"], "description": row["description"]}
             for row in self.rows.values()
             if row["id"] > last_id
-            and str(row["attributes"].get("degree_fields_meta", {}).get("version", "")) != version
+            and (row["degree_version"] is None or row["degree_version"] != version)
         ][:limit]
 
     async def executemany(self, query, updates):
@@ -469,8 +474,9 @@ class _DegreesConnection:
             row = self.rows[posting_id]
             if row["title"] != title or (row["description"] or "") != description:
                 continue
-            if str(row["attributes"].get("degree_fields_meta", {}).get("version", "")) != version:
+            if row["degree_version"] is None or row["degree_version"] != version:
                 row["attributes"].update(payload)
+                row["degree_version"] = version
 
 
 @pytest.mark.asyncio
@@ -483,23 +489,22 @@ async def test_degrees_step_enriches_each_unstamped_posting_only_once() -> None:
     assert first == gold.Counts(postings=2)
     assert second == gold.Counts()
     assert connection.update_calls == 1
-    assert connection.rows[1]["attributes"]["degree_fields"] == ["computer_science"]
-    assert connection.rows[2]["attributes"]["degree_fields"] == []
+    assert connection.rows[1]["attributes"]["degree"] == ["cs"]
+    assert connection.rows[2]["attributes"]["degree"] == []
+    assert connection.rows[1]["degree_version"] == 5
 
 
 @pytest.mark.asyncio
 async def test_degrees_step_rebuilds_postings_from_an_older_taxonomy() -> None:
     connection = _DegreesConnection()
-    connection.rows[1]["attributes"] = {
-        "degree_fields": ["bioengineering"],
-        "degree_fields_meta": {"version": 1},
-    }
+    connection.rows[1]["attributes"] = {"degree": ["bioengineering"]}
+    connection.rows[1]["degree_version"] = 1
 
     result = await gold._degrees_rebuild(connection, parsed_at=NOW)
 
     assert result == gold.Counts(postings=2)
-    assert connection.rows[1]["attributes"]["degree_fields"] == ["computer_science"]
-    assert connection.rows[1]["attributes"]["degree_fields_meta"]["version"] == 3
+    assert connection.rows[1]["attributes"]["degree"] == ["cs"]
+    assert connection.rows[1]["degree_version"] == 5
 
 
 class _SkillsConnection:

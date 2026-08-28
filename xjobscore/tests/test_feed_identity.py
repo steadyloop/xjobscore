@@ -8,21 +8,21 @@ from xjobscore.feed_identity import (
 )
 
 
-def test_retired_workday_source_is_an_alias_for_workday_list():
-    assert canonical_feed_source("workday") == "workday-list"
+def test_interim_workday_list_source_is_an_alias_for_workday():
+    assert canonical_feed_source("workday-list") == "workday"
     assert canonical_feed_identity("workday", "Cisco/wd5/Cisco_Careers") == (
-        "workday-list",
+        "workday",
         "cisco/wd5/cisco_careers",
     )
 
 
-def test_workday_list_keys_are_case_insensitive_endpoint_identities():
+def test_workday_keys_are_case_insensitive_endpoint_identities():
     assert (
-        canonical_feed_key("workday-list", "Cisco/wd5/Cisco_Careers")
+        canonical_feed_key("workday", "Cisco/wd5/Cisco_Careers")
         == "cisco/wd5/cisco_careers"
     )
-    assert canonical_feed_identity("workday-list", "Acme/wd1/Jobs") == (
-        "workday-list",
+    assert canonical_feed_identity("workday", "Acme/wd1/Jobs") == (
+        "workday",
         "acme/wd1/jobs",
     )
 
@@ -33,8 +33,8 @@ def test_other_vendor_keys_keep_their_exact_spelling():
 
 def test_workday_posting_namespace_uses_the_canonical_feed_identity():
     assert store.source_instance(
-        store.Feed(id=1, source="workday-list", key="Acme/wd1/Careers")
-    ) == "workday-list:acme/wd1/careers"
+        store.Feed(id=1, source="workday", key="Acme/wd1/Careers")
+    ) == "workday:acme/wd1/careers"
 
 
 @pytest.mark.asyncio
@@ -51,15 +51,15 @@ async def test_bulk_feed_import_normalizes_before_deduplicating():
     result = await store.import_feeds(
         connection,
         [
-            ("workday-list", "Cisco/wd5/Cisco_Careers"),
-            ("workday-list", "cisco/wd5/cisco_careers"),
+            ("workday", "Cisco/wd5/Cisco_Careers"),
+            ("workday", "cisco/wd5/cisco_careers"),
         ],
         enabled=True,
     )
 
     assert result == (1, 0)
     assert connection.args == (
-        ["workday-list"],
+        ["workday"],
         ["cisco/wd5/cisco_careers"],
         True,
     )

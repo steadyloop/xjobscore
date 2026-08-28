@@ -26,14 +26,22 @@ async def seed_token(pool, token: str, *, status: str = "live", muted: bool = Fa
 
 async def test_heartbeat_candidate_guards_and_mute_race(core_schema):
     pool = core_schema.pool
-    await seed_token(pool, "eligible")
-    await seed_token(pool, "muted", muted=True)
-    await seed_token(pool, "dead", status="dead")
+    # The heartbeat re-probes dead boards looking for resurrections; live ones
+    # absent from feed are the operator's backlog and are left alone.
+    await seed_token(pool, "eligible", status="dead")
+    await seed_token(pool, "muted", status="dead", muted=True)
+    await seed_token(pool, "live", status="live")
 
     identities, total = await tokens.promotion_candidates(pool)
     assert identities == [("workable", "eligible")]
     assert total == 1
 
+    # The probe found it alive again -- promote_verified's guard is 'live',
+    # so without the mute this would now promote. Muting mid-cycle is the race.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE token SET status = 'live' WHERE ats='workable' AND token='eligible'"
+        )
     await tokens.set_muted(
         pool,
         ats="workable",
@@ -72,6 +80,36 @@ async def test_muting_drops_but_unmuting_does_not_recreate_feed(core_schema):
     assert muted["feed_dropped"] is True
     assert unmuted["feed_dropped"] is False
     assert feed_exists is False
+
+
+async def test_pause_switch_survives_and_gates_every_path(core_schema):
+    """The switch is a row, not process state: one write, three readers."""
+    pool = core_schema.pool
+    current = datetime.now(timezone.utc)
+
+    await token_heartbeat.set_paused(pool, True, current=current)
+
+    assert await token_heartbeat.touch_runner(pool, current) is True
+    with pytest.raises(token_heartbeat.HeartbeatPaused):
+        await token_heartbeat.enqueue_now(pool, current)
+    snapshot = await token_heartbeat.heartbeat_snapshot(
+        pool,
+        current=current,
+        configured=True,
+        offline_after_s=180,
+    )
+    assert snapshot["state"] == "paused"
+    assert snapshot["paused"] is True
+    assert snapshot["paused_changed_at"] == current.isoformat()
+
+    await token_heartbeat.set_paused(pool, False, current=current)
+
+    assert await token_heartbeat.touch_runner(pool, current) is False
+    await token_heartbeat.enqueue_now(pool, current)
+    assert (
+        await token_heartbeat.claim_due(pool, current=current, lease_seconds=900)
+        is not None
+    )
 
 
 async def test_heartbeat_lease_is_exclusive_and_status_is_persistent(core_schema):

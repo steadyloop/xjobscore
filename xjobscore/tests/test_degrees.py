@@ -10,7 +10,7 @@ def test_extracts_configured_degree_fields() -> None:
     )
 
     assert degrees.extract(description) == [
-        "computer_science",
+        "cs",
         "mathematics",
         "med_device",
     ]
@@ -42,17 +42,22 @@ def test_gcp_requires_clinical_context() -> None:
     ]
 
 
-def test_adjacent_bio_terms_are_title_only() -> None:
+def test_biotech_ignores_the_title_entirely() -> None:
+    """biotech carries no title_patterns: only the description can name it."""
     description = "Our company develops products for immunology and neuroscience."
 
     assert degrees.extract(description, title="Finance Intern") == []
-    assert degrees.extract(description, title="Research Scientist, Immunology") == [
-        "biotech"
-    ]
+    # Adjacent bio vocabulary in the title no longer admits the field. It added
+    # 529 tags across the active corpus, 68% on postings with no description --
+    # therapy-area role names, not degree evidence.
+    assert degrees.extract(description, title="Research Scientist, Immunology") == []
+    assert degrees.extract("", title="Computational Neuroscience Intern") == []
+    # The description channel is untouched.
+    assert degrees.extract("BS in Bioengineering or related field.") == ["biotech"]
 
 
-def test_title_only_patterns_cover_observed_bioengineering_roles() -> None:
-    assert degrees.extract("", title="Computational Neuroscience Intern") == ["biotech"]
+def test_title_only_patterns_cover_observed_device_roles() -> None:
+    # med_device keeps its title channel; biotech is the one that gave it up.
     assert degrees.extract("", title="Biomedical Equipment Maintenance Technician") == [
         "med_device"
     ]

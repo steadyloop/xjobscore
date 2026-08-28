@@ -131,3 +131,35 @@ def test_main_retains_jsonl_contract(tmp_path, capsys) -> None:
         "locations": [{"country": "CA", "state": "ON", "city": "Toronto"}],
         "remote": False,
     }
+
+
+def _states(value: str) -> list[tuple[str, str | None, str | None]]:
+    return [(x["country"], x["state"], x["city"])
+            for x in normalize_location(value)["locations"]]
+
+
+def test_a_multi_word_state_beats_city_matches_on_its_own_halves() -> None:
+    """`north` is a city in Utah and `carolina` one in Puerto Rico, so the city
+    matcher used to consume both words and North Carolina never resolved. The
+    state span strictly contains each city span, which is what settles it."""
+    assert _states("Remote, North Carolina, USA") == [("US", "NC", None)]
+    assert _states("North Dakota, Virtual Address") == [("US", "ND", None)]
+    assert _states("New Hampshire") == [("US", "NH", None)]
+
+
+def test_a_resolved_city_still_wins_its_own_state() -> None:
+    """Suppression is scoped to spans the state strictly contains, so an equal
+    span is still decided by the city/state compatibility check above it."""
+    assert _states("Charlotte, North Carolina") == [("US", "NC", "Charlotte")]
+    assert _states("New York, NY") == [("US", "NY", "New York City")]
+    assert _states("Kansas City, Kansas") == [("US", "KS", "Kansas City")]
+
+
+def test_a_suppressed_state_is_appended_not_dropped() -> None:
+    """Removing the spurious city is only half of it: the `if not rows` fallback
+    promotes state hits only when nothing at all was selected, so a surviving
+    city elsewhere in the string would otherwise take the state down with it.
+    The state is appended monotonically, never replacing an existing row."""
+    assert _states("Atlanta; Florida; North Carolina; South Carolina") == [
+        ("US", "GA", "Atlanta"), ("US", "NC", None), ("US", "SC", None),
+    ]

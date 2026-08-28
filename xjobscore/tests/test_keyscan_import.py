@@ -47,12 +47,12 @@ def _seed_token(
 
 
 def test_resolve_ats_maps_the_stale_workday_label():
-    assert resolve_ats("workday") == "workday-list"
+    assert resolve_ats("workday") == "workday"
     assert resolve_ats("greenhouse") == "greenhouse"
 
 
 def test_resolve_key_uses_the_tenant_segment_for_compound_tokens():
-    assert resolve_key("workday-list", "acme/wd5/AcmeCareers") == "acme"
+    assert resolve_key("workday", "acme/wd5/AcmeCareers") == "acme"
     assert resolve_key("oracle", "acme/12345") == "acme"
     assert resolve_key("greenhouse", "acme") == "acme"
 
@@ -67,7 +67,7 @@ async def test_only_resolvable_rows_are_written_with_full_field_mapping(tmp_path
 
     _seed_token(db_path, ats="greenhouse", token=resolvable_token, status="live")
     _seed_token(db_path, ats="greenhouse", token=unresolvable_token, status="live")
-    # keyscan's stale pre-rename label -- must land under workday-list.
+    # keyscan's stale pre-rename label -- must land under workday.
     _seed_token(db_path, ats="workday", token=workday_token, status="dead", checked_at=None)
 
     pool = core_schema.pool
@@ -78,7 +78,7 @@ async def test_only_resolvable_rows_are_written_with_full_field_mapping(tmp_path
             f"acme-{suffix}.test",
         )
         await conn.execute(
-            "INSERT INTO alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
+            "INSERT INTO company_alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
             f"acme-{suffix}",
             company_id,
         )
@@ -94,7 +94,7 @@ async def test_only_resolvable_rows_are_written_with_full_field_mapping(tmp_path
             "SELECT * FROM token WHERE ats = 'greenhouse' AND token = $1", resolvable_token
         )
         workday_row = await conn.fetchrow(
-            "SELECT * FROM token WHERE ats = 'workday-list' AND token = $1",
+            "SELECT * FROM token WHERE ats = 'workday' AND token = $1",
             workday_token.lower(),
         )
         missing = await conn.fetchrow(
@@ -115,7 +115,7 @@ async def test_only_resolvable_rows_are_written_with_full_field_mapping(tmp_path
     assert missing is None  # unresolved: skipped entirely, not written with NULL company_id
 
     # keyscan's own imported_at is set only for the rows actually written,
-    # scoped to keyscan's original ats label ("workday", not "workday-list").
+    # scoped to keyscan's original ats label ("workday", not "workday").
     pending_after = load_pending(db_path)
     assert {row.token for row in pending_after} == {unresolvable_token}
 
@@ -135,7 +135,7 @@ async def test_rerun_is_idempotent(tmp_path, core_schema):
             f"acme-{suffix}.test",
         )
         await conn.execute(
-            "INSERT INTO alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
+            "INSERT INTO company_alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
             f"acme-{suffix}",
             company_id,
         )
@@ -164,7 +164,7 @@ async def test_a_row_not_owned_by_keyscan_is_never_overwritten(tmp_path, core_sc
             f"acme-{suffix}.test",
         )
         await conn.execute(
-            "INSERT INTO alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
+            "INSERT INTO company_alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
             f"acme-{suffix}",
             company_id,
         )
@@ -204,7 +204,7 @@ async def test_dry_run_writes_nothing(tmp_path, core_schema):
             f"acme-{suffix}.test",
         )
         await conn.execute(
-            "INSERT INTO alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
+            "INSERT INTO company_alias(alias_norm, company_id, alias) VALUES ($1, $2, $1)",
             f"acme-{suffix}",
             company_id,
         )

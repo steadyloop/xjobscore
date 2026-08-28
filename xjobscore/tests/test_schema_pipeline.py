@@ -11,7 +11,7 @@ import yaml
 
 from xjobscore import router, run, silver, sources, store, work
 from xjobscore.records import LINK_DEAD
-from xjobscore.records import Fact, Feed, Item, Label, Posting, Record, Target
+from xjobscore.records import Fact, Feed, Item, Label, Posting, Record, Target, Unparseable
 
 json_api = sources.json_api
 
@@ -83,6 +83,27 @@ def test_schema_carries_workday_count_probe_state():
     assert "last_full_poll_at timestamptz" in schema
 
 
+def test_company_alias_rename_has_a_live_database_migration():
+    """The table is `company_alias`; nothing may still declare the old `alias`
+    name, and an existing database has to be carried across by the migration
+    rather than only by a fresh schema.sql build."""
+    root = Path(__file__).parent.parent.parent
+    schema = (root / "schema.sql").read_text()
+    migration = (
+        root / "xjobscore" / "migrations" / "20260826_company_alias_rename.sql"
+    ).read_text()
+
+    assert "CREATE TABLE company_alias (" in schema
+    assert "CREATE TABLE alias (" not in schema
+    assert "ON company_alias (company_id)" in schema
+    assert "ALTER TABLE alias RENAME TO company_alias" in migration
+    assert "alias_company_idx RENAME TO company_alias_company_idx" in migration
+    # A table rename leaves the constraints under their old names, which drifts
+    # a migrated database from a fresh one; the catalog sweep is what closes it.
+    assert "alias_pkey RENAME TO company_alias_pkey" in migration
+    assert "RENAME CONSTRAINT" in migration
+
+
 def test_schema_job_types_match_the_api_contract():
     """job_type has no registry canon any more -- the column CHECK is the
     contract. oneshot-ui is a separate sub-project with its own suite, so it
@@ -95,7 +116,32 @@ def test_schema_job_types_match_the_api_contract():
     assert declared is not None, "schema.sql must CHECK the job_type column"
     schema_types = set(re.findall(r"'([a-z_]+)'", declared.group(1)))
     # `research` has no vendor emitting it yet; it is still part of the contract.
-    assert schema_types == {"intern", "coop", "student_program", "research", "part_time"}
+    assert schema_types == {"intern", "coop", "student", "new_grad", "research"}
+
+
+def test_schema_part_time_is_its_own_column_with_no_negative():
+    """Schedule is orthogonal to opportunity kind: a part-time internship is
+    `intern` plus part_time 'yes', which the single-valued job_type could not
+    say. Domain mirrors `remote` -- no 'no', because a vendor's stated
+    full-time value disagrees with the title too often to assert."""
+    schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
+    declared = re.search(r"CHECK \(part_time IN \((.*?)\)\)", schema, re.DOTALL)
+    assert declared is not None, "schema.sql must CHECK the part_time column"
+    assert set(re.findall(r"'([a-z_]+)'", declared.group(1))) == {"yes", "unknown"}
+
+
+def test_part_time_split_has_a_live_database_migration():
+    """The column is new and job_type's domain narrows, so an existing database
+    needs the backfill before the tighter CHECK can be installed."""
+    migration = (
+        Path(__file__).parent.parent / "migrations" / "20260826_part_time_column.sql"
+    ).read_text()
+    assert "ADD COLUMN IF NOT EXISTS part_time text" in migration
+    # Backfill must precede the narrowed CHECK or the surviving rows violate it.
+    assert migration.index("SET part_time = 'yes'") < migration.index(
+        "ADD CONSTRAINT job_posting_job_type_check"
+    )
+    assert "SET job_type = NULL" in migration
 
 
 def test_schema_remote_domain_has_no_negative():
@@ -123,9 +169,9 @@ def test_schema_rejects_retired_and_noncanonical_workday_token_identities():
     schema = (Path(__file__).parent.parent.parent / "schema.sql").read_text()
 
     assert "CONSTRAINT token_workday_source_renamed" in schema
-    assert "CHECK (ats <> 'workday')" in schema
-    assert "CONSTRAINT token_workday_list_key_lower" in schema
-    assert "CHECK (ats <> 'workday-list' OR token = lower(token))" in schema
+    assert "CHECK (ats <> 'workday-list')" in schema
+    assert "CONSTRAINT token_workday_key_lower" in schema
+    assert "CHECK (ats <> 'workday' OR token = lower(token))" in schema
 
 
 def test_schema_rejects_noncanonical_workday_posting_namespaces():
@@ -133,7 +179,7 @@ def test_schema_rejects_noncanonical_workday_posting_namespaces():
 
     assert "CONSTRAINT raw_posting_workday_source_lower" in schema
     assert "CONSTRAINT job_posting_workday_source_lower" in schema
-    assert "source NOT LIKE 'workday-list:%' OR source = lower(source)" in schema
+    assert "source NOT LIKE 'workday:%' OR source = lower(source)" in schema
 
 
 class _AsyncContext:
@@ -303,7 +349,7 @@ async def test_company_resolution_from_alias_map_skips_the_database():
 
 
 def test_raw_wrapper_is_replayable_and_hash_ignores_volatile_fields():
-    feed = Feed(id=1, source="workday-list", key="acme")
+    feed = Feed(id=1, source="workday", key="acme")
     first = Record(
         items=[Item("job-1", {"title": "Engineer", "postedOn": "Posted today"})],
         envelope={"company": "Acme"},
@@ -741,6 +787,7 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
         # so silver carries the "no signal" defaults through untouched.
         "job_type": None,
         "remote": "unknown",
+        "part_time": "unknown",
         "locations": [{"country": "US", "state": None, "city": None}],
         "attributes": {
             "version": 1,
@@ -751,7 +798,7 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
     }
 
 
-def test_silver_projects_ashby_student_program_from_parse_rules():
+def test_silver_projects_ashby_student_from_parse_rules():
     feed = Feed(id=1, source="ashby", key="acme")
     posting = json_api.parse(
         "ashby",
@@ -768,8 +815,8 @@ def test_silver_projects_ashby_student_program_from_parse_rules():
 
     values = silver._projection(posting)
 
-    assert posting.job_type == "student_program"
-    assert values["job_type"] == "student_program"
+    assert posting.job_type == "student"
+    assert values["job_type"] == "student"
 
 
 def test_ashby_stores_and_normalizes_the_postal_augmented_location_text():
@@ -929,7 +976,7 @@ def test_ashby_secondary_locations_are_additive_and_never_remove_primary_cities(
     }
 
 
-def test_silver_projects_greenhouse_student_program_from_parse_rules():
+def test_silver_projects_greenhouse_student_from_parse_rules():
     feed = Feed(id=1, source="greenhouse", key="acme")
     posting = json_api.parse(
         "greenhouse",
@@ -946,8 +993,8 @@ def test_silver_projects_greenhouse_student_program_from_parse_rules():
 
     values = silver._projection(posting)
 
-    assert posting.job_type == "student_program"
-    assert values["job_type"] == "student_program"
+    assert posting.job_type == "student"
+    assert values["job_type"] == "student"
 
 
 _BASE_HASH_VALUES = {
@@ -976,7 +1023,7 @@ def test_content_hash_ignores_status():
 
 def test_content_hash_ignores_attributes():
     """No gold step reads deadline_at or attributes' silver-derived remote --
-    skills and degree_fields hash only their posting-text inputs."""
+    skills and degree hash only their posting-text inputs."""
     without_deadline = silver._content_hash(_BASE_HASH_VALUES)
     with_deadline = silver._content_hash(
         {
@@ -1033,8 +1080,7 @@ def test_silver_leaves_derived_enrichment_to_gold():
     assert "job_type_meta" not in values["attributes"]
     assert "skills" not in values["attributes"]
     assert "skills_meta" not in values["attributes"]
-    assert "degree_fields" not in values["attributes"]
-    assert "degree_fields_meta" not in values["attributes"]
+    assert "degree" not in values["attributes"]
 
 
 @pytest.mark.parametrize(
@@ -1120,8 +1166,10 @@ async def test_description_change_invalidates_gold_enrichments():
         "job_posting.content_hash IS DISTINCT FROM EXCLUDED.content_hash" not in upsert
     )
     assert "- 'skills' - 'skills_meta'" in upsert
-    assert "- 'degree_fields' - 'degree_fields_meta'" in upsert
+    assert "- 'degree'" in upsert
     assert upsert.count("- 'summary' - 'summary_meta'") == 2
+    # The tag and its revision stamp must be invalidated together.
+    assert "degree_version = CASE" in upsert
 
 
 @pytest.mark.asyncio
@@ -1317,3 +1365,67 @@ async def test_unsupported_outputs_and_secondhand_postings_are_counted(monkeypat
     assert counts.unsupported == 3
     assert counts.secondhand == 1
     assert counts.postings == 0
+
+
+@pytest.mark.asyncio
+async def test_one_unparseable_item_does_not_cost_the_batch(monkeypatch):
+    """A detail page the vendor no longer serves is one skipped item.
+
+    Taleo answers 200 with its career-section shell for a requisition pulled
+    between the listing walk and the detail fetch. Failing the whole poll on
+    that threw away every other posting fetched beside it.
+    """
+    posting = Posting(
+        external_id="job-2",
+        title="Kept",
+        url_posting="https://example.test/jobs/2",
+        company_raw="Acme",
+    )
+    feed = Feed(id=1, source="fixture", key="board", company_id=42, type="ATS")
+    stored = [
+        router.StoredRaw(Item("job-1", {}), 7, "raw-1", True),
+        router.StoredRaw(Item("job-2", {}), 8, "raw-2", True),
+    ]
+
+    def parse(feed, item, envelope):
+        if item.external_id == "job-1":
+            raise Unparseable("Taleo page did not define descRequisition")
+        return [posting]
+
+    monkeypatch.setattr(silver.sources, "parser", lambda name: parse)
+
+    writes = []
+
+    async def unresolved(conn, raw, **kwargs):
+        return None
+
+    async def write(conn, **kwargs):
+        writes.append(kwargs["source_key"])
+        return 9, True, True
+
+    monkeypatch.setattr(store, "resolve_company", unresolved)
+    monkeypatch.setattr(store, "upsert_job_posting", write)
+
+    counts = await silver.process(object(), feed, stored, {}, seen_at=NOW)
+
+    assert counts.unparseable == 1
+    assert counts.postings == 1
+    assert writes == ["job-2"]
+
+
+@pytest.mark.asyncio
+async def test_a_wholly_unparseable_batch_is_still_an_error(monkeypatch):
+    """Skipping every item would report a broken feed as a healthy empty one."""
+    feed = Feed(id=1, source="fixture", key="board", company_id=42, type="ATS")
+    stored = [
+        router.StoredRaw(Item("job-1", {}), 7, "raw-1", True),
+        router.StoredRaw(Item("job-2", {}), 8, "raw-2", True),
+    ]
+
+    def parse(feed, item, envelope):
+        raise Unparseable("Taleo page did not define descRequisition")
+
+    monkeypatch.setattr(silver.sources, "parser", lambda name: parse)
+
+    with pytest.raises(ValueError, match="every item was unparseable"):
+        await silver.process(object(), feed, stored, {}, seen_at=NOW)
