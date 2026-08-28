@@ -48,12 +48,12 @@ DEFAULT_KEYSCAN_DB = Path(__file__).resolve().parent.parent / "keyscan" / "work"
 # keyscan's on-disk `ats` label for a rule that has since been renamed. The
 # rule itself is unambiguous -- `myworkdayjobs.com` -- only the stored label
 # for tokens discovered before the rename lags behind.
-_ATS_RENAMES = {"workday": "workday-list"}
+_ATS_RENAMES = {"workday-list": "workday"}
 
 # Vendors whose token is a compound path (`tenant/wdN/site`, `tenant/site`)
 # rather than a bare company slug -- the company-resolution candidate is the
 # first path segment, not the full token.
-_TENANT_PREFIXED_ATS = {"workday-list", "oracle"}
+_TENANT_PREFIXED_ATS = {"workday", "oracle"}
 
 
 @dataclass(frozen=True, slots=True)

@@ -318,6 +318,7 @@ def _normalize_location(value: str) -> dict:
             ignored.add(end - 1)
 
     found = {}
+    suppressed_states = set()
     ambiguous_country_spans = {(i, j) for i, j, _ in country_hits
                                if any(a == i and b == j for a, b, *_ in state_hits)}
     explicit_country_hits = [x for x in country_hits if x[:2] not in ambiguous_country_spans]
@@ -334,6 +335,25 @@ def _normalize_location(value: str) -> dict:
         if (any(x[:2] == (start, end) for x in state_hits) and
                 not any(fits(place, state) for place in places for state in state_hits
                         if word_clauses[state[0]] == word_clauses[start])):
+            continue
+        # A multi-word state name loses to city matches on its own halves:
+        # "North Carolina" is a state span (0, 2) while `north` (0, 1) and
+        # `carolina` (1, 2) are cities, and the exact-span guard above never
+        # sees them. Strict containment only -- an equal span is still decided
+        # by `fits` above, so "New York, NY" keeps resolving to the city.
+        #
+        # Suppressing the city is only half the repair. The `if not rows`
+        # fallback below promotes state hits only when NOTHING was selected, so
+        # in "Atlanta; Florida; North Carolina" the surviving Atlanta would keep
+        # North Carolina out entirely. Record the covering state and assert it
+        # afterwards through the same monotonic path `_append_strong_hints`
+        # uses -- append, never replace.
+        covering = [state for state in state_hits
+                    if state[0] <= start and end <= state[1]
+                    and (state[1] - state[0]) > (end - start)
+                    and word_clauses[state[0]] == word_clauses[start]]
+        if covering:
+            suppressed_states.update((x[2], x[3] or None, None) for x in covering)
             continue
         state_options = nearest_states(start, end)
         country = nearest(explicit_country_hits, start, end)
@@ -471,6 +491,14 @@ def _normalize_location(value: str) -> dict:
     # another city. This operation is monotonic: every pre-existing tuple
     # stays in its original order and only missing refinements are appended.
     _append_strong_hints(rows, original_value)
+    # Same contract as the hints above: a state whose own words were consumed by
+    # a spurious city match is appended only where no existing row already
+    # refines it, so a resolved "Charlotte, North Carolina" is never widened.
+    _append_strong_hints(rows, "")
+    for hint in sorted(suppressed_states):
+        if not any(all(want is None or got == want for got, want in zip(row, hint))
+                   for row in rows):
+            rows.append(hint)
     return response(rows, remote)
 
 

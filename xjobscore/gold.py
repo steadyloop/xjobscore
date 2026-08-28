@@ -37,8 +37,7 @@ __all__ = [
     "Step",
     "ats_identity",
     "description_hash",
-    "degree_fields_input_hash",
-    "degree_fields_payload",
+    "degree_payload",
     "normalize_title",
     "plan_dedup",
     "skills_input_hash",
@@ -279,33 +278,28 @@ async def _summaries_rebuild(
 
 # DEGREE FIELDS ------------------------------------------------------------
 
-_DEGREES_VERSION = 3
+_DEGREES_VERSION = 5
 _DEGREES_BATCH_SIZE = 1_000
 
 
-def _degree_fields_text(title: str, description: str | None) -> str:
-    """Join every posting-owned text field consumed by degree extraction."""
-    return f"{title}\n{description or ''}"
+def _degree_text(description: str | None) -> str:
+    """The posting text a degree field's ``patterns`` may match: description alone.
+
+    A title names the role, not its degree requirement, so a title mention can
+    only reach the matcher through a field's explicit ``title_patterns``.
+    """
+    return description or ""
 
 
-def degree_fields_input_hash(title: str, description: str | None) -> str:
-    """Fingerprint exactly the text consumed by the degree-field matcher."""
-    return hashlib.sha256(_degree_fields_text(title, description).encode("utf-8")).hexdigest()
+def degree_payload(title: str, description: str | None) -> dict[str, Any]:
+    """The complete JSONB patch for one degree-field enrichment result.
 
-
-def degree_fields_payload(
-    title: str, description: str | None, *, parsed_at: datetime
-) -> dict[str, Any]:
-    """The complete JSONB patch for one degree-field enrichment result."""
-    text = _degree_fields_text(title, description)
-    return {
-        "degree_fields": degrees.extract(text, title=title),
-        "degree_fields_meta": {
-            "version": _DEGREES_VERSION,
-            "parsed_at": _utc_text(parsed_at),
-            "input_hash": degree_fields_input_hash(title, description),
-        },
-    }
+    The taxonomy revision is not in here: it lives in ``job_posting.degree_version``
+    so the staleness scan stays indexable. Invalidation on an input change is the
+    upsert's job -- it clears both the tag and the column when title or
+    description moves -- so this carries no input fingerprint of its own.
+    """
+    return {"degree": degrees.extract(_degree_text(description), title=title)}
 
 
 async def _degrees_rebuild(
@@ -315,22 +309,30 @@ async def _degrees_rebuild(
     parsed_at: datetime | None = None,
 ) -> Counts:
     """Enrich each posting whose degree-field taxonomy is out of date."""
-    stamp = parsed_at or datetime.now(timezone.utc)
     last_id = 0
     enriched = 0
     while True:
+        # "Not the current version" is spelled as three range predicates rather
+        # than <> or IS DISTINCT FROM because neither of those is indexable:
+        # the planner answers < / > / IS NULL from job_posting_degree_version_idx
+        # under a BitmapOr, but falls back to a full parallel seq scan for <>.
+        # Measured on 292k rows: 0.12 ms here against 84 ms for the <> form.
         rows = await conn.fetch(
             """
             SELECT id, title, description
             FROM job_posting
             WHERE id > $1
-              AND COALESCE(attributes #>> '{degree_fields_meta,version}', '') <> $3
+              AND (
+                degree_version IS NULL
+                OR degree_version < $3
+                OR degree_version > $3
+              )
             ORDER BY id
             LIMIT $2
             """,
             last_id,
             _DEGREES_BATCH_SIZE,
-            str(_DEGREES_VERSION),
+            _DEGREES_VERSION,
         )
         if not rows:
             break
@@ -338,22 +340,26 @@ async def _degrees_rebuild(
         updates = [
             (
                 int(row["id"]),
-                degree_fields_payload(row["title"], row["description"], parsed_at=stamp),
+                degree_payload(row["title"], row["description"]),
                 row["title"],
                 row["description"] or "",
-                str(_DEGREES_VERSION),
+                _DEGREES_VERSION,
             )
             for row in rows
         ]
         if not dry_run:
             await conn.executemany(
                 """
+                -- Single-row lookup by primary key, so this guard is a filter
+                -- and not an access path: IS DISTINCT FROM is the clearer
+                -- spelling of the same condition the SELECT splits by range.
                 UPDATE job_posting
-                SET attributes = attributes || $2::jsonb
+                SET attributes = attributes || $2::jsonb,
+                    degree_version = $5
                 WHERE id = $1
                   AND title = $3
                   AND COALESCE(description, '') = $4
-                  AND COALESCE(attributes #>> '{degree_fields_meta,version}', '') <> $5
+                  AND degree_version IS DISTINCT FROM $5
                 """,
                 updates,
             )

@@ -15,10 +15,19 @@ PostgreSQL owns companies, aliases, feed inventory, source metadata, and
 per-feed adapter configuration. A feed is created explicitly from an ATS token
 or by an operator; workers never synchronize or seed feed rows.
 
-- `feed.config` holds endpoint-specific adapter values.
+- `token.config` holds endpoint-specific adapter values. It sits on the
+  token, not the feed, because promotion rebuilds a feed from its token and
+  config is the one input nothing re-derives; `token` + `company` therefore
+  reproduces a feed completely.
 - `token.company_id` is the feed's company identity and resolves its
   description from `company`; `feed.type` is feed runtime metadata.
 - `feed.interval_s` defaults to 900 seconds; `feed.polling` is operator state.
+- `backup.py` exports the durable seed -- `company`, `company_alias`, `token` --
+  as JSONL and re-imports it, remapping company identity through a natural key
+  (`domain`, else the lowercased name) because `company.id` is an identity
+  column that means nothing in another database. `feed` is deliberately not
+  exported: promotion rebuilds it. The file carries live API credentials in
+  `token.config`, so the default path is under the gitignored `local/`.
 - Deleting a feed does not delete its token, company, raw rows, or postings.
 
 A feed instance is identified everywhere downstream as
@@ -133,7 +142,7 @@ The canonical `content_hash` includes only stored fields. Upserts preserve
 hash, and `raw_id`.
 
 ATS and direct-company feeds fall back to the feed/token company. Boards
-resolve `Posting.company_raw` through `alias`; unresolved board rows stay in
+resolve `Posting.company_raw` through `company_alias`; unresolved board rows stay in
 bronze and are logged/counted without failing the feed. Secondhand postings
 remain bronze-only until the schema has a provenance model. `Target`, `Label`,
 and `Fact` remain parser-compatible outputs but are logged/counted as
@@ -242,8 +251,19 @@ description-derived Gold data intact. Empty skill lists are stamped too, so
 “processed with no matches” is distinct from “not processed.”
 
 The `degrees` step uses the degree patterns in `registry/job-posting/types.yaml` to record
-the configured fields explicitly mentioned in a title or description as
-`attributes.degree_fields`, with the same hash-and-stamp lifecycle as skills.
+the configured fields explicitly mentioned in a description as
+`attributes.degree`. A field's `patterns` see the description alone -- a title
+names the role, not its degree requirement -- so a title reaches the matcher only
+through that field's explicit `title_patterns`.
+
+Its staleness lifecycle differs from skills: the taxonomy revision is stamped
+into the `job_posting.degree_version` column rather than a metadata object
+inside `attributes`. The step scans that column on every pass, so the predicate
+stays indexable instead of reading JSONB out of a multi-gigabyte table, and
+bumping the version makes every row eligible again. There is no input hash --
+the upsert clears both `attributes.degree` and `degree_version` whenever the
+title or description behind them changes, so a title edit still re-enriches the
+row.
 
 The `summaries` step deterministically selects 40–50 words of role and
 qualification evidence from classified student postings. It recognizes common

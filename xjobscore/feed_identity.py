@@ -10,15 +10,16 @@ __all__ = [
 ]
 
 
-_SOURCE_RENAMES = {"workday": "workday-list"}
+_SOURCE_RENAMES = {"workday-list": "workday"}
 
 
 def canonical_feed_source(source: str) -> str:
     """Return the current adapter name for a persisted source label.
 
-    Workday's former detail adapter and its listing-only replacement address
-    the same tenant endpoints.  The detail leg is gone, so its old source name
-    is an input alias rather than a second database identity.
+    ``workday-list`` was the listing-only adapter's name while the detail leg
+    was retired.  The leg is back -- gated, not ungated -- so the adapter is
+    ``workday`` again and the interim name is an input alias rather than a
+    second database identity.
     """
     return _SOURCE_RENAMES.get(source, source)
 
@@ -34,7 +35,7 @@ def canonical_feed_key(source: str, key: str) -> str:
     ``feed``.
     """
     source = canonical_feed_source(source)
-    return key.lower() if source == "workday-list" else key
+    return key.lower() if source == "workday" else key
 
 
 def canonical_feed_identity(source: str, key: str) -> tuple[str, str]:
