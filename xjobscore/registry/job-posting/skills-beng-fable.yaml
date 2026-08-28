@@ -1,0 +1,1476 @@
+# Resume keywords measured across 34 bioengineering job descriptions.
+#
+# Scope is a fixed URL list supplied 2026-08-27, resolved against the local
+# xjobscore corpus; every posting matched and carried a full description. The
+# matcher is the production Aho-Corasick one in xjobscore/skills.py, run over
+# the union of skills.yaml and the skills-bioeng.yaml candidate supplement.
+# 169 skills matched; all 34 postings carry at least one.
+#
+# Organised on four resume axes rather than the eleven production categories:
+#
+#   techniques      what you can do at the bench or in a pipeline   (61)
+#   domains         what biology, or what field, you know           (55)
+#   tools-software  named products, languages, platforms            (24)
+#   regulatory      quality systems, standards, clinical function   (29)
+#
+# These are not production category values, so this file does NOT load through
+# skills._load(); it is an analysis extract. Aliases are copied verbatim from
+# their source files. Within each axis entries are ordered by document
+# frequency: the first entry is the one the most postings named.
+#
+# Alias expansion 2026-08-27: 99 aliases added across 56 skills after a
+# corpus scan of 1,035 candidates. Each added alias reaches postings the skill
+# did not already hit, and at least 20% of those (>=3x the 5.1% corpus base) carry
+# a bio, lab, quality or clinical title. Rejected despite passing on numbers:
+# 'audits', 'DNA', 'cancer', 'neural', 'SPR', 'CTA', 'NDA' -- they name something
+# broader than the skill or collide with an unrelated acronym. A title review of
+# the new postings then pulled 21 more that passed on numbers but not on meaning:
+# QSR (restaurants), NCR (the company), PMA (aerospace), H&E, Prism, Hamilton,
+# LIS, 'phase II' (project phases), 'immune' (security), 'regulatory strategy'
+# and 'technology transfer' (legal), 'aseptic'/'sterile technique' (nursing),
+# 'hypothesis testing'/'design experiments' (A/B testing), 'fault tree',
+# 'test protocols', 'device development', 'implants', 'design outputs'.
+
+skill:
+
+# TECHNIQUES --------------------------------------------------------
+- id: wet-lab-research
+  name: Wet-lab research
+  category: techniques
+  aliases:
+  - wet lab
+  - wet-lab
+  - wet laboratory
+  - hands-on laboratory
+  - lab experience
+  - laboratory experience
+
+- id: data-analysis
+  name: Data analysis
+  category: techniques
+  aliases:
+  - Data analysis
+
+- id: assay-development
+  name: Assay development
+  category: techniques
+  aliases:
+  - assay development
+  - assay optimization
+
+- id: troubleshooting
+  name: Troubleshooting
+  category: techniques
+  aliases:
+  - Troubleshooting
+
+- id: polymerase-chain-reaction
+  name: Polymerase chain reaction
+  category: techniques
+  aliases:
+  - polymerase chain reaction
+  - ddPCR
+  - qPCR
+  case_sensitive_aliases:
+  - PCR
+
+- id: flow-cytometry
+  name: Flow cytometry
+  category: techniques
+  aliases:
+  - flow cytometry
+  - flow-cytometric analysis
+
+- id: observability
+  name: Observability
+  category: techniques
+  aliases:
+  - Observability
+
+- id: cell-culture
+  name: Cell culture
+  category: techniques
+  aliases:
+  - cell culture
+  - cell culturing
+  - cell lines
+  - tissue culture
+
+- id: data-collection
+  name: Data collection
+  category: techniques
+  aliases:
+  - Data collection
+  - Data-collection
+
+- id: fermentation
+  name: Fermentation
+  category: techniques
+  aliases:
+  - fermentation
+  - microbial fermentation
+  - precision fermentation
+
+- id: laboratory-automation
+  name: Laboratory automation
+  category: techniques
+  aliases:
+  - laboratory automation
+  - lab automation
+
+- id: molecular-cloning
+  name: Molecular cloning
+  category: techniques
+  aliases:
+  - molecular cloning
+  - DNA cloning
+  - gene cloning
+
+- id: monitoring
+  name: Monitoring
+  category: techniques
+  aliases:
+  - Monitoring
+
+- id: benchmarking
+  name: Benchmarking
+  category: techniques
+  aliases:
+  - Benchmarking
+
+- id: bioprocess-development
+  name: Bioprocess development
+  category: techniques
+  aliases:
+  - bioprocess development
+  - bioprocess engineering
+  - bioprocess optimization
+
+- id: cell-based-assays
+  name: Cell-based assays
+  category: techniques
+  aliases:
+  - cell-based assay
+  - cell-based assays
+  - cell based assay
+  - cell based assays
+  - functional assays
+
+- id: code-review
+  name: Code review
+  category: techniques
+  aliases:
+  - Code review
+
+- id: data-ingestion
+  name: Data ingestion
+  category: techniques
+  aliases:
+  - Data ingestion
+
+- id: data-pipeline-development
+  name: Data pipeline development
+  category: techniques
+  aliases:
+  - data pipeline
+  - data pipelines
+  - Data pipeline development
+
+- id: enzyme-assays
+  name: Enzyme assays
+  category: techniques
+  aliases:
+  - enzyme assay
+  - enzyme assays
+  - enzymatic assay
+  - enzymatic assays
+
+- id: enzyme-linked-immunosorbent-assay
+  name: Enzyme-linked immunosorbent assay
+  category: techniques
+  aliases:
+  - enzyme-linked immunosorbent assay
+  - enzyme linked immunosorbent assay
+  case_sensitive_aliases:
+  - ELISA
+
+- id: gel-electrophoresis
+  name: Gel electrophoresis
+  category: techniques
+  aliases:
+  - gel electrophoresis
+  - agarose gel electrophoresis
+  - electrophoresis
+
+- id: genome-editing
+  name: Genome editing
+  category: techniques
+  aliases:
+  - genome editing
+  - gene editing
+  - genetic editing
+
+- id: high-performance-liquid-chromatography
+  name: High-performance liquid chromatography
+  category: techniques
+  aliases:
+  - high-performance liquid chromatography
+  - high performance liquid chromatography
+  - chromatography
+  - LC-MS
+  case_sensitive_aliases:
+  - HPLC
+
+- id: immunoassays
+  name: Immunoassays
+  category: techniques
+  aliases:
+  - immunoassay
+  - immunoassays
+  - immunometric assay
+
+- id: mammalian-cell-culture
+  name: Mammalian cell culture
+  category: techniques
+  aliases:
+  - mammalian cell culture
+  - mammalian cell culturing
+  case_sensitive_aliases:
+  - CHO
+
+- id: next-generation-sequencing
+  name: Next-generation sequencing
+  category: techniques
+  aliases:
+  - next-generation sequencing
+  - next generation sequencing
+  - massively parallel sequencing
+  case_sensitive_aliases:
+  - NGS
+
+- id: protein-expression
+  name: Protein expression
+  category: techniques
+  aliases:
+  - protein expression
+  - heterologous protein expression
+
+- id: quantitative-modeling
+  name: Quantitative modeling
+  category: techniques
+  aliases:
+  - Quantitative modeling
+  - quantitative model
+  - quantitative models
+
+- id: antibody-engineering
+  name: Antibody engineering
+  category: techniques
+  aliases:
+  - antibody engineering
+  - antibody discovery
+  - antibodies
+  - monoclonal antibodies
+  case_sensitive_aliases:
+  - mAbs
+
+- id: aseptic-technique
+  name: Aseptic technique
+  category: techniques
+  aliases:
+  - aseptic technique
+  - aseptic techniques
+  - aseptic processing
+
+- id: bacterial-transformation
+  name: Bacterial transformation
+  category: techniques
+  aliases:
+  - bacterial transformation
+  - plasmid transformation
+
+- id: cell-transfection
+  name: Cell transfection
+  category: techniques
+  aliases:
+  - cell transfection
+  - transient transfection
+  - stable transfection
+  - transfection
+
+- id: crispr-cas
+  name: CRISPR-Cas systems
+  category: techniques
+  aliases:
+  - CRISPR-Cas
+  - CRISPR Cas
+  - CRISPR-Cas9
+  - CRISPR Cas9
+  case_sensitive_aliases:
+  - CRISPR
+
+- id: data-modeling
+  name: Data modeling
+  category: techniques
+  aliases:
+  - Data modeling
+
+- id: data-visualization
+  name: Data visualization
+  category: techniques
+  aliases:
+  - Data visualization
+  - GraphPad Prism
+  - matplotlib
+  case_sensitive_aliases:
+  - GraphPad
+
+- id: design-of-experiments
+  name: Design of experiments
+  category: techniques
+  aliases:
+  - design of experiments
+  - designed experiments
+  - design of experiment
+  case_sensitive_aliases:
+  - DOE
+  - DoE
+
+- id: electroencephalography
+  name: Electroencephalography
+  category: techniques
+  aliases:
+  - electroencephalography
+  - electroencephalographic recording
+  case_sensitive_aliases:
+  - EEG
+
+- id: electromyography
+  name: Electromyography
+  category: techniques
+  aliases:
+  - electromyography
+  - electromyographic recording
+  case_sensitive_aliases:
+  - EMG
+
+- id: experimental-design
+  name: Experimental design
+  category: techniques
+  aliases:
+  - Experimental design
+  - designing experiments
+  - Experimental designs
+
+- id: gibson-assembly
+  name: Gibson Assembly
+  category: techniques
+  aliases:
+  - Gibson Assembly
+  - Gibson cloning
+
+- id: golden-gate-assembly
+  name: Golden Gate assembly
+  category: techniques
+  aliases:
+  - Golden Gate assembly
+  - Golden Gate cloning
+
+- id: in-vivo-studies
+  name: In-vivo studies
+  category: techniques
+  aliases:
+  - in vivo study
+  - in vivo studies
+  - in-vivo study
+  - in-vivo studies
+  - in vivo model
+  - in vivo models
+  - animal models
+  - animal studies
+  - in vivo
+  - rodent
+
+- id: liquid-handling
+  name: Liquid handling
+  category: techniques
+  aliases:
+  - liquid handling
+  - automated liquid handling
+  - liquid handler
+  - liquid handlers
+  - liquid-handling
+  case_sensitive_aliases:
+
+- id: microplate-reader-assays
+  name: Microplate-reader assays
+  category: techniques
+  aliases:
+  - microplate reader assay
+  - microplate reader assays
+  - plate reader assay
+  - plate reader assays
+  - plate readers
+
+- id: plasmid-design
+  name: Plasmid design
+  category: techniques
+  aliases:
+  - plasmid design
+  - plasmid construction
+  - plasmid
+
+- id: primer-design
+  name: Primer design
+  category: techniques
+  aliases:
+  - primer design
+  - PCR primer design
+  - oligonucleotide design
+
+- id: process-development
+  name: Process development
+  category: techniques
+  aliases:
+  - process development
+  - tech transfer
+
+- id: protein-engineering
+  name: Protein engineering
+  category: techniques
+  aliases:
+  - protein engineering
+  - protein design and engineering
+  - protein design
+
+- id: ranking
+  name: Ranking
+  category: techniques
+  aliases:
+  - Ranking
+
+- id: requirements-analysis
+  name: Requirements analysis
+  category: techniques
+  aliases:
+  - Requirements analysis
+
+- id: rna-sequencing
+  name: RNA sequencing
+  category: techniques
+  aliases:
+  - RNA sequencing
+  - RNA-seq
+  - RNA seq
+
+- id: scientific-publication
+  name: Scientific publication
+  category: techniques
+  aliases:
+  - peer-reviewed publication
+  - peer-reviewed publications
+  - scientific publications
+  - publication record
+  - manuscript
+  - manuscripts
+  - peer reviewed
+  - scientific publication
+
+- id: signal-processing
+  name: Signal processing
+  category: techniques
+  aliases:
+  - Signal processing
+
+- id: single-cell-rna-sequencing
+  name: Single-cell RNA sequencing
+  category: techniques
+  aliases:
+  - single-cell RNA sequencing
+  - single cell RNA sequencing
+  - single-cell RNA-seq
+  - single cell RNA-seq
+  case_sensitive_aliases:
+  - scRNA-seq
+
+- id: spatial-transcriptomics
+  name: Spatial transcriptomics
+  category: techniques
+  aliases:
+  - spatial transcriptomics
+  - spatial transcriptomic analysis
+
+- id: statistical-analysis
+  name: Statistical analysis
+  category: techniques
+  aliases:
+  - Statistical analysis
+  - statistical methods
+  - statistical modeling
+
+- id: target-identification
+  name: Target identification and validation
+  category: techniques
+  aliases:
+  - target identification
+  - target validation
+  - target discovery
+  - novel targets
+
+- id: three-dimensional-printing
+  name: 3D printing
+  category: techniques
+  aliases:
+  - 3D printing
+  - three-dimensional printing
+  - additive manufacturing
+
+- id: version-control
+  name: Version control
+  category: techniques
+  aliases:
+  - Version control
+
+- id: viral-transduction
+  name: Viral transduction
+  category: techniques
+  aliases:
+  - viral transduction
+  - lentiviral transduction
+  - adenoviral transduction
+
+
+# DOMAINS -----------------------------------------------------------
+- id: artificial-intelligence
+  name: Artificial intelligence (AI)
+  category: domains
+  aliases:
+  - Artificial intelligence
+  - Artificial intelligence (AI)
+  case_sensitive_aliases:
+  - AI
+
+- id: biochemistry
+  name: Biochemistry
+  category: domains
+  aliases:
+  - biochemistry
+  - biochemical science
+  - biochemical
+
+- id: molecular-biology
+  name: Molecular biology
+  category: domains
+  aliases:
+  - molecular biology
+  - molecular biological techniques
+  - nucleic acid
+
+- id: biophysics
+  name: Biophysics
+  category: domains
+  aliases:
+  - biophysics
+  - biological physics
+  - biophysical
+
+- id: cell-biology
+  name: Cell biology
+  category: domains
+  aliases:
+  - cell biology
+  - cellular biology
+
+- id: computational-biology
+  name: Computational biology
+  category: domains
+  aliases:
+  - Computational biology
+
+- id: medical-devices
+  name: Medical devices
+  category: domains
+  aliases:
+  - medical device
+  - medical devices
+  - combination products
+  - medtech
+
+- id: microbiology
+  name: Microbiology
+  category: domains
+  aliases:
+  - microbiology
+  - microbial biology
+
+- id: bioinformatics
+  name: Bioinformatics
+  category: domains
+  aliases:
+  - Bioinformatics
+  - Bioinformatic
+
+- id: gene-therapy
+  name: Gene therapy
+  category: domains
+  aliases:
+  - gene therapy
+  - genetic medicine
+  - genetic medicines
+  - cell and gene therapy
+  - cell therapies
+  - cell therapy
+  - gene therapies
+
+- id: genomics
+  name: Genomics
+  category: domains
+  aliases:
+  - genomics
+  - genomic science
+  - genome
+  - genomic
+
+- id: structured-data
+  name: Structured data
+  category: domains
+  aliases:
+  - Structured data
+
+- id: immunology
+  name: Immunology
+  category: domains
+  aliases:
+  - immunology
+  - immunological science
+
+- id: neuroscience
+  name: Neuroscience
+  category: domains
+  aliases:
+  - neuroscience
+  - neural science
+
+- id: robotics
+  name: Robotics
+  category: domains
+  aliases:
+  - Robotics
+
+- id: software-engineering
+  name: Software engineering
+  category: domains
+  aliases:
+  - Software engineering
+
+- id: translational-research
+  name: Translational research
+  category: domains
+  aliases:
+  - translational research
+  - translational science
+  - translational medicine
+  - translational sciences
+
+- id: adeno-associated-virus-vectors
+  name: Adeno-associated virus vectors
+  category: domains
+  aliases:
+  - adeno-associated virus
+  - adeno associated virus
+  case_sensitive_aliases:
+  - AAV
+  - AAVs
+
+- id: algorithms
+  name: Algorithms
+  category: domains
+  aliases:
+  - Algorithms
+
+- id: biomarkers
+  name: Biomarkers
+  category: domains
+  aliases:
+  - biomarker
+  - biomarkers
+  - biomarker discovery
+
+- id: data-quality
+  name: Data quality
+  category: domains
+  aliases:
+  - Data quality
+
+- id: drug-discovery
+  name: Drug discovery
+  category: domains
+  aliases:
+  - drug discovery
+  - hit-to-lead
+  - lead optimization
+  - drug development
+
+- id: machine-learning
+  name: Machine learning (ML)
+  category: domains
+  aliases:
+  - Machine learning
+  - Machine learning (ML)
+  case_sensitive_aliases:
+  - ML
+
+- id: messenger-rna-therapeutics
+  name: mRNA therapeutics
+  category: domains
+  aliases:
+  - mRNA therapeutic
+  - mRNA therapeutics
+  - mRNA vaccine
+  case_sensitive_aliases:
+  - mRNA
+
+- id: proteomics
+  name: Proteomics
+  category: domains
+  aliases:
+  - proteomics
+  - proteomic analysis
+  - mass spec
+  - mass spectrometry
+
+- id: bayesian-statistics
+  name: Bayesian statistics
+  category: domains
+  aliases:
+  - Bayesian statistics
+
+- id: biosensors
+  name: Biosensors
+  category: domains
+  aliases:
+  - biosensor
+  - biosensors
+  - biological sensor
+  - biological sensors
+
+- id: biostatistics
+  name: Biostatistics
+  category: domains
+  aliases:
+  - biostatistics
+  - biostatistician
+  - biostatistical analysis
+  - biostatisticians
+
+- id: brain-computer-interfaces
+  name: Brain–computer interfaces
+  category: domains
+  aliases:
+  - brain-computer interface
+  - brain computer interface
+  - brain-machine interface
+  - brain machine interface
+  - neural interface
+  - neural interfaces
+  - electrode array
+  - multi-electrode array
+  case_sensitive_aliases:
+  - BCI
+
+- id: compilers
+  name: Compilers
+  category: domains
+  aliases:
+  - Compilers
+
+- id: cybersecurity
+  name: Cybersecurity
+  category: domains
+  aliases:
+  - Cybersecurity
+  - Information security
+
+- id: data-engineering
+  name: Data engineering
+  category: domains
+  aliases:
+  - Data engineering
+
+- id: data-science
+  name: Data science
+  category: domains
+  aliases:
+  - Data science
+
+- id: data-structures
+  name: Data structures
+  category: domains
+  aliases:
+  - Data structures
+
+- id: database-systems
+  name: Database systems
+  category: domains
+  aliases:
+  - Database systems
+
+- id: deep-learning
+  name: Deep learning
+  category: domains
+  aliases:
+  - Deep learning
+  - Deep-learning
+
+- id: distributed-systems
+  name: Distributed systems
+  category: domains
+  aliases:
+  - Distributed systems
+  - Distributed systems engineering
+  - Distributed-systems engineering
+
+- id: electrophysiology
+  name: Electrophysiology
+  category: domains
+  aliases:
+  - electrophysiology
+  - electrophysiological recording
+  - electrophysiological measurements
+
+- id: histology
+  name: Histology
+  category: domains
+  aliases:
+  - histology
+  - histological analysis
+  - histological techniques
+  - histopathology
+  case_sensitive_aliases:
+
+
+- id: implantable-medical-devices
+  name: Implantable medical devices
+  category: domains
+  aliases:
+  - implantable medical device
+  - implantable medical devices
+  - medical implant design
+  - implantable device
+  - implantable devices
+  - implantable
+
+- id: in-vitro-diagnostics
+  name: In-vitro diagnostics
+  category: domains
+  aliases:
+  - in vitro diagnostic
+  - in vitro diagnostics
+  - in-vitro diagnostic
+  - in-vitro diagnostics
+  case_sensitive_aliases:
+  - IVD
+  - IVDs
+
+- id: large-language-models
+  name: Large language models (LLMs)
+  category: domains
+  aliases:
+  - LLM
+  - LLMs
+  - large language model
+  - Large language models
+  - Large language models (LLMs)
+
+- id: lipid-nanoparticles
+  name: Lipid nanoparticles
+  category: domains
+  aliases:
+  - lipid nanoparticle
+  - lipid nanoparticles
+  case_sensitive_aliases:
+  - LNP
+  - LNPs
+
+- id: molecular-diagnostics
+  name: Molecular diagnostics
+  category: domains
+  aliases:
+  - molecular diagnostics
+  - molecular diagnostic testing
+  - companion diagnostics
+
+- id: oncology
+  name: Oncology
+  category: domains
+  aliases:
+  - oncology
+  - tumor
+
+- id: operating-systems
+  name: Operating systems
+  category: domains
+  aliases:
+  - Operating systems
+
+- id: pharmacology
+  name: Pharmacology
+  category: domains
+  aliases:
+  - pharmacology
+  - pharmacological science
+  case_sensitive_aliases:
+  - ADME
+
+- id: programming-language-theory
+  name: Programming-language theory
+  category: domains
+  aliases:
+  - Programming language theory
+  - Programming-language theory
+
+- id: regenerative-medicine
+  name: Regenerative medicine
+  category: domains
+  aliases:
+  - regenerative medicine
+  - regenerative therapies
+
+- id: rehabilitation-engineering
+  name: Rehabilitation engineering
+  category: domains
+  aliases:
+  - rehabilitation engineering
+  - rehabilitation technology
+  - assistive technology engineering
+
+- id: resilience
+  name: Resilience
+  category: domains
+  aliases:
+  - Resilience
+
+- id: scalability
+  name: Scalability
+  category: domains
+  aliases:
+  - Scalability
+
+- id: synthetic-biology
+  name: Synthetic biology
+  category: domains
+  aliases:
+  - synthetic biology
+  - synthetic biological systems
+
+- id: toxicology
+  name: Toxicology
+  category: domains
+  aliases:
+  - toxicology
+  - toxicological science
+
+- id: transcriptomics
+  name: Transcriptomics
+  category: domains
+  aliases:
+  - transcriptomics
+  - transcriptomic analysis
+
+
+# TOOLS & SOFTWARE --------------------------------------------------
+- id: python
+  name: Python
+  category: tools-software
+  aliases:
+  - Python
+
+- id: benchling
+  name: Benchling
+  category: tools-software
+  aliases:
+  - Benchling
+  - Benchling platform
+
+- id: http-https
+  name: HTTP / HTTPS
+  category: tools-software
+  aliases:
+  - HTTP
+  - HTTPS
+  - HTTP / HTTPS
+
+- id: microsoft-excel
+  name: Microsoft Excel
+  category: tools-software
+  aliases:
+  - MS Excel
+  - Microsoft Excel
+  case_sensitive_aliases:
+  - Excel
+
+- id: sql
+  name: SQL
+  category: tools-software
+  aliases:
+  - SQL
+  - Structured Query Language
+
+- id: git
+  name: Git
+  category: tools-software
+  aliases:
+  - Git
+
+- id: postgresql
+  name: PostgreSQL
+  category: tools-software
+  aliases:
+  - Postgres
+  - PostgreSQL
+
+- id: amazon-web-services
+  name: Amazon Web Services (AWS)
+  category: tools-software
+  aliases:
+  - AWS
+  - Amazon Web Services
+  - Amazon Web Services (AWS)
+
+- id: bash
+  name: Bash
+  category: tools-software
+  aliases:
+  - Bash
+  - bash scripting
+  - shell scripting
+
+- id: computer-aided-design
+  name: Computer-aided design
+  category: tools-software
+  aliases:
+  - computer-aided design
+  - computer aided design
+  - 3D CAD
+  case_sensitive_aliases:
+  - CAD
+
+- id: cpp
+  name: C++
+  category: tools-software
+  aliases:
+  - C++
+  - cpp
+  - C++17
+  - C++20
+  - C++23
+  - c plus plus
+
+- id: csv
+  name: CSV
+  category: tools-software
+  aliases:
+  - CSV
+
+- id: ebpf
+  name: eBPF
+  category: tools-software
+  aliases:
+  - eBPF
+
+- id: electronic-data-capture
+  name: Electronic data capture
+  category: tools-software
+  aliases:
+  - electronic data capture system
+  - electronic data capture platform
+  case_sensitive_aliases:
+  - EDC system
+  - EDC platform
+  - EDC
+
+- id: electronic-laboratory-notebook
+  name: Electronic laboratory notebook
+  category: tools-software
+  aliases:
+  - electronic lab notebook
+  - electronic laboratory notebook
+  - laboratory notebook
+  - lab notebook
+  case_sensitive_aliases:
+  - ELN
+
+- id: google-cloud-platform
+  name: Google Cloud Platform (GCP)
+  category: tools-software
+  aliases:
+  - GCP
+  - Google Cloud
+  - Google Cloud Platform
+  - Google Cloud Platform (GCP)
+
+- id: kubernetes
+  name: Kubernetes
+  category: tools-software
+  aliases:
+  - k8s
+  - Kubernetes
+
+- id: laboratory-information-management-system
+  name: Laboratory information management system
+  category: tools-software
+  aliases:
+  - laboratory information management system
+  - laboratory information system
+  - laboratory information systems
+  case_sensitive_aliases:
+  - LIMS
+
+- id: linux
+  name: Linux
+  category: tools-software
+  aliases:
+  - Linux
+
+- id: microcontrollers
+  name: Microcontrollers
+  category: tools-software
+  aliases:
+  - Microcontrollers
+
+- id: pytorch
+  name: PyTorch
+  category: tools-software
+  aliases:
+  - PyTorch
+
+- id: rest
+  name: REST
+  category: tools-software
+  aliases:
+  - REST architecture
+  - REST API
+  - REST APIs
+  - RESTful API
+  - RESTful APIs
+  - Representational state transfer
+  - Representational state transfer (REST)
+  case_sensitive_aliases:
+  - REST
+
+- id: unity
+  name: Unity
+  category: tools-software
+  case_sensitive_aliases:
+  - Unity
+
+- id: wireshark
+  name: Wireshark
+  category: tools-software
+  aliases:
+  - Wireshark
+
+
+# REGULATORY --------------------------------------------------------
+- id: corrective-and-preventive-action
+  name: Corrective and preventive action
+  category: regulatory
+  aliases:
+  - corrective and preventive action
+  - corrective and preventative action
+  - corrective action
+  - corrective and preventative actions
+  - corrective and preventive actions
+  - non-conformance
+  - nonconformance
+  - preventive action
+  case_sensitive_aliases:
+  - CAPA
+  - CAPAs
+
+- id: data-integrity
+  name: Data integrity
+  category: regulatory
+  aliases:
+  - data integrity
+  - ALCOA+
+  - ALCOA principles
+  - 21 CFR Part 11
+  - Part 11
+
+- id: gxp-compliance
+  name: GxP compliance
+  category: regulatory
+  aliases:
+  - GxP compliance
+  - GxP environment
+  - GxP regulated
+  case_sensitive_aliases:
+  - GxP
+  - GXP
+  - GLP
+
+- id: iso-13485
+  name: ISO 13485
+  category: regulatory
+  aliases:
+  - ISO 13485
+  - ISO13485
+  - ISO 13485 quality management system
+
+- id: quality-assurance
+  name: Quality assurance
+  category: regulatory
+  aliases:
+  - Quality assurance
+  - quality control
+  - quality engineering
+  case_sensitive_aliases:
+  - QC
+
+- id: quality-management-system
+  name: Quality management system
+  category: regulatory
+  aliases:
+  - quality management system
+  - quality management systems
+  - quality system
+  - quality systems
+  case_sensitive_aliases:
+  - QMS
+  - eQMS
+
+- id: real-world-evidence
+  name: Real-world evidence
+  category: regulatory
+  aliases:
+  - real-world evidence
+  - real world evidence
+  - real-world data
+  case_sensitive_aliases:
+  - RWE
+
+- id: regulatory-compliance
+  name: Regulatory compliance
+  category: regulatory
+  aliases:
+  - regulatory compliance
+  - regulatory requirements
+  - regulatory standards
+  - regulatory guidelines
+
+- id: regulatory-submissions
+  name: Regulatory submissions
+  category: regulatory
+  aliases:
+  - regulatory submission
+  - regulatory submissions
+  - regulatory filing
+  - regulatory filings
+  - regulatory dossier
+  - regulatory dossiers
+  case_sensitive_aliases:
+  - BLA
+
+- id: standard-operating-procedures
+  name: Standard operating procedures
+  category: regulatory
+  aliases:
+  - standard operating procedure
+  - standard operating procedures
+  case_sensitive_aliases:
+  - SOP
+  - SOPs
+
+- id: adverse-event-reporting
+  name: Adverse-event reporting
+  category: regulatory
+  aliases:
+  - adverse event reporting
+  - serious adverse event reporting
+  - safety event reporting
+  - adverse event
+  - adverse events
+  - pharmacovigilance
+  - safety reporting
+
+- id: batch-record-review
+  name: Batch-record review
+  category: regulatory
+  aliases:
+  - batch record review
+  - batch record
+  - batch records
+  - executed batch records
+
+- id: change-control
+  name: Change control
+  category: regulatory
+  aliases:
+  - change control
+  - engineering change control
+  - quality change control
+  - change controls
+
+- id: clinical-research
+  name: Clinical research
+  category: regulatory
+  aliases:
+  - clinical research
+  - clinical data
+  - clinical development
+  - clinical operations
+  case_sensitive_aliases:
+  - CRA
+
+- id: clinical-trials
+  name: Clinical trials
+  category: regulatory
+  aliases:
+  - clinical trial
+  - clinical trials
+  - clinical study
+  - clinical studies
+
+- id: design-verification
+  name: Design verification
+  category: regulatory
+  aliases:
+  - design verification
+  - product design verification
+
+- id: eu-medical-device-regulation
+  name: EU Medical Device Regulation
+  category: regulatory
+  aliases:
+  - EU Medical Device Regulation
+  - European Medical Device Regulation
+  - Regulation (EU) 2017/745
+  case_sensitive_aliases:
+  - EU MDR
+
+- id: failure-mode-and-effects-analysis
+  name: Failure mode and effects analysis
+  category: regulatory
+  aliases:
+  - failure mode and effects analysis
+  - failure modes and effects analysis
+  - design FMEA
+  - process FMEA
+  case_sensitive_aliases:
+  - FMEA
+  - DFMEA
+  - PFMEA
+
+- id: good-clinical-practice
+  name: Good Clinical Practice
+  category: regulatory
+  aliases:
+  - good clinical practice
+  - ICH good clinical practice
+  - ICH-GCP
+  - GCP guidelines
+  - GCP compliance
+  - good clinical practices
+
+- id: good-documentation-practice
+  name: Good Documentation Practice
+  category: regulatory
+  aliases:
+  - good documentation practice
+  - good documentation practices
+  case_sensitive_aliases:
+  - GDocP
+
+- id: good-manufacturing-practice
+  name: Good Manufacturing Practice
+  category: regulatory
+  aliases:
+  - good manufacturing practice
+  - good manufacturing practices
+  - current good manufacturing practice
+  - current good manufacturing practices
+  case_sensitive_aliases:
+  - GMP
+  - cGMP
+  - CGMP
+
+- id: iec-62304
+  name: IEC 62304
+  category: regulatory
+  aliases:
+  - IEC 62304
+  - IEC62304
+  - IEC 62304 software lifecycle
+
+- id: iso-14971
+  name: ISO 14971
+  category: regulatory
+  aliases:
+  - ISO 14971
+  - ISO14971
+  - ISO 14971 risk management
+
+- id: medical-device-design-controls
+  name: Medical-device design controls
+  category: regulatory
+  aliases:
+  - medical device design controls
+  - design controls for medical devices
+  - medical-device design control
+  - design controls
+  - design control
+  - 21 CFR 820
+  - 21 CFR Part 820
+  case_sensitive_aliases:
+
+- id: notified-body-engagement
+  name: Notified body engagement
+  category: regulatory
+  aliases:
+  - notified body
+  - notified bodies
+
+- id: process-validation
+  name: Process validation
+  category: regulatory
+  aliases:
+  - process validation
+  - manufacturing process validation
+  - validated manufacturing process
+  - equipment qualification
+  - validation protocols
+  case_sensitive_aliases:
+  - IQ/OQ/PQ
+
+- id: quality-system-auditing
+  name: Quality-system auditing
+  category: regulatory
+  aliases:
+  - quality system auditing
+  - quality-system audit
+  - quality systems audit
+  - regulatory compliance audit
+  - lead auditor
+  - supplier audit
+  - supplier audits
+  - internal audits
+
+- id: regulatory-affairs
+  name: Regulatory affairs
+  category: regulatory
+  aliases:
+  - regulatory affairs
+  - regulatory affairs experience
+  - FDA regulations
+  case_sensitive_aliases:
+  - EMA
+  - FDA
+
+- id: software-as-a-medical-device
+  name: Software as a Medical Device
+  category: regulatory
+  aliases:
+  - Software as a Medical Device
+  case_sensitive_aliases:
+  - SaMD

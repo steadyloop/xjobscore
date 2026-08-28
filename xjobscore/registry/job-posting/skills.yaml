@@ -403,21 +403,6 @@ skill:
   aliases:
   - Elixir
 
-- id: common-lisp
-  name: Common Lisp
-  category: language
-  aliases:
-  - Common Lisp
-
-- id: scheme
-  name: Scheme
-  category: language
-  aliases:
-  - Scheme language
-  - Scheme programming
-  ambiguous_aliases:
-  - scheme
-
 - id: prolog
   name: Prolog
   category: language
@@ -476,12 +461,6 @@ skill:
   category: language
   aliases:
   - HLSL
-
-- id: metal-shading-language
-  name: Metal Shading Language
-  category: language
-  aliases:
-  - Metal Shading Language
 
 - id: webgpu-shading-language
   name: WebGPU Shading Language (WGSL)
@@ -664,15 +643,6 @@ skill:
   category: library
   aliases:
   - Shapely
-
-- id: requests
-  name: Requests
-  category: library
-  aliases:
-  - Python Requests
-  - Requests library
-  ambiguous_aliases:
-  - requests
 
 - id: beautiful-soup
   name: Beautiful Soup
@@ -1034,12 +1004,6 @@ skill:
   aliases:
   - GoogleTest
 
-- id: google-benchmark
-  name: Google Benchmark
-  category: library
-  aliases:
-  - Google Benchmark
-
 - id: catch2
   name: Catch2
   category: library
@@ -1069,12 +1033,6 @@ skill:
   category: library
   aliases:
   - CUTLASS
-
-- id: cuda-thrust
-  name: CUDA Thrust
-  category: library
-  aliases:
-  - CUDA Thrust
 
 - id: openmp
   name: OpenMP
@@ -1914,15 +1872,6 @@ skill:
   category: tool
   aliases:
   - LabVIEW
-
-- id: maple
-  name: Maple
-  category: tool
-  aliases:
-  - Maple software
-  - Maple mathematics
-  ambiguous_aliases:
-  - maple
 
 - id: quickbooks
   name: QuickBooks
@@ -5032,11 +4981,21 @@ skill:
   aliases:
   - Stochastic calculus
 
-- id: markov-chains
-  name: Markov chains
+- id: markov-models
+  name: Markov models
   category: concept
   aliases:
+  - Markov model
+  - Markov models
+  - Markov chain
   - Markov chains
+  - Hidden Markov Model
+  - Hidden Markov Models
+  - Markov Decision Process
+  - Markov Decision Processes
+  ambiguous_aliases:
+  - HMM
+  - MDP
 
 - id: martingales
   name: Martingales
@@ -5070,12 +5029,6 @@ skill:
   category: concept
   aliases:
   - Optimization theory
-
-- id: convex-analysis
-  name: Convex analysis
-  category: concept
-  aliases:
-  - Convex analysis
 
 - id: operations-research
   name: Operations research
@@ -6226,6 +6179,8 @@ skill:
   aliases:
   - Python Flask
   - Flask framework
+  case_sensitive_aliases:
+  - Flask
   ambiguous_aliases:
   - flask
 
@@ -6332,6 +6287,12 @@ skill:
   aliases:
   - ray.io
   - Ray framework
+  - Ray Core
+  - Ray Train
+  - Ray Tune
+  - Ray Data
+  - Ray cluster
+  - Ray clusters
   ambiguous_aliases:
   - ray
 

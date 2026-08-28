@@ -15,6 +15,16 @@
 #
 # Categories use the production vocabulary: language, library, tool, platform,
 # method, concept, framework, datastore, protocol, format, and hardware.
+#
+# Validated against the live PostgreSQL corpus (see the sections added at the
+# end of the file).  Every alias added in that pass was measured first: its
+# document frequency in bioengineering postings and its rate in a non-bio
+# control sample.  Terms whose common sense outside this domain is something
+# else -- CRO (Chief Revenue Officer), NDA (non-disclosure agreement), ADC
+# (analog-to-digital converter), CSR -- are recorded as ambiguous rather than
+# matched.  On the production recommendation set this file reaches 93% of
+# postings with at least one skill; the residue is software and hardware
+# engineering roles at bio employers, whose skills belong to skills.yaml.
 
 skill:
 
@@ -489,6 +499,7 @@ skill:
   - reporter gene assay
   - reporter-gene assay
   - luciferase assay
+  - reporter gene
 
 - id: molecular-cloning
   name: Molecular cloning
@@ -1658,6 +1669,8 @@ skill:
   - bioreactor operations
   - bioreactor processing
   - bioreactor cultivation
+  - bioreactor
+  - bioreactors
 
 - id: fermentation
   name: Fermentation
@@ -2005,6 +2018,7 @@ skill:
   - biocompatibility
   - biocompatibility assessment
   - biocompatibility testing
+  - biocompatible
 
 - id: tissue-engineering
   name: Tissue engineering
@@ -2084,6 +2098,8 @@ skill:
   - implantable medical device
   - implantable medical devices
   - medical implant design
+  - implantable device
+  - implantable devices
 
 - id: prosthetic-design
   name: Prosthetic design
@@ -2254,6 +2270,10 @@ skill:
   - brain computer interface
   - brain-machine interface
   - brain machine interface
+  - neural interface
+  - neural interfaces
+  - electrode array
+  - multi-electrode array
   case_sensitive_aliases:
   - BCI
 
@@ -2266,6 +2286,8 @@ skill:
   - medical device design controls
   - design controls for medical devices
   - medical-device design control
+  - design controls
+  - design control
 
 - id: design-inputs-and-outputs
   name: Design inputs and outputs
@@ -2368,6 +2390,7 @@ skill:
   - corrective and preventative action
   case_sensitive_aliases:
   - CAPA
+  - CAPAs
 
 - id: nonconformance-management
   name: Nonconformance management
@@ -2386,6 +2409,7 @@ skill:
   - medical device complaint handling
   - product complaint handling
   - complaint investigation
+  - complaint handling
 
 - id: postmarket-surveillance
   name: Postmarket surveillance
@@ -2394,6 +2418,8 @@ skill:
   - postmarket surveillance
   - post-market surveillance
   - post market surveillance
+  - post-market quality
+  - post-market activities
   case_sensitive_aliases:
   - PMS for medical devices
 
@@ -2412,6 +2438,7 @@ skill:
   - quality document control
   - controlled document management
   - document control procedures
+  - document control
 
 - id: supplier-quality-engineering
   name: Supplier quality engineering
@@ -2429,6 +2456,9 @@ skill:
   - quality-system audit
   - quality systems audit
   - regulatory compliance audit
+  - lead auditor
+  - supplier audit
+  - supplier audits
 
 - id: good-manufacturing-practice
   name: Good Manufacturing Practice
@@ -2657,6 +2687,7 @@ skill:
   case_sensitive_aliases:
   - PK/PD modeling
   - PK-PD modeling
+  - PK/PD
 
 - id: dose-response-analysis
   name: Dose–response analysis
@@ -2730,6 +2761,7 @@ skill:
   aliases:
   - analytical method validation
   - bioanalytical method validation
+  - method validation
 
 - id: stability-testing
   name: Stability testing
@@ -2755,6 +2787,8 @@ skill:
   - in vitro studies
   - in-vitro study
   - in-vitro studies
+  - in vitro model
+  - in vitro models
 
 - id: in-vivo-studies
   name: In-vivo studies
@@ -2764,6 +2798,8 @@ skill:
   - in vivo studies
   - in-vivo study
   - in-vivo studies
+  - in vivo model
+  - in vivo models
 
 - id: ex-vivo-studies
   name: Ex-vivo studies
@@ -2815,6 +2851,7 @@ skill:
   - clinical trial operations
   - clinical study operations
   - clinical operations for trials
+  - clinical operations
 
 - id: clinical-protocol-development
   name: Clinical-protocol development
@@ -2823,6 +2860,7 @@ skill:
   - clinical protocol development
   - clinical study protocol development
   - trial protocol development
+  - protocol writing
 
 - id: clinical-data-management
   name: Clinical-data management
@@ -2869,6 +2907,8 @@ skill:
   - adverse event reporting
   - serious adverse event reporting
   - safety event reporting
+  - adverse event
+  - adverse events
 
 - id: pharmacovigilance
   name: Pharmacovigilance
@@ -2887,6 +2927,7 @@ skill:
   case_sensitive_aliases:
   - EDC system
   - EDC platform
+  - EDC
 
 - id: redcap
   name: REDCap
@@ -2955,3 +2996,1033 @@ skill:
   - WHODrug Global
   case_sensitive_aliases:
   - WHODrug
+
+# REGULATORY AFFAIRS AND SUBMISSIONS -------------------------------------
+#
+# Added from a live-corpus pass over bioengineering postings: the sections
+# above described regulated *artifacts* (DHF, 21 CFR 820) but not the
+# submission and agency-facing work that names itself in these postings.
+
+- id: regulatory-affairs
+  name: Regulatory affairs
+  category: concept
+  aliases:
+  - regulatory affairs
+  - regulatory affairs experience
+
+- id: regulatory-submissions
+  name: Regulatory submissions
+  category: method
+  aliases:
+  - regulatory submission
+  - regulatory submissions
+  - regulatory filing
+  - regulatory filings
+  - regulatory dossier
+
+- id: regulatory-strategy
+  name: Regulatory strategy
+  category: method
+  aliases:
+  - regulatory strategy
+  - regulatory strategies
+
+- id: regulatory-intelligence
+  name: Regulatory intelligence
+  category: method
+  aliases:
+  - regulatory intelligence
+
+- id: investigational-new-drug
+  name: Investigational New Drug application
+  category: protocol
+  aliases:
+  - Investigational New Drug
+  - IND application
+  - IND submission
+  - IND-enabling studies
+  case_sensitive_aliases:
+  - IND
+  - INDs
+  - IND-enabling
+
+- id: new-drug-application
+  name: New Drug Application
+  category: method
+  aliases:
+  - New Drug Application
+  - New Drug Applications
+  - Abbreviated New Drug Application
+  ambiguous_aliases:
+  - NDA
+
+- id: biologics-license-application
+  name: Biologics License Application
+  category: method
+  aliases:
+  - Biologics License Application
+  - Biologics License Applications
+  case_sensitive_aliases:
+  - BLA
+
+- id: marketing-authorization-application
+  name: Marketing Authorization Application
+  category: method
+  aliases:
+  - Marketing Authorization Application
+  - Marketing Authorisation Application
+  case_sensitive_aliases:
+  - MAA
+
+- id: electronic-common-technical-document
+  name: Electronic Common Technical Document
+  category: format
+  aliases:
+  - electronic Common Technical Document
+  - Common Technical Document
+  case_sensitive_aliases:
+  - eCTD
+  - CTD submission
+
+- id: ich-guidelines
+  name: ICH guidelines
+  category: protocol
+  aliases:
+  - ICH guideline
+  - ICH guidelines
+  case_sensitive_aliases:
+  - ICH
+
+- id: ce-marking
+  name: CE marking
+  category: protocol
+  aliases:
+  - CE marking
+  - CE mark
+  - CE marked
+
+- id: notified-body-engagement
+  name: Notified body engagement
+  category: method
+  aliases:
+  - notified body
+  - notified bodies
+
+- id: iso-14155
+  name: ISO 14155
+  category: protocol
+  aliases:
+  - ISO 14155
+  - ISO14155
+
+- id: clinical-laboratory-improvement-amendments
+  name: CLIA
+  category: protocol
+  aliases:
+  - Clinical Laboratory Improvement Amendments
+  case_sensitive_aliases:
+  - CLIA
+
+- id: hipaa
+  name: HIPAA
+  category: protocol
+  aliases:
+  - Health Insurance Portability and Accountability Act
+  case_sensitive_aliases:
+  - HIPAA
+
+- id: gxp-compliance
+  name: GxP compliance
+  category: protocol
+  aliases:
+  - GxP compliance
+  - GxP environment
+  - GxP regulated
+  case_sensitive_aliases:
+  - GxP
+  - GXP
+
+- id: good-documentation-practice
+  name: Good Documentation Practice
+  category: protocol
+  aliases:
+  - good documentation practice
+  - good documentation practices
+  case_sensitive_aliases:
+  - GDocP
+
+- id: data-integrity
+  name: Data integrity
+  category: concept
+  aliases:
+  - data integrity
+  - ALCOA+
+  - ALCOA principles
+
+- id: software-as-a-medical-device
+  name: Software as a Medical Device
+  category: concept
+  aliases:
+  - Software as a Medical Device
+  case_sensitive_aliases:
+  - SaMD
+
+- id: medical-devices
+  name: Medical devices
+  category: concept
+  aliases:
+  - medical device
+  - medical devices
+
+- id: in-vitro-diagnostics
+  name: In-vitro diagnostics
+  category: concept
+  aliases:
+  - in vitro diagnostic
+  - in vitro diagnostics
+  - in-vitro diagnostic
+  - in-vitro diagnostics
+  case_sensitive_aliases:
+  - IVD
+  - IVDs
+
+- id: laboratory-developed-tests
+  name: Laboratory-developed tests
+  category: concept
+  aliases:
+  - laboratory developed test
+  - laboratory-developed test
+  - laboratory-developed tests
+  - lab-developed test
+  case_sensitive_aliases:
+  - LDT
+  - LDTs
+
+- id: companion-diagnostics
+  name: Companion diagnostics
+  category: concept
+  aliases:
+  - companion diagnostic
+  - companion diagnostics
+
+- id: molecular-diagnostics
+  name: Molecular diagnostics
+  category: concept
+  aliases:
+  - molecular diagnostics
+  - molecular diagnostic testing
+
+- id: point-of-care-testing
+  name: Point-of-care testing
+  category: concept
+  aliases:
+  - point-of-care testing
+  - point of care testing
+  - point-of-care diagnostics
+
+# CLINICAL RESEARCH, MEDICAL AFFAIRS, AND EVIDENCE -----------------------
+
+- id: clinical-trials
+  name: Clinical trials
+  category: concept
+  aliases:
+  - clinical trial
+  - clinical trials
+  - clinical study
+  - clinical studies
+
+- id: clinical-research
+  name: Clinical research
+  category: concept
+  aliases:
+  - clinical research
+
+- id: clinical-development
+  name: Clinical development
+  category: concept
+  aliases:
+  - clinical development
+
+- id: clinical-monitoring
+  name: Clinical monitoring
+  category: method
+  aliases:
+  - clinical monitoring
+  - site monitoring
+  - clinical research associate
+
+- id: clinical-study-report
+  name: Clinical study report
+  category: format
+  aliases:
+  - clinical study report
+  - clinical study reports
+  ambiguous_aliases:
+  - CSR
+
+- id: trial-master-file
+  name: Trial Master File
+  category: format
+  aliases:
+  - Trial Master File
+
+- id: study-startup
+  name: Clinical study startup
+  category: method
+  aliases:
+  - study startup
+  - study start-up
+  - site activation
+
+- id: contract-research-organization
+  name: Contract research organization
+  category: concept
+  aliases:
+  - contract research organization
+  - contract research organisation
+  - contract research organizations
+  - CRO oversight
+  - CRO partners
+  - CRO management
+  # Bare CRO is Chief Revenue Officer far more often than it is a contract
+  # research organization outside this domain, and aliases are global.
+  ambiguous_aliases:
+  - CRO
+  - CROs
+
+- id: medical-affairs
+  name: Medical affairs
+  category: concept
+  aliases:
+  - medical affairs
+
+- id: medical-science-liaison
+  name: Medical science liaison
+  category: concept
+  aliases:
+  - medical science liaison
+  - medical science liaisons
+  case_sensitive_aliases:
+  - MSL
+  - MSLs
+
+- id: key-opinion-leader-engagement
+  name: Key opinion leader engagement
+  category: method
+  aliases:
+  - key opinion leader
+  - key opinion leaders
+  case_sensitive_aliases:
+  - KOL
+  - KOLs
+
+- id: real-world-evidence
+  name: Real-world evidence
+  category: concept
+  aliases:
+  - real-world evidence
+  - real world evidence
+  - real-world data
+  case_sensitive_aliases:
+  - RWE
+
+- id: health-economics-and-outcomes-research
+  name: Health economics and outcomes research
+  category: concept
+  aliases:
+  - health economics and outcomes research
+  - health economics outcomes research
+  case_sensitive_aliases:
+  - HEOR
+
+- id: medical-writing
+  name: Medical writing
+  category: method
+  aliases:
+  - medical writing
+  - regulatory writing
+  - scientific and medical writing
+
+- id: biostatistics
+  name: Biostatistics
+  category: concept
+  aliases:
+  - biostatistics
+  - biostatistician
+  - biostatistical analysis
+
+- id: electronic-health-records
+  name: Electronic health records
+  category: platform
+  aliases:
+  - electronic health record
+  - electronic health records
+  - electronic medical record
+  - electronic medical records
+  case_sensitive_aliases:
+  - EHR
+  - EHRs
+  - EMR
+  - EMRs
+
+# DRUG DISCOVERY, MODALITIES, AND CMC ------------------------------------
+
+- id: drug-development
+  name: Drug development
+  category: concept
+  aliases:
+  - drug development
+  - pharmaceutical development
+
+- id: drug-discovery
+  name: Drug discovery
+  category: concept
+  aliases:
+  - drug discovery
+  - hit-to-lead
+  - lead optimization
+
+- id: translational-research
+  name: Translational research
+  category: concept
+  aliases:
+  - translational research
+  - translational science
+
+- id: biomarkers
+  name: Biomarkers
+  category: concept
+  aliases:
+  - biomarker
+  - biomarkers
+  - biomarker discovery
+
+- id: chemistry-manufacturing-and-controls
+  name: Chemistry, Manufacturing and Controls
+  category: concept
+  aliases:
+  - Chemistry, Manufacturing and Controls
+  - Chemistry, Manufacturing, and Controls
+  - Chemistry Manufacturing and Controls
+  case_sensitive_aliases:
+  - CMC
+
+- id: drug-substance
+  name: Drug substance
+  category: concept
+  aliases:
+  - drug substance
+
+- id: drug-product
+  name: Drug product
+  category: concept
+  aliases:
+  - drug product
+
+- id: small-molecule-therapeutics
+  name: Small-molecule therapeutics
+  category: concept
+  aliases:
+  - small molecule
+  - small molecules
+  - small-molecule drug
+
+- id: monoclonal-antibodies
+  name: Monoclonal antibodies
+  category: concept
+  aliases:
+  - monoclonal antibody
+  - monoclonal antibodies
+  case_sensitive_aliases:
+  - mAb
+  - mAbs
+
+- id: antibody-engineering
+  name: Antibody engineering
+  category: method
+  aliases:
+  - antibody engineering
+  - antibody discovery
+
+- id: bispecific-antibodies
+  name: Bispecific antibodies
+  category: concept
+  aliases:
+  - bispecific antibody
+  - bispecific antibodies
+  - bispecifics
+
+- id: antibody-drug-conjugates
+  name: Antibody-drug conjugates
+  category: concept
+  aliases:
+  - antibody-drug conjugate
+  - antibody drug conjugate
+  - antibody-drug conjugates
+  ambiguous_aliases:
+  - ADC
+
+- id: messenger-rna-therapeutics
+  name: mRNA therapeutics
+  category: concept
+  aliases:
+  - mRNA therapeutic
+  - mRNA therapeutics
+  - mRNA vaccine
+  case_sensitive_aliases:
+  - mRNA
+
+- id: lipid-nanoparticles
+  name: Lipid nanoparticles
+  category: concept
+  aliases:
+  - lipid nanoparticle
+  - lipid nanoparticles
+  case_sensitive_aliases:
+  - LNP
+  - LNPs
+
+- id: adeno-associated-virus-vectors
+  name: Adeno-associated virus vectors
+  category: concept
+  aliases:
+  - adeno-associated virus
+  - adeno associated virus
+  case_sensitive_aliases:
+  - AAV
+  - AAVs
+
+- id: lentiviral-vectors
+  name: Lentiviral vectors
+  category: concept
+  aliases:
+  - lentiviral vector
+  - lentiviral vectors
+  - lentivirus
+
+- id: car-t-cell-therapy
+  name: CAR-T cell therapy
+  category: concept
+  aliases:
+  - chimeric antigen receptor T cell
+  - CAR-T therapy
+  case_sensitive_aliases:
+  - CAR-T
+  - CAR T
+
+- id: cell-therapy
+  name: Cell therapy
+  category: concept
+  aliases:
+  - cell therapy
+  - cellular therapy
+
+- id: gene-therapy
+  name: Gene therapy
+  category: concept
+  aliases:
+  - gene therapy
+  - genetic medicine
+  - genetic medicines
+
+- id: immuno-oncology
+  name: Immuno-oncology
+  category: concept
+  aliases:
+  - immuno-oncology
+  - immunooncology
+  - cancer immunotherapy
+
+- id: oncology
+  name: Oncology
+  category: concept
+  aliases:
+  - oncology
+
+- id: rare-disease-therapeutics
+  name: Rare-disease therapeutics
+  category: concept
+  aliases:
+  - rare disease
+  - rare diseases
+  - orphan drug
+
+- id: protein-engineering
+  name: Protein engineering
+  category: method
+  aliases:
+  - protein engineering
+  - protein design and engineering
+
+- id: chromatography
+  name: Chromatography
+  category: method
+  aliases:
+  - chromatography
+  - chromatographic separation
+
+# QUALITY OPERATIONS, LAB SYSTEMS, AND MANUFACTURING SUPPORT ------------
+
+- id: standard-operating-procedures
+  name: Standard operating procedures
+  category: format
+  aliases:
+  - standard operating procedure
+  - standard operating procedures
+  case_sensitive_aliases:
+  - SOP
+  - SOPs
+
+- id: quality-management-system
+  name: Quality management system
+  category: platform
+  aliases:
+  - quality management system
+  - quality management systems
+  case_sensitive_aliases:
+  - QMS
+  - eQMS
+
+- id: batch-record-review
+  name: Batch-record review
+  category: method
+  aliases:
+  - batch record review
+  - batch record
+  - batch records
+  - executed batch records
+
+- id: deviation-management
+  name: Deviation management
+  category: method
+  aliases:
+  - deviation management
+  - deviation investigation
+  - deviation investigations
+
+- id: out-of-specification-investigations
+  name: Out-of-specification investigations
+  category: method
+  aliases:
+  - out of specification
+  - out-of-specification
+  case_sensitive_aliases:
+  - OOS
+
+- id: cleanroom-operations
+  name: Cleanroom operations
+  category: method
+  aliases:
+  - cleanroom
+  - cleanrooms
+  - clean room
+  - cleanroom operations
+
+- id: environmental-monitoring
+  name: Environmental monitoring
+  category: method
+  aliases:
+  - environmental monitoring
+
+- id: personal-protective-equipment
+  name: Personal protective equipment
+  category: hardware
+  aliases:
+  - personal protective equipment
+  case_sensitive_aliases:
+  - PPE
+
+- id: endotoxin-testing
+  name: Endotoxin testing
+  category: method
+  aliases:
+  - endotoxin testing
+  - endotoxin analysis
+  - bacterial endotoxin test
+
+- id: bioburden-testing
+  name: Bioburden testing
+  category: method
+  aliases:
+  - bioburden testing
+  - bioburden sampling
+  - bioburden analysis
+
+- id: sterility-testing
+  name: Sterility testing
+  category: method
+  aliases:
+  - sterility testing
+  - sterility assurance
+
+- id: biosafety
+  name: Biosafety
+  category: concept
+  aliases:
+  - biosafety
+  - biological safety
+  - biosafety level
+
+- id: laboratory-information-management-system
+  name: Laboratory information management system
+  category: platform
+  aliases:
+  - laboratory information management system
+  - laboratory information system
+  case_sensitive_aliases:
+  - LIMS
+
+- id: electronic-laboratory-notebook
+  name: Electronic laboratory notebook
+  category: platform
+  aliases:
+  - electronic lab notebook
+  - electronic laboratory notebook
+  - laboratory notebook
+  - lab notebook
+  case_sensitive_aliases:
+  - ELN
+
+- id: manufacturing-execution-system
+  name: Manufacturing execution system
+  category: platform
+  aliases:
+  - manufacturing execution system
+  - manufacturing execution systems
+  case_sensitive_aliases:
+  - MES
+
+- id: contract-manufacturing-organization
+  name: Contract manufacturing organization
+  category: concept
+  aliases:
+  - contract development and manufacturing organization
+  - contract manufacturing organization
+  case_sensitive_aliases:
+  - CDMO
+  - CDMOs
+
+- id: laboratory-automation
+  name: Laboratory automation
+  category: method
+  aliases:
+  - laboratory automation
+  - lab automation
+
+- id: wet-lab-research
+  name: Wet-lab research
+  category: method
+  aliases:
+  - wet lab
+  - wet-lab
+  - wet laboratory
+
+- id: assay-development
+  name: Assay development
+  category: method
+  aliases:
+  - assay development
+  - assay optimization
+
+- id: assay-validation
+  name: Assay validation
+  category: method
+  aliases:
+  - assay validation
+  - assay qualification
+
+- id: sample-management
+  name: Biological sample management
+  category: method
+  aliases:
+  - sample management
+  - specimen processing
+  - specimen management
+
+- id: biobanking
+  name: Biobanking
+  category: method
+  aliases:
+  - biobank
+  - biobanking
+  - biorepository
+
+- id: clinical-laboratory-testing
+  name: Clinical laboratory testing
+  category: method
+  aliases:
+  - clinical laboratory testing
+  - laboratory testing
+
+- id: jmp
+  name: JMP
+  category: tool
+  aliases:
+  - JMP statistical software
+  case_sensitive_aliases:
+  - JMP
+
+# CLINICAL IMAGING, ALLIED-HEALTH, AND HEALTH-SYSTEM PRACTICE ------------
+#
+# Diagnostic-imaging and allied-health roles sit inside the bioengineering
+# recommendation set through their employers, and their descriptions name
+# modality skills that the imaging entries above do not reach.
+
+- id: mammography
+  name: Mammography
+  category: method
+  aliases:
+  - mammography
+  - mammographic imaging
+  - screening mammography
+
+- id: radiography
+  name: Radiography
+  category: method
+  aliases:
+  - radiography
+  - radiographic imaging
+  - diagnostic radiography
+
+- id: radiologic-technology
+  name: Radiologic technology
+  category: method
+  aliases:
+  - radiologic technology
+  - radiologic technologist
+  - radiologic technologists
+
+- id: fluoroscopy
+  name: Fluoroscopy
+  category: method
+  aliases:
+  - fluoroscopy
+  - fluoroscopic imaging
+
+- id: nuclear-medicine
+  name: Nuclear medicine
+  category: concept
+  aliases:
+  - nuclear medicine
+  - radiopharmaceutical imaging
+
+- id: interventional-radiology
+  name: Interventional radiology
+  category: concept
+  aliases:
+  - interventional radiology
+
+- id: radiation-safety
+  name: Radiation safety
+  category: method
+  aliases:
+  - radiation safety
+  - radiation protection
+
+- id: picture-archiving-and-communication-system
+  name: Picture archiving and communication system
+  category: platform
+  aliases:
+  - picture archiving and communication system
+  case_sensitive_aliases:
+  - PACS
+
+- id: phlebotomy
+  name: Phlebotomy
+  category: method
+  aliases:
+  - phlebotomy
+  - venipuncture
+
+- id: sterile-processing
+  name: Sterile processing
+  category: method
+  aliases:
+  - sterile processing
+  - sterile instrument reprocessing
+
+- id: durable-medical-equipment
+  name: Durable medical equipment
+  category: hardware
+  aliases:
+  - durable medical equipment
+  - home medical equipment
+
+- id: medical-terminology
+  name: Medical terminology
+  category: concept
+  aliases:
+  - medical terminology
+
+# QUALITY, COMPLIANCE, AND COMMERCIALIZATION ----------------------------
+
+- id: regulatory-compliance
+  name: Regulatory compliance
+  category: concept
+  aliases:
+  - regulatory compliance
+  - regulatory requirements
+  - regulatory standards
+  - regulatory guidelines
+
+- id: quality-control
+  name: Quality control
+  category: method
+  aliases:
+  - quality control
+  - quality control testing
+
+- id: quality-systems
+  name: Quality systems
+  category: concept
+  aliases:
+  - quality system
+  - quality systems
+
+- id: process-development
+  name: Process development
+  category: method
+  aliases:
+  - process development
+
+- id: patient-recruitment
+  name: Patient recruitment
+  category: method
+  aliases:
+  - patient recruitment
+  - patient enrollment
+  - study recruitment
+  - subject enrollment
+
+- id: market-access
+  name: Market access
+  category: concept
+  aliases:
+  - market access
+  - payer access
+  - reimbursement strategy
+
+- id: specialty-pharmacy
+  name: Specialty pharmacy
+  category: concept
+  aliases:
+  - specialty pharmacy
+  - specialty pharmacy distribution
+
+- id: digital-health
+  name: Digital health
+  category: concept
+  aliases:
+  - digital health
+  - digital therapeutics
+
+- id: clinical-workflow-integration
+  name: Clinical-workflow integration
+  category: method
+  aliases:
+  - clinical workflow
+  - clinical workflows
+
+# DISCOVERY BIOLOGY AND ACADEMIC RESEARCH PRACTICE -----------------------
+
+- id: target-identification
+  name: Target identification and validation
+  category: method
+  aliases:
+  - target identification
+  - target validation
+  - target discovery
+
+- id: mechanism-of-action-studies
+  name: Mechanism-of-action studies
+  category: method
+  aliases:
+  - mechanism of action
+  - mechanism-of-action
+
+- id: disease-biology
+  name: Disease biology
+  category: concept
+  aliases:
+  - disease biology
+  - disease mechanisms
+  - disease models
+
+- id: neurodegeneration
+  name: Neurodegeneration
+  category: concept
+  aliases:
+  - neurodegeneration
+  - neurodegenerative disease
+  - neurodegenerative diseases
+
+- id: behavioral-assays
+  name: Behavioral assays
+  category: method
+  aliases:
+  - behavioral assay
+  - behavioral assays
+  - behavioural assay
+
+- id: scientific-publication
+  name: Scientific publication
+  category: method
+  aliases:
+  - peer-reviewed publication
+  - peer-reviewed publications
+  - scientific publications
+  - publication record
+
+- id: grant-writing
+  name: Research grant writing
+  category: method
+  aliases:
+  - grant writing
+  - grant applications
+  - grant proposals
+  - research grants
+
+- id: scientific-literature-review
+  name: Scientific literature review
+  category: method
+  aliases:
+  - literature review
+  - scientific literature review
+
+- id: clinical-study-coordination
+  name: Clinical-study coordination
+  category: method
+  aliases:
+  - clinical research coordinator
+  - study coordinator
+  - study coordination
+  - site coordination
+
+- id: study-protocol
+  name: Study protocol
+  category: format
+  aliases:
+  - study protocol
+  - study protocols
+
+- id: sterilization-validation
+  name: Sterilization validation
+  category: method
+  aliases:
+  - sterilization validation
+  - sterilisation validation
+
+- id: packaging-validation
+  name: Packaging validation
+  category: method
+  aliases:
+  - packaging validation
+  - package integrity testing
+
+- id: shelf-life-testing
+  name: Shelf-life testing
+  category: method
+  aliases:
+  - shelf life
+  - shelf-life testing
+  - real-time aging study

@@ -6,7 +6,6 @@ label:
   transact-sql: T-SQL
   stata-programming-language: Stata
   triton-kernel-language: Triton
-  metal-shading-language: MSL
   webgpu-shading-language: WGSL
   kusto-query-language: KQL
   hashicorp-configuration-language: HCL
