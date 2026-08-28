@@ -24,6 +24,23 @@ from xjobscore.bioengineering import (
     NONTECHNICAL_PATTERN,
     TECHNICAL_OR_STUDENT_PATTERN,
 )
+from xjobscore.job_domain import (
+    ADJACENT_DISCIPLINE_PATTERN,
+    FINANCE_FILTER,
+    FINANCE_FUNCTION_PATTERN,
+    IT_ROLE_PATTERN,
+    PROGRAM_NOISE_PATTERN,
+    QUANT_PATTERN,
+    QUANT_ROLE_PATTERN,
+    SOFTWARE_FILTER,
+    SOFTWARE_RESCUE_PATTERN,
+    SOFTWARE_STRONG_PATTERN,
+    SOFTWARE_WEAK_PATTERN,
+    STUDENT_DOMAIN_GUARD_PATTERN,
+    STUDENT_DOMAIN_PATTERN,
+    UNLABELED_FILTER,
+)
+from xjobscore.job_domain import NONTECHNICAL_PATTERN as DOMAIN_NONTECHNICAL_PATTERN
 from xjobscore.degrees import canon as degree_canon
 from xjobscore.skill_labels import labels as skill_labels
 from xjobscore.skills import canon
@@ -54,13 +71,21 @@ LOCAL_ACCOUNT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 # `job_type` is a parse-time column now, not a registry-derived enrichment, so
 # the contract is spelled out here and pinned to schema.sql's CHECK by test.
-DEFAULT_JOB_TYPES = ("intern", "coop", "student_program", "research", "part_time")
+DEFAULT_JOB_TYPES = ("intern", "coop", "student", "new_grad", "research")
 # API-only token: storage says NULL for "no signal", but the query parameter
 # keeps a name so the unclassified pool stays addressable.
 UNCLASSIFIED = "unclassified"
 VALID_JOB_TYPES = frozenset((*DEFAULT_JOB_TYPES, UNCLASSIFIED))
+# Domain labels are computed from the title at query time, so -- like
+# UNCLASSIFIED above -- nothing is stored and the residual pool still needs an
+# addressable name for manual review.
+DOMAIN_FILTERS = (SOFTWARE_FILTER, FINANCE_FILTER, UNLABELED_FILTER)
 VALID_DEGREE_FIELDS = frozenset(
-    {*(field.name for field in degree_canon()), BIOENGINEERING_FILTER}
+    {
+        *(field.name for field in degree_canon()),
+        BIOENGINEERING_FILTER,
+        *DOMAIN_FILTERS,
+    }
 )
 VALID_APPLICATION_STAGES = frozenset(
     {"considering", "applied", "assessment", "interview", "offer", "closed"}
@@ -79,11 +104,95 @@ _LOCATION_DISPLAY_LIMIT = 3
 _BIO_COMPANY_CACHE_SECONDS = 300
 
 
-class _BioCompanyCache:
+class _CompanyCohortCache:
     def __init__(self) -> None:
         self.ids: tuple[int, ...] = ()
         self.expires_at = 0.0
         self.lock = asyncio.Lock()
+
+
+def _domain_predicates(
+    bind: Any, quant_company_ids: Iterable[int], requested: Iterable[str]
+) -> dict[str, str]:
+    """Render `job_domain.classify` as SQL, one predicate per requested domain.
+
+    `unlabeled` is derived from the other two rather than written out, so the
+    review queue cannot drift away from the labels it is the complement of.
+
+    Only the requested domains are built, and each pattern binds at most once:
+    a parameter bound for a predicate that never reaches the SQL would be
+    rejected by the server as an argument-count mismatch.
+    """
+    markers: dict[str, str] = {}
+    employer_marker: list[str] = []
+
+    def marker(pattern: str) -> str:
+        # `job_domain` patterns are bounded for both engines, so the same
+        # constant drives `re` in Python and `~*` here.
+        if pattern not in markers:
+            markers[pattern] = bind(pattern)
+        return markers[pattern]
+
+    def title() -> str:
+        return f"regexp_replace(j.title, {marker(PROGRAM_NOISE_PATTERN)}, ' ', 'gi')"
+
+    def matches(pattern: str) -> str:
+        return f"{title()} ~* {marker(pattern)}"
+
+    def software() -> str:
+        # Stage 1: strong evidence, minus the adjacent-discipline steal.
+        strong = (
+            f"({matches(SOFTWARE_STRONG_PATTERN)} AND NOT "
+            f"({matches(ADJACENT_DISCIPLINE_PATTERN)} AND NOT "
+            f"{matches(SOFTWARE_RESCUE_PATTERN)}))"
+        )
+        # Stage 3: weak evidence, readable only once the stage 2 veto clears.
+        weak = (
+            f"(NOT {matches(DOMAIN_NONTECHNICAL_PATTERN)} AND "
+            f"{matches(SOFTWARE_WEAK_PATTERN)} AND NOT "
+            f"{matches(ADJACENT_DISCIPLINE_PATTERN)})"
+        )
+        # Stage 3b: a software domain noun paired with a student role noun,
+        # minus its non-software qualifiers.  Narrow by design -- see
+        # `STUDENT_DOMAIN_PATTERN`.
+        program = (
+            f"(NOT {matches(DOMAIN_NONTECHNICAL_PATTERN)} AND "
+            f"{matches(STUDENT_DOMAIN_PATTERN)} AND NOT "
+            f"{matches(STUDENT_DOMAIN_GUARD_PATTERN)})"
+        )
+        return f"({strong} OR {weak} OR {program})"
+
+    def finance() -> str:
+        # Stages 4 and 5 are reached only by falling through 1 to 3.
+        strong = (
+            f"({matches(SOFTWARE_STRONG_PATTERN)} AND NOT "
+            f"({matches(ADJACENT_DISCIPLINE_PATTERN)} AND NOT "
+            f"{matches(SOFTWARE_RESCUE_PATTERN)}))"
+        )
+        if not employer_marker:
+            employer_marker.append(bind(list(quant_company_ids)))
+        employer = f"c.id = ANY({employer_marker[0]}::bigint[])"
+        return (
+            f"(NOT {strong} AND NOT {matches(DOMAIN_NONTECHNICAL_PATTERN)} "
+            f"AND NOT ({matches(SOFTWARE_WEAK_PATTERN)} AND NOT "
+            f"{matches(ADJACENT_DISCIPLINE_PATTERN)}) "
+            f"AND NOT ({matches(STUDENT_DOMAIN_PATTERN)} AND NOT "
+            f"{matches(STUDENT_DOMAIN_GUARD_PATTERN)}) "
+            f"AND NOT {matches(FINANCE_FUNCTION_PATTERN)} "
+            f"AND ({matches(QUANT_PATTERN)} OR ({employer} AND "
+            f"{matches(QUANT_ROLE_PATTERN)} AND NOT "
+            f"{matches(IT_ROLE_PATTERN)})))"
+        )
+
+    predicates: dict[str, str] = {}
+    for name in requested:
+        if name == SOFTWARE_FILTER:
+            predicates[name] = software()
+        elif name == FINANCE_FILTER:
+            predicates[name] = finance()
+        elif name == UNLABELED_FILTER:
+            predicates[name] = f"(NOT {software()} AND NOT {finance()})"
+    return predicates
 
 
 def _json_object(value: Any) -> dict[str, Any]:
@@ -353,13 +462,17 @@ class PostgresRepository:
         *,
         account_id: UUID = LOCAL_ACCOUNT_ID,
         pool: asyncpg.Pool | None = None,
-        _bio_company_cache: _BioCompanyCache | None = None,
+        _bio_company_cache: _CompanyCohortCache | None = None,
+        _quant_company_cache: _CompanyCohortCache | None = None,
     ) -> None:
         self.dsn = dsn
         self.account_id = account_id
         self.pool = pool
         self._owns_pool = pool is None
-        self._bio_company_cache = _bio_company_cache or _BioCompanyCache()
+        self._bio_company_cache = _bio_company_cache or _CompanyCohortCache()
+        self._quant_company_cache = (
+            _quant_company_cache or _CompanyCohortCache()
+        )
 
     async def connect(self) -> None:
         if self.pool is not None:
@@ -398,6 +511,7 @@ class PostgresRepository:
             account_id=account_id,
             pool=self._ready(),
             _bio_company_cache=self._bio_company_cache,
+            _quant_company_cache=self._quant_company_cache,
         )
 
     async def _bioengineering_company_ids(self) -> tuple[int, ...]:
@@ -419,7 +533,7 @@ class PostgresRepository:
                     SELECT company_id, COUNT(*) AS direct_count
                     FROM job_posting
                     WHERE status = 'active'
-                      AND (attributes -> 'degree_fields') ?| ARRAY[
+                      AND (attributes -> 'degree') ?| ARRAY[
                           'biotech', 'med_device', 'clinical_affairs'
                       ]::text[]
                       AND title ~* $1
@@ -440,6 +554,46 @@ class PostgresRepository:
                    )
                 """,
                 DIRECT_DOMAIN_PATTERN,
+            )
+            cache.ids = tuple(int(row["id"]) for row in rows)
+            cache.expires_at = monotonic() + _BIO_COMPANY_CACHE_SECONDS
+            return cache.ids
+
+    async def _quant_company_ids(self) -> tuple[int, ...]:
+        """Return the measured quant-employer prior, shared briefly across requests."""
+        cache = self._quant_company_cache
+        if monotonic() < cache.expires_at:
+            return cache.ids
+        async with cache.lock:
+            if monotonic() < cache.expires_at:
+                return cache.ids
+            # Measured over every active posting rather than the student slice:
+            # the same 40% threshold over the full corpus yields trading firms
+            # only, while the student slice alone admits insurers on 3 rows.
+            rows = await self._ready().fetch(
+                """
+                WITH company_postings AS MATERIALIZED (
+                    SELECT company_id, COUNT(*) AS posting_count
+                    FROM job_posting
+                    WHERE status = 'active'
+                    GROUP BY company_id
+                ), company_titles AS MATERIALIZED (
+                    SELECT company_id, COUNT(*) AS quant_count
+                    FROM job_posting
+                    WHERE status = 'active'
+                      AND title ~* $1
+                      AND NOT (title ~* $2)
+                    GROUP BY company_id
+                )
+                SELECT c.id
+                FROM company c
+                JOIN company_postings cp ON cp.company_id = c.id
+                JOIN company_titles ct ON ct.company_id = c.id
+                WHERE cp.posting_count >= 3
+                  AND ct.quant_count::numeric / cp.posting_count >= 0.40
+                """,
+                QUANT_PATTERN,
+                FINANCE_FUNCTION_PATTERN,
             )
             cache.ids = tuple(int(row["id"]) for row in rows)
             cache.expires_at = monotonic() + _BIO_COMPANY_CACHE_SECONDS
@@ -473,6 +627,9 @@ class PostgresRepository:
             # per-vendor migration.
             "job_type": row.get("job_type"),
             "remote": _remote(row.get("remote"), attributes),
+            # Schedule, orthogonal to job_type: a part-time internship reads
+            # job_type "intern" and part_time "yes".
+            "part_time": row.get("part_time") or "unknown",
             "attributes": attributes,
             # Derived API presentation; attributes.skills remains the durable
             # JSONB array of canonical ids.
@@ -507,6 +664,10 @@ class PostgresRepository:
             await self._bioengineering_company_ids()
             if bioengineering_requested
             else ()
+        )
+        domains_requested = tuple(f for f in fields if f in DOMAIN_FILTERS)
+        quant_company_ids = (
+            await self._quant_company_ids() if domains_requested else ()
         )
         params: list[Any] = []
 
@@ -563,15 +724,16 @@ class PostgresRepository:
                 ")))"
             )
         if fields:
-            ordinary_fields = [
-                field for field in fields if field != BIOENGINEERING_FILTER
-            ]
             field_clauses = []
-            if ordinary_fields:
-                marker = bind(ordinary_fields)
-                field_clauses.append(
-                    f"(j.attributes -> 'degree_fields') ?| {marker}::text[]"
-                )
+            # `degree` is NOT a gate. The tag is non-empty on 8.3% of
+            # active postings -- it is absent on every description-less vendor
+            # (workday-list, 149k rows, carries no description at all), and it
+            # fires on boilerplate ("BS in Computer Science or related field")
+            # in senior and non-technical reqs. Gating on it dropped 1,235 of
+            # 1,691 student CS/finance roles while rescuing ~8 that a title
+            # vocabulary misses. Selecting an ordinary focus area therefore
+            # narrows nothing; it is kept as an accepted parameter so bookmarked
+            # requests and the BioTech cohort below keep working.
             if bioengineering_requested:
                 direct_marker = bind(DIRECT_DOMAIN_PATTERN)
                 technical_marker = bind(TECHNICAL_OR_STUDENT_PATTERN)
@@ -585,7 +747,17 @@ class PostgresRepository:
                     f"OR ({bio_employer} AND j.title ~* {generic_marker}))"
                 )
                 field_clauses.append(f"({recommendation})")
-            clauses.append(f"({' OR '.join(field_clauses)})")
+            if domains_requested:
+                domain_sql = _domain_predicates(
+                    bind, quant_company_ids, domains_requested
+                )
+                field_clauses.extend(domain_sql[name] for name in domains_requested)
+            # Only BioTech and the domain labels contribute predicates, so
+            # `field_clauses` is empty whenever an ordinary focus area is
+            # selected alone. Appending an empty "()" would be a syntax error,
+            # not a no-op.
+            if field_clauses:
+                clauses.append(f"({' OR '.join(field_clauses)})")
         excluded = tuple(dict.fromkeys(int(job_id) for job_id in exclude_job_ids))
         if excluded:
             marker = bind(list(excluded))
@@ -646,15 +818,15 @@ class PostgresRepository:
             SELECT
                 COUNT(*) FILTER (WHERE j.job_type = 'intern') AS intern,
                 COUNT(*) FILTER (WHERE j.job_type = 'coop') AS coop,
-                COUNT(*) FILTER (WHERE j.job_type = 'student_program') AS student_program,
-                COUNT(*) FILTER (WHERE j.job_type = 'research') AS research,
-                COUNT(*) FILTER (WHERE j.job_type = 'part_time') AS part_time
+                COUNT(*) FILTER (WHERE j.job_type = 'student') AS student,
+                COUNT(*) FILTER (WHERE j.job_type = 'new_grad') AS new_grad,
+                COUNT(*) FILTER (WHERE j.job_type = 'research') AS research
             FROM job_posting j
             JOIN company c ON c.id = j.company_id
             LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
             WHERE {counts_where}
               AND j.job_type = ANY(ARRAY[
-                  'intern', 'coop', 'student_program', 'research', 'part_time'
+                  'intern', 'coop', 'student', 'new_grad', 'research'
               ]::text[])
             """,
             *counts_params,
@@ -722,7 +894,7 @@ class PostgresRepository:
                 j.id, j.source, c.name AS company_name, j.title,
                 j.locations, j.source_url, j.apply_url, j.posted_at,
                 j.first_seen_at, j.last_seen_at, j.status, j.attributes,
-                j.job_type, j.remote,
+                j.job_type, j.remote, j.part_time,
                 COALESCE(alternates.other_sources, '[]'::jsonb) AS other_sources
             FROM job_posting j
             JOIN company c ON c.id = j.company_id

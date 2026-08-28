@@ -286,17 +286,6 @@ def create_app(
         async def discover() -> FileResponse:
             return FileResponse(static_dir / "discover" / "index.html")
 
-        @application.get("/opportunities-v2/")
-        async def opportunities_v2() -> FileResponse:
-            return FileResponse(static_dir / "opportunities-v2" / "index.html")
-
-        # Opportunities (v2): the same data and app logic on the Source coverage
-        # design system, served from its own directory so the live page at "/"
-        # cannot be affected by changes to it.
-        @application.get("/opportunities-v3/")
-        async def opportunities_v3() -> FileResponse:
-            return FileResponse(static_dir / "opportunities-v3" / "index.html")
-
         @application.get("/resume/")
         async def resume_page() -> FileResponse:
             return FileResponse(static_dir / "resume" / "index.html")

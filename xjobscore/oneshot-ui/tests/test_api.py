@@ -54,7 +54,7 @@ class FakeRepository:
                     "version": 1,
                     "term": "Summer 2027",
                     "skills": ["python", "postgresql"],
-                    "degree_fields": ["computer_science"],
+                    "degree": ["cs"],
                 },
                 "skills": [
                     {
@@ -96,11 +96,11 @@ class FakeRepository:
             rows = [
                 row
                 for row in rows
-                if degree_fields.intersection(row["attributes"].get("degree_fields", []))
+                if degree_fields.intersection(row["attributes"].get("degree", []))
             ]
         job_type_counts = {
             job_type: sum(row.get("job_type") == job_type for row in rows)
-            for job_type in ("intern", "coop", "student_program", "research", "part_time")
+            for job_type in ("intern", "coop", "student", "new_grad", "research")
         }
         types = set(options["job_types"])
         if types:
@@ -369,7 +369,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
 
         async def fetchrow(self, query, *args):
             self.type_count_query = query
-            return {"intern": 1, "coop": 0, "student_program": 0, "research": 0, "part_time": 0}
+            return {"intern": 1, "coop": 0, "student": 0, "new_grad": 0, "research": 0}
 
         async def fetch(self, query, *args):
             self.page_query = query
@@ -402,7 +402,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     result = await asyncio.wait_for(
         repository.list_jobs(
             job_types=["intern"],
-            degree_fields=["computer_science"],
+            degree_fields=["cs"],
             exclude_job_ids=[99],
             q="Kubernetes",
             limit=25,
@@ -416,12 +416,14 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     assert result["jobs"][0]["id"] == 41
     assert result["jobs"][0]["location"] == "United States"
     # COUNT sees only account + filters; LIMIT/OFFSET belong only to the page.
-    assert len(pool.count_args) == 6
-    assert pool.count_args[1] == ["computer_science"]
-    assert pool.count_args[2] == [99]
-    assert pool.count_args[3] == "%Kubernetes%"
-    assert "kubernetes" in pool.count_args[4]
-    assert pool.count_args[5] == ["intern"]
+    # An ordinary focus area binds nothing: `degree` is accepted but no
+    # longer gates the query, so "cs" above contributes no parameter here.
+    assert len(pool.count_args) == 5
+    assert ["cs"] not in pool.count_args
+    assert pool.count_args[1] == [99]
+    assert pool.count_args[2] == "%Kubernetes%"
+    assert "kubernetes" in pool.count_args[3]
+    assert pool.count_args[4] == ["intern"]
     assert pool.page_args[-2:] == (25, 50)
     array_args = [value for value in pool.page_args if isinstance(value, list)]
     assert any("CA|San Francisco" in value and "NY|New York City" in value for value in array_args)
@@ -463,9 +465,9 @@ async def test_bio_degree_filter_uses_title_and_employer_evidence() -> None:
             return {
                 "intern": 0,
                 "coop": 0,
-                "student_program": 0,
+                "student": 0,
+                "new_grad": 0,
                 "research": 0,
-                "part_time": 0,
             }
 
         async def fetch(self, query, *args):
@@ -511,14 +513,14 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
         assert client.get("/api/health").json() == {"ok": True}
         jobs = client.get(
             "/api/jobs",
-            params={"job_type": "intern", "degree_field": "computer_science"},
+            params={"job_type": "intern", "degree_field": "cs"},
         ).json()
         assert jobs["total"] == 1
         assert jobs["job_type_counts"] == {
-            "intern": 1, "coop": 0, "student_program": 0, "research": 0, "part_time": 0,
+            "intern": 1, "coop": 0, "student": 0, "new_grad": 0, "research": 0,
         }
         assert jobs["jobs"][0]["attributes"]["skills"] == ["python", "postgresql"]
-        assert jobs["jobs"][0]["attributes"]["degree_fields"] == ["computer_science"]
+        assert jobs["jobs"][0]["attributes"]["degree"] == ["cs"]
         assert jobs["jobs"][0]["skills"] == [
             {
                 "id": "python",
@@ -594,12 +596,17 @@ def test_api_rejects_unknown_job_filter_and_invalid_application_mutation() -> No
             params=[
                 ("job_type", "intern"),
                 ("job_type", "coop"),
-                ("job_type", "student_program"),
+                ("job_type", "student"),
+                ("job_type", "new_grad"),
                 ("job_type", "research"),
             ],
         ).status_code == 200
         assert client.get("/api/jobs", params={"job_type": "made_up"}).status_code == 400
         assert client.get("/api/jobs", params={"degree_field": "made_up"}).status_code == 400
+        for domain in ("software", "finance", "unlabeled"):
+            assert client.get(
+                "/api/jobs", params={"degree_field": domain}
+            ).status_code == 200
         created = client.post("/api/jobs/41/applications").json()
         assert client.patch(
             f"/api/applications/{created['id']}", json={"company": "Changed"}
@@ -621,15 +628,18 @@ def test_discover_route_serves_the_standalone_document() -> None:
     assert '<a ' not in response.text
 
 
-def test_main_route_serves_the_v2_opportunities_design() -> None:
+def test_main_route_serves_the_opportunities_page() -> None:
     application = create_app(Settings(dsn="injected"), repository=FakeRepository())
     with TestClient(application) as client:
         response = client.get("/")
 
     assert response.status_code == 200
-    assert 'href="/static/opportunities-v2/styles.css?v=' in response.text
-    assert 'src="/static/opportunities-v2/app.js?v=' in response.text
-    assert "Opportunities V2" not in response.text
+    assert 'href="/static/opportunities/styles.css?v=' in response.text
+    assert 'src="/static/opportunities/app.js?v=' in response.text
+    # The versioned directories are gone; nothing may still point at them.
+    assert "opportunities-v2" not in response.text
+    assert "opportunities-v3" not in response.text
+    assert "(v2)" not in response.text
 
 
 def test_page_shells_reference_assets_by_absolute_path() -> None:
@@ -643,7 +653,7 @@ def test_page_shells_reference_assets_by_absolute_path() -> None:
     """
     application = create_app(Settings(dsn="injected"), repository=FakeRepository())
     with TestClient(application) as client:
-        for path in ("/", "/opportunities-v2/", "/application/", "/source-coverage/", "/resume/", "/login/"):
+        for path in ("/", "/application/", "/source-coverage/", "/resume/", "/login/"):
             text = client.get(path).text
             for ref in ('src="./', 'src="../', 'href="./', 'href="../'):
                 assert ref not in text, f"{path} uses a relative asset ref {ref!r}"
@@ -653,7 +663,7 @@ def test_clean_page_urls_serve_the_same_shell_as_the_static_mount() -> None:
     application = create_app(Settings(dsn="injected"), repository=FakeRepository())
     with TestClient(application) as client:
         for clean, mounted in (
-            ("/opportunities-v2/", "/static/opportunities-v2/index.html"),
+            ("/", "/static/index.html"),
             ("/application/", "/static/application/index.html"),
             ("/source-coverage/", "/static/source-coverage/index.html"),
         ):
@@ -676,10 +686,9 @@ def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
         "/static/sample-data.js",
         "/static/navigation.css",
         "/static/brand-mark.svg",
-        "/opportunities-v2/",
-        "/static/opportunities-v2/index.html",
-        "/static/opportunities-v2/styles.css",
-        "/static/opportunities-v2/app.js",
+        "/static/index.html",
+        "/static/opportunities/styles.css",
+        "/static/opportunities/app.js",
         "/application/",
         "/static/application/index.html",
         "/static/application/styles.css",
@@ -736,3 +745,42 @@ def test_search_treats_ilike_wildcards_as_literal_text() -> None:
     assert _ilike_pattern("a%b_c") == r"%a\%b\_c%"
     assert _ilike_pattern("\\") == r"%\\%"
     assert _ilike_pattern("ends\\") == r"%ends\\%"
+
+
+def test_unlabeled_is_derived_from_the_other_two_domain_predicates() -> None:
+    # The review queue is only trustworthy while it is the exact complement of
+    # the labels, so it must never be transcribed by hand.
+    from oneshot_ui.repository import (
+        DOMAIN_FILTERS,
+        FINANCE_FILTER,
+        SOFTWARE_FILTER,
+        UNLABELED_FILTER,
+        _domain_predicates,
+    )
+
+    params: list[object] = []
+
+    def bind(value: object) -> str:
+        params.append(value)
+        return f"${len(params)}"
+
+    predicates = _domain_predicates(bind, [7], DOMAIN_FILTERS)
+    assert set(predicates) == set(DOMAIN_FILTERS)
+    assert predicates[UNLABELED_FILTER] == (
+        f"(NOT {predicates[SOFTWARE_FILTER]} AND NOT {predicates[FINANCE_FILTER]})"
+    )
+    # Every pattern binds at most once across all three predicates, so no
+    # parameter is left orphaned when only some domains reach the SQL.
+    assert len(params) == len(set(map(str, params)))
+    assert [value for value in params if isinstance(value, list)] == [[7]]
+
+    # Requesting one domain must bind only that domain's patterns.
+    only: list[object] = []
+    _domain_predicates(
+        lambda value: (only.append(value), f"${len(only)}")[1],
+        [7],
+        [SOFTWARE_FILTER],
+    )
+    assert all(not isinstance(value, list) for value in only)
+    assert len(only) < len(params)
+
