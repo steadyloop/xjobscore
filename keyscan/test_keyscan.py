@@ -186,23 +186,23 @@ async def test_probe_enriches_unbound_candidate_from_metadata(tmp_path: Path):
 
 def test_workday_candidates_use_one_lowercase_list_identity(tmp_path: Path):
     scan = Keyscan(tmp_path / "work")
-    scan._new_run(["commoncrawl"], 1, ["workday-list"])
+    scan._new_run(["commoncrawl"], 1, ["workday"])
 
     first = scan._record_candidate(
-        "workday-list",
+        "workday",
         "NVIDIA/wd5/NVIDIAExternalCareerSite",
         "cc",
         ["https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite"],
     )
     second = scan._record_candidate(
-        "workday-list",
+        "workday",
         "nvidia/wd5/nvidiaexternalcareersite",
         "board",
         ["https://nvidia.wd5.myworkdayjobs.com/en-US/nvidiaexternalcareersite"],
     )
 
-    assert first == second == ("workday-list", "nvidia/wd5/nvidiaexternalcareersite")
-    rows = scan.list_candidates(source="workday-list")
+    assert first == second == ("workday", "nvidia/wd5/nvidiaexternalcareersite")
+    rows = scan.list_candidates(source="workday")
     assert len(rows) == 1
     assert rows[0]["token"] == "nvidia/wd5/nvidiaexternalcareersite"
 
@@ -303,7 +303,7 @@ async def test_board_run_extracts_tokens_from_listings(tmp_path: Path, monkeypat
     assert set(rows) == {
         ("greenhouse", "acme"),
         ("ashby", "OpenAI"),
-        ("workday-list", "nvidia/wd5/nvidiaexternalcareersite"),
+        ("workday", "nvidia/wd5/nvidiaexternalcareersite"),
     }
     assert rows[("greenhouse", "acme")]["details"]["company_name"] == "Acme"
 
@@ -1484,7 +1484,7 @@ async def test_verify_does_not_abort_a_multi_host_vendor_on_one_blocked_tenant(t
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=transport(handler)) as client:
-        result = await verify_source(BY_SOURCE["workday-list"], client=client, workdir=tmp_path, request_delay=0)
+        result = await verify_source(BY_SOURCE["workday"], client=client, workdir=tmp_path, request_delay=0)
 
     assert result["outcome"] == "verified"
     assert result["live"]["token"] == "good/wd2/goodsite"
@@ -1509,7 +1509,7 @@ async def test_verify_escalates_when_a_per_tenant_vendor_blocks_every_host(tmp_p
         return httpx.Response(403, text="<html>cloudflare</html>")
 
     async with httpx.AsyncClient(transport=transport(handler)) as client:
-        result = await verify_source(BY_SOURCE["workday-list"], client=client, workdir=tmp_path, request_delay=0)
+        result = await verify_source(BY_SOURCE["workday"], client=client, workdir=tmp_path, request_delay=0)
 
     assert result["outcome"] == "blocked"
     assert result["probes"] == 5
@@ -1745,7 +1745,7 @@ def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: 
                ats, token, status, canonical_url, urls, details,
                discovered_at, checked_at
            ) VALUES (
-               'workday', 'NVIDIA/wd5/NVIDIAExternalCareerSite', 'live',
+               'workday-list', 'NVIDIA/wd5/NVIDIAExternalCareerSite', 'live',
                'https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite',
                '["old"]', '{"verdict":"live","job_count":42}',
                '2025-12-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00'
@@ -1755,7 +1755,7 @@ def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: 
         """INSERT INTO token(
                ats, token, status, canonical_url, urls, details, discovered_at
            ) VALUES (
-               'workday-list', 'nvidia/wd5/nvidiaexternalcareersite', 'unknown',
+               'workday', 'nvidia/wd5/nvidiaexternalcareersite', 'unknown',
                'https://nvidia.wd5.myworkdayjobs.com/en-US/nvidiaexternalcareersite',
                '["new"]', '{"company_name":"NVIDIA"}',
                '2026-01-01T00:00:00+00:00'
@@ -1777,17 +1777,19 @@ def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: 
     workday_rows = con.execute(
         "SELECT * FROM token WHERE ats IN ('workday', 'workday-list')"
     ).fetchall()
-    with pytest.raises(sqlite3.IntegrityError, match="renamed to workday-list"):
+    # The retired label is the interim one now: `workday-list` was renamed back
+    # to `workday` on 2026-08-26 when the gated detail leg landed.
+    with pytest.raises(sqlite3.IntegrityError, match="renamed back to workday"):
         con.execute(
             """INSERT INTO token(ats, token, canonical_url, discovered_at)
-               VALUES ('workday', 'acme/wd1/jobs', 'https://example.test', '2026-01-01')"""
+               VALUES ('workday-list', 'acme/wd1/jobs', 'https://example.test', '2026-01-01')"""
         )
     con.close()
     assert row["status"] == "live"
     assert row["imported_at"] is None
     assert len(workday_rows) == 1
     migrated = workday_rows[0]
-    assert migrated["ats"] == "workday-list"
+    assert migrated["ats"] == "workday"
     assert migrated["token"] == "nvidia/wd5/nvidiaexternalcareersite"
     assert migrated["status"] == "live"
     assert migrated["checked_at"] == "2026-01-02T00:00:00+00:00"

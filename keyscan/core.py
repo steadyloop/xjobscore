@@ -133,7 +133,7 @@ def _merge(old: dict[str, Any], new: dict[str, Any] | None = None, **overrides: 
 
 def _canonical_token(source: str, token: str) -> str:
     """Return keyscan's one stored spelling for a vendor endpoint."""
-    return token.lower() if source == "workday-list" else token
+    return token.lower() if source == "workday" else token
 
 
 _CRAWL_WEEK = re.compile(r"^CC-MAIN-(\d{4})-(\d{2})$")
@@ -194,18 +194,20 @@ def _select_crawls(collections: list[dict[str, Any]], config: dict[str, Any]) ->
 
 
 def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
-    """Fold the retired Workday source into its listing-only replacement.
+    """Fold the interim ``workday-list`` label back into ``workday``.
 
-    Historical databases can contain both labels and casing variants of the
-    same tenant endpoint.  Rebuild just those rows as one lowercase
-    ``workday-list`` identity, keeping the latest validation result and merging
-    discovery evidence.  ``imported_at`` follows the winning validation row so
-    a newer, not-yet-imported verdict remains pending.
+    ``workday`` was renamed to ``workday-list`` while the detail leg was
+    retired, and renamed back on 2026-08-26 when a gated leg replaced it.
+    Historical databases can therefore contain either label plus casing
+    variants of the same tenant endpoint.  Rebuild just those rows as one
+    lowercase ``workday`` identity, keeping the latest validation result and
+    merging discovery evidence.  ``imported_at`` follows the winning validation
+    row so a newer, not-yet-imported verdict remains pending.
     """
     dirty = con.execute(
         """SELECT 1 FROM token
-           WHERE ats = 'workday'
-              OR (ats = 'workday-list' AND token <> lower(token))
+           WHERE ats = 'workday-list'
+              OR (ats = 'workday' AND token <> lower(token))
            LIMIT 1"""
     ).fetchone()
     if dirty is None:
@@ -219,7 +221,7 @@ def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
         groups.setdefault(row["token"].lower(), []).append(row)
 
     con.execute("DELETE FROM token WHERE ats IN ('workday', 'workday-list')")
-    rule = BY_SOURCE["workday-list"]
+    rule = BY_SOURCE["workday"]
     for token, sightings in groups.items():
         # ISO timestamps sort chronologically. A checked row outranks an
         # unchecked discovery; exact ties prefer the current source label.
@@ -228,7 +230,7 @@ def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
             key=lambda row: (
                 row["checked_at"] is not None,
                 row["checked_at"] or "",
-                row["ats"] == "workday-list",
+                row["ats"] == "workday",
             ),
         )
         ordered = sorted(
@@ -248,7 +250,7 @@ def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
             """INSERT INTO token(
                    ats, token, status, canonical_url, urls, method, run_id,
                    details, discovered_at, checked_at, imported_at
-               ) VALUES ('workday-list', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               ) VALUES ('workday', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 token,
                 winner["status"],
@@ -682,7 +684,7 @@ class Keyscan:
                 CREATE UNIQUE INDEX IF NOT EXISTS keyscan_one_active
                     ON runs(status) WHERE status = 'running';
                 CREATE TABLE IF NOT EXISTS token (
-                    ats           TEXT NOT NULL CHECK (ats <> 'workday'),
+                    ats           TEXT NOT NULL CHECK (ats <> 'workday-list'),
                     token         TEXT NOT NULL,
                     status        TEXT NOT NULL DEFAULT 'unknown'
                         CHECK (status IN ('unknown','live','dead')),
@@ -712,6 +714,18 @@ class Keyscan:
             existing_columns = {row["name"] for row in con.execute("PRAGMA table_info(token)")}
             if "imported_at" not in existing_columns:
                 con.execute("ALTER TABLE token ADD COLUMN imported_at TEXT")
+            # DROP FIRST, and before the migration. A database written by the
+            # 2026-08-22 build carries triggers that ABORT on `ats = 'workday'`
+            # -- the name that is canonical again -- so the migration below
+            # could not insert a single row while they stand. `IF NOT EXISTS`
+            # cannot redefine a trigger that already exists on disk; only a drop
+            # can.
+            con.executescript(
+                """
+                DROP TRIGGER IF EXISTS keyscan_token_workday_insert;
+                DROP TRIGGER IF EXISTS keyscan_token_workday_update;
+                """
+            )
             _migrate_workday_tokens(con)
             # Existing SQLite tables cannot gain a CHECK constraint in place.
             # Triggers give upgraded databases the same invariant as fresh
@@ -719,14 +733,14 @@ class Keyscan:
             con.executescript(
                 """
                 CREATE TRIGGER IF NOT EXISTS keyscan_token_workday_insert
-                BEFORE INSERT ON token WHEN NEW.ats = 'workday'
+                BEFORE INSERT ON token WHEN NEW.ats = 'workday-list'
                 BEGIN
-                    SELECT RAISE(ABORT, 'workday source was renamed to workday-list');
+                    SELECT RAISE(ABORT, 'workday-list was renamed back to workday');
                 END;
                 CREATE TRIGGER IF NOT EXISTS keyscan_token_workday_update
-                BEFORE UPDATE OF ats ON token WHEN NEW.ats = 'workday'
+                BEFORE UPDATE OF ats ON token WHEN NEW.ats = 'workday-list'
                 BEGIN
-                    SELECT RAISE(ABORT, 'workday source was renamed to workday-list');
+                    SELECT RAISE(ABORT, 'workday-list was renamed back to workday');
                 END;
                 """
             )

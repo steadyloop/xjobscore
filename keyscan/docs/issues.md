@@ -46,6 +46,15 @@ Re-running the four afterwards: eightfold 58 tokens, smartrecruiters 676 tokens
 in the catalog's `[feed.config]`, while the database token row has no config
 field.
 
+**Data blocker removed 2026-08-27** by
+`xjobscore/migrations/20260827_token_config.sql`, which moved the column from
+`feed` to `token`. All 6 eightfold token rows now carry `config.host` and
+`config.domain`, so the composite is derivable with a join instead of by hand.
+
+**Still open:** no keyscan code reads it. `rules.py` keys eightfold on the
+composite `host/domain` while `token.token` holds the bare key, and nothing
+consults `token.config` to bridge them. The lookup is now possible, not done.
+
 The bare key is a human-assigned label that appears in no URL, so composite →
 key needs a lookup and key → composite is impossible. Reassembled by hand, all 6
 boards probe live and the synthetic control is correctly rejected.

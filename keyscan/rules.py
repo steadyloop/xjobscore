@@ -106,7 +106,7 @@ RULES: tuple[Rule, ...] = (
        # the default, so the whole board (1.29 MB for a 110-posting one) is the
        # only GET on offer. HEAD answers 200/404 with no body at all.
        light_method="HEAD"),
-    _r("workday-list", ("myworkdayjobs.com",), "url_host_name LIKE '%.myworkdayjobs.com'", (
+    _r("workday", ("myworkdayjobs.com",), "url_host_name LIKE '%.myworkdayjobs.com'", (
         Pattern(r"^https?://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)", (1, 2, 3)),
         Pattern(r"^https?://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/[a-z]{2}(?:-[A-Za-z]{2})?/([^/?#]+)", (1, 2, 3)),
         Pattern(r"^https?://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/([^/?#]+)", (1, 2, 3)),
@@ -258,7 +258,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # which has no bounded vendor domain to scan, so a crawl-driven group cannot
     # reach it (``domains=()``, ``where_sql="FALSE"``).
     "tier1": (
-        "greenhouse", "workable", "workday-list", "ashby", "lever", "oracle",
+        "greenhouse", "workable", "workday", "ashby", "lever", "oracle",
         "eightfold", "smartrecruiters", "successfactors", "avature",
     ),
     # SMB payroll-ATS cluster that carries biotech (doc/raw_postings/criteria/
@@ -277,7 +277,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
 # Discovery is unaffected; tokens for other vendors are still recorded, they
 # just keep `status = 'unknown'` until their rule is verified.
 VALIDATED_SOURCES: frozenset[str] = frozenset({
-    "greenhouse", "ashby", "lever", "oracle", "workday-list", "workable",
+    "greenhouse", "ashby", "lever", "oracle", "workday", "workable",
 })
 
 
@@ -327,7 +327,7 @@ SAMPLES: tuple[tuple[str, tuple[str, str] | None], ...] = (
     ("https://boards.greenhouse.io/stripe", ("greenhouse", "stripe")),
     ("https://jobs.lever.co/palantir", ("lever", "palantir")),
     ("https://jobs.ashbyhq.com/openai/123", ("ashby", "openai")),
-    ("https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite", ("workday-list", "nvidia/wd5/NVIDIAExternalCareerSite")),
+    ("https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite", ("workday", "nvidia/wd5/NVIDIAExternalCareerSite")),
     ("https://jobs.smartrecruiters.com/Palantir", ("smartrecruiters", "Palantir")),
     ("https://apply.workable.com/deliveroo/", ("workable", "deliveroo")),
     ("https://acme.recruitee.com/o/backend", ("recruitee", "acme")),
