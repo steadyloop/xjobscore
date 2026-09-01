@@ -83,14 +83,9 @@ CREATE TABLE feed (
     source   text NOT NULL, -- ashby, greenhouse, workable, etc.
     key      text NOT NULL, -- openai, anthropic, janestreet, etc.
     polling  boolean NOT NULL DEFAULT false,
-<<<<<<< Updated upstream
-    config       jsonb NOT NULL DEFAULT '{}'::jsonb
-        CHECK (jsonb_typeof(config) = 'object'),
-=======
     -- Per-tenant adapter values live on `token.config`, not here: `feed` is
     -- rebuilt from `token` by promotion, and config is the one input nothing
     -- can re-derive. See migrations/20260827_token_config.sql.
->>>>>>> Stashed changes
     type         text NOT NULL DEFAULT 'ATS'
         CHECK (type IN ('ATS', 'Direct', 'Board')),
     -- Config

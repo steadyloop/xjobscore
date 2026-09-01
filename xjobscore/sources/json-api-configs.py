@@ -2146,46 +2146,6 @@ DETAIL_A: dict[str, dict] = {
             #   requisitionFlexFields:"Job Type" -- 6,382 rows, ONE board
             #      (md:41-45). A rule keyed on it is a rule about one company.
             #   StudyLevel -- 0.16% fill, 40 rows. md:47 says not usable.
-<<<<<<< Updated upstream
-            "job_type": {"classify": [
-                # Co-op first, as on every vendor. Only 2 rows here, and one of
-                # them ("Summer Intern Co-op Conversion") also matches the
-                # intern rule below -- which is exactly why the order matters.
-                {"from": "@Title", "re": "co-?ops?", "is": "coop"},  # 2, md:60
-                # Finance-sector naming: an internship that never says "intern".
-                # Same rule as workday-list (md:workday.md, 0 live there) -- here
-                # it is live: Goldman Sachs (162) and JPMorganChase (40) title
-                # their programs this way exclusively, e.g. "2027 | Americas |
-                # Dallas Metro Area | Investment Banking Quantitative Strats |
-                # Summer Analyst".
-                {"from": "@Title",
-                 "re": "summer analysts?|summer associates?|summer scholars?"
-                       "|spring insight|off.?cycle analyst|vacation scheme"
-                       "|vacation work|sandwich (year|placement)|year in industry"
-                       "|placement year",
-                 "is": "intern"},  # 202
-                # Boundaries reject the 267 Internal / International rows that a
-                # bare /intern/ admits -- the largest such gap of any vendor
-                # surveyed (md:26-27).
-                {"from": "@Title", "re": "intern(s|ship|ships)?", "is": "intern"},  # 135, md:21
-                # md:24-25 measures `new grad|graduate program|university|campus`
-                # (21) and `apprentice|apprenticeship` (60) separately. Only the
-                # phrase forms and the apprentice pair are transcribed: the bare
-                # `university|campus` share of the first number is unmeasured,
-                # and it is the same pair iCIMS measured as retail-store noise
-                # (icms.md:52-54). Count is this corpus, not md's union.
-                {"from": "@Title",
-                 "re": "new grads?|graduate programs?|early careers?"
-                       "|apprentices?|apprenticeships?",
-                 "is": "student_program"},  # 38, md:24-25
-                # LAST: part-time, from JobSchedule -- a closed two-value field,
-                # null on the 7,006 rows of the one board that never sets it,
-                # which simply means no rule fires (md:67-70). The title agrees
-                # on 925 of its own 942 hits, so it adds nothing worth its
-                # false-positive surface (md:72).
-                {"from": "@JobSchedule", "re": "part.?time", "is": "part_time"},  # 724, md:69
-            ]},
-=======
             #
             # The TABLE is the shared one in doc/raw_postings/regex/job_type.md,
             # rebound onto `Title`. It replaced the Oracle-measured table on
@@ -2226,7 +2186,6 @@ DETAIL_A: dict[str, dict] = {
             "part_time": {"classify": [
                 {"from": "@JobSchedule", "re": "part.?time", "is": "yes"},  # 724, md:69
             ], "default": "unknown"},
->>>>>>> Stashed changes
             # WorkplaceTypeCode, not WorkplaceType: same 3,451 rows, but the
             # code is machine-readable and closed, while the label spells a
             # fourth value ("On-site with Flexibility") that maps onto
