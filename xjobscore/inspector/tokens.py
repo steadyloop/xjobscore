@@ -6,7 +6,7 @@ two are joined loosely on ``(ats, token) = (feed.source, feed.key)``; there is
 no foreign key between them, which is exactly why a token can exist with no
 feed row. Those rows are the promotion backlog this page exists to work.
 
-Telemetry-style, same contract as ``postings``: every function borrows the
+Telemetry-style: every function borrows the
 pipeline pool (see ``PolicyStore.pool_or_none``) and opens nothing of its own.
 Untrusted text only ever arrives as a bind parameter; the only values
 interpolated into SQL are pre-validated enum keys.
@@ -76,9 +76,15 @@ LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
 """
 
 
-_RECENT_CHECKS = """
+# token_log carries two kinds of verb in one column. Every tail read names the
+# kinds it wants, so a new verb can never leak into a panel that predates it.
+PROBE_STATUSES = ("unknown", "live", "dead")
+FEED_EVENTS = ("feed_entered", "feed_exited")
+
+_RECENT = """
 SELECT l.id, l.checked_at, l.ats, l.token, l.status
   FROM token_log AS l
+ WHERE l.status = ANY($2::text[])
  ORDER BY l.id DESC
  LIMIT $1
 """
@@ -134,20 +140,25 @@ async def query(
     }
 
 
-async def recent_checks(pool, *, limit: int = 50) -> list[dict[str, Any]] | None:
-    """The newest liveness probes, newest first -- the page's tail log.
+async def _recent(
+    pool, statuses: tuple[str, ...], *, limit: int
+) -> list[dict[str, Any]] | None:
+    """One tail of ``token_log``, newest first, restricted to ``statuses``.
 
     Ordered by ``id``, not ``checked_at``: a batch probes three boards at once
     and their timestamps can tie or land out of order, which would make the
-    tail jitter. ``None`` means ``token_log`` does not exist yet -- the DDL in
-    ``schema.sql`` has not been applied -- which the page reports as "log
-    unavailable" rather than as an empty log. An empty log is a claim that
-    nothing has been checked; those are different statements.
+    tail jitter. A promote is worse -- it writes ``live`` and ``feed_entered``
+    from the same statement, so ``now()`` is identical by construction.
+
+    ``None`` means ``token_log`` does not exist yet -- the DDL in ``schema.sql``
+    has not been applied -- which the page reports as "log unavailable" rather
+    than as an empty log. An empty log is a claim that nothing happened; those
+    are different statements.
     """
     limit = max(1, min(limit, 200))
     try:
         async with pool.acquire() as conn:
-            records = await conn.fetch(_RECENT_CHECKS, limit)
+            records = await conn.fetch(_RECENT, limit, list(statuses))
     except asyncpg.UndefinedTableError:
         return None
     return [
@@ -160,6 +171,21 @@ async def recent_checks(pool, *, limit: int = 50) -> list[dict[str, Any]] | None
         }
         for record in records
     ]
+
+
+async def recent_checks(pool, *, limit: int = 50) -> list[dict[str, Any]] | None:
+    """The newest liveness probes -- the check log's tail."""
+    return await _recent(pool, PROBE_STATUSES, limit=limit)
+
+
+async def recent_feed_events(pool, *, limit: int = 50) -> list[dict[str, Any]] | None:
+    """The newest ``feed`` arrivals and departures -- the feed log's tail.
+
+    ``feed`` records neither: a row carries no birth timestamp and a drop is a
+    hard delete, so without these rows an identity that came and went leaves
+    nothing behind at all.
+    """
+    return await _recent(pool, FEED_EVENTS, limit=limit)
 
 
 async def set_note(
@@ -229,7 +255,10 @@ async def set_muted(
                  WHERE $1
                    AND f.source = c.ats
                    AND f.key = c.token
-             RETURNING f.id
+             RETURNING f.source, f.key
+            ), logged AS (
+                INSERT INTO token_log (checked_at, ats, token, status)
+                SELECT now(), source, key, 'feed_exited' FROM dropped
             )
             SELECT c.ats, c.token, c.muted,
                    EXISTS (SELECT 1 FROM dropped) AS feed_dropped
@@ -293,20 +322,25 @@ async def promote_verified(
             """
             WITH incoming(ats, token) AS (
                 SELECT * FROM unnest($1::text[], $2::text[])
+            ), promoted AS (
+                INSERT INTO feed(source, key, polling)
+                SELECT t.ats, t.token, true
+                  FROM incoming AS i
+                  JOIN token AS t USING (ats, token)
+                 WHERE t.status = 'live'
+                   AND NOT t.muted
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM feed AS f
+                        WHERE f.source = t.ats AND f.key = t.token
+                   )
+                ON CONFLICT (source, key) DO NOTHING
+                RETURNING source, key
+            ), logged AS (
+                INSERT INTO token_log (checked_at, ats, token, status)
+                SELECT now(), source, key, 'feed_entered' FROM promoted
             )
-            INSERT INTO feed(source, key, polling)
-            SELECT t.ats, t.token, true
-              FROM incoming AS i
-              JOIN token AS t USING (ats, token)
-             WHERE t.status = 'live'
-               AND NOT t.muted
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM feed AS f
-                    WHERE f.source = t.ats AND f.key = t.token
-               )
-            ON CONFLICT (source, key) DO NOTHING
-            RETURNING source, key
+            SELECT source, key FROM promoted
             """,
             [ats for ats, _ in identities],
             [token for _, token in identities],

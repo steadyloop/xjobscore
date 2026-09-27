@@ -12,8 +12,15 @@ dependencies = [
     "httpx>=0.27",
     # Required by Starlette's SessionMiddleware, which signs the session cookie.
     "itsdangerous>=2.0",
+    "playwright>=1.55",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    # The Typst compiler itself, as a binary wheel (manylinux + macOS, x86_64
+    # and arm64). It replaced a system `typst` binary the Dockerfile fetched
+    # from GitHub and every developer had to `brew install` — with the compiler
+    # pinned by the lockfile, typesetting can no longer drift between machines,
+    # which matters for a template tuned to fit exactly one page.
+    "typst>=0.15",
     "uvicorn>=0.52.0",
     "xjobscore",
 ]

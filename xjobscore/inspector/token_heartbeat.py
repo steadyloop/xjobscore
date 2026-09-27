@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -323,6 +324,8 @@ class TokenHeartbeatRunner:
         interval_seconds: int = DEFAULT_INTERVAL_S,
         retry_seconds: int = DEFAULT_RETRY_S,
         lease_seconds: int = DEFAULT_LEASE_S,
+        run_store: Any | None = None,
+        ownership_check: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._policy = policy
         self.enabled = enabled
@@ -331,8 +334,11 @@ class TokenHeartbeatRunner:
         self.interval_seconds = interval_seconds
         self.retry_seconds = retry_seconds
         self.lease_seconds = lease_seconds
+        self._run_store = run_store
+        self._ownership_check = ownership_check
         self._task: asyncio.Task | None = None
         self._wake = asyncio.Event()
+        self._stopping = False
 
     @property
     def alive(self) -> bool:
@@ -341,14 +347,26 @@ class TokenHeartbeatRunner:
     async def start(self) -> None:
         if not self.enabled or self._task is not None:
             return
+        self._stopping = False
         self._task = asyncio.create_task(self._loop(), name="token-heartbeat")
 
-    async def stop(self) -> None:
+    async def stop(self, *, grace_s: float = 0) -> None:
         if self._task is None:
             return
-        self._task.cancel()
+        self._stopping = True
+        self._wake.set()
         try:
-            await self._task
+            if grace_s > 0:
+                await asyncio.wait_for(self._task, timeout=grace_s)
+            else:
+                self._task.cancel()
+                await self._task
+        except asyncio.TimeoutError:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
         except asyncio.CancelledError:
             pass
         self._task = None
@@ -357,13 +375,15 @@ class TokenHeartbeatRunner:
         self._wake.set()
 
     async def _loop(self) -> None:
-        while True:
+        while not self._stopping:
             try:
                 await self.tick()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("token heartbeat tick failed")
+            if self._stopping:
+                break
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=self.tick_s)
             except asyncio.TimeoutError:
@@ -371,6 +391,8 @@ class TokenHeartbeatRunner:
             self._wake.clear()
 
     async def tick(self) -> dict[str, int] | None:
+        if self._ownership_check is not None:
+            await self._ownership_check()
         pool = await self._policy.pool_or_none()
         if pool is None:
             return None
@@ -384,10 +406,37 @@ class TokenHeartbeatRunner:
         )
         if lease is None:
             return None
-        return await run_claimed_cycle(
-            pool,
-            lease,
-            batch=self.batch,
-            interval_seconds=self.interval_seconds,
-            retry_seconds=self.retry_seconds,
-        )
+        run_id = None
+        if self._run_store is not None:
+            try:
+                run_id = await self._run_store.begin(pool, "token_heartbeat")
+            except Exception:
+                logger.exception("could not start token-heartbeat system run")
+        try:
+            counts = await run_claimed_cycle(
+                pool,
+                lease,
+                batch=self.batch,
+                interval_seconds=self.interval_seconds,
+                retry_seconds=self.retry_seconds,
+            )
+        except Exception as exc:
+            if run_id is not None:
+                try:
+                    await self._run_store.finish(
+                        pool,
+                        run_id,
+                        state="failed",
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                except Exception:
+                    logger.exception("could not finish failed token-heartbeat run")
+            raise
+        if run_id is not None:
+            try:
+                await self._run_store.finish(
+                    pool, run_id, state="complete", detail=counts
+                )
+            except Exception:
+                logger.exception("could not finish token-heartbeat system run")
+        return counts

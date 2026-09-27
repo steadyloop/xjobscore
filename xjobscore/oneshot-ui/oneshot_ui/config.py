@@ -91,12 +91,7 @@ class Settings:
 def load_settings() -> Settings:
     load_dotenv_files()
     return Settings(
-        dsn=(
-            os.environ.get("XJOBSCORE_ONESHOT_DSN")
-            or os.environ.get("XJOBSCORE_DSN")
-            or os.environ.get("DATABASE_URL")
-            or ""
-        ),
+        dsn=os.environ.get("DATABASE_URL", ""),
         host=os.environ.get("XJOBSCORE_ONESHOT_HOST", "127.0.0.1"),
         port=int(os.environ.get("XJOBSCORE_ONESHOT_PORT", "8766")),
         static_dir=os.environ.get("XJOBSCORE_ONESHOT_STATIC_DIR") or _default_static_dir(),

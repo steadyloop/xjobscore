@@ -1,37 +1,11 @@
-"""Supervises the real pipeline (``run.cycle``) from inside the inspector process.
+"""Temporary compatibility helpers for isolated legacy tests.
 
-This is the one place the inspector crosses from *describing* production
-polling into *doing* it. Everything else in the inspector -- ``service.py``'s
-``fetch_once``, the ``inspector`` schema -- is deliberately side-effect-free;
-``SchedulerRunner`` is not. It calls the exact ``run.cycle`` (and therefore
-``run.poll``) path cron would, against the exact ``public`` tables:
-``raw_posting``, ``job_posting``, ``poll_observation``, and the runtime feed
-columns run.py's workers own. See ``inspector/__init__.py`` and
-``inspector/README.md`` for the boundary this redraws.
-
-There are two entry points into that path. The tick loop below runs
-``run.cycle`` on a schedule; ``poll_feed_now`` runs ``run.poll`` for one feed
-on demand -- the Scheduler page's Fetch-all, where the browser is the
-scheduler. The on-demand path shares this runner's ``Net`` (so per-host pacing
-covers both) and deliberately ignores both gates: it needs
-neither ``config.runner_enabled()`` nor ``scheduler_control.running``, because
-the operator driving it *is* the schedule.
-
-Two independent switches gate it:
-
-- ``config.runner_enabled()`` (env var, read once at process start) -- whether
-  this inspector process is *allowed* to run the loop at all. Off by default,
-  so every dev laptop and the whole test suite stay inert without anyone
-  having to remember to pause a database flag.
-- ``scheduler_control.running`` (PostgreSQL, read fresh every tick) -- the
-  operator's pause/resume, driven from the Scheduler page. Persistent so a
-  process restart cannot silently undo a deliberate pause, and defaults to
-  false so a fresh database polls nothing until asked.
-
-A process with the env var off still reads and writes the DB flag through the
-API (so the Scheduler page's button always works), it just never acts on it --
-``status()["alive"]`` is how the page tells "paused" apart from "nothing is
-listening".
+Production uses :mod:`xjobscore.runtime`; Inspector never constructs an active
+``SchedulerRunner`` and web requests never call ``poll_feed_now``. The class is
+retained only so focused tests and old imports fail gradually during the
+one-release command transition. ``GoldJob`` serves the same compatibility role
+for the old in-process dedup control; the unified runtime queues dedup through
+:class:`xjobscore.pipeline.GoldCoordinator` instead.
 """
 
 from __future__ import annotations
@@ -64,6 +38,8 @@ _MAX_BACKOFF_S = 300.0
 class _RunnerStatus:
     alive: bool = False
     last_cycle_at: datetime | None = None
+    # Feeds polled by the most recent cycle -- one time-budgeted cycle, not
+    # the whole drain, which may take several.
     last_polled: int | None = None
     consecutive_errors: int = 0
     last_error: str | None = None
@@ -92,7 +68,7 @@ class SchedulerRunner:
         enabled: bool,
         user_agent: str,
         tick_s: float,
-        batch: int,
+        cycle_budget_s: float,
         lease_seconds: int,
     ) -> None:
         self._policy = policy
@@ -100,7 +76,7 @@ class SchedulerRunner:
         self._cfg = Config(
             dsn="",  # unused: cycle() takes the pool directly, not cfg.dsn
             user_agent=user_agent,
-            batch=batch,
+            cycle_budget_s=cycle_budget_s,
             lease_seconds=lease_seconds,
         )
         self._tick_s = tick_s
@@ -203,15 +179,16 @@ class SchedulerRunner:
         pool = await self._policy.pool_or_none()
         if pool is None:
             return
-        # Drain the backlog: a full batch means more feeds were due than this
-        # cycle claimed, so run again immediately rather than waiting a full
-        # tick to make progress. An empty or partial batch means the queue is
-        # caught up.
+        # Drain the backlog: a cycle that spent its whole time budget while
+        # some vendor still had feeds due reports drained=False, so run again
+        # immediately rather than waiting a full tick to make progress. The
+        # control flag is re-read between cycles so an operator's pause lands
+        # within one budget rather than one whole drain.
         while True:
-            polled = await run.cycle(pool, net, self._cfg, now_utc())
+            result = await run.cycle(pool, net, self._cfg, now_utc())
             self._status.last_cycle_at = now_utc()
-            self._status.last_polled = polled
-            if polled < self._cfg.batch:
+            self._status.last_polled = result.polled
+            if result.drained:
                 return
             control = await self._policy.scheduler_control()
             if control is None or not control.get("running"):
@@ -247,7 +224,7 @@ class SchedulerRunner:
             # every terminal path; a lost lease writes no row, so this reads
             # back None rather than crashing.
             new_postings = await conn.fetchval(
-                "SELECT new_postings FROM poll_observation"
+                "SELECT new_postings FROM poll_log"
                 " WHERE feed_id = $1 AND polled_at = $2",
                 feed.id,
                 now,

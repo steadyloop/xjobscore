@@ -32,6 +32,7 @@ from xjobscore.net import (
     _HostPace,
     _VENDOR_CAPS,
     _vendor_key,
+    vendor_cap,
 )
 
 
@@ -251,3 +252,41 @@ def test_a_burst_of_successes_cannot_buy_back_time_never_spent(monkeypatch):
     for _ in range(1000):  # no clock movement at all
         pace.succeeded()
     assert pace.interval == pytest.approx(1.0, rel=1e-9)
+
+
+# ------------------------------------------------------- client construction
+
+
+async def test_client_is_opened_with_explicit_connection_limits(monkeypatch):
+    """httpx defaults to 100 connections; the scheduler's summed per-vendor
+    widths exceed that, and the surplus would queue invisibly inside httpx."""
+    opened: list[dict] = []
+
+    class RecordingClient:
+        def __init__(self, **kwargs) -> None:
+            opened.append(kwargs)
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(net_module.httpx, "AsyncClient", RecordingClient)
+
+    async with Net(user_agent="t"):
+        pass
+    assert opened[-1]["limits"].max_connections == 256
+    assert opened[-1]["limits"].max_keepalive_connections == 64
+
+    async with Net(user_agent="t", max_connections=10, max_keepalive_connections=3):
+        pass
+    assert opened[-1]["limits"].max_connections == 10
+    assert opened[-1]["limits"].max_keepalive_connections == 3
+
+
+def test_vendor_cap_reads_the_table_request_enforces():
+    """`sources.width` sizes worker pools off this, so it must match
+    `_vendor_key`'s dot-boundary matching exactly."""
+    assert vendor_cap("acme.bamboohr.com") == _VENDOR_CAPS["bamboohr.com"] == 8
+    assert vendor_cap("x.oraclecloud.com") == 12
+    assert vendor_cap("tenant.wd5.myworkdayjobs.com") == 24
+    assert vendor_cap("notbamboohr.com") is None       # dot boundary, not substring
+    assert vendor_cap("api.ashbyhq.com") is None       # single-host vendor: uncapped here

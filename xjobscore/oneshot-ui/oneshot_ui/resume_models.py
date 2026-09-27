@@ -1,11 +1,18 @@
 """Validated command payloads for the resume workspace API."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
-Audience = Literal["all", "mlsys", "swe", "quant"]
-Variant = Literal["mlsys", "swe", "quant"]
+# Variants are defined per account in `resume_workspace.variants`, so the wire
+# type is only a bounded string: the store checks the value against that
+# account's declared keys, which is the only place the list is readable. A
+# Literal here would be one user's career shape compiled into the API.
+# "all" stays reserved on an audience -- it means "show on every variant".
+VariantKey = Annotated[str, StringConstraints(max_length=40)]
+Audience = VariantKey
+Variant = VariantKey
+ALL_AUDIENCES = "all"
 EntryKind = Literal["education", "experience", "research", "project", "leadership"]
 SkillCategory = Literal["language", "framework", "tool", "coursework", "math"]
 
@@ -21,6 +28,27 @@ class ProfileUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=50)
     location: str | None = Field(default=None, max_length=200)
     links: list[ProfileLink] | None = None
+
+
+class VariantDefinition(BaseModel):
+    """One entry in an account's variant list.
+
+    ``key`` is what a bullet's ``audience`` and a resume's ``variant`` store;
+    ``label`` is what the studio prints. The store lowercases and dedupes keys
+    and drops the reserved ``all``.
+    """
+
+    key: str = Field(min_length=1, max_length=40)
+    label: str = Field(default="", max_length=80)
+
+
+class VariantsUpdate(BaseModel):
+    variants: list[VariantDefinition] = Field(default_factory=list)
+
+
+class VocabularyUpdate(BaseModel):
+    # The coverage term list. Generous cap: the seed list alone is ~150 terms.
+    terms: list[str] = Field(default_factory=list, max_length=2000)
 
 
 class EntryCreate(BaseModel):
@@ -67,6 +95,12 @@ class SkillCreate(BaseModel):
     audience: Audience = "all"
 
 
+class SkillUpdate(BaseModel):
+    category: SkillCategory | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    audience: Audience | None = None
+
+
 class TargetJobCreate(BaseModel):
     company: str = Field(min_length=1, max_length=300)
     title: str = Field(min_length=1, max_length=500)
@@ -93,6 +127,10 @@ class BulletPick(BaseModel):
 class EntryPick(BaseModel):
     entry_id: int
     bullets: list[BulletPick] = Field(default_factory=list)
+    # The entry's detail line (GPA on education, stack on a project) is on by
+    # default; a resume opts out per entry, so a pick with no bullets can
+    # still carry a choice.
+    show_detail: bool = True
 
 
 class Selection(BaseModel):
@@ -103,7 +141,7 @@ class Selection(BaseModel):
 class ResumeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=300)
     target_job_id: int | None = None
-    variant: Variant = "swe"
+    variant: Variant = ""
     availability_line: str = Field(default="", max_length=300)
     education_note: str = Field(default="", max_length=300)
     selection: Selection = Field(default_factory=Selection)

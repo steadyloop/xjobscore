@@ -1,0 +1,601 @@
+/* Keyscan page. The look aims for a sharp personal tool, not a product:
+   flat panes with plain 1px rules instead of cards, mono type doing the
+   work, statuses as colored words, an ASCII progress bar. Everything uses
+   the page's own theme tokens so both themes hold. */
+
+.keyscan-page {
+  /* Every scrolling pane on the page is this tall -- feeds and tables alike
+     -- so the four boxes line up instead of each sizing to its own content. */
+  --ks-pane-h: 230px;
+}
+
+.keyscan-page .ks-note {
+  margin: 0 0 var(--space-4);
+  padding: 6px 10px;
+  border-left: 3px solid var(--warn);
+  color: var(--text-secondary);
+  font: 12.5px var(--font-mono);
+}
+
+/* The run controls are the CLI invocation, written out: flags are labels and
+   the editable values sit inline as plain text, so the row reads as one
+   command instead of a rank of native widgets. A dotted underline is the only
+   affordance -- it turns solid on focus. */
+
+.ks-cmd {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 7px;
+  margin-bottom: var(--space-3);
+  font-size: 13px;
+}
+
+.ks-cmd-name {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* A flag value the page does not offer a choice about. */
+.ks-fixed {
+  color: var(--text);
+}
+
+.ks-flag {
+  color: var(--text-muted);
+}
+
+.ks-cmd .ks-inline,
+.ks-pane-head .ks-inline {
+  min-width: 0;
+  padding: 0 1px;
+  border: none;
+  border-bottom: 1px dotted var(--text-muted);
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.ks-cmd .ks-inline:hover,
+.ks-pane-head .ks-inline:hover {
+  border-bottom-color: var(--text-secondary);
+}
+
+.ks-cmd .ks-inline:focus,
+.ks-pane-head .ks-inline:focus {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+}
+
+.ks-cmd .ks-inline::placeholder,
+.ks-pane-head .ks-inline::placeholder {
+  color: var(--text-muted);
+}
+
+/* The snapshot picker: a real Common Crawl id list stands in for the old
+   free-text date range, so the row can only ever name whole snapshots. */
+.ks-crawls {
+  position: relative;
+  display: inline-block;
+}
+
+.ks-crawls-btn {
+  min-width: 0;
+  padding: 0 1px;
+  border: none;
+  border-bottom: 1px dotted var(--text-muted);
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ks-crawls-btn:hover {
+  border-bottom-color: var(--text-secondary);
+}
+
+.ks-crawls-btn:focus,
+.ks-crawls-btn[aria-expanded="true"] {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+}
+
+.ks-crawls-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  margin-top: 4px;
+  padding: 4px 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-panel, var(--bg));
+  border: 1px solid var(--text-muted);
+  white-space: nowrap;
+}
+
+.ks-crawls-panel label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ks-crawls-panel label:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.12));
+}
+
+.ks-crawls-panel .ks-dim {
+  color: var(--text-muted);
+}
+
+/* A text action for things that are not the page's one primary verb. */
+.ks-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ks-link:hover {
+  text-decoration: underline;
+}
+
+/* Several blocks here set `display`, which outranks the UA stylesheet's
+   [hidden] rule -- without this, hiding an element by attribute silently
+   does nothing. */
+.keyscan-page [hidden] {
+  display: none !important;
+}
+
+/* An empty pane or table says so in place, in the same voice. */
+.ks-empty {
+  padding: 6px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ks-run-error {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+/* The page note carries load state; it is not a permanent banner. */
+.keyscan-page .ks-note[data-level="error"] {
+  border-left-color: var(--err);
+  color: var(--err);
+}
+
+/* Semantic text colors, used instead of chips. */
+.c-ok { color: var(--ok); }
+.c-err { color: var(--err); }
+.c-warn { color: var(--warn); }
+.c-acc { color: var(--accent); }
+.c-mut { color: var(--text-muted); }
+
+/* Flat panes ------------------------------------------------------------- */
+
+.ks-pane {
+  margin-bottom: var(--space-5);
+}
+
+.ks-pane-title {
+  margin: 0 0 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ks-src {
+  margin-left: 8px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.ks-pane-title .secondary {
+  font-weight: 400;
+}
+
+.ks-pane-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+
+.ks-pane-head .ks-pane-title {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.ks-pane-head select,
+.ks-pane-head input[type="search"] {
+  flex: none;
+}
+
+/* Active run -------------------------------------------------------------- */
+
+.ks-run {
+  margin-bottom: var(--space-4);
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.ks-run-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.ks-run-id {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ks-run-live {
+  color: var(--ok);
+}
+
+.ks-run-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 6px;
+}
+
+.ks-run-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.ks-run-track span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.ks-run-pct {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ks-run-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 18px;
+  color: var(--text-muted);
+}
+
+.ks-run-stages .is-done { color: var(--text-secondary); }
+.ks-run-stages .is-done::before { content: "✓ "; color: var(--ok); }
+.ks-run-stages .is-now { color: var(--text); }
+.ks-run-stages .is-now::before { content: "● "; color: var(--accent); }
+.ks-run-stages span:not(.is-done):not(.is-now):not(.ks-run-plus)::before { content: "○ "; }
+.ks-run-plus { margin-left: auto; }
+
+/* Tally line -------------------------------------------------------------- */
+
+.ks-tally {
+  margin: 0 0 var(--space-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.ks-tally b {
+  color: var(--text);
+}
+
+/* Grouped panes ----------------------------------------------------------- */
+
+/* Both groups share one template, so the gutter is a single line down the
+   page. The ratio follows what the panes actually ask for: a timestamped
+   line wants ~380px, the tables beside them 560 (history) and 669
+   (candidates), so the streams take the narrow column and the tables the
+   wide one. */
+.ks-columns {
+  display: grid;
+  grid-template-columns: minmax(30ch, 2fr) minmax(0, 3fr);
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+@media (max-width: 900px) {
+  .ks-columns { grid-template-columns: 1fr; }
+}
+
+.ks-lines {
+  max-height: var(--ks-pane-h);
+  overflow-y: auto;
+  /* Lines truncate; they never scroll sideways. */
+  overflow-x: hidden;
+  font: 11px/1.7 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ks-lines::after {
+  content: "▋";
+  color: var(--ok);
+  animation: ks-blink 1.1s steps(1) infinite;
+}
+
+@keyframes ks-blink {
+  50% { opacity: 0; }
+}
+
+.ks-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.ks-line time {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.ks-line b {
+  /* flex children refuse to shrink below their content unless min-width is
+     cleared -- without this a long tenant path widens the pane instead of
+     ellipsing, which is what put a horizontal scrollbar under it. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.ks-mark {
+  flex: none;
+  width: 1ch;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.ks-mark[data-kind="live"] { color: var(--ok); }
+.ks-mark[data-kind="dead"] { color: var(--err); }
+.ks-mark[data-kind="found"] { color: var(--accent); }
+
+/* run.jsonl's own `phase`, in a fixed column so the messages line up.
+   Its color carries `level` -- warn/error tint the word itself rather than
+   spending a separate mark column on it. */
+/* Wide enough for the longest function ("validate"), so every message starts
+   at the same x. It was 12ch when this column held phase names like
+   "commoncrawl"; against the CLI's verbs that left four characters of gap on
+   every line. Deliberately uncoloured -- which function ran is not the news,
+   and tinting it painted a whole screen for one bad request. */
+.ks-phase {
+  flex: none;
+  width: 8ch;
+  font-weight: 600;
+}
+
+.ks-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
+/* A line with no status code carries its outcome on the message instead. */
+.ks-msg[data-level="warn"] { color: var(--warn); }
+.ks-msg[data-level="error"] { color: var(--err); }
+
+/* The status code leads the message and is the coloured thing on the line.
+   Fixed width so a 404 and a 200 put the host that follows at the same x. */
+.ks-code {
+  display: inline-block;
+  width: 3ch;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ks-code[data-level="warn"] { color: var(--warn); }
+.ks-code[data-level="error"] { color: var(--err); }
+
+.ks-verdict {
+  flex: none;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.ks-verdict[data-form="mark"] {
+  /* Sits right against the "+": the pair reads as one discovered/verified
+     glyph, so the flex row's 8px gap is cancelled between them. */
+  margin-left: -5px;
+  width: 1.2ch;
+}
+
+/* The bold is the scan target: live and dead are the rows worth stopping on,
+   and the muted unknown dot has no business competing with them for weight. */
+.ks-verdict[data-form="text"][data-verdict="unknown"] { font-weight: 400; }
+
+.ks-verdict[data-verdict="live"] { color: var(--ok); }
+.ks-verdict[data-verdict="dead"] { color: var(--err); }
+
+.ks-urls {
+  margin-left: auto;
+  padding-left: 12px;
+  flex: none;
+  color: var(--text-muted);
+}
+
+/* Unlike `.ks-urls` (pinned to the row's far edge, for the run log's elapsed
+   time), this column tracks its own content width -- computed per render
+   from what's on screen -- so it sits close to the key instead of stranded
+   out at the pane's edge when keys are short. */
+.ks-count {
+  flex: none;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.ks-dim {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A count's unit, muted one step further than `.ks-dim` -- the candidates
+   table's numbers carry no header, so this contrast is what tells "1" the
+   value from "urls" the label instead of leaving them the same weight. */
+.ks-unit {
+  color: var(--text-muted);
+}
+
+/* Tables read as the log panes do: mono throughout, one hairline under the
+   header, no rule per row, and the same 11px/1.7 density. Alignment carries
+   the structure, exactly as it does in "new keys" and "run log". */
+
+.keyscan-page table.data {
+  font: 11px/1.7 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.keyscan-page table.data th {
+  padding: 0 10px 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: lowercase;
+  color: var(--text-muted);
+}
+
+.keyscan-page .ks-table td {
+  padding: 1px 10px 1px 0;
+  border-bottom: none;
+}
+
+.keyscan-page .ks-table tbody tr:hover td {
+  background: none;
+  color: var(--text);
+}
+
+/* The filter row sits on the title line as plain inline controls, the same
+   shape the run command uses -- no boxed selects above a borderless table. */
+.keyscan-page .ks-pane-head {
+  gap: 14px;
+}
+
+.keyscan-page .ks-pane-head .ks-inline {
+  font-size: 12px;
+}
+
+/* Tables ------------------------------------------------------------------ */
+
+.keyscan-page table.data th {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* Columns hug their content instead of stretching to the page: `table.data`
+   is width:100%, which pushed every column apart and left the token cell
+   absorbing all the slack. */
+.keyscan-page table.ks-table {
+  width: auto;
+  max-width: 100%;
+}
+
+.ks-table th,
+.ks-table td {
+  padding-right: var(--space-4);
+}
+
+/* A workday token is a whole tenant path; it must not set the table's width. */
+.ks-table .ks-key {
+  display: inline-block;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* No rule under every row: the mono columns already align, exactly as they do
+   in the two log panes. Only the header keeps its rule. */
+.ks-table td {
+  padding-top: 2px;
+  padding-bottom: 2px;
+  border-bottom: none;
+}
+
+.ks-table tbody tr:hover td {
+  background: var(--surface-2);
+}
+
+.ks-key {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ks-key:hover {
+  text-decoration: underline;
+}
+
+/* The candidates list is unbounded -- a seeding run leaves tens of thousands
+   of rows -- so it scrolls in place instead of pushing the run history off
+   the bottom of the page. The header stays put while the body moves. */
+.ks-scroll {
+  max-height: var(--ks-pane-h);
+  overflow-y: auto;
+}
+
+.ks-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+.ks-check {
+  width: 24px;
+}
+
+
+/* Footer + toast ---------------------------------------------------------- */
+
+.ks-foot {
+  margin: var(--space-5) 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ks-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  z-index: 10;
+}
+
+.ks-more {
+  margin-top: 6px;
+}
+

@@ -125,7 +125,7 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     # Without this the Scheduler page's whole telemetry stays empty.
     async with pool.acquire() as conn:
         observation = await conn.fetchrow(
-            "SELECT status, new_postings FROM poll_observation WHERE feed_id = $1",
+            "SELECT status, new_postings FROM poll_log WHERE feed_id = $1",
             feed_id,
         )
     assert observation is not None, "poll recorded no observation: lease was lost"
@@ -160,6 +160,84 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     assert listing["title"] == title
     assert listing["summary"] is None
     assert "description" not in listing
+
+
+@pytest.mark.asyncio
+async def test_claim_due_feeds_filters_by_source(core_schema):
+    """run.cycle's per-vendor workers each claim from their own queue only."""
+    suffix = uuid4().hex
+    left, right = f"vendor_a_{suffix}", f"vendor_b_{suffix}"
+    now = datetime.now(timezone.utc)
+    pool = core_schema.pool
+
+    async with pool.acquire() as conn:
+        for source in (left, right):
+            await conn.execute(
+                "INSERT INTO token(ats, token, status) VALUES ($1, 'board', 'live')", source
+            )
+            await conn.execute(
+                "INSERT INTO feed(source, key, polling, due_at) VALUES ($1, 'board', true, $2)",
+                source,
+                now,
+            )
+        assert await store.due_sources(conn, now) == sorted([left, right])
+
+        claimed = await store.claim_due_feeds(conn, now, 5, source=left)
+        assert [(feed.source, feed.key) for feed in claimed] == [(left, "board")]
+        # Same data-modifying-CTE trap as the unfiltered claim: the lease must
+        # come back from the CTE, not the pre-claim row.
+        stored_hold = await conn.fetchval(
+            "SELECT hold_until FROM feed WHERE source = $1", left
+        )
+        assert claimed[0].hold_until == stored_hold
+
+        # Leased now, so a second claim of that vendor finds nothing -- while
+        # the other vendor's queue is untouched by any of it.
+        assert await store.claim_due_feeds(conn, now, 5, source=left) == []
+        assert await store.due_sources(conn, now) == [right]
+
+    async def claim_right():
+        async with pool.acquire() as conn:
+            return await store.claim_due_feeds(conn, now, 1, source=right)
+
+    attempts = await asyncio.gather(claim_right(), claim_right())
+    assert sorted(len(result) for result in attempts) == [0, 1]  # SKIP LOCKED
+
+    async with pool.acquire() as conn:
+        assert await store.due_sources(conn, now) == []
+
+
+@pytest.mark.asyncio
+async def test_due_feeds_reads_the_whole_queue_without_a_limit(core_schema):
+    """The dry-run snapshot: no lease exists to bound a refilling claim."""
+    suffix = uuid4().hex
+    source = f"vendor_c_{suffix}"
+    now = datetime.now(timezone.utc)
+    pool = core_schema.pool
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO token(ats, token, status) VALUES ($1, 'board', 'live')", source
+        )
+        for index in range(3):
+            await conn.execute(
+                "INSERT INTO token(ats, token, status) VALUES ($1, $2, 'live')",
+                source,
+                f"board-{index}",
+            )
+            await conn.execute(
+                "INSERT INTO feed(source, key, polling, due_at) VALUES ($1, $2, true, $3)",
+                source,
+                f"board-{index}",
+                now - timedelta(seconds=index),
+            )
+
+        every = await store.due_feeds(conn, now, source=source)
+        assert len(every) == 3
+        assert [feed.due_at for feed in every] == sorted(feed.due_at for feed in every)
+        assert len(await store.due_feeds(conn, now, 2, source=source)) == 2
+        # Reading takes no lease, so the same rows are still claimable.
+        assert len(await store.due_feeds(conn, now, source=source)) == 3
 
 
 @pytest.mark.asyncio
@@ -209,7 +287,7 @@ async def test_claim_feed_leases_one_feed_regardless_of_due_at(core_schema):
         # value (a data-modifying CTE's writes are invisible to its own
         # query). finish_schedule_success matching proves it end-to-end: a
         # stale lease here means every on-demand poll silently skips its
-        # poll_observation row.
+        # poll_log row.
         stored_hold = await conn.fetchval(
             "SELECT hold_until FROM feed WHERE id = $1", feed_id
         )

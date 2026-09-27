@@ -25,6 +25,13 @@ ENTRY_FIELDS = (
 )
 ENTRY_UPDATABLE = frozenset(ENTRY_FIELDS) | {"position"}
 BULLET_UPDATABLE = frozenset({"text", "audience", "tags", "defense_notes", "position"})
+SKILL_UPDATABLE = frozenset({"category", "name", "audience"})
+
+# The audience every bullet and skill matches, whatever variant is being built.
+# Reserved: it can never be one of the account's own variant keys.
+ALL_AUDIENCES = "all"
+VARIANT_KEY_MAX = 40
+VARIANT_LABEL_MAX = 80
 
 
 def blank_workspace() -> dict[str, Any]:
@@ -32,6 +39,14 @@ def blank_workspace() -> dict[str, Any]:
         "profile": {"full_name": "", "email": "", "phone": "", "location": "", "links": []},
         "entries": [],
         "skills": [],
+        # Empty, not seeded with someone else's career shape. A new account
+        # declares its own variants; until it does, every bullet is "all" and
+        # the studio simply offers no variant filter.
+        "variants": [],
+        # Seeded, because an empty vocabulary silently turns the "missing from
+        # bank" half of coverage analysis off with no way to tell that from a
+        # JD that genuinely named nothing.
+        "vocabulary": list(DEFAULT_VOCABULARY),
         "next_item_id": 1,
     }
 
@@ -50,6 +65,14 @@ def normalize(workspace: dict[str, Any] | None) -> dict[str, Any]:
     state["profile"] = profile
     state["entries"] = list(state.get("entries") or [])
     state["skills"] = list(state.get("skills") or [])
+    state["variants"] = normalize_variants(state.get("variants"))
+    # A row written before this column existed decodes as None, not as a
+    # deliberate empty list, so it inherits the default rather than losing
+    # coverage analysis on the next save.
+    raw_vocabulary = state.get("vocabulary")
+    state["vocabulary"] = (
+        list(DEFAULT_VOCABULARY) if raw_vocabulary is None else _clean_terms(raw_vocabulary)
+    )
 
     highest = 0
     for entry in state["entries"]:
@@ -67,6 +90,126 @@ def allocate(workspace: dict[str, Any]) -> int:
     item_id = int(workspace["next_item_id"])
     workspace["next_item_id"] = item_id + 1
     return item_id
+
+
+# -- variants ------------------------------------------------------------
+
+
+def _clean_terms(raw: Any) -> list[str]:
+    """A deduplicated, order-preserving list of non-empty strings."""
+    seen: set[str] = set()
+    terms: list[str] = []
+    for value in raw or []:
+        term = str(value).strip()
+        folded = term.lower()
+        if term and folded not in seen:
+            seen.add(folded)
+            terms.append(term)
+    return terms
+
+
+def normalize_variants(raw: Any) -> list[dict[str, str]]:
+    """Coerce stored variants to ``[{key, label}]``, deduplicated on key.
+
+    Keys are compared case-insensitively and stored lowercased, because they are
+    matched against a bullet's ``audience`` on every render of the builder; two
+    keys differing only in case would dim bullets unpredictably. ``all`` is
+    dropped rather than rejected -- it is the reserved audience, so accepting it
+    as a variant would make every bullet match every resume.
+    """
+    seen: set[str] = set()
+    variants: list[dict[str, str]] = []
+    for item in raw or []:
+        if isinstance(item, str):
+            item = {"key": item, "label": item}
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip().lower()[:VARIANT_KEY_MAX]
+        if not key or key == ALL_AUDIENCES or key in seen:
+            continue
+        label = str(item.get("label") or "").strip()[:VARIANT_LABEL_MAX] or key
+        seen.add(key)
+        variants.append({"key": key, "label": label})
+    return variants
+
+
+def list_variants(workspace: dict[str, Any]) -> list[dict[str, str]]:
+    return deepcopy(workspace["variants"])
+
+
+def variant_keys(workspace: dict[str, Any]) -> set[str]:
+    return {variant["key"] for variant in workspace["variants"]}
+
+
+def audience_is_valid(workspace: dict[str, Any], audience: str) -> bool:
+    return audience == ALL_AUDIENCES or audience in variant_keys(workspace)
+
+
+def check_audience(workspace: dict[str, Any], audience: Any) -> None:
+    """Raise ValueError unless ``audience`` is 'all' or a declared variant key.
+
+    Lives here, not in the store, for the same reason every other rule does:
+    the Postgres store and the in-memory test fake must refuse the same values
+    with the same message, or the fake stops proving anything.
+    """
+    if audience is None:
+        return
+    if not audience_is_valid(workspace, audience):
+        declared = ", ".join(sorted(variant_keys(workspace))) or "none defined yet"
+        raise ValueError(
+            f"Unknown audience {audience!r}. Use 'all' or a declared variant ({declared})."
+        )
+
+
+def check_variant(workspace: dict[str, Any], variant: Any) -> None:
+    """Raise ValueError unless ``variant`` is '' or a declared variant key.
+
+    Unlike an audience, a resume variant may not be 'all': a resume is built
+    *for* one variant. '' means none, which is the only sensible state before
+    any variants exist.
+    """
+    if variant is None or variant == "":
+        return
+    if variant not in variant_keys(workspace):
+        declared = ", ".join(sorted(variant_keys(workspace))) or "none defined yet"
+        raise ValueError(f"Unknown variant {variant!r}. Declared variants: {declared}.")
+
+
+def variant_usage(workspace: dict[str, Any], key: str) -> int:
+    """How many bullets and skills are tagged with this variant.
+
+    Used to refuse a delete that would orphan them: an orphaned audience is
+    invisible in the builder, because it matches no variant the user can pick.
+    """
+    used = sum(
+        1
+        for entry in workspace["entries"]
+        for bullet in entry.get("bullets", [])
+        if bullet.get("audience") == key
+    )
+    return used + sum(1 for skill in workspace["skills"] if skill.get("audience") == key)
+
+
+def set_variants(workspace: dict[str, Any], raw: Any) -> list[dict[str, str]]:
+    """Replace the variant list wholesale. Raises ValueError on orphaning."""
+    incoming = normalize_variants(raw)
+    dropped = variant_keys(workspace) - {variant["key"] for variant in incoming}
+    in_use = {key: variant_usage(workspace, key) for key in dropped}
+    orphaning = {key: count for key, count in in_use.items() if count}
+    if orphaning:
+        detail = ", ".join(f"{key} ({count})" for key, count in sorted(orphaning.items()))
+        raise ValueError(f"variant still in use: {detail}")
+    workspace["variants"] = incoming
+    return list_variants(workspace)
+
+
+def list_vocabulary(workspace: dict[str, Any]) -> list[str]:
+    return list(workspace["vocabulary"])
+
+
+def set_vocabulary(workspace: dict[str, Any], raw: Any) -> list[str]:
+    workspace["vocabulary"] = _clean_terms(raw)
+    return list_vocabulary(workspace)
 
 
 # -- profile -------------------------------------------------------------
@@ -232,6 +375,27 @@ def add_skill(workspace: dict[str, Any], fields: dict[str, Any]) -> dict[str, An
     return deepcopy(skill)
 
 
+def edit_skill(
+    workspace: dict[str, Any], skill_id: int, fields: dict[str, Any]
+) -> dict[str, Any] | None:
+    skill = next((item for item in workspace["skills"] if item["id"] == skill_id), None)
+    if skill is None:
+        return None
+    category = fields.get("category", skill["category"])
+    name = fields.get("name", skill["name"])
+    if any(
+        item["id"] != skill_id
+        and item["category"] == category
+        and item["name"] == name
+        for item in workspace["skills"]
+    ):
+        raise ValueError("Skill already exists in that category")
+    for key, value in fields.items():
+        if key in SKILL_UPDATABLE and value is not None:
+            skill[key] = value
+    return deepcopy(skill)
+
+
 def remove_skill(workspace: dict[str, Any], skill_id: int) -> bool:
     before = len(workspace["skills"])
     workspace["skills"] = [s for s in workspace["skills"] if s["id"] != skill_id]
@@ -242,25 +406,42 @@ def remove_skill(workspace: dict[str, Any], skill_id: int) -> bool:
 
 
 def compute_coverage(
-    job: dict[str, Any], skills: list[dict[str, Any]], shown_ids: set[int]
+    job: dict[str, Any],
+    skills: list[dict[str, Any]],
+    shown_ids: set[int],
+    vocabulary: list[str] | None = None,
 ) -> dict[str, Any]:
     """Compare a JD against the skill bank and (optionally) one resume.
 
     matched: bank skills named in the JD and shown on the resume.
     have_not_shown: bank skills named in the JD but not on the resume —
       candidates to mirror in the JD's own words.
-    missing: JD tech vocabulary with no bank skill at all. Never faked in;
+    missing: JD vocabulary with no bank skill at all. Never faked in;
       surfaced so the gap is a conscious decision.
+
+    ``vocabulary`` is the account's own term list. It falls back to the seed list
+    only so the pure-function tests and any caller predating per-account
+    vocabularies keep working; the store always passes the workspace's own,
+    because a term list is a statement about one person's field.
     """
     jd = (job.get("jd_text") or "").lower()
 
+    # `+`, `#` and `&` count as part of the surrounding word, not as boundaries:
+    # without them a bank skill named "C" matched the C in "C++" and "C#", and
+    # "R" matched the R in "R&D". `.` is deliberately NOT in the set — it ends
+    # sentences far more often than it joins a name, and excluding it would stop
+    # "Backend in Go." from matching Go at all.
+    boundary = "[a-z0-9+#&]"
+
     def mentioned(name: str) -> bool:
-        return re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", jd) is not None
+        pattern = rf"(?<!{boundary}){re.escape(name.lower())}(?!{boundary})"
+        return re.search(pattern, jd) is not None
 
     in_jd = [skill for skill in skills if skill["name"] and mentioned(skill["name"])]
     bank_names = {skill["name"].lower() for skill in skills}
+    terms = DEFAULT_VOCABULARY if vocabulary is None else vocabulary
     vocabulary_hits = sorted(
-        term for term in TECH_VOCABULARY
+        term for term in terms
         if term.lower() not in bank_names and mentioned(term)
     )
     return {
@@ -271,10 +452,15 @@ def compute_coverage(
     }
 
 
-# Tech terms a JD may name that deserve a "missing from bank" flag. Curated,
-# not exhaustive — coverage of arbitrary vocabulary would need NLP and would
-# invite keyword-stuffing, which the strategy doc explicitly rejects.
-TECH_VOCABULARY = [
+# The seed vocabulary a *new* workspace starts with: terms a JD may name that
+# deserve a "missing from bank" flag. Curated, not exhaustive — coverage of
+# arbitrary vocabulary would need NLP and would invite keyword-stuffing, which
+# the strategy doc explicitly rejects.
+#
+# This list is software/GPU/quant shaped. It is a starting point, not the
+# vocabulary: each account owns an editable copy in `resume_workspace.vocabulary`,
+# so a user in another field replaces it rather than working around it.
+DEFAULT_VOCABULARY = [
     "Python", "C", "C++", "C#", "Java", "JavaScript", "TypeScript", "Go", "Rust",
     "Kotlin", "Swift", "Scala", "R", "Julia", "MATLAB", "SQL", "Bash", "OCaml",
     "Haskell", "React", "Vue", "Angular", "Node.js", "Django", "Flask", "FastAPI",

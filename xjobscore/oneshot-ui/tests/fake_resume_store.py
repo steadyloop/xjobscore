@@ -26,6 +26,9 @@ class _Account:
         self.workspace = workspace.blank_workspace()
         self.targets: list[dict[str, Any]] = []
         self.documents: list[dict[str, Any]] = []
+        # Stands in for the `job_application` rows the real store reads across
+        # the table boundary. Seeded by tests via add_application().
+        self.applications: dict[int, dict[str, Any]] = {}
         self.next_row_id = 1
 
     def allocate(self) -> int:
@@ -57,6 +60,30 @@ class InMemoryResumeStore:
     def _state(self) -> _Account:
         return self._accounts.setdefault(self.account_id, _Account())
 
+    def add_application(self, application_id: int, **snapshot: Any) -> None:
+        """Seed a queued application for this account (test helper)."""
+        self._state.applications[application_id] = {
+            "company": snapshot.get("company", "Acme"),
+            "title": snapshot.get("title", "Intern"),
+            "url": snapshot.get("url", ""),
+            "jd_text": snapshot.get("jd_text", ""),
+            "date_posted": snapshot.get("date_posted", ""),
+        }
+
+    # -- variants and vocabulary -----------------------------------------
+
+    async def list_variants(self):
+        return workspace.list_variants(self._state.workspace)
+
+    async def set_variants(self, raw):
+        return workspace.set_variants(self._state.workspace, raw)
+
+    async def list_vocabulary(self):
+        return workspace.list_vocabulary(self._state.workspace)
+
+    async def set_vocabulary(self, raw):
+        return workspace.set_vocabulary(self._state.workspace, raw)
+
     # -- profile ---------------------------------------------------------
 
     async def get_profile(self):
@@ -79,10 +106,18 @@ class InMemoryResumeStore:
     async def delete_entry(self, entry_id):
         return workspace.remove_entry(self._state.workspace, entry_id)
 
+    def _check_audience(self, audience):
+        workspace.check_audience(self._state.workspace, audience)
+
+    def _check_variant(self, variant):
+        workspace.check_variant(self._state.workspace, variant)
+
     async def create_bullet(self, entry_id, fields):
+        self._check_audience(fields.get("audience"))
         return workspace.add_bullet(self._state.workspace, entry_id, fields)
 
     async def update_bullet(self, bullet_id, fields):
+        self._check_audience(fields.get("audience"))
         return workspace.edit_bullet(self._state.workspace, bullet_id, fields)
 
     async def delete_bullet(self, bullet_id):
@@ -94,7 +129,12 @@ class InMemoryResumeStore:
         return workspace.list_skills(self._state.workspace)
 
     async def create_skill(self, fields):
+        self._check_audience(fields.get("audience"))
         return workspace.add_skill(self._state.workspace, fields)
+
+    async def update_skill(self, skill_id, fields):
+        self._check_audience(fields.get("audience"))
+        return workspace.edit_skill(self._state.workspace, skill_id, fields)
 
     async def delete_skill(self, skill_id):
         return workspace.remove_skill(self._state.workspace, skill_id)
@@ -113,10 +153,25 @@ class InMemoryResumeStore:
             "jd_text": fields.get("jd_text", ""),
             "date_posted": fields.get("date_posted", ""),
             "note": fields.get("note", ""),
+            "job_application_id": fields.get("job_application_id"),
             "created_at": "2026-01-01T00:00:00+00:00",
         }
         self._state.targets.append(target)
         return deepcopy(target)
+
+    async def create_target_from_application(self, application_id):
+        snapshot = self._state.applications.get(application_id)
+        if snapshot is None:
+            return None
+        existing = next(
+            (t for t in self._state.targets if t["job_application_id"] == application_id),
+            None,
+        )
+        if existing is not None:
+            return deepcopy(existing)
+        return await self.create_target_job(
+            dict(snapshot, job_application_id=application_id)
+        )
 
     def _target(self, job_id):
         return next((t for t in self._state.targets if t["id"] == job_id), None)
@@ -157,11 +212,12 @@ class InMemoryResumeStore:
         return deepcopy(document) if document is not None else None
 
     async def create_resume(self, fields):
+        self._check_variant(fields.get("variant"))
         document = {
             "id": self._state.allocate(),
             "name": fields["name"],
             "target_job_id": fields.get("target_job_id"),
-            "variant": fields.get("variant", "swe"),
+            "variant": fields.get("variant", ""),
             "availability_line": fields.get("availability_line", ""),
             "education_note": fields.get("education_note", ""),
             "selection": fields.get("selection", {}),
@@ -172,6 +228,7 @@ class InMemoryResumeStore:
         return deepcopy(document)
 
     async def update_resume(self, resume_id, fields):
+        self._check_variant(fields.get("variant"))
         updates = {
             k: v
             for k, v in fields.items()
@@ -206,7 +263,10 @@ class InMemoryResumeStore:
             if document is not None:
                 shown_ids = set(document["selection"].get("skills", []))
         return workspace.compute_coverage(
-            job, workspace.list_skills(self._state.workspace), shown_ids
+            job,
+            workspace.list_skills(self._state.workspace),
+            shown_ids,
+            workspace.list_vocabulary(self._state.workspace),
         )
 
     async def render_inputs(self, resume_id):

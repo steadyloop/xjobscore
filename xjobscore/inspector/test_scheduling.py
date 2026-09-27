@@ -37,24 +37,25 @@ def test_degraded_policy_reads_as_unknown():
 
 def test_pause_outranks_strikes():
     """Deliberate intent explains the row; a strike count underneath does not."""
-    status = scheduling.feed_status(policy(paused_at=NOW.isoformat(), strikes=9), NOW)
+    status = scheduling.feed_status(policy(enabled=False, strikes=9), NOW)
     assert status["state"] == "paused"
 
 
 def test_paused_feed_is_not_reported_as_stale():
     """The whole point of a hold: due_at goes stale on purpose, so staleness lies."""
     held = policy(
-        paused_at=(NOW - timedelta(days=3)).isoformat(),
+        enabled=False,
         last_poll_at=(NOW - timedelta(days=9)).isoformat(),
         interval_s=900,
     )
     assert scheduling.feed_status(held, NOW)["state"] == "paused"
 
 
-def test_disabled_outranks_paused():
-    """A feed switched off on the Feeds page is off, held or not."""
-    off = policy(enabled=False, paused_at=NOW.isoformat())
-    assert scheduling.feed_status(off, NOW)["state"] == "disabled"
+def test_pause_and_disable_are_one_state():
+    """Two columns became one: polling = false is the only way to be held."""
+    off = policy(enabled=False)
+    assert scheduling.feed_status(off, NOW)["state"] == "paused"
+    assert scheduling.feed_status(off, NOW)["detail"] == "feed.polling is false"
 
 
 def test_strikes_read_as_backing_off():
@@ -87,13 +88,13 @@ def test_custom_interval_controls_staleness_threshold():
     assert scheduling.feed_status(custom, NOW)["state"] == "stale"
 
 
-def test_disabled_feed_is_not_reported_as_stale():
+def test_held_feed_is_not_reported_as_stale():
     off = policy(enabled=False, last_poll_at=(NOW - timedelta(days=9)).isoformat())
-    assert scheduling.feed_status(off, NOW)["state"] == "disabled"
+    assert scheduling.feed_status(off, NOW)["state"] == "paused"
 
 
 def test_every_state_maps_to_a_styled_chip():
     """States are rendered as .chip[data-status]; components.css styles five."""
-    styled = {"ok", "not_modified", "partial", "error", "never"}
+    styled = {"ok", "unchanged", "partial", "error", "never"}
     assert set(scheduling.STATE_CHIPS) == set(scheduling.STATE_LABELS)
     assert set(scheduling.STATE_CHIPS.values()) <= styled

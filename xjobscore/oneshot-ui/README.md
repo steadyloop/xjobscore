@@ -4,8 +4,10 @@ A local job-discovery and application workspace backed directly by the
 project's PostgreSQL `schema.sql`.
 
 OneShot does not harvest or canonicalize postings. The core xjobscore pipeline
-owns `feed`, `raw_posting`, and `job_posting`; this application
-reads those tables and writes `job_application` and `job_application_event`.
+owns `feed`, `raw_posting`, and `job_posting`, and replaces the singleton
+`coverage_snapshot` after each polling cycle. This application reads that
+snapshot for source coverage and writes `job_application` and
+`job_application_event`.
 
 ## Database
 
@@ -44,12 +46,18 @@ psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
 uv run python -m xjobscore.run --parse
 ```
 
-Configure one of these DSN variables, in precedence order:
+An existing database needs the coverage snapshot migration before running the
+updated poller or OneShot server:
 
 ```bash
-export XJOBSCORE_ONESHOT_DSN=postgresql://localhost/xjobscore
-# or XJOBSCORE_DSN
-# or DATABASE_URL
+psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
+  --file=xjobscore/migrations/20260902_coverage_snapshot.sql
+```
+
+Configure the database URL:
+
+```bash
+export DATABASE_URL=postgresql://localhost/xjobscore
 ```
 
 `schema.sql` still seeds the account `00000000-0000-0000-0000-000000000001`, but
@@ -66,7 +74,7 @@ Public discovery stays open; persisted personal workspaces require a session:
 
 | | |
 |---|---|
-| **Open** | jobs, source coverage, health, and every page shell |
+| **Open** | jobs, Feed Status, health, and every page shell |
 | **Session required** | `/api/auth/me`, `/api/applications/*`, job-to-application writes, and all of `/api/resume/*` |
 
 Signed-out application and resume CRUD is implemented by the browser in a blank
@@ -91,7 +99,7 @@ XJOBSCORE_ONESHOT_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 XJOBSCORE_ONESHOT_GOOGLE_CLIENT_SECRET=GOCSPX-...
 XJOBSCORE_ONESHOT_SESSION_SECRET=...          # python -c 'import secrets; print(secrets.token_hex(32))'
 XJOBSCORE_ONESHOT_ALLOWED_EMAILS=you@gmail.com,friend@gmail.com
-XJOBSCORE_ONESHOT_DSN=postgresql://localhost/xjobscore
+DATABASE_URL=postgresql://localhost/xjobscore
 ```
 
 A real environment variable overrides the file, so a deployment injecting its own
@@ -116,7 +124,7 @@ uv run --directory xjobscore/oneshot-ui python -m oneshot_ui
 ```
 
 The server starts at <http://127.0.0.1:8766>. Opportunities, Applications,
-and Source Coverage all use the live `/api` transport.
+and Feed Status all use the live `/api` transport.
 
 ## The browser client
 
@@ -146,14 +154,15 @@ The flow: maintain a **content bank** (profile, entries, bullets with audience
 tags and defense notes, skills), add **target postings** with pasted job
 descriptions, then in the **builder** assemble a named resume as a selection of
 bullets/skills. The server renders a fixed single-column, ATS-safe template via
-[Typst](https://typst.app) (`brew install typst`) and enforces render-time
+[Typst](https://typst.app) — the compiler ships as the `typst` wheel, so there
+is no system binary to install — and enforces render-time
 checks: one page hard limit, filler phrases, first person, missing metrics,
 missing availability line. JD coverage compares the posting's tech vocabulary
 against the skill bank three ways — matched, in-bank-but-not-shown, and
 missing (surfaced, never faked in).
 
 Endpoints live under `/api/resume/*`; `GET /api/resume/resumes/{id}/pdf`
-returns the compiled PDF (503 with a reason if Typst is not installed), and
+returns the compiled PDF (503 with the compiler's message if it fails), and
 `/source` returns the generated `.typ` for hand-tuning.
 
 ## Data contract

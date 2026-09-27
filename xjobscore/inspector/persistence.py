@@ -83,37 +83,6 @@ CREATE TABLE IF NOT EXISTS {schema}.meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-
--- Hand labels over public.job_posting rows, keyed by the posting's natural
--- key: gold tables are rebuilt destructively (store.py: "Human judgements
--- must never live here"), and this store's DSN can in principle diverge from
--- public's, so no FK. No CHECK on label either -- IF NOT EXISTS never alters
--- an existing table, so a CHECK would freeze the vocabulary at first boot;
--- the API layer enforces it instead. The snapshots keep a labeled eval set
--- meaningful after the posting row itself is deleted or reinserted.
-CREATE TABLE IF NOT EXISTS {schema}.posting_label (
-    source           TEXT NOT NULL,
-    source_key       TEXT NOT NULL,
-    label            TEXT NOT NULL,
-    note             TEXT,
-    title_snapshot   TEXT,
-    company_snapshot TEXT,
-    labeled_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (source, source_key)
-);
-
--- Human review of derived duplicate candidates. The gold group table is
--- rebuilt destructively, so reviews live here without a foreign key. A group
--- id is stable for one strategy key while its evidence can change; retaining
--- each fingerprint preserves history and makes changed groups require review.
-CREATE TABLE IF NOT EXISTS {schema}.duplicate_group_review (
-    group_id     UUID NOT NULL,
-    fingerprint  TEXT NOT NULL,
-    decision     TEXT NOT NULL,
-    note         TEXT,
-    reviewed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (group_id, fingerprint)
-);
 """
 
 
@@ -248,7 +217,7 @@ class ResultStore:
                 snapshot.key,
             )
             if snapshot.status in {"ok", "partial"} or (
-                snapshot.status == "not_modified" and has_staged_payload
+                snapshot.status == "unchanged" and has_staged_payload
             ):
                 await conn.execute(
                     f"""
@@ -551,8 +520,8 @@ class ResultStore:
                        count(*) AS run_count,
                        count(DISTINCT feed_ref) AS feed_count,
                        count(*) FILTER (WHERE status = 'error') AS error_count,
-                       count(*) FILTER (WHERE status = 'not_modified')
-                           AS not_modified_count,
+                       count(*) FILTER (WHERE status = 'unchanged')
+                           AS unchanged_count,
                        count(*) FILTER (WHERE status = 'partial') AS partial_count,
                        avg(elapsed_ms) AS avg_elapsed_ms,
                        max(elapsed_ms) AS max_elapsed_ms,
@@ -594,144 +563,3 @@ class ResultStore:
                 key,
                 value,
             )
-
-    # Posting labels -------------------------------------------------------
-
-    async def posting_labels(self) -> dict[tuple[str, str], dict[str, Any]]:
-        """Every hand label, keyed (source, source_key).
-
-        Read whole per request: the table only ever grows at human labeling
-        speed, so a full scan is smaller than one staged payload.
-        """
-        pool = await self.pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT source, source_key, label, note, labeled_at
-                FROM {self.schema}.posting_label
-                """
-            )
-        return {
-            (row["source"], row["source_key"]): {
-                "label": row["label"],
-                "note": row["note"],
-                "labeled_at": _iso(row["labeled_at"]),
-            }
-            for row in rows
-        }
-
-    async def set_posting_labels(self, entries: list[dict[str, Any]]) -> int:
-        """Upsert labels; a relabel overwrites in place and re-stamps labeled_at."""
-        if not entries:
-            return 0
-        pool = await self.pool()
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.executemany(
-                f"""
-                INSERT INTO {self.schema}.posting_label
-                    (source, source_key, label, note, title_snapshot, company_snapshot)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (source, source_key) DO UPDATE SET
-                    label = excluded.label,
-                    note = excluded.note,
-                    title_snapshot = excluded.title_snapshot,
-                    company_snapshot = excluded.company_snapshot,
-                    labeled_at = now()
-                """,
-                [
-                    (
-                        entry["source"],
-                        entry["source_key"],
-                        entry["label"],
-                        entry.get("note"),
-                        entry.get("title_snapshot"),
-                        entry.get("company_snapshot"),
-                    )
-                    for entry in entries
-                ],
-            )
-        return len(entries)
-
-    async def delete_posting_labels(self, keys: list[tuple[str, str]]) -> int:
-        """Clear labels by natural key; unknown keys are ignored, not errors."""
-        if not keys:
-            return 0
-        pool = await self.pool()
-        async with pool.acquire() as conn:
-            result = await conn.execute(
-                f"""
-                DELETE FROM {self.schema}.posting_label
-                WHERE (source, source_key) IN (
-                    SELECT unnest($1::text[]), unnest($2::text[])
-                )
-                """,
-                [key[0] for key in keys],
-                [key[1] for key in keys],
-            )
-        return int(result.split()[-1])
-
-    # Duplicate-group reviews ----------------------------------------------
-
-    async def duplicate_group_reviews(
-        self,
-    ) -> dict[tuple[str, str], dict[str, Any]]:
-        """Every retained review, keyed by ``(group_id, fingerprint)``."""
-        pool = await self.pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT group_id, fingerprint, decision, note, reviewed_at
-                FROM {self.schema}.duplicate_group_review
-                """
-            )
-        return {
-            (str(row["group_id"]), row["fingerprint"]): {
-                "decision": row["decision"],
-                "note": row["note"],
-                "reviewed_at": _iso(row["reviewed_at"]),
-            }
-            for row in rows
-        }
-
-    async def set_duplicate_group_review(
-        self,
-        *,
-        group_id: str,
-        fingerprint: str,
-        decision: str,
-        note: str | None = None,
-    ) -> None:
-        """Upsert one review version and refresh its review timestamp."""
-        pool = await self.pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                INSERT INTO {self.schema}.duplicate_group_review
-                    (group_id, fingerprint, decision, note)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (group_id, fingerprint) DO UPDATE SET
-                    decision = excluded.decision,
-                    note = excluded.note,
-                    reviewed_at = now()
-                """,
-                UUID(group_id),
-                fingerprint,
-                decision,
-                note,
-            )
-
-    async def delete_duplicate_group_review(
-        self, *, group_id: str, fingerprint: str
-    ) -> int:
-        """Clear only the current review version; older history is retained."""
-        pool = await self.pool()
-        async with pool.acquire() as conn:
-            result = await conn.execute(
-                f"""
-                DELETE FROM {self.schema}.duplicate_group_review
-                WHERE group_id = $1 AND fingerprint = $2
-                """,
-                UUID(group_id),
-                fingerprint,
-            )
-        return int(result.split()[-1])

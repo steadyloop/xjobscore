@@ -10,14 +10,15 @@ export const MIN_INTERVAL_S = 60;
 export const MAX_INTERVAL_S = 7 * 86_400;
 export const ATTENTION_STATES = new Set(["backing_off", "stale", "never_polled"]);
 
+// No `disabled`: pause and disable were one intent over two columns, and are
+// now one state over `feed.polling`.
 export const STATUS_PRIORITY = {
   backing_off: 0,
   stale: 1,
   never_polled: 2,
   healthy: 3,
   paused: 4,
-  disabled: 5,
-  unknown: 6,
+  unknown: 5,
 };
 
 export function formatRequestRate(value) {
@@ -67,9 +68,11 @@ export function summaryCounts(countsByStatus = {}) {
 }
 
 /* Next-due presentation and ordering. Paused and unscheduled feeds sort last;
-   overdue and near-due feeds are flagged imminent so the UI can highlight them. */
-export function dueInfo(dueAt, pausedAt, nowMs) {
-  if (pausedAt) return { sortKey: Infinity, text: "—", imminent: false };
+   overdue and near-due feeds are flagged imminent so the UI can highlight them.
+   `held` is the negation of feed.policy.enabled -- a feed nobody is polling has
+   no next due date to show. */
+export function dueInfo(dueAt, held, nowMs) {
+  if (held) return { sortKey: Infinity, text: "—", imminent: false };
   const timestamp = Date.parse(dueAt ?? "");
   if (Number.isNaN(timestamp)) return { sortKey: Infinity, text: "—", imminent: false };
   const remaining = (timestamp - nowMs) / 1000;
@@ -110,7 +113,7 @@ function compareValue(feed, key, nowMs) {
   if (key === "status") return STATUS_PRIORITY[feed.sched.status.state] ?? 99;
   if (key === "interval") return nullableNumber(feed.policy?.interval_s);
   if (key === "due") {
-    return dueInfo(feed.policy?.due_at, feed.policy?.paused_at, nowMs).sortKey;
+    return dueInfo(feed.policy?.due_at, feed.policy?.enabled === false, nowMs).sortKey;
   }
   if (key === "last_poll") {
     const timestamp = Date.parse(feed.policy?.last_poll_at ?? "");
@@ -191,7 +194,7 @@ export function groupRollup(rows, nowMs = 0) {
     if (today != null) jobs = (jobs ?? 0) + today;
     const errs = feed.telemetry?.error_count_7d;
     if (errs != null) errors = (errors ?? 0) + errs;
-    const due = dueInfo(feed.policy?.due_at, feed.policy?.paused_at, nowMs);
+    const due = dueInfo(feed.policy?.due_at, feed.policy?.enabled === false, nowMs);
     if (due.sortKey < soonestKey) {
       soonestKey = due.sortKey;
       dueAt = feed.policy.due_at;

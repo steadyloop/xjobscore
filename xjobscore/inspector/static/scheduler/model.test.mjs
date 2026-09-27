@@ -25,7 +25,7 @@ function feed(source, state, interval = 900, options = {}) {
     company_name: options.name ?? source,
     policy: {
       interval_s: interval,
-      paused_at: options.paused ? "2026-01-01T00:00:00Z" : null,
+      enabled: !options.paused,
       last_poll_at: options.lastPoll ?? null,
       due_at: options.dueAt ?? null,
     },
@@ -130,19 +130,19 @@ test("summary counts map scheduler states to the header vocabulary", () => {
 
 test("due info counts down, flags imminent polls, and parks paused feeds", () => {
   const now = Date.parse("2026-08-22T12:00:00Z");
-  const soon = dueInfo("2026-08-22T12:00:30Z", null, now);
+  const soon = dueInfo("2026-08-22T12:00:30Z", false, now);
   assert.equal(soon.text, "30s");
   assert.equal(soon.imminent, true);
-  const later = dueInfo("2026-08-22T12:25:00Z", null, now);
+  const later = dueInfo("2026-08-22T12:25:00Z", false, now);
   assert.equal(later.text, "25m");
   assert.equal(later.imminent, false);
-  assert.equal(dueInfo("2026-08-22T18:30:00Z", null, now).text, "6.5h");
-  const overdue = dueInfo("2026-08-22T11:00:00Z", null, now);
+  assert.equal(dueInfo("2026-08-22T18:30:00Z", false, now).text, "6.5h");
+  const overdue = dueInfo("2026-08-22T11:00:00Z", false, now);
   assert.equal(overdue.text, "due");
   assert.equal(overdue.imminent, true);
-  assert.deepEqual(dueInfo("2026-08-22T12:00:30Z", "2026-01-01T00:00:00Z", now),
+  assert.deepEqual(dueInfo("2026-08-22T12:00:30Z", true, now),
     { sortKey: Infinity, text: "—", imminent: false });
-  assert.deepEqual(dueInfo(null, null, now), { sortKey: Infinity, text: "—", imminent: false });
+  assert.deepEqual(dueInfo(null, false, now), { sortKey: Infinity, text: "—", imminent: false });
 });
 
 test("jobs today reads the newest daily spark bucket", () => {

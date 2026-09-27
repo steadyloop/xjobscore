@@ -3,11 +3,12 @@
 `schema.sql` is the storage contract. The implemented core path is:
 
 ```text
-feed (PostgreSQL) → fetch → raw_posting → job_posting → OneShot
+feed (PostgreSQL) → fetch → raw_posting → job_posting → Gold → OneShot
 ```
 
-Normal polls run bronze and silver together. Bronze remains independently
-replayable with `python -m xjobscore.run --parse` after a parser fix.
+The unified runtime runs changed polls through Bronze, Silver, and targeted
+Gold. Bronze remains independently replayable with
+`python -m xjobscore.run --parse` after a parser fix.
 
 ## Feed inventory
 
@@ -54,9 +55,27 @@ time, and lease. Conditional requests use ETag only.
 
 ## Scheduler
 
+`uv run xjobscore` owns the scheduler, workers, token heartbeat, and Inspector.
+One PostgreSQL advisory lock permits exactly one active system per database;
+`scheduler_control.running` is the sole persisted polling switch.
+
 The worker uses an `asyncpg` pool. Due rows are claimed atomically with
 `FOR UPDATE SKIP LOCKED` by setting `feed.hold_until`; the default lease is
 one hour and is configurable.
+
+One cycle runs a worker pool per vendor rather than a single queue. Each pool
+is `sources.width(source)` workers wide, and every worker claims one due feed
+*of its own source*, polls it, and immediately claims the next -- so no feed
+waits on a slower sibling, and a vendor that cannot keep up cannot crowd the
+others out by accumulating the oldest `due_at` values. Widths are derived, not
+declared: a shared-host vendor takes its list leg's concurrency, a per-tenant
+vendor takes its `net._VENDOR_CAPS` ceiling divided by one poll's own fan-out,
+and anything unmeasured is one. `feed_source_due_idx` serves the per-source
+claim. A cycle is bounded by `--cycle-budget-s` (default 30) rather than a feed
+count, since 20 feeds is minutes of Workday and seconds of Greenhouse; the
+budget stops claiming while polls in flight finish, and a cycle that ran out of
+time with feeds still due reports `drained=False` so the caller runs another
+immediately.
 
 A claim requires an enabled, due feed with no `paused_at` and no
 active lease. A successful attempt clears strikes and the lease, stores the
@@ -173,8 +192,8 @@ the trigger and a dead origin URL is the evidence, per `records.py`: a posting
 missing from a listing is not closed, it is unconfirmed.
 
 Per feed instance, `store.absent_postings` selects `active` postings whose
-`last_seen_at` predates that feed's most recent `poll_observation` with
-`status = 'ok'`. Completeness comes from `poll_observation` rather than
+`last_seen_at` predates that feed's most recent `poll_log` with
+`status = 'ok'`. Completeness comes from `poll_log` rather than
 `feed.last_poll_at`, which records no outcome and cannot distinguish a whole
 listing from a truncated one.
 
@@ -216,7 +235,9 @@ skipped.
 | `silver.py` | Parser dispatch, company resolution, canonical projection/upsert. |
 | `gold.py` | Derived enrichment and dedup artifacts computed from silver. |
 | `probe.py` | Three-valued origin-URL check backing reconciliation by absence. |
-| `run.py` | Polling, inline ingestion, and replay orchestration. |
+| `run.py` | Polling engine plus explicit maintenance and replay commands. |
+| `runtime.py` | Unified lifecycle, scheduler supervision, and process lock. |
+| `pipeline.py` | Incremental Gold, retry batches, dedup generations, and run telemetry. |
 | `oneshot-ui/` | Reads `job_posting`; writes application-tracker tables. |
 
 Enrichment, scoring, notifications, dynamic targets, labels, and facts remain
@@ -228,16 +249,21 @@ enriched and deduped.
 `gold.py` holds artifacts recoverable from `job_posting`. Nothing whose value
 cannot be recovered from silver belongs here -- human judgements in particular.
 
-`--enrich` runs every enrichment; `--enrich skills`, `--enrich degrees`,
-`--enrich summaries`, or `--enrich dedup` runs one. Each enrichment gets its own transaction, so a
-failure neither aborts nor half-writes the others.
+Changed Silver rows immediately run the posting-local Gold steps: job-domain
+classification, skills, degrees, and summaries. Each step commits independently;
+a failure degrades the pipeline run without turning a successful source fetch
+into a source failure. Version stamps are the durable retry queue, and the
+catch-up worker processes stale rows in bounded batches after restarts.
 
-`job_type` is no longer a gold step. It classified from the silver title alone,
-across every vendor, which discarded the stronger vendor-specific signals. It is
-now derived at `parse()` time per vendor and stored in the `job_posting.job_type`
-column -- see "Parse-time derivation" under Bronze. Title normalization used by
-derived grouping still lives in `gold.py`, because dedup and the inspector's
-parse preview both consume it.
+Dedup is generation-tracked global work. Silver increments the generation in
+its own transaction; dedup runs after 30 quiet seconds when the queue drains,
+or after five minutes at most. A change arriving during a rebuild leaves a
+newer generation pending.
+
+The Silver `job_type` remains vendor-derived. Gold's step named `job_type`
+materializes the separate `job_domain` classification used by OneShot. Because
+its quant-employer prior is company-wide, an incremental change reclassifies
+all typed postings at every affected company.
 
 The `skills` step extracts canonical aliases from each plain-text description
 and writes `attributes.skills` plus `attributes.skills_meta` directly onto the
@@ -257,12 +283,13 @@ names the role, not its degree requirement -- so a title reaches the matcher onl
 through that field's explicit `title_patterns`.
 
 Its staleness lifecycle differs from skills: the taxonomy revision is stamped
-into the `job_posting.degree_version` column rather than a metadata object
-inside `attributes`. The step scans that column on every pass, so the predicate
-stays indexable instead of reading JSONB out of a multi-gigabyte table, and
-bumping the version makes every row eligible again. There is no input hash --
-the upsert clears both `attributes.degree` and `degree_version` whenever the
-title or description behind them changes, so a title edit still re-enriches the
+into the indexed `job_posting.degree_version` column, while `degree_meta`
+records the version, parse time, and a hash of the exact title and description
+used by the matcher. The step scans the scalar column on every pass, avoiding a
+JSONB scan over a multi-gigabyte table, and bumping the version makes every row
+eligible again. The upsert clears `attributes.degree`, `degree_meta`, and
+`degree_version` whenever the title or description behind them changes, so a
+title edit still re-enriches the
 row.
 
 The `summaries` step deterministically selects 40–50 words of role and

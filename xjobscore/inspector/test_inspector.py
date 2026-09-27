@@ -352,7 +352,6 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
         static / "feed" / "app.js",
         static / "shared" / "inspect.js",
         static / "scheduler" / "app.js",
-        static / "postings" / "app.js",
     ]
     for script in scripts:
         assert "feed.id" not in script.read_text(), script.name

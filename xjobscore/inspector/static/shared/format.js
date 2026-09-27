@@ -55,7 +55,7 @@ export function statusLabel(status) {
   return (
     {
       ok: "OK",
-      not_modified: "304",
+      unchanged: "304",
       partial: "Partial",
       error: "Error",
       never: "Never run",

@@ -67,6 +67,23 @@ def test_duplicate_skill_is_case_sensitive():
     assert workspace.add_skill(state, {"category": "tool", "name": "Python"})
 
 
+def test_skill_edit_keeps_its_id_and_refuses_a_duplicate():
+    state = bank()
+    python = workspace.add_skill(state, {"category": "language", "name": "Python"})
+    workspace.add_skill(state, {"category": "language", "name": "Go"})
+
+    changed = workspace.edit_skill(state, python["id"], {"name": "Python 3"})
+    assert changed["id"] == python["id"]
+    assert changed["name"] == "Python 3"
+
+    try:
+        workspace.edit_skill(state, python["id"], {"name": "Go"})
+    except ValueError as error:
+        assert "already exists" in str(error)
+    else:
+        raise AssertionError("duplicate edit should fail")
+
+
 def test_skills_sort_by_category_then_name_without_casefolding():
     state = bank()
     for category, name in [
@@ -83,6 +100,7 @@ def test_edits_to_missing_rows_return_none_and_deletes_return_false():
     state = bank()
     assert workspace.edit_entry(state, 999, {"org": "x"}) is None
     assert workspace.edit_bullet(state, 999, {"text": "x"}) is None
+    assert workspace.edit_skill(state, 999, {"name": "x"}) is None
     assert workspace.remove_entry(state, 999) is False
     assert workspace.remove_bullet(state, 999) is False
     assert workspace.remove_skill(state, 999) is False
@@ -159,3 +177,28 @@ def test_coverage_matches_whole_words_only():
 
     # "R" must not match inside "Rust" or "React".
     assert result["matched"] == [] and result["have_not_shown"] == []
+
+
+def test_coverage_treats_plus_hash_and_ampersand_as_part_of_a_word():
+    """"C" must not match the C in "C++" or "C#", nor "R" the R in "R&D"."""
+    state = bank()
+    for name in ("C", "R", "C++", "C#"):
+        workspace.add_skill(state, {"category": "language", "name": name})
+    skills = workspace.list_skills(state)
+    jd = "Experience with C++, C#, and an R&D background."
+
+    result = workspace.compute_coverage({"id": 1, "jd_text": jd}, skills, set())
+
+    assert sorted(s["name"] for s in result["have_not_shown"]) == ["C#", "C++"]
+
+
+def test_coverage_still_matches_a_name_that_ends_a_sentence():
+    """`.` stays a boundary: excluding it would lose "Backend in Go." entirely."""
+    state = bank()
+    workspace.add_skill(state, {"category": "language", "name": "Go"})
+
+    result = workspace.compute_coverage(
+        {"id": 1, "jd_text": "Backend in Go."}, workspace.list_skills(state), set()
+    )
+
+    assert [s["name"] for s in result["have_not_shown"]] == ["Go"]

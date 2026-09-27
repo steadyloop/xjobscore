@@ -350,7 +350,13 @@ SIMPLE: dict[str, dict] = {
         "extra": {"department": "@department", "salary": "@salary", "is_remote": "@location.is_remote", "friendly_id": "@friendly_id"},
     },
     "comeet": {
-        "list": {"url": "https://www.comeet.co/careers-api/2.0/company/{key}/positions?token={token}&details=true", "items": "", "id": "@uid"},
+        # Two spellings of one board reach this adapter. Discovery promotes a
+        # candidate to `board-id/api-token` (keyscan/probe.py _probe_comeet),
+        # while an operator-entered row is `board-id` plus a config.token.
+        # Splitting the key serves the first; config, applied last, still wins
+        # for the second. Both render the same URL.
+        "key_parts": ("company", "token"),
+        "list": {"url": "https://www.comeet.co/careers-api/2.0/company/{company}/positions?token={token}&details=true", "items": "", "id": "@uid"},
         "fields": {
             "title": "@name", "url_posting": "@url_comeet_hosted_page", "company_raw": "@company_name",
             "location_raw": {"fallback": ["@location.name", {"join": ["@location.city", "@location.state", "@location.country"]}]},
@@ -394,7 +400,15 @@ SIMPLE: dict[str, dict] = {
         "extra": {"department": "@department", "experience_level": "@experience_level", "categories": "@categories", "location_is_remote": "@location.is_remote"},
     },
     "greenhouse": {
-        "list": {"url": "https://boards-api.greenhouse.io/v1/boards/{key}/jobs?content=true", "items": "jobs", "id": "@id"},
+        # concurrency: single shared host (boards-api.greenhouse.io) for every
+        # tenant, so this per-host semaphore is the vendor-wide cap too -- same
+        # shape as ashby above, no _VENDOR_CAPS entry needed. 30 per
+        # doc/networking/rate-limits.md: a 357-board burst drew zero throttle
+        # responses at widths 30-100, and 30-40 held ~95 req/s at p95 508ms
+        # while width 100 fell to 46 req/s on queueing alone. Without this key
+        # the adapter takes `net`'s default serial path -- one request per
+        # second to the one host every Greenhouse feed shares.
+        "list": {"url": "https://boards-api.greenhouse.io/v1/boards/{key}/jobs?content=true", "items": "jobs", "id": "@id", "concurrency": 30},
         # Reconcile-only, never fetched during a poll: the list already carries
         # full content, so there is no detail leg to reuse. Greenhouse publishes
         # no closed flag and no tombstone -- a delisted job simply stops being
@@ -1874,10 +1888,11 @@ DETAIL_A: dict[str, dict] = {
             # UA still got 200. It cleared on its own, but tenants share edge
             # infrastructure, so the ceiling is Eightfold's and it is enforced
             # vendor-wide, not per tenant. `Net._host_semaphores` is keyed by
-            # netloc, so this cap is per tenant: `run.cycle` gathers a batch of
-            # feeds, and all six boards polling at once is 6x this number in
-            # flight against one backend. 8 is verified for a single board;
-            # raising it further needs a vendor-wide cap first.
+            # netloc, so this cap is per tenant: several boards polling at once
+            # is that many times this number in flight against one backend. 8 is
+            # verified for a single board, and the vendor-wide cap that bounds
+            # the rest now exists -- `_VENDOR_CAPS` holds eightfold.ai to 16,
+            # which is what sizes `sources.width` here at a two-feed pool.
             #
             # `max` exists because this config had none -- at 10 rows/page an
             # unexpectedly large tenant walked unbounded. 500 pages = 5,000 rows,

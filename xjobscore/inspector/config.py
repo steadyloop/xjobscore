@@ -1,4 +1,4 @@
-"""Configuration for the standalone inspector process."""
+"""Inspector storage settings and one-release legacy environment aliases."""
 
 from __future__ import annotations
 
@@ -46,13 +46,11 @@ _load_local_config()
 
 def dsn() -> str:
     value = (
-        os.environ.get("XJOBSCORE_INSPECTOR_DSN")
-        or os.environ.get("XJOBSCORE_DSN")
-        or os.environ.get("DATABASE_URL")
+        os.environ.get("DATABASE_URL")
     )
     if not value:
         raise RuntimeError(
-            "No database DSN. Set XJOBSCORE_INSPECTOR_DSN, XJOBSCORE_DSN, or DATABASE_URL."
+            "No database DSN. Set DATABASE_URL."
         )
     _validate_dsn(value)
     return value
@@ -98,23 +96,12 @@ def _env_bool(name: str, default: bool) -> bool:
     return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def runner_enabled() -> bool:
-    """Whether this process may run run.py's poll loop at all.
-
-    Off by default: the scheduler_control DB flag is the operator's runtime
-    pause, but this env var is the deploy-time decision that most inspector
-    processes -- every dev laptop, the whole test suite -- should never poll
-    production feeds no matter what that flag says.
-    """
-    return _env_bool("XJOBSCORE_INSPECTOR_RUNNER", False)
-
-
 def runner_tick_s() -> float:
     return float(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_TICK_S", "60"))
 
 
-def runner_batch() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_BATCH", "20"))
+def runner_budget_s() -> float:
+    return float(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_BUDGET_S", "30"))
 
 
 def runner_lease_s() -> int:
@@ -124,8 +111,7 @@ def runner_lease_s() -> int:
 def token_heartbeat_enabled() -> bool:
     """Whether this process may run the token validation/promotion heartbeat.
 
-    On by default, unlike runner_enabled(): one leased batch of liveness probes
-    every six hours is the behaviour every inspector should have, and the
+    One leased batch of liveness probes every six hours is the default, and the
     operator's runtime pause lives in ``token_heartbeat.paused`` where the
     Tokens page can reach it. Set the env var falsy for a process that must
     never probe -- ``inspector/conftest.py`` pins it off for the test suite.

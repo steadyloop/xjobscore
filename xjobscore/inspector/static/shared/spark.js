@@ -15,7 +15,7 @@ function svgEl(tag, attrs = {}) {
 
 const STATUS_COLOR = {
   ok: "var(--viz-series)",
-  not_modified: "var(--viz-series)",
+  unchanged: "var(--viz-series)",
   partial: "var(--warn)",
   error: "var(--err)",
 };

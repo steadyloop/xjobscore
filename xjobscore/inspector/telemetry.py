@@ -1,4 +1,4 @@
-"""Reads over ``public.poll_observation`` -- what the production poller did.
+"""Reads over ``public.poll_log`` -- what the production poller did.
 
 This is the second read-only coupling to the pipeline's own schema, alongside
 ``policy.py``. It borrows that module's pool rather than opening its own (see
@@ -8,7 +8,7 @@ belongs to ``run.py``.
 Two absences are normal and are reported differently, because they mean
 different things to an operator:
 
-* ``poll_observation`` does not exist -- the DDL in ``schema.sql`` has not been
+* ``poll_log`` does not exist -- the DDL in ``schema.sql`` has not been
   applied to this database. Every function returns ``None``.
 * The table exists but is empty -- ``run.py`` appends a row per completed poll,
   and it has not completed one yet. Functions return empty collections.
@@ -75,7 +75,7 @@ async def feed_daily_counts(
         SELECT feed_id,
                (polled_at AT TIME ZONE 'UTC')::date AS day,
                sum(new_postings)::bigint AS new_postings
-        FROM poll_observation
+        FROM poll_log
         WHERE polled_at >= $1
         GROUP BY feed_id, day
         """,
@@ -113,7 +113,7 @@ async def feed_rollups(
                count(*) FILTER (WHERE status = 'error')::bigint
                    AS error_count_7d,
                max(polled_at) AS last_polled_at
-        FROM poll_observation
+        FROM poll_log
         WHERE polled_at >= $1
         GROUP BY feed_id
         """,
@@ -122,12 +122,23 @@ async def feed_rollups(
     if rows is None:
         return None
 
+    # One indexed seek per feed rather than DISTINCT ON over the whole table.
+    # DISTINCT ON cannot skip ahead in poll_log_feed_idx, so it walks every
+    # poll ever recorded to return one row per feed -- a cost that grows with
+    # poll_log forever. The lateral drives off `feed` instead, so the work
+    # tracks the fleet size, which is what the answer is actually about.
     latest = await _fetch(
         pool,
         """
-        SELECT DISTINCT ON (feed_id) feed_id, status
-        FROM poll_observation
-        ORDER BY feed_id, polled_at DESC
+        SELECT f.id AS feed_id, o.status
+        FROM feed f
+        CROSS JOIN LATERAL (
+            SELECT status
+            FROM poll_log p
+            WHERE p.feed_id = f.id
+            ORDER BY p.polled_at DESC
+            LIMIT 1
+        ) o
         """,
     )
     last_status = {row["feed_id"]: row["status"] for row in (latest or [])}
@@ -145,7 +156,7 @@ async def feed_rollups(
 
 
 async def global_tiles(pool: Any, *, now: datetime) -> dict[str, Any] | None:
-    """The page-header numbers. ``None`` when poll_observation does not exist."""
+    """The page-header numbers. ``None`` when poll_log does not exist."""
     today = _day_start(now)
     day_ago = now - timedelta(hours=24)
     rows = await _fetch(
@@ -158,7 +169,7 @@ async def global_tiles(pool: Any, *, now: datetime) -> dict[str, Any] | None:
                count(*) FILTER (WHERE polled_at >= $2)::bigint AS polls_24h,
                count(*) FILTER (WHERE polled_at >= $2 AND status = 'error')::bigint
                    AS errors_24h
-        FROM poll_observation
+        FROM poll_log
         """,
         today,
         day_ago,
@@ -242,7 +253,7 @@ async def polls_by_hour(
         """
         SELECT date_trunc('hour', polled_at AT TIME ZONE 'UTC') AS hour,
                count(*)::bigint AS polls
-        FROM poll_observation
+        FROM poll_log
         WHERE polled_at >= $1
         GROUP BY hour
         """,
@@ -269,7 +280,7 @@ async def error_sources(pool: Any, *, now: datetime) -> list[dict[str, Any]] | N
         pool,
         """
         SELECT f.source, count(*)::bigint AS errors
-        FROM poll_observation o
+        FROM poll_log o
         JOIN feed f ON f.id = o.feed_id
         WHERE o.polled_at >= $1 AND o.status = 'error'
         GROUP BY f.source
@@ -349,8 +360,8 @@ async def feed_events(
     rows = await _fetch(
         pool,
         """
-        SELECT polled_at, status, new_postings
-        FROM poll_observation
+        SELECT polled_at, status, new_postings, status_code
+        FROM poll_log
         WHERE feed_id = $1
         ORDER BY polled_at DESC
         LIMIT $2
@@ -365,6 +376,7 @@ async def feed_events(
             "polled_at": _iso(row["polled_at"]),
             "status": row["status"],
             "new_postings": int(row["new_postings"]),
+            "status_code": row["status_code"],
         }
         for row in rows
     ]
@@ -379,8 +391,8 @@ async def recent_events(
     rows = await _fetch(
         pool,
         """
-        SELECT o.polled_at, o.status, o.new_postings, f.source, f.key
-        FROM poll_observation o
+        SELECT o.polled_at, o.status, o.new_postings, o.status_code, f.source, f.key
+        FROM poll_log o
         JOIN feed f ON f.id = o.feed_id
         ORDER BY o.polled_at DESC
         LIMIT $1
@@ -394,6 +406,7 @@ async def recent_events(
             "polled_at": _iso(row["polled_at"]),
             "status": row["status"],
             "new_postings": int(row["new_postings"]),
+            "status_code": row["status_code"],
             "source": row["source"],
             "key": row["key"],
         }

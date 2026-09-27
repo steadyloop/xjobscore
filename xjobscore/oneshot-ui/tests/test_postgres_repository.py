@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from xjobscore import coverage_snapshot
 from oneshot_ui.repository import LOCAL_ACCOUNT_ID, PostgresRepository
 
 
@@ -81,7 +82,7 @@ async def test_schema_sql_repository_round_trip() -> None:
         ) == LOCAL_ACCOUNT_ID
 
         applied = await repository.update_application(
-            application["id"], {"stage": "applied", "confirmed": True}
+            application["id"], {"stage": "applied"}
         )
         assert applied is not None
         assert applied["submitted_at"] is not None
@@ -94,11 +95,13 @@ async def test_schema_sql_repository_round_trip() -> None:
         )
         assert external["external"] is True
         assert await repository.delete_application(external["id"])
+        await coverage_snapshot.refresh(pool)
         assert (await repository.source_coverage())["source_count"] == 1
 
         # The fixture feed is polling=false, so it is not part of the fleet map.
         assert source not in {p["source"] for p in (await repository.board_map())["providers"]}
         await pool.execute("UPDATE feed SET polling = true WHERE id = $1", feed_id)
+        await coverage_snapshot.refresh(pool)
         board_map = await repository.board_map()
         provider = next(p for p in board_map["providers"] if p["source"] == source)
         assert provider["board_count"] == 1
@@ -120,6 +123,7 @@ async def test_schema_sql_repository_round_trip() -> None:
         await pool.execute("DELETE FROM job_posting WHERE source = $1", posting_source)
         await pool.execute("DELETE FROM raw_posting WHERE source = $1", posting_source)
         await pool.execute("DELETE FROM company WHERE domain = 'repository.test'")
+        await coverage_snapshot.refresh(pool)
         await repository.close()
 
 

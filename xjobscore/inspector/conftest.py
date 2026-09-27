@@ -23,21 +23,7 @@ _schema_counter = itertools.count()
 
 @pytest.fixture(autouse=True)
 def _runner_stays_off(monkeypatch):
-    """No test process may start the real polling loop.
-
-    ``config.runner_enabled()`` reads ``XJOBSCORE_INSPECTOR_RUNNER``, and
-    ``config._load_local_config()`` pulls the repo's ``.env`` into the
-    environment at import time. A developer who has enabled the runner for
-    their own inspector would otherwise have every ``create_app`` in this
-    suite spawn a task that polls live feeds and writes ``public``. Cleared
-    here rather than in individual fixtures so it cannot be forgotten; a test
-    that wants the runner on sets it back explicitly.
-
-    The token heartbeat is *on* by default, so that one is pinned off rather
-    than cleared -- clearing it would enable it. It probes vendor endpoints
-    and promotes tokens into ``feed``, which no test process may do either.
-    """
-    monkeypatch.delenv("XJOBSCORE_INSPECTOR_RUNNER", raising=False)
+    """The legacy app factory is inert; also pin its heartbeat off in tests."""
     monkeypatch.setenv("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", "0")
 
 

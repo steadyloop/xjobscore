@@ -58,6 +58,7 @@ def _target(row: asyncpg.Record) -> dict[str, Any]:
         "jd_text": row["jd_text"],
         "date_posted": row["date_posted"],
         "note": row["note"],
+        "job_application_id": row["job_application_id"],
         "created_at": _iso(row["created_at"]),
     }
 
@@ -96,8 +97,7 @@ class PostgresResumeStore:
             return
         if not self.dsn:
             raise RuntimeError(
-                "No PostgreSQL DSN. Set XJOBSCORE_ONESHOT_DSN, XJOBSCORE_DSN, "
-                "or DATABASE_URL."
+                "No PostgreSQL DSN. Set DATABASE_URL."
             )
         self.pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=8)
 
@@ -126,6 +126,11 @@ class PostgresResumeStore:
                 "profile": _json_value(row["profile"], {}),
                 "entries": _json_value(row["entries"], []),
                 "skills": _json_value(row["skills"], []),
+                "variants": _json_value(row["variants"], []),
+                # `None` -- not `[]` -- so a row written before this column
+                # existed inherits the seed vocabulary instead of decoding as a
+                # deliberate empty list and silently disabling coverage.
+                "vocabulary": _json_value(row["vocabulary"], None),
                 "next_item_id": row["next_item_id"],
             }
         )
@@ -134,7 +139,7 @@ class PostgresResumeStore:
         """Read-only view. Creates no row: a GET must not write."""
         row = await self._ready().fetchrow(
             """
-            SELECT profile, entries, skills, next_item_id
+            SELECT profile, entries, skills, variants, vocabulary, next_item_id
             FROM resume_workspace WHERE account_id = $1
             """,
             self.account_id,
@@ -159,7 +164,7 @@ class PostgresResumeStore:
                 INSERT INTO resume_workspace (account_id) VALUES ($1)
                 ON CONFLICT (account_id) DO UPDATE
                     SET updated_at = resume_workspace.updated_at
-                RETURNING profile, entries, skills, next_item_id
+                RETURNING profile, entries, skills, variants, vocabulary, next_item_id
                 """,
                 self.account_id,
             )
@@ -171,7 +176,9 @@ class PostgresResumeStore:
                 SET profile      = $2::jsonb,
                     entries      = $3::jsonb,
                     skills       = $4::jsonb,
-                    next_item_id = $5,
+                    variants     = $5::jsonb,
+                    vocabulary   = $6::jsonb,
+                    next_item_id = $7,
                     updated_at   = now()
                 WHERE account_id = $1
                 """,
@@ -179,6 +186,8 @@ class PostgresResumeStore:
                 json.dumps(state["profile"]),
                 json.dumps(state["entries"]),
                 json.dumps(state["skills"]),
+                json.dumps(state["variants"]),
+                json.dumps(state["vocabulary"]),
                 state["next_item_id"],
             )
 
@@ -190,6 +199,23 @@ class PostgresResumeStore:
     async def update_profile(self, fields: dict[str, Any]) -> dict[str, Any]:
         async with self._edit() as state:
             return workspace.apply_profile(state, fields)
+
+    # -- variants and vocabulary -----------------------------------------
+
+    async def list_variants(self) -> list[dict[str, str]]:
+        return workspace.list_variants(await self._read())
+
+    async def set_variants(self, raw: Any) -> list[dict[str, str]]:
+        """Replace the variant list. Raises ValueError if it would orphan tags."""
+        async with self._edit() as state:
+            return workspace.set_variants(state, raw)
+
+    async def list_vocabulary(self) -> list[str]:
+        return workspace.list_vocabulary(await self._read())
+
+    async def set_vocabulary(self, raw: Any) -> list[str]:
+        async with self._edit() as state:
+            return workspace.set_vocabulary(state, raw)
 
     # -- entries and bullets ---------------------------------------------
 
@@ -214,12 +240,14 @@ class PostgresResumeStore:
         self, entry_id: int, fields: dict[str, Any]
     ) -> dict[str, Any] | None:
         async with self._edit() as state:
+            workspace.check_audience(state, fields.get("audience"))
             return workspace.add_bullet(state, entry_id, fields)
 
     async def update_bullet(
         self, bullet_id: int, fields: dict[str, Any]
     ) -> dict[str, Any] | None:
         async with self._edit() as state:
+            workspace.check_audience(state, fields.get("audience"))
             return workspace.edit_bullet(state, bullet_id, fields)
 
     async def delete_bullet(self, bullet_id: int) -> bool:
@@ -233,7 +261,15 @@ class PostgresResumeStore:
 
     async def create_skill(self, fields: dict[str, Any]) -> dict[str, Any] | None:
         async with self._edit() as state:
+            workspace.check_audience(state, fields.get("audience"))
             return workspace.add_skill(state, fields)
+
+    async def update_skill(
+        self, skill_id: int, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        async with self._edit() as state:
+            workspace.check_audience(state, fields.get("audience"))
+            return workspace.edit_skill(state, skill_id, fields)
 
     async def delete_skill(self, skill_id: int) -> bool:
         async with self._edit() as state:
@@ -264,6 +300,74 @@ class PostgresResumeStore:
             fields.get("date_posted", ""),
             fields.get("note", ""),
         )
+        return _target(row)
+
+    async def create_target_from_application(
+        self, application_id: int
+    ) -> dict[str, Any] | None:
+        """Build a resume target from a queued application. Idempotent.
+
+        This is the join between the two halves of the app: the application
+        tracker and the resume studio were separate stores over separate tables,
+        so tailoring a resume for a tracked job meant retyping the company,
+        title and URL and pasting the description by hand.
+
+        Reads `job_application` directly rather than calling into
+        `PostgresRepository`. The two stores share one pool and this is a single
+        statement against an account-scoped row; routing it through the other
+        store would buy indirection and a second round trip, not safety.
+
+        The snapshot columns are the right source: they are frozen at the moment
+        the job was queued and are immutable for discovered applications, so the
+        target always reflects the posting as it was tracked. `description` is
+        joined from the live posting because that is the only place it exists --
+        it is absent for external applications, and absent on the ~12% of
+        classified postings whose vendor supplies no description, both of which
+        simply leave `jd_text` empty for the user to paste into.
+
+        Returns None when the application is not this account's, which the route
+        turns into a 404.
+        """
+        async with self._ready().acquire() as connection, connection.transaction():
+            source = await connection.fetchrow(
+                """
+                SELECT
+                    a.company_snapshot, a.title_snapshot, a.apply_url_snapshot,
+                    coalesce(j.description, '') AS description,
+                    j.posted_at
+                FROM job_application a
+                LEFT JOIN job_posting j ON j.id = a.job_posting_id
+                WHERE a.id = $1 AND a.account_id = $2
+                """,
+                application_id,
+                self.account_id,
+            )
+            if source is None:
+                return None
+            # ON CONFLICT DO UPDATE rather than DO NOTHING: DO NOTHING returns no
+            # row, so the second click would have to re-SELECT to answer. The
+            # no-op SET makes the existing row come back from the same statement.
+            row = await connection.fetchrow(
+                """
+                INSERT INTO resume_target
+                    (account_id, company, title, url, jd_text, date_posted,
+                     job_application_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (account_id, job_application_id)
+                    WHERE job_application_id IS NOT NULL
+                    DO UPDATE SET company = resume_target.company
+                RETURNING *
+                """,
+                self.account_id,
+                source["company_snapshot"],
+                source["title_snapshot"],
+                source["apply_url_snapshot"] or "",
+                # The column is `text NOT NULL`, and jd_text is capped at 100k by
+                # the API model; a vendor description can exceed that.
+                (source["description"] or "")[:100_000],
+                source["posted_at"].date().isoformat() if source["posted_at"] else "",
+                application_id,
+            )
         return _target(row)
 
     async def _get_target(self, job_id: int) -> dict[str, Any] | None:
@@ -322,7 +426,16 @@ class PostgresResumeStore:
         )
         return _document(row) if row is not None else None
 
+    async def _check_variant(self, variant: Any) -> None:
+        """Reject a resume variant the account has not declared.
+
+        The audience checks run inside ``_edit``, which already holds the
+        workspace row; a resume lives in another table, so this one reads it.
+        """
+        workspace.check_variant(await self._read(), variant)
+
     async def create_resume(self, fields: dict[str, Any]) -> dict[str, Any]:
+        await self._check_variant(fields.get("variant"))
         row = await self._ready().fetchrow(
             """
             INSERT INTO resume_document
@@ -334,7 +447,7 @@ class PostgresResumeStore:
             self.account_id,
             fields["name"],
             fields.get("target_job_id"),
-            fields.get("variant", "swe"),
+            fields.get("variant", ""),
             fields.get("availability_line", ""),
             fields.get("education_note", ""),
             json.dumps(fields.get("selection", {})),
@@ -344,6 +457,7 @@ class PostgresResumeStore:
     async def update_resume(
         self, resume_id: int, fields: dict[str, Any]
     ) -> dict[str, Any] | None:
+        await self._check_variant(fields.get("variant"))
         updates = {
             k: v
             for k, v in fields.items()
@@ -394,13 +508,18 @@ class PostgresResumeStore:
         job = await self._get_target(job_id)
         if job is None:
             return None
-        skills = workspace.list_skills(await self._read())
+        # One read for both: the skill bank and the term list are the same row,
+        # so re-reading for the vocabulary could straddle an edit.
+        state = await self._read()
+        skills = workspace.list_skills(state)
         shown_ids: set[int] = set()
         if resume_id is not None:
             resume = await self.get_resume(resume_id)
             if resume is not None:
                 shown_ids = set(resume["selection"].get("skills", []))
-        return workspace.compute_coverage(job, skills, shown_ids)
+        return workspace.compute_coverage(
+            job, skills, shown_ids, workspace.list_vocabulary(state)
+        )
 
     async def render_inputs(
         self, resume_id: int

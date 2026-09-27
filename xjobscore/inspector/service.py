@@ -257,7 +257,7 @@ class InspectorService:
                 # send a validator when the stored snapshot is complete.
                 stored_complete = (
                     stored is not None
-                    and stored.status in {"ok", "not_modified"}
+                    and stored.status in {"ok", "unchanged"}
                     and not stored.truncated
                     and bool(stored.items)
                 )
@@ -354,12 +354,12 @@ class InspectorService:
                 raw_size_bytes = sum(item_raw_sizes)
                 stages.record("project")
                 if http_status == 304:
-                    status = "not_modified"
+                    status = "unchanged"
                 elif truncated:
                     status = "partial"
                 else:
                     status = "ok"
-                if status == "not_modified":
+                if status == "unchanged":
                     # The validator matched, so the stored payload is the same
                     # bytes this request would have downloaded. Carrying it
                     # forward keeps the run displayable and its detail rows from

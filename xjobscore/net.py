@@ -23,7 +23,9 @@ from urllib.parse import urlsplit
 
 import httpx
 
-__all__ = ["DEFAULT_USER_AGENT", "Net", "NetError", "Response", "conditional", "etag"]
+__all__ = [
+    "DEFAULT_USER_AGENT", "Net", "NetError", "Response", "conditional", "etag", "vendor_cap",
+]
 
 # Declared once here rather than per entry point: the string is long enough
 # that a second copy is how production and the inspector drift into presenting
@@ -88,6 +90,18 @@ def _vendor_key(host: str) -> str | None:
         if hostname == suffix or hostname.endswith("." + suffix):
             return suffix
     return None
+
+
+def vendor_cap(host: str) -> int | None:
+    """The vendor-wide ceiling binding `host`, or None if it is uncapped.
+
+    Public because the scheduler sizes a vendor's worker pool against the same
+    table `_request` enforces (`sources.width`). Reading it rather than
+    restating it is the point: a pool wider than the cap is workers holding
+    feed leases while queued on `_vendor_semaphores`.
+    """
+    key = _vendor_key(host)
+    return None if key is None else _VENDOR_CAPS[key]
 
 
 # Adaptive pacing bounds. A host is unpaced until it answers 429; spacing then
@@ -288,11 +302,15 @@ class Net:
         timeout_s: float = 30.0,
         min_interval_s: float = 1.0,
         max_retries: int = 3,
+        max_connections: int = 256,
+        max_keepalive_connections: int = 64,
     ) -> None:
         self._user_agent = user_agent
         self._timeout_s = timeout_s
         self._min_interval_s = min_interval_s
         self._max_retries = max_retries
+        self._max_connections = max_connections
+        self._max_keepalive_connections = max_keepalive_connections
         self._max_redirects = 10
         self._client: httpx.AsyncClient | None = None
         # one lock + last-request timestamp per host: the token bucket
@@ -314,11 +332,21 @@ class Net:
 
     async def __aenter__(self) -> Self:
         """Open the underlying client. Use `async with Net(...) as net`."""
+        # Stated, not inherited: httpx defaults to 100 connections, and the
+        # scheduler's per-vendor pools plus each poll's own fan-out exceed that
+        # (ashby 44 + greenhouse 30 + workday 2x10 + eightfold 2x8 + ...). Over
+        # the default the surplus queues inside httpx with no error and no 429,
+        # which reads as the origin being slow. Headroom, not a measured limit:
+        # the real ceilings are `_VENDOR_CAPS` and the per-host semaphores.
         self._client = httpx.AsyncClient(
             timeout=self._timeout_s,
             headers={"User-Agent": self._user_agent},
             follow_redirects=True,
             max_redirects=self._max_redirects,
+            limits=httpx.Limits(
+                max_connections=self._max_connections,
+                max_keepalive_connections=self._max_keepalive_connections,
+            ),
         )
         return self
 

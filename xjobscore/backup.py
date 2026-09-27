@@ -58,7 +58,7 @@ DEFAULT_PATH = Path("local/seed.jsonl")
 
 # Column lists are explicit rather than SELECT *: a new column should force a
 # deliberate choice here, not silently ride along into every backup.
-COMPANY_COLUMNS = ("name", "domain", "domain_verified_at", "description", "labels")
+COMPANY_COLUMNS = ("name", "domain", "description", "tags")
 ALIAS_COLUMNS = ("alias_norm", "alias")
 TOKEN_COLUMNS = (
     "ats", "token", "status", "muted", "source",
@@ -244,11 +244,11 @@ async def import_seed(
                 if existing is None:
                     new_id = await conn.fetchval(
                         """
-                        INSERT INTO company (name, domain, domain_verified_at, description, labels)
-                        VALUES ($1, $2, $3, $4, $5) RETURNING id
+                        INSERT INTO company (name, domain, description, tags)
+                        VALUES ($1, $2, $3, $4) RETURNING id
                         """,
-                        row["name"], row.get("domain"), _ts(row.get("domain_verified_at")),
-                        row.get("description"), row.get("labels") or {},
+                        row["name"], row.get("domain"),
+                        row.get("description"), row.get("tags") or {},
                     )
                     id_by_key[key] = int(new_id)
                     result.company_new += 1
@@ -257,11 +257,11 @@ async def import_seed(
                     if replace:
                         await conn.execute(
                             """
-                            UPDATE company SET name=$2, domain_verified_at=$3,
-                                   description=$4, labels=$5 WHERE id=$1
+                            UPDATE company SET name=$2,
+                                   description=$3, tags=$4 WHERE id=$1
                             """,
-                            existing["id"], row["name"], _ts(row.get("domain_verified_at")),
-                            row.get("description"), row.get("labels") or {},
+                            existing["id"], row["name"],
+                            row.get("description"), row.get("tags") or {},
                         )
                         result.company_updated += 1
 
@@ -333,12 +333,12 @@ def _ts(value: Any) -> datetime | None:
 
 
 def _env_dsn() -> str | None:
-    return os.environ.get("XJOBSCORE_DSN") or os.environ.get("DATABASE_URL")
+    return os.environ.get("DATABASE_URL")
 
 
 async def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dsn", help="Postgres DSN; default: $XJOBSCORE_DSN or $DATABASE_URL")
+    parser.add_argument("--dsn", help="Postgres DSN; default: $DATABASE_URL")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--export", metavar="FILE", nargs="?", const=str(DEFAULT_PATH),
                       help=f"write the seed to FILE (default: {DEFAULT_PATH})")
@@ -353,7 +353,7 @@ async def main(argv: Sequence[str] | None = None) -> int:
 
     dsn = args.dsn or _env_dsn()
     if not dsn:
-        raise ValueError("no dsn: pass --dsn or set XJOBSCORE_DSN/DATABASE_URL")
+        raise ValueError("no dsn: pass --dsn or set DATABASE_URL")
     logging.basicConfig(level=os.environ.get("XJOBSCORE_LOG_LEVEL", "INFO"))
 
     pool = await store.connect(dsn)

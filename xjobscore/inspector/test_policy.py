@@ -166,8 +166,16 @@ class AbsentFeedPolicy(FakePolicy):
 
 
 class FakeConnection:
-    def __init__(self, results: dict[str, object]):
+    """Canned results keyed by SQL.
+
+    ``match="contains"`` keys on a fragment instead of the whole statement, for
+    the few queries that are a multi-line CTE the test has no interest in
+    reproducing verbatim.
+    """
+
+    def __init__(self, results: dict[str, object], *, match: str = "exact"):
         self.results = results
+        self.match = match
         self.queries: list[tuple[str, tuple]] = []
 
     def _record(self, sql: str, args: tuple) -> str:
@@ -175,17 +183,26 @@ class FakeConnection:
         self.queries.append((normalized, args))
         return normalized
 
+    def _lookup(self, sql: str, args: tuple, default=None):
+        normalized = self._record(sql, args)
+        if self.match == "exact":
+            return self.results.get(normalized, default)
+        for fragment, result in self.results.items():
+            if fragment in normalized:
+                return result
+        return default
+
     async def fetchval(self, sql: str, *args):
-        return self.results.get(self._record(sql, args))
+        return self._lookup(sql, args)
 
     async def fetchrow(self, sql: str, *args):
-        return self.results.get(self._record(sql, args))
+        return self._lookup(sql, args)
 
     async def fetch(self, sql: str, *args):
-        return self.results.get(self._record(sql, args), [])
+        return self._lookup(sql, args, [])
 
     async def execute(self, sql: str, *args):
-        return self.results.get(self._record(sql, args), "UPDATE 0")
+        return self._lookup(sql, args, "UPDATE 0")
 
 
 class FakePool:
@@ -297,9 +314,7 @@ async def test_policy_store_missing_feed_raises(monkeypatch):
 
 
 async def test_policy_store_drop_feed_preserves_the_token(monkeypatch):
-    connection = FakeConnection(
-        {"DELETE FROM feed WHERE source = $1 AND key = $2 RETURNING id": 7}
-    )
+    connection = FakeConnection({"DELETE FROM feed": 7}, match="contains")
     pool = FakePool(connection)
 
     async def fake_connect(_dsn):
@@ -310,18 +325,19 @@ async def test_policy_store_drop_feed_preserves_the_token(monkeypatch):
 
     assert await policy.drop_feed("lever", "acme") == {"feed_id": 7, "dropped": True}
     sql, args = connection.queries[0]
-    assert sql.startswith("DELETE FROM feed")
-    assert "token" not in sql.lower()
+    assert "DELETE FROM feed" in sql
+    # The `token` row survives the drop; only token_log is written, and only
+    # to record that the feed left.
+    assert "UPDATE token" not in sql
+    assert "DELETE FROM token" not in sql
+    assert "'feed_exited'" in sql
     assert args == ("lever", "acme")
 
 
-async def test_policy_store_set_paused_uses_store_mutator(monkeypatch):
+async def test_policy_store_set_paused_writes_polling(monkeypatch):
+    """Pause and disable are one column: holding a feed clears feed.polling."""
     connection = FakeConnection(
-        {
-            "SELECT id FROM feed WHERE source = $1 AND key = $2": 7,
-            "UPDATE feed SET paused_at = CASE WHEN $2 THEN now() ELSE NULL END "
-            "WHERE id = $1": "UPDATE 1",
-        }
+        {"UPDATE feed SET polling = $3 WHERE source = $1 AND key = $2 RETURNING id": 7}
     )
     pool = FakePool(connection)
 
@@ -334,8 +350,11 @@ async def test_policy_store_set_paused_uses_store_mutator(monkeypatch):
     assert await policy.set_paused("lever", "acme", True) == {
         "feed_id": 7,
         "paused": True,
+        "enabled": False,
     }
-    assert connection.queries[1][1] == (7, True)
+    sql, args = connection.queries[0]
+    assert "paused_at" not in sql
+    assert args == ("lever", "acme", False)
 
 
 async def test_policy_store_set_paused_on_a_missing_feed_raises(monkeypatch):

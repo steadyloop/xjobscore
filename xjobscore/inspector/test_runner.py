@@ -19,6 +19,7 @@ from xjobscore import gold
 from xjobscore.inspector import runner as runner_module
 from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.net import Net
+from xjobscore.run import CycleResult
 
 
 class FakePolicy:
@@ -39,13 +40,13 @@ class FakePolicy:
         return self.pool
 
 
-def make_runner(policy, *, batch=20, tick_s=1000.0, enabled=True):
+def make_runner(policy, *, cycle_budget_s=30.0, tick_s=1000.0, enabled=True):
     runner = SchedulerRunner(
         policy,
         enabled=enabled,
         user_agent="runner-test",
         tick_s=tick_s,
-        batch=batch,
+        cycle_budget_s=cycle_budget_s,
         lease_seconds=60,
     )
     return runner
@@ -77,10 +78,12 @@ async def test_tick_skips_when_control_unavailable(monkeypatch):
     assert calls == []
 
 
-async def test_tick_polls_once_when_below_a_full_batch(monkeypatch):
+async def test_tick_runs_one_cycle_when_it_drains(monkeypatch):
     calls = []
-    monkeypatch.setattr(runner_module.run, "cycle", _record(calls, returns=[5]))
-    runner = make_runner(FakePolicy(running=True), batch=20)
+    monkeypatch.setattr(
+        runner_module.run, "cycle", _record(calls, returns=[CycleResult(5, drained=True)])
+    )
+    runner = make_runner(FakePolicy(running=True))
 
     await runner._tick(net=object())
 
@@ -90,11 +93,15 @@ async def test_tick_polls_once_when_below_a_full_batch(monkeypatch):
     assert status["last_cycle_at"] is not None
 
 
-async def test_tick_drains_consecutive_full_batches(monkeypatch):
-    """A full batch means more feeds were due than one cycle claimed."""
+async def test_tick_repeats_cycles_until_one_drains(monkeypatch):
+    """drained=False means the budget ran out with feeds still due."""
     calls = []
-    monkeypatch.setattr(runner_module.run, "cycle", _record(calls, returns=[3, 3, 1]))
-    runner = make_runner(FakePolicy(running=True), batch=3)
+    monkeypatch.setattr(
+        runner_module.run,
+        "cycle",
+        _record(calls, returns=[CycleResult(3, False), CycleResult(3, False), CycleResult(1, True)]),
+    )
+    runner = make_runner(FakePolicy(running=True))
 
     await runner._tick(net=object())
 
@@ -103,28 +110,39 @@ async def test_tick_drains_consecutive_full_batches(monkeypatch):
 
 
 async def test_tick_stops_draining_if_paused_mid_loop(monkeypatch):
-    """Every full-batch iteration re-reads the control flag before looping again."""
+    """Every undrained iteration re-reads the control flag before looping again."""
     calls = []
     policy = FakePolicy(running=True)
 
     async def cycle(pool, net, cfg, now, *, index=None, types=None):
         calls.append(1)
         policy.running = False  # paused from another tab, mid-drain
-        return 3  # always a full batch: only the control re-check should stop it
+        # Never drained: only the control re-check should stop the loop.
+        return CycleResult(3, drained=False)
 
     monkeypatch.setattr(runner_module.run, "cycle", cycle)
-    runner = make_runner(policy, batch=3)
+    runner = make_runner(policy)
 
     await runner._tick(net=object())
 
     assert len(calls) == 1
 
 
-def _record(calls: list, returns: list[int] | None = None):
-    returns = list(returns or [0])
+async def test_tick_passes_the_cycle_budget_through_to_the_config(monkeypatch):
+    calls = []
+    monkeypatch.setattr(runner_module.run, "cycle", _record(calls))
+    runner = make_runner(FakePolicy(running=True), cycle_budget_s=7.5)
+
+    await runner._tick(net=object())
+
+    assert calls[0][1] == 7.5
+
+
+def _record(calls: list, returns: list[CycleResult] | None = None):
+    returns = list(returns or [CycleResult()])
 
     async def cycle(pool, net, cfg, now, *, index=None, types=None):
-        calls.append((pool, cfg.batch))
+        calls.append((pool, cfg.cycle_budget_s))
         return returns[min(len(calls) - 1, len(returns) - 1)]
 
     return cycle

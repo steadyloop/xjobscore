@@ -31,6 +31,98 @@ def _row(posting_id: int, **overrides: Any) -> dict[str, Any]:
     return row
 
 
+# Job-domain enrichment ----------------------------------------------------
+
+
+def test_job_domain_label_materializes_the_complete_filter_domain() -> None:
+    assert gold.job_domain_label("Software Engineer Intern") == "software"
+    assert gold.job_domain_label("Quantitative Trader Intern") == "finance"
+    assert gold.job_domain_label("Human Resources Intern") == "unlabeled"
+    assert gold.job_domain_label(
+        "Research Summer Analyst", quant_employer=True
+    ) == "finance"
+
+
+class _JobTypeConnection:
+    def __init__(self) -> None:
+        self.rows = {
+            1: {
+                "id": 1,
+                "title": "Software Engineer Intern",
+                "company_id": 1,
+                "job_type": "intern",
+                "job_domain": None,
+                "job_domain_version": None,
+            },
+            2: {
+                "id": 2,
+                "title": "Research Summer Analyst",
+                "company_id": 2,
+                "job_type": "intern",
+                "job_domain": None,
+                "job_domain_version": None,
+            },
+            3: {
+                "id": 3,
+                "title": "Human Resources Intern",
+                "company_id": 1,
+                "job_type": "intern",
+                "job_domain": None,
+                "job_domain_version": None,
+            },
+            4: {
+                "id": 4,
+                "title": "Software Engineer",
+                "company_id": 1,
+                "job_type": None,
+                "job_domain": None,
+                "job_domain_version": None,
+            },
+        }
+        self.update_calls = 0
+
+    async def fetch(self, query: str, last_id: int, limit: int):
+        assert "job_type IS NOT NULL" in query
+        return [
+            row
+            for row in self.rows.values()
+            if row["id"] > last_id and row["job_type"] is not None
+        ][:limit]
+
+    async def executemany(self, query: str, updates):
+        assert "SET job_domain = $2" in query
+        self.update_calls += 1
+        for posting_id, label, version, title, company_id in updates:
+            row = self.rows[posting_id]
+            if row["title"] != title or row["company_id"] != company_id:
+                continue
+            row["job_domain"] = label
+            row["job_domain_version"] = version
+
+
+@pytest.mark.asyncio
+async def test_job_type_step_persists_domains_and_skips_unchanged_rows(
+    monkeypatch,
+) -> None:
+    connection = _JobTypeConnection()
+
+    async def quant_companies(_conn):
+        return {2}
+
+    monkeypatch.setattr(gold, "_quant_company_ids", quant_companies)
+
+    first = await gold._job_type_rebuild(connection)
+    second = await gold._job_type_rebuild(connection)
+
+    assert first == gold.Counts(postings=3)
+    assert second == gold.Counts()
+    assert connection.update_calls == 1
+    assert connection.rows[1]["job_domain"] == "software"
+    assert connection.rows[2]["job_domain"] == "finance"
+    assert connection.rows[3]["job_domain"] == "unlabeled"
+    assert connection.rows[4]["job_domain"] is None
+
+
 # Keying -------------------------------------------------------------------
 
 
@@ -410,29 +502,50 @@ def test_empty_skill_result_is_stamped_as_processed() -> None:
 # Degree-field enrichment --------------------------------------------------
 
 
+def test_degree_input_hash_tracks_every_matcher_input() -> None:
+    baseline = gold.degree_input_hash("Engineer", "Degree in Computer Science.")
+
+    assert baseline != gold.degree_input_hash("Engineer", "Degree in Mathematics.")
+    assert baseline != gold.degree_input_hash(
+        "Surgical Robotics Engineer", "Degree in Computer Science."
+    )
+
+
 def test_degree_payload_records_every_match() -> None:
     description = "Bachelor's degree in Computer Science, Applied Mathematics, or BME."
 
-    payload = gold.degree_payload("Engineer", description)
+    payload = gold.degree_payload("Engineer", description, parsed_at=NOW)
 
-    # The taxonomy revision is not in the patch: it is written to
-    # job_posting.degree_version by the rebuild statement instead.
-    assert payload == {"degree": ["cs", "mathematics", "med_device"]}
+    assert payload["degree"] == ["cs", "mathematics", "med_device"]
+    assert payload["degree_meta"] == {
+        "version": 6,
+        "parsed_at": "2026-08-17T21:34:00Z",
+        "input_hash": gold.degree_input_hash("Engineer", description),
+    }
 
 
 def test_empty_degree_result_is_still_a_patch() -> None:
-    assert gold.degree_payload("Engineer", None) == {"degree": []}
+    payload = gold.degree_payload("Engineer", None, parsed_at=NOW)
+
+    assert payload["degree"] == []
+    assert payload["degree_meta"]["input_hash"] == gold.degree_input_hash(
+        "Engineer", None
+    )
 
 
 def test_degree_ignores_a_title_that_only_matches_patterns() -> None:
-    payload = gold.degree_payload("Biomedical Engineering Intern", "Join our summer program.")
+    payload = gold.degree_payload(
+        "Biomedical Engineering Intern", "Join our summer program.", parsed_at=NOW
+    )
 
     assert payload["degree"] == []
 
 
 def test_degree_still_honors_an_explicit_title_pattern() -> None:
     payload = gold.degree_payload(
-        "Field Service Engineer, Surgical Robotics", "Join our summer program."
+        "Field Service Engineer, Surgical Robotics",
+        "Join our summer program.",
+        parsed_at=NOW,
     )
 
     assert payload["degree"] == ["med_device"]
@@ -470,9 +583,11 @@ class _DegreesConnection:
 
     async def executemany(self, query, updates):
         self.update_calls += 1
-        for posting_id, payload, title, description, version in updates:
+        for posting_id, payload, title, description, version, input_hash in updates:
             row = self.rows[posting_id]
             if row["title"] != title or (row["description"] or "") != description:
+                continue
+            if payload["degree_meta"]["input_hash"] != input_hash:
                 continue
             if row["degree_version"] is None or row["degree_version"] != version:
                 row["attributes"].update(payload)
@@ -491,7 +606,10 @@ async def test_degrees_step_enriches_each_unstamped_posting_only_once() -> None:
     assert connection.update_calls == 1
     assert connection.rows[1]["attributes"]["degree"] == ["cs"]
     assert connection.rows[2]["attributes"]["degree"] == []
-    assert connection.rows[1]["degree_version"] == 5
+    assert connection.rows[1]["attributes"]["degree_meta"]["input_hash"] == (
+        gold.degree_input_hash("Engineer", "Degree in Computer Science.")
+    )
+    assert connection.rows[1]["degree_version"] == 6
 
 
 @pytest.mark.asyncio
@@ -504,7 +622,7 @@ async def test_degrees_step_rebuilds_postings_from_an_older_taxonomy() -> None:
 
     assert result == gold.Counts(postings=2)
     assert connection.rows[1]["attributes"]["degree"] == ["cs"]
-    assert connection.rows[1]["degree_version"] == 5
+    assert connection.rows[1]["degree_version"] == 6
 
 
 class _SkillsConnection:
@@ -683,11 +801,10 @@ async def test_skills_step_rebuilds_postings_from_an_older_taxonomy() -> None:
 
 
 def test_steps_selects_all_or_one() -> None:
-    # job_type is deliberately absent: it is a parse-time column derived per
-    # vendor in the adapter, not a rebuildable gold artifact.
     assert [step.name for step in gold.steps()] == [
-        "skills", "degrees", "summaries", "dedup"
+        "job_type", "skills", "degrees", "summaries", "dedup"
     ]
+    assert [step.name for step in gold.steps("job_type")] == ["job_type"]
     assert [step.name for step in gold.steps("degrees")] == ["degrees"]
     assert [step.name for step in gold.steps("skills")] == ["skills"]
     assert [step.name for step in gold.steps("summaries")] == ["summaries"]

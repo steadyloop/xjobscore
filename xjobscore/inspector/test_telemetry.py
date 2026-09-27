@@ -107,12 +107,12 @@ async def test_rollups_carry_counters_and_the_latest_outcome():
                 "last_polled_at": NOW,
             }
         ],
-        [{"feed_id": 7, "status": "not_modified"}],
+        [{"feed_id": 7, "status": "unchanged"}],
     )
     rollups = await telemetry.feed_rollups(pool, now=NOW)
     assert rollups[7]["new_7d"] == 4
     assert "observed_days" not in rollups[7]
-    assert rollups[7]["last_status"] == "not_modified"
+    assert rollups[7]["last_status"] == "unchanged"
     assert rollups[7]["last_polled_at"] == NOW.isoformat()
 
 

@@ -37,6 +37,8 @@ def signed_in_app(**kwargs):
 class FakeRepository:
     def __init__(self) -> None:
         self.connected = False
+        # One PNG and one company that the harvest never resolved.
+        self.logos = {7: b"\x89PNG\r\n\x1a\n fake", 8: None}
         self.jobs = [
             {
                 "id": 41,
@@ -49,6 +51,7 @@ class FakeRepository:
                 "location": "United States",
                 "apply_url": "https://jobs.example.test/41/apply",
                 "job_type": "intern",
+                "job_domain": "software",
                 "remote": "yes",
                 "attributes": {
                     "version": 1,
@@ -92,6 +95,10 @@ class FakeRepository:
         application_job_ids = {row["job_id"] for row in self.applications if row["job_id"]}
         rows = [row for row in self.jobs if row["id"] not in application_job_ids]
         degree_fields = set(options["degree_fields"])
+        domains = degree_fields.intersection({"software", "finance", "unlabeled"})
+        if domains:
+            rows = [row for row in rows if row.get("job_domain") in domains]
+            degree_fields -= domains
         if degree_fields:
             rows = [
                 row
@@ -111,6 +118,9 @@ class FakeRepository:
                 or (row.get("job_type") is None and UNCLASSIFIED in types)
             ]
         return {"jobs": deepcopy(rows), "total": len(rows), "job_type_counts": job_type_counts, "limit": options["limit"], "offset": options["offset"]}
+
+    async def company_logo(self, company_id):
+        return self.logos.get(company_id)
 
     async def source_coverage(self):
         return {
@@ -147,6 +157,7 @@ class FakeRepository:
             "stage": "considering",
             "closed_reason": None,
             "apply_url_snapshot": url,
+            "resume_variant": None,
             "submitted_at": None,
             "next_action": None,
             "next_due_at": None,
@@ -186,13 +197,12 @@ class FakeRepository:
         row = next((row for row in self.applications if row["id"] == application_id), None)
         if row is None:
             return None
-        if not row["external"] and any(key in changes for key in ("company", "title", "apply_url_snapshot")):
+        if not row["external"] and any(key in changes for key in ("company", "title", "location", "apply_url_snapshot")):
             raise ValueError("discovered application snapshots cannot be edited")
-        if "company" in changes:
-            row["company"] = changes["company"]
-        if "title" in changes:
-            row["title"] = changes["title"]
-        for key in ("stage", "closed_reason", "apply_url_snapshot", "submitted_at", "next_action", "next_due_at", "note"):
+        for key in ("company", "title", "location"):
+            if key in changes:
+                row[key] = changes[key]
+        for key in ("stage", "closed_reason", "apply_url_snapshot", "resume_variant", "submitted_at", "next_action", "next_due_at", "note"):
             if key in changes:
                 row[key] = changes[key]
         return deepcopy(row)
@@ -337,6 +347,35 @@ def test_us_location_policy_has_four_read_time_buckets() -> None:
     ]) == 3
 
 
+@pytest.mark.asyncio
+async def test_search_matches_the_ats_vendor_half_of_source() -> None:
+    """Typing a vendor name lists that vendor's boards, keyed on the prefix only."""
+
+    class QueryPool:
+        def __init__(self):
+            self.queries = []
+
+        async def fetchval(self, query, *args):
+            return 0
+
+        async def fetchrow(self, query, *args):
+            self.queries.append((query, args))
+            return {"intern": 0, "coop": 0, "student": 0, "new_grad": 0, "research": 0}
+
+        async def fetch(self, query, *args):
+            self.queries.append((query, args))
+            return []
+
+    pool = QueryPool()
+    repository = PostgresRepository("injected", pool=pool)
+    await repository.list_jobs(job_types=["intern"], q="greenhouse")
+
+    assert pool.queries
+    for query, args in pool.queries:
+        assert "split_part(j.source, ':', 1) ILIKE" in query
+        assert "%greenhouse%" in args
+
+
 def test_skill_keyword_search_resolves_ids_without_description_search() -> None:
     assert "cpp" in _skill_search_ids("C++")
     assert "kubernetes" in _skill_search_ids("Kubernetes")
@@ -357,18 +396,16 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
             self.page_started = asyncio.Event()
             self.count_args = ()
             self.count_query = ""
-            self.type_count_query = ""
             self.page_args = ()
             self.page_query = ""
 
         async def fetchval(self, query, *args):
+            raise AssertionError("standard job types derive total from tab counts")
+
+        async def fetchrow(self, query, *args):
             self.count_query = query
             self.count_args = args
             await self.page_started.wait()
-            return 1
-
-        async def fetchrow(self, query, *args):
-            self.type_count_query = query
             return {"intern": 1, "coop": 0, "student": 0, "new_grad": 0, "research": 0}
 
         async def fetch(self, query, *args):
@@ -418,12 +455,11 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     # COUNT sees only account + filters; LIMIT/OFFSET belong only to the page.
     # An ordinary focus area binds nothing: `degree` is accepted but no
     # longer gates the query, so "cs" above contributes no parameter here.
-    assert len(pool.count_args) == 5
+    assert len(pool.count_args) == 4
     assert ["cs"] not in pool.count_args
     assert pool.count_args[1] == [99]
     assert pool.count_args[2] == "%Kubernetes%"
     assert "kubernetes" in pool.count_args[3]
-    assert pool.count_args[4] == ["intern"]
     assert pool.page_args[-2:] == (25, 50)
     array_args = [value for value in pool.page_args if isinstance(value, list)]
     assert any("CA|San Francisco" in value and "NY|New York City" in value for value in array_args)
@@ -438,7 +474,7 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     assert "AT TIME ZONE 'America/Los_Angeles'" in pool.page_query
     assert "SELECT 1 FROM jsonb_array_elements(j.locations) location" in pool.page_query
     assert "THEN 1" in pool.page_query and "ELSE 4" in pool.page_query
-    for query in (pool.count_query, pool.type_count_query, pool.page_query):
+    for query in (pool.count_query, pool.page_query):
         assert "LEFT JOIN job_posting_dup_group g" in query
         assert "g.primary_posting_id IS NOT NULL" in query
         assert "g.state <> 'rejected'" in query
@@ -448,6 +484,72 @@ async def test_job_count_does_not_block_the_visible_page() -> None:
     assert "excluded.dup_group_id = j.dup_group_id" in pool.page_query
     assert "AS other_sources" in pool.page_query
     assert "sibling.status = 'active'" in pool.page_query
+
+
+@pytest.mark.asyncio
+async def test_oldest_sort_orders_posting_dates_and_ids_ascending() -> None:
+    class RecordingPool:
+        def __init__(self) -> None:
+            self.page_query = ""
+
+        async def fetchval(self, query, *args):
+            return 0
+
+        async def fetchrow(self, query, *args):
+            return {
+                "intern": 0,
+                "coop": 0,
+                "student": 0,
+                "new_grad": 0,
+                "research": 0,
+            }
+
+        async def fetch(self, query, *args):
+            self.page_query = query
+            return []
+
+    pool = RecordingPool()
+    repository = PostgresRepository("injected", pool=pool)
+    await repository.list_jobs(job_types=["intern"], sort="oldest")
+
+    assert "::date ASC NULLS LAST" in pool.page_query
+    assert "COALESCE(j.posted_at, j.first_seen_at) ASC NULLS LAST" in pool.page_query
+    assert "j.id ASC" in pool.page_query
+
+
+@pytest.mark.asyncio
+async def test_season_filter_searches_title_and_description_and_skips_count_cache() -> None:
+    class RecordingPool:
+        def __init__(self) -> None:
+            self.queries = []
+
+        async def fetchrow(self, query, *args):
+            self.queries.append((query, args))
+            return {
+                "intern": 0,
+                "coop": 0,
+                "student": 0,
+                "new_grad": 0,
+                "research": 0,
+            }
+
+        async def fetch(self, query, *args):
+            self.queries.append((query, args))
+            return []
+
+    pool = RecordingPool()
+    repository = PostgresRepository("injected", pool=pool)
+
+    await repository.list_jobs(job_types=["intern"], season="Fall")
+    await repository.list_jobs(job_types=["intern"], season="Fall")
+
+    assert len(pool.queries) == 4
+    for query, args in pool.queries:
+        assert "j.title ~*" in query
+        assert "COALESCE(j.description, '') ~*" in query
+        assert r"\mfall\M" in args
+    with pytest.raises(ValueError, match="unknown season"):
+        await repository.list_jobs(job_types=["intern"], season="spring")
 
 
 @pytest.mark.asyncio
@@ -481,10 +583,10 @@ async def test_bio_degree_filter_uses_title_and_employer_evidence() -> None:
         degree_fields=["biotech"],
     )
 
-    assert len(pool.queries) == 4
+    assert len(pool.queries) == 3
     employer_query, employer_args = pool.queries[0]
     assert "WITH company_postings AS MATERIALIZED" in employer_query
-    assert "c.labels ? 'biotech'" in employer_query
+    assert "c.tags ? 'biotech'" in employer_query
     assert "COALESCE(ct.direct_count, 0) >= 5" in employer_query
     assert ">= 0.02" in employer_query
     assert "COALESCE(ct.direct_count, 0) >= 3" in employer_query
@@ -502,7 +604,7 @@ async def test_bio_degree_filter_uses_title_and_employer_evidence() -> None:
         job_types=["intern"],
         degree_fields=["biotech"],
     )
-    assert len(pool.queries) == 7
+    assert len(pool.queries) == 5
 
 
 def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
@@ -559,6 +661,58 @@ def test_live_api_contract_uses_repository_and_postgres_vocabulary() -> None:
     assert not repository.connected
 
 
+def test_marking_an_application_applied_takes_no_extra_confirmation() -> None:
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        created = client.post("/api/jobs/41/applications").json()
+        response = client.patch(
+            f"/api/applications/{created['id']}", json={"stage": "applied"}
+        )
+        assert response.status_code == 200
+        assert response.json()["stage"] == "applied"
+
+
+def test_location_is_editable_only_on_external_applications() -> None:
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        external = client.post(
+            "/api/applications/external",
+            json={
+                "company": "Manual Co",
+                "title": "Engineer",
+                "url": "https://manual.example/job",
+                "location": "Boston, MA",
+            },
+        ).json()
+        moved = client.patch(
+            f"/api/applications/{external['id']}", json={"location": "Remote (US)"}
+        )
+        assert moved.status_code == 200
+        assert moved.json()["location"] == "Remote (US)"
+
+        discovered = client.post("/api/jobs/41/applications").json()
+        refused = client.patch(
+            f"/api/applications/{discovered['id']}", json={"location": "Remote (US)"}
+        )
+        assert refused.status_code == 422
+        assert refused.json()["detail"] == "discovered application snapshots cannot be edited"
+
+
+def test_the_resume_sent_is_recorded_on_any_application() -> None:
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        discovered = client.post("/api/jobs/41/applications").json()
+        assert discovered["resume_variant"] is None
+        updated = client.patch(
+            f"/api/applications/{discovered['id']}", json={"resume_variant": "Systems SWE"}
+        )
+        assert updated.status_code == 200
+        assert updated.json()["resume_variant"] == "Systems SWE"
+
+
 def test_jobs_default_scope_excludes_the_unclassified_pool() -> None:
     repository = FakeRepository()
     repository.jobs.append(
@@ -603,6 +757,8 @@ def test_api_rejects_unknown_job_filter_and_invalid_application_mutation() -> No
         ).status_code == 200
         assert client.get("/api/jobs", params={"job_type": "made_up"}).status_code == 400
         assert client.get("/api/jobs", params={"degree_field": "made_up"}).status_code == 400
+        assert client.get("/api/jobs", params={"season": "spring"}).status_code == 400
+        assert client.get("/api/jobs", params={"season": "Fall"}).status_code == 200
         for domain in ("software", "finance", "unlabeled"):
             assert client.get(
                 "/api/jobs", params={"degree_field": domain}
@@ -729,6 +885,32 @@ def test_board_state_ranks_deliberate_holds_above_derived_signals() -> None:
     assert _board_state(0, ancient, None, 0, now) == "ok"
 
 
+@pytest.mark.asyncio
+async def test_coverage_reads_only_the_single_snapshot_row() -> None:
+    class SnapshotPool:
+        def __init__(self) -> None:
+            self.queries = []
+
+        async def fetchrow(self, query, *args):
+            self.queries.append(query)
+            return {
+                "payload": (
+                    '{"source_coverage":{"sources":[],"source_count":0,'
+                    '"total_coverage":4,"total_added_today":1},'
+                    '"board_map":{"providers":[],"totals":{"boards":2}}}'
+                ),
+                "computed_at": "2026-09-02T20:00:00+00:00",
+            }
+
+    pool = SnapshotPool()
+    repository = PostgresRepository("injected", pool=pool)
+
+    assert (await repository.source_coverage())["total_coverage"] == 4
+    assert (await repository.board_map())["totals"]["boards"] == 2
+    assert all("coverage_snapshot" in query for query in pool.queries)
+    assert all("feed" not in query and "token" not in query for query in pool.queries)
+
+
 def test_search_treats_ilike_wildcards_as_literal_text() -> None:
     """A typed ``%`` or ``_`` must match itself, not act as a wildcard.
 
@@ -747,40 +929,131 @@ def test_search_treats_ilike_wildcards_as_literal_text() -> None:
     assert _ilike_pattern("ends\\") == r"%ends\\%"
 
 
-def test_unlabeled_is_derived_from_the_other_two_domain_predicates() -> None:
-    # The review queue is only trustworthy while it is the exact complement of
-    # the labels, so it must never be transcribed by hand.
-    from oneshot_ui.repository import (
-        DOMAIN_FILTERS,
-        FINANCE_FILTER,
-        SOFTWARE_FILTER,
-        UNLABELED_FILTER,
-        _domain_predicates,
+@pytest.mark.asyncio
+async def test_domain_filters_read_the_stored_gold_column() -> None:
+    from oneshot_ui.repository import DOMAIN_FILTERS
+
+    class QueryPool:
+        def __init__(self):
+            self.queries = []
+
+        async def fetchval(self, query, *args):
+            return 0
+
+        async def fetchrow(self, query, *args):
+            self.queries.append((query, args))
+            return {
+                "intern": 0,
+                "coop": 0,
+                "student": 0,
+                "new_grad": 0,
+                "research": 0,
+            }
+
+        async def fetch(self, query, *args):
+            self.queries.append((query, args))
+            return []
+
+    pool = QueryPool()
+    repository = PostgresRepository("injected", pool=pool)
+    for domain in DOMAIN_FILTERS:
+        await repository.list_jobs(
+            job_types=["intern"], degree_fields=[domain], hide_tracked=False
+        )
+
+    sql = "\n".join(query for query, _args in pool.queries)
+    assert sql.count("j.job_domain = ANY") == 2 * len(DOMAIN_FILTERS)
+    assert "regexp_replace" not in sql
+    assert "~*" not in sql
+    bound_lists = [
+        value
+        for _query, args in pool.queries
+        for value in args
+        if isinstance(value, list)
+    ]
+    for domain in DOMAIN_FILTERS:
+        assert [domain] in bound_lists
+
+
+@pytest.mark.asyncio
+async def test_job_type_counts_are_cached_across_tabs_and_repository_clones() -> None:
+    class CountingPool:
+        def __init__(self) -> None:
+            self.count_reads = 0
+            self.page_reads = 0
+
+        async def fetchval(self, query, *args):
+            raise AssertionError("standard job types derive total from tab counts")
+
+        async def fetchrow(self, query, *args):
+            self.count_reads += 1
+            await asyncio.sleep(0)
+            return {
+                "intern": 5,
+                "coop": 2,
+                "student": 3,
+                "new_grad": 4,
+                "research": 1,
+            }
+
+        async def fetch(self, query, *args):
+            self.page_reads += 1
+            return []
+
+    pool = CountingPool()
+    repository = PostgresRepository("injected", pool=pool)
+    account_repository = repository.for_account(TEST_ACCOUNT_ID)
+
+    internships, coops = await asyncio.gather(
+        repository.list_jobs(
+            job_types=["intern"], degree_fields=["software"], hide_tracked=False
+        ),
+        account_repository.list_jobs(
+            job_types=["coop"], degree_fields=["software"], hide_tracked=False
+        ),
     )
 
-    params: list[object] = []
+    assert internships["total"] == 5
+    assert coops["total"] == 2
+    assert internships["job_type_counts"] == coops["job_type_counts"]
+    assert pool.count_reads == 1
+    assert pool.page_reads == 2
 
-    def bind(value: object) -> str:
-        params.append(value)
-        return f"${len(params)}"
+    # Search terms are unbounded user input, so they bypass the small cache.
+    await repository.list_jobs(job_types=["intern"], q="python")
+    await repository.list_jobs(job_types=["intern"], q="python")
+    assert pool.count_reads == 3
 
-    predicates = _domain_predicates(bind, [7], DOMAIN_FILTERS)
-    assert set(predicates) == set(DOMAIN_FILTERS)
-    assert predicates[UNLABELED_FILTER] == (
-        f"(NOT {predicates[SOFTWARE_FILTER]} AND NOT {predicates[FINANCE_FILTER]})"
-    )
-    # Every pattern binds at most once across all three predicates, so no
-    # parameter is left orphaned when only some domains reach the SQL.
-    assert len(params) == len(set(map(str, params)))
-    assert [value for value in params if isinstance(value, list)] == [[7]]
 
-    # Requesting one domain must bind only that domain's patterns.
-    only: list[object] = []
-    _domain_predicates(
-        lambda value: (only.append(value), f"${len(only)}")[1],
-        [7],
-        [SOFTWARE_FILTER],
-    )
-    assert all(not isinstance(value, list) for value in only)
-    assert len(only) < len(params)
 
+def test_company_logo_route_serves_stored_bytes_and_404s_on_a_miss():
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        hit = client.get("/api/companies/7/logo")
+        assert hit.status_code == 200
+        assert hit.content == repository.logos[7]
+        # Sniffed from the payload, because the bytes are stored exactly as the
+        # company's own site served them and carry no recorded type.
+        assert hit.headers["content-type"] == "image/png"
+        # A list page asks for ~30 of these at once; without this every card
+        # revalidates on every view.
+        assert "max-age=" in hit.headers["cache-control"]
+
+        # A recorded failure and an unknown company are the same answer: the
+        # client already knows not to ask, so this is only the direct-hit case.
+        assert client.get("/api/companies/8/logo").status_code == 404
+        assert client.get("/api/companies/999/logo").status_code == 404
+
+
+def test_logo_media_type_names_every_format_a_favicon_arrives_as():
+    from oneshot_ui.app import _logo_media_type
+
+    assert _logo_media_type(b"\x89PNG\r\n\x1a\n") == "image/png"
+    assert _logo_media_type(b"RIFF\x00\x00\x00\x00WEBPVP8 ") == "image/webp"
+    assert _logo_media_type(b"GIF89a") == "image/gif"
+    assert _logo_media_type(b"\xff\xd8\xff\xe0") == "image/jpeg"
+    assert _logo_media_type(b"\x00\x00\x01\x00\x01\x00") == "image/x-icon"
+    # SVG is the only text format here, so it is the fallback rather than a
+    # magic-number match.
+    assert _logo_media_type(b'<svg xmlns="http://www.w3.org/2000/svg">') == "image/svg+xml"

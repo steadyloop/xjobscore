@@ -18,6 +18,11 @@ from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 
 
+# Detail fan-out width for one board. A module constant rather than a literal
+# at the call site so `sources.width` sizes this vendor's scheduler pool from
+# the same number the requests use.
+CONCURRENCY = 5
+
 _DETAIL = re.compile(r"/(?:[A-Za-z_]+/)?careers/JobDetail/[^?#]+/(?P<id>\d+)(?:[?#]|$)")
 
 
@@ -165,7 +170,7 @@ async def harvest(feed: Feed, net: Net) -> Record:
 
     links = list(details.items())
     responses = await asyncio.gather(
-        *(net.get(url, concurrency=5) for _, url in links),
+        *(net.get(url, concurrency=CONCURRENCY) for _, url in links),
         return_exceptions=True,
     )
     items: list[Item] = []

@@ -1,0 +1,558 @@
+:root {
+  color-scheme: light;
+  --page: #f1f4ef;
+  --paper: #fbfcf9;
+  --paper-soft: #f5f7f3;
+  --ink: #17211b;
+  --ink-soft: #5f6d65;
+  --ink-faint: #929c96;
+  --line: #dce2dc;
+  --line-strong: #cad4cc;
+  --forest: #1f4d39;
+  --green: #2c8b5d;
+  --green-bright: #51b87e;
+  --green-soft: #dcefe4;
+  --green-pale: #eef7f1;
+  --amber: #a56c1b;
+  --red: #b4483f;
+  --shadow: 0 24px 70px rgba(31, 55, 42, 0.09);
+  --ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html { min-height: 100%; }
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(81, 184, 126, 0.08), transparent 28rem),
+    var(--page);
+  color: var(--ink);
+  font: 14px/1.45 var(--ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+.system-shell {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 48px 0 70px;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+  padding: 0 4px;
+}
+
+.brand {
+  display: block;
+  margin-bottom: 26px;
+  color: var(--forest);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: clamp(36px, 5vw, 62px);
+  font-weight: 590;
+  letter-spacing: -0.055em;
+  line-height: 0.95;
+}
+
+.page-head p {
+  margin: 13px 0 0;
+  color: var(--ink-soft);
+  font-size: 15px;
+}
+
+.sample-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 4px;
+  color: var(--ink-faint);
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sample-note span {
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 99px;
+  color: var(--forest);
+  background: rgba(251, 252, 249, 0.7);
+}
+
+.sample-note small { font: inherit; }
+
+.system-board {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.unit { min-width: 0; }
+
+.pipeline-unit {
+  padding: 30px 34px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.unit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.unit-index {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink-faint);
+  font: 600 9px/1.2 var(--mono);
+  letter-spacing: 0.12em;
+}
+
+.unit-head h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 630;
+  letter-spacing: -0.03em;
+}
+
+.state-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  color: var(--ink-soft);
+  font: 11px/1 var(--mono);
+  white-space: nowrap;
+}
+
+.state-beacon {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.unit[data-live="true"] .state-beacon {
+  background: var(--green-bright);
+  animation: beacon 2.4s ease-out infinite;
+}
+
+.unit[data-tone="warning"] .state-beacon { background: var(--amber); }
+.unit[data-tone="error"] .state-beacon { background: var(--red); }
+
+@keyframes beacon {
+  0%, 35% { box-shadow: 0 0 0 0 rgba(81, 184, 126, 0.42); }
+  78%, 100% { box-shadow: 0 0 0 9px rgba(81, 184, 126, 0); }
+}
+
+/* Pipeline -------------------------------------------------------------- */
+
+.pipeline-map {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 39px 0 35px;
+}
+
+.pipeline-line {
+  position: absolute;
+  top: 7px;
+  right: 12.5%;
+  left: 12.5%;
+  height: 2px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.pipeline-line::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--green-soft), var(--green), var(--green-soft));
+  opacity: 0.85;
+}
+
+.pipeline-packet {
+  position: absolute;
+  z-index: 2;
+  top: -2px;
+  left: -10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green-bright);
+  box-shadow: 0 0 0 5px rgba(81, 184, 126, 0.12), 0 0 18px rgba(44, 139, 93, 0.5);
+  opacity: 0;
+}
+
+.pipeline-unit[data-active="true"] .pipeline-packet {
+  opacity: 1;
+  animation: packet 4.8s cubic-bezier(0.36, 0, 0.32, 1) infinite;
+}
+
+.pipeline-unit[data-active="true"] .packet-two { animation-delay: -2.4s; }
+
+@keyframes packet {
+  from { left: -10px; }
+  to { left: calc(100% + 3px); }
+}
+
+.pipeline-stage {
+  position: relative;
+  z-index: 3;
+  text-align: center;
+}
+
+.stage-node {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0 auto 12px;
+  border: 4px solid var(--paper);
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 1px var(--green);
+}
+
+.pipeline-stage strong,
+.pipeline-stage small { display: block; }
+
+.pipeline-stage strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pipeline-stage small {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: 10px;
+}
+
+.fact-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 -34px;
+  border-top: 1px solid var(--line);
+}
+
+.fact-row div {
+  padding: 17px 34px 19px;
+  border-right: 1px solid var(--line);
+}
+
+.fact-row div:last-child { border-right: 0; }
+
+.fact-row span,
+.fact-row strong { display: block; }
+
+.fact-row span,
+.clock-facts span {
+  color: var(--ink-faint);
+  font: 9px/1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fact-row strong {
+  margin-top: 5px;
+  font-size: 13px;
+  font-weight: 610;
+}
+
+/* Clocks ---------------------------------------------------------------- */
+
+.cadence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cadence-unit { padding: 28px 34px 32px; }
+.cadence-unit:first-child { border-right: 1px solid var(--line); }
+
+.clock-layout {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  align-items: center;
+  gap: 32px;
+  margin-top: 28px;
+}
+
+.cadence-clock {
+  --progress: 0;
+  position: relative;
+  width: 184px;
+  height: 184px;
+  border-radius: 50%;
+}
+
+.scheduler-clock {
+  background:
+    radial-gradient(circle, var(--paper) 0 57%, transparent 58%),
+    conic-gradient(from -90deg, var(--green) calc(var(--progress) * 1turn), var(--green-soft) 0);
+}
+
+.scheduler-clock::after,
+.heartbeat-clock::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.clock-ticks {
+  position: absolute;
+  inset: 0;
+}
+
+.clock-ticks i {
+  position: absolute;
+  top: 4px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  height: 5px;
+  background: var(--line-strong);
+  transform: rotate(calc(var(--tick) * 6deg));
+  transform-origin: 0.5px 88px;
+}
+
+.clock-ticks i:nth-child(5n + 1) {
+  height: 8px;
+  background: var(--ink-faint);
+}
+
+.clock-hand {
+  position: absolute;
+  z-index: 4;
+  top: 18px;
+  left: calc(50% - 1px);
+  width: 2px;
+  height: 74px;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, var(--green-bright), var(--forest));
+  transform: rotate(calc(var(--progress) * 1turn));
+  transform-origin: 1px 74px;
+}
+
+.clock-pin {
+  position: absolute;
+  z-index: 5;
+  top: calc(50% - 5px);
+  left: calc(50% - 5px);
+  width: 10px;
+  height: 10px;
+  border: 3px solid var(--paper);
+  border-radius: 50%;
+  background: var(--forest);
+  box-shadow: 0 0 0 1px var(--forest);
+}
+
+.clock-copy {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.clock-copy strong {
+  font: 650 25px/1 var(--mono);
+  letter-spacing: -0.05em;
+}
+
+.clock-copy span {
+  margin-top: 7px;
+  color: var(--ink-faint);
+  font: 9px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.clock-facts {
+  display: flex;
+  flex-direction: column;
+}
+
+.clock-facts div {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.clock-facts div:last-child { border-bottom: 0; }
+
+.clock-facts strong {
+  display: block;
+  margin-top: 5px;
+  font: 610 12px/1.25 var(--mono);
+}
+
+/* Heartbeat uses the same clock grammar, but its six-hour cadence is shown
+   as a truthful progress arc. The halo says the listener is alive; it does
+   not pretend a six-hour validation run is happening every few seconds. */
+
+.heartbeat-clock {
+  background: radial-gradient(circle, var(--paper) 0 57%, transparent 58%);
+}
+
+.heartbeat-arc,
+.heartbeat-progress {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.heartbeat-arc { background: conic-gradient(from -90deg, var(--green-soft), var(--green-soft)); }
+
+.heartbeat-progress {
+  background: conic-gradient(from -90deg, var(--green) calc(var(--progress) * 1turn), transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 0 69%, #000 70% 76%, transparent 77%);
+  mask: radial-gradient(circle, transparent 0 69%, #000 70% 76%, transparent 77%);
+}
+
+.heartbeat-arc {
+  -webkit-mask: radial-gradient(circle, transparent 0 69%, #000 70% 76%, transparent 77%);
+  mask: radial-gradient(circle, transparent 0 69%, #000 70% 76%, transparent 77%);
+}
+
+.heartbeat-position,
+.heartbeat-origin {
+  position: absolute;
+  z-index: 5;
+  top: 17px;
+  left: calc(50% - 5px);
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--green-bright);
+  box-shadow: 0 0 0 1px var(--green);
+  transform: rotate(calc(var(--progress) * 1turn));
+  transform-origin: 5px 75px;
+}
+
+.heartbeat-origin {
+  background: var(--forest);
+  transform: none;
+}
+
+.heartbeat-unit[data-live="true"] .heartbeat-position {
+  animation: heartbeat-listener 2.8s ease-out infinite;
+}
+
+.heartbeat-unit[data-running="true"] .heartbeat-position {
+  animation-duration: 0.9s;
+}
+
+@keyframes heartbeat-listener {
+  0%, 38% { box-shadow: 0 0 0 1px var(--green), 0 0 0 0 rgba(81, 184, 126, 0.45); }
+  80%, 100% { box-shadow: 0 0 0 1px var(--green), 0 0 0 10px rgba(81, 184, 126, 0); }
+}
+
+.motion-contract {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 34px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-soft);
+}
+
+.motion-contract p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.motion-contract strong { color: var(--ink); }
+
+.contract-mark {
+  width: 18px;
+  height: 2px;
+  flex: none;
+  background: linear-gradient(90deg, var(--green), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .state-beacon,
+  .pipeline-packet,
+  .heartbeat-position { animation: none !important; }
+}
+
+@media (max-width: 980px) {
+  .cadence-grid { grid-template-columns: 1fr; }
+  .cadence-unit:first-child {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .clock-layout { grid-template-columns: 210px 1fr; }
+}
+
+@media (max-width: 620px) {
+  .system-shell {
+    width: min(100% - 20px, 1180px);
+    padding-top: 25px;
+  }
+  .page-head { align-items: flex-start; }
+  .sample-note small { display: none; }
+  .brand { margin-bottom: 18px; }
+  .pipeline-unit,
+  .cadence-unit { padding-inline: 20px; }
+  .pipeline-map { margin-block: 34px 30px; }
+  .pipeline-stage small { display: none; }
+  .fact-row { margin-inline: -20px; }
+  .fact-row div { padding-inline: 20px; }
+  .clock-layout {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 22px;
+  }
+  .clock-facts {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .clock-facts div {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  .clock-facts strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .motion-contract { padding-inline: 20px; }
+}
+
+@media (max-width: 430px) {
+  .page-head p { display: none; }
+  .sample-note { align-self: flex-end; }
+  .system-board { border-radius: 16px; }
+  .unit-head { align-items: flex-end; }
+  .unit-head h2 { font-size: 18px; }
+  .state-label { font-size: 10px; }
+  .fact-row div { padding: 15px 12px 17px; }
+  .fact-row strong { font-size: 11px; }
+  .cadence-clock { transform: scale(0.92); }
+}

@@ -16,6 +16,10 @@ from xjobscore.net import Net, NetError
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 
 
+# Detail fan-out width for one board, read by `sources.width`; see avature.
+CONCURRENCY = 4
+
+
 class _Scripts(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -105,7 +109,7 @@ async def harvest(feed: Feed, net: Net) -> Record:
         links.append((str(external_id), f"{root}/{slug}"))
 
     responses = await asyncio.gather(
-        *(net.get(url, concurrency=4) for _, url in links),
+        *(net.get(url, concurrency=CONCURRENCY) for _, url in links),
         return_exceptions=True,
     )
     items: list[Item] = []

@@ -42,6 +42,11 @@ const state = {
   // unreadable log is not an empty one -- see the header dot.
   checks: [],
   logAvailable: false,
+  // The same table's other verb: feed arrivals and departures. Tracked apart
+  // from `checks` so one panel can be empty while the other is full -- a quiet
+  // fleet checks constantly and enters nothing.
+  feedEvents: [],
+  feedLogAvailable: false,
 };
 
 // The tail is short and the page is not a monitor: slower than the Scheduler's
@@ -57,6 +62,8 @@ const nodes = {
   counts: document.getElementById("summary-line"),
   logLines: document.getElementById("token-log-lines"),
   logDot: document.getElementById("token-log-dot"),
+  feedLogLines: document.getElementById("feed-log-lines"),
+  feedLogDot: document.getElementById("feed-log-dot"),
   degraded: document.getElementById("degraded-banner"),
   error: document.getElementById("error-banner"),
   errorText: document.getElementById("error-text"),
@@ -466,36 +473,58 @@ function renderCounts(counts) {
   );
 }
 
-/* The tail log reads `token_log`, one row per probe. Rendered oldest-at-top so
-   new lines arrive at the bottom, and the scroll only follows when the reader
-   is already parked there -- scrolling back through history should stay put. */
-function renderLog() {
-  nodes.logDot.dataset.state = state.logAvailable ? "live" : "off";
-  if (!state.checks.length) {
-    nodes.logLines.replaceChildren(
-      el(
-        "div",
-        { class: "tok-log-empty" },
-        state.logAvailable ? "no checks recorded yet…" : "check log unavailable"
-      )
+// `feed_entered`/`feed_exited` are stored as verbs and shown as direction.
+const EVENT_GLYPHS = { feed_entered: "→", feed_exited: "←" };
+
+/* Both tails read `token_log`, one row per thing that happened to a token, and
+   differ only in which verbs they keep. Rendered oldest-at-top so new lines
+   arrive at the bottom, and the scroll only follows when the reader is already
+   parked there -- scrolling back through history should stay put. */
+function renderTail(lines, dot, rows, available, emptyText, unavailableText) {
+  dot.dataset.state = available ? "live" : "off";
+  if (!rows.length) {
+    lines.replaceChildren(
+      el("div", { class: "tok-log-empty" }, available ? emptyText : unavailableText)
     );
     return;
   }
-  const pinned =
-    nodes.logLines.scrollHeight - nodes.logLines.scrollTop - nodes.logLines.clientHeight < 12;
-  nodes.logLines.replaceChildren(
-    ...[...state.checks].reverse().map((check) =>
+  const pinned = lines.scrollHeight - lines.scrollTop - lines.clientHeight < 12;
+  lines.replaceChildren(
+    ...[...rows].reverse().map((row) =>
       el(
         "div",
         { class: "tok-log-line" },
-        el("time", { title: check.checked_at ?? "" }, (check.checked_at ?? "").slice(11, 19)),
-        el("span", { class: "tok-log-st", "data-status": check.status }, check.status),
-        el("span", { class: "tok-log-token", title: `${check.ats}:${check.token}` }, check.token),
-        el("span", { class: "tok-log-vendor" }, check.ats)
+        el("time", { title: row.checked_at ?? "" }, (row.checked_at ?? "").slice(11, 19)),
+        el(
+          "span",
+          { class: "tok-log-st", "data-status": row.status, title: row.status },
+          EVENT_GLYPHS[row.status] ?? row.status
+        ),
+        el("span", { class: "tok-log-token", title: `${row.ats}:${row.token}` }, row.token),
+        el("span", { class: "tok-log-vendor" }, row.ats)
       )
     )
   );
-  if (pinned) nodes.logLines.scrollTop = nodes.logLines.scrollHeight;
+  if (pinned) lines.scrollTop = lines.scrollHeight;
+}
+
+function renderLog() {
+  renderTail(
+    nodes.logLines,
+    nodes.logDot,
+    state.checks,
+    state.logAvailable,
+    "no checks recorded yet…",
+    "check log unavailable"
+  );
+  renderTail(
+    nodes.feedLogLines,
+    nodes.feedLogDot,
+    state.feedEvents,
+    state.feedLogAvailable,
+    "no feed changes recorded yet…",
+    "feed log unavailable"
+  );
 }
 
 async function loadLog() {
@@ -503,8 +532,11 @@ async function loadLog() {
     const view = await api(`/api/tokens/log?limit=${LOG_LIMIT}`);
     state.logAvailable = Boolean(view.log_available);
     state.checks = view.checks ?? [];
+    state.feedLogAvailable = Boolean(view.feed_log_available);
+    state.feedEvents = view.feed_events ?? [];
   } catch {
     state.logAvailable = false;
+    state.feedLogAvailable = false;
   }
   renderLog();
 }

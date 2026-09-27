@@ -37,7 +37,7 @@ def _seed_token(
     con = sqlite3.connect(db_path)
     try:
         con.execute(
-            """INSERT INTO token(ats, token, status, canonical_url, discovered_at, checked_at)
+            """INSERT INTO tenants(ats, key, status, canonical_url, discovered_at, checked_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (ats, token, status, canonical_url or f"https://example.test/{token}", discovered_at, checked_at),
         )

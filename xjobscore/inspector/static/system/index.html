@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>System · xJobscore</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="system-shell">
+    <header class="page-head">
+      <div>
+        <span class="brand">xJobscore</span>
+        <h1>System</h1>
+        <p>Three clocks. One living pipeline.</p>
+      </div>
+      <div class="sample-note"><span>Live telemetry</span></div>
+    </header>
+
+    <section class="system-board" aria-label="System activity">
+      <article class="unit pipeline-unit" id="pipeline-unit" data-live="false" data-active="false">
+        <header class="unit-head">
+          <div>
+            <span class="unit-index">01 · FLOW</span>
+            <h2>Pipeline</h2>
+          </div>
+          <div class="state-label">
+            <span class="state-beacon" aria-hidden="true"></span>
+            <span id="pipeline-state">Reading state</span>
+          </div>
+        </header>
+
+        <div class="pipeline-map" aria-label="Current posting pipeline">
+          <div class="pipeline-line" aria-hidden="true">
+            <span class="pipeline-packet packet-one"></span>
+            <span class="pipeline-packet packet-two"></span>
+          </div>
+          <div class="pipeline-stage">
+            <span class="stage-node"></span>
+            <strong>Claim</strong>
+            <small>due feeds</small>
+          </div>
+          <div class="pipeline-stage">
+            <span class="stage-node"></span>
+            <strong>Harvest</strong>
+            <small>source payloads</small>
+          </div>
+          <div class="pipeline-stage">
+            <span class="stage-node"></span>
+            <strong>Normalize</strong>
+            <small>job postings</small>
+          </div>
+          <div class="pipeline-stage">
+            <span class="stage-node"></span>
+            <strong>Persist</strong>
+            <small>PostgreSQL</small>
+          </div>
+        </div>
+
+        <footer class="fact-row">
+          <div><span>Current work</span><strong id="pipeline-work">—</strong></div>
+          <div><span>Last write</span><strong id="pipeline-last">—</strong></div>
+          <div><span>Output today</span><strong id="pipeline-output">—</strong></div>
+        </footer>
+      </article>
+
+      <div class="cadence-grid">
+        <article class="unit cadence-unit" id="scheduler-unit" data-live="false">
+          <header class="unit-head">
+            <div>
+              <span class="unit-index">02 · FAST CLOCK</span>
+              <h2>Scheduler</h2>
+            </div>
+            <div class="state-label">
+              <span class="state-beacon" aria-hidden="true"></span>
+              <span id="scheduler-state">Reading state</span>
+            </div>
+          </header>
+
+          <div class="clock-layout">
+            <div class="cadence-clock scheduler-clock" id="scheduler-clock" aria-label="Scheduler cadence">
+              <div class="clock-ticks" id="scheduler-ticks" aria-hidden="true"></div>
+              <span class="clock-progress"></span>
+              <span class="clock-hand"></span>
+              <span class="clock-pin"></span>
+              <div class="clock-copy">
+                <strong id="scheduler-countdown">—</strong>
+                <span>next check</span>
+              </div>
+            </div>
+            <div class="clock-facts">
+              <div><span>Cadence</span><strong id="scheduler-cadence">—</strong></div>
+              <div><span>Due now</span><strong id="scheduler-due">—</strong></div>
+              <div><span>Runner seen</span><strong id="scheduler-seen">—</strong></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="unit cadence-unit" id="heartbeat-unit" data-live="false" data-running="false">
+          <header class="unit-head">
+            <div>
+              <span class="unit-index">03 · SLOW CLOCK</span>
+              <h2>Token heartbeat</h2>
+            </div>
+            <div class="state-label">
+              <span class="state-beacon" aria-hidden="true"></span>
+              <span id="heartbeat-state">Reading state</span>
+            </div>
+          </header>
+
+          <div class="clock-layout">
+            <div class="cadence-clock heartbeat-clock" id="heartbeat-clock" aria-label="Token heartbeat cadence">
+              <span class="heartbeat-arc"></span>
+              <span class="heartbeat-progress"></span>
+              <span class="heartbeat-position"></span>
+              <span class="heartbeat-origin"></span>
+              <div class="clock-copy">
+                <strong id="heartbeat-countdown">—</strong>
+                <span>until next beat</span>
+              </div>
+            </div>
+            <div class="clock-facts">
+              <div><span>Cadence</span><strong id="heartbeat-cadence">—</strong></div>
+              <div><span>Last beat</span><strong id="heartbeat-last">—</strong></div>
+              <div><span>Runner seen</span><strong id="heartbeat-seen">—</strong></div>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <footer class="motion-contract">
+        <span class="contract-mark" aria-hidden="true"></span>
+        <p><strong>Motion is evidence.</strong> Flow requires active work. Clock movement requires a fresh runner signal. Stale, paused, or offline systems freeze.</p>
+      </footer>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

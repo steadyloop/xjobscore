@@ -4,14 +4,12 @@ import { api } from "/static/shared/api.js";
 import { el } from "/static/shared/format.js";
 
 const LINKS = [
+  ["System", "/system"],
+  ["Keyscan", "/keyscan"],
   ["Tokens", "/tokens"],
   ["Scheduler", "/scheduler"],
   ["Feeds", "/"],
-  ["Postings", "/postings"],
-  ["Review", "/review"],
-  ["Query", "/query"],
-  ["Fields", "/fields"],
-  ["Regex", "/regex"],
+  ["Companies", "/companies"],
 ];
 
 const THEME_KEY = "inspector-theme";

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Companies · xJobscore</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/companies/styles.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body class="companies-page">
+  <header id="topnav"></header>
+  <main class="page">
+    <div class="page-header">
+      <div class="pills" id="filter-pills" role="group" aria-label="State"></div>
+      <div class="grow"></div>
+      <input type="search" id="search" placeholder="Search…" autocomplete="off">
+    </div>
+
+    <section class="card">
+      <header class="co-head">
+        <h1>Companies to review</h1>
+        <p class="co-summary" id="summary">—</p>
+        <div class="grow"></div>
+        <button class="btn small" id="reload" type="button">Reload</button>
+      </header>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th style="width:19%">Company</th>
+              <th style="width:18%">Look here</th>
+              <th style="width:15%">Name</th>
+              <th style="width:13%">Domain</th>
+              <th>Description</th>
+              <th style="width:124px"></th>
+            </tr>
+          </thead>
+          <tbody id="body"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="empty" hidden>Nothing to review.</div>
+    </section>
+  </main>
+  <script type="module" src="/static/companies/app.js"></script>
+</body>
+</html>

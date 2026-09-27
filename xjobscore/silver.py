@@ -5,7 +5,7 @@ from __future__ import annotations
 from html.parser import HTMLParser
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Counts", "process", "replay"]
+__all__ = ["ChangeSet", "Counts", "process", "replay"]
 
 
 class _PlainText(HTMLParser):
@@ -157,7 +157,7 @@ class Counts:
     postings: int = 0
     # Subset of ``postings``: rows this call inserted rather than revised. A
     # posting whose description was edited is a changed posting, not a new one,
-    # and only this counter may reach ``poll_observation.new_postings``.
+    # and only this counter may reach ``poll_log.new_postings``.
     created: int = 0
     unchanged: int = 0
     unresolved: int = 0
@@ -167,6 +167,15 @@ class Counts:
     # the only channel that tells an operator a feed's detail pages have gone
     # from requisitions to session walls.
     unparseable: int = 0
+    # Identity side of the result used by the unified incremental Gold path.
+    # ``compare=False`` preserves the value semantics of historical counter
+    # assertions while making the changed rows explicit to new callers.
+    changed_posting_ids: frozenset[int] = field(
+        default_factory=frozenset, compare=False
+    )
+    affected_company_ids: frozenset[int] = field(
+        default_factory=frozenset, compare=False
+    )
 
     def __add__(self, other: "Counts") -> "Counts":
         return Counts(
@@ -177,7 +186,32 @@ class Counts:
             unsupported=self.unsupported + other.unsupported,
             secondhand=self.secondhand + other.secondhand,
             unparseable=self.unparseable + other.unparseable,
+            changed_posting_ids=self.changed_posting_ids
+            | other.changed_posting_ids,
+            affected_company_ids=self.affected_company_ids
+            | other.affected_company_ids,
         )
+
+
+@dataclass(slots=True)
+class ChangeSet:
+    """Silver rows whose derived Gold state may need to be refreshed.
+
+    The mutable collector is optional so replay and older callers retain the
+    compact Counts return value. The unified runtime passes one per feed and
+    carries only these identities into the incremental Gold path.
+    """
+
+    posting_ids: set[int]
+    company_ids: set[int]
+
+    def __init__(self) -> None:
+        self.posting_ids = set()
+        self.company_ids = set()
+
+    def add(self, posting_id: int, company_id: int) -> None:
+        self.posting_ids.add(posting_id)
+        self.company_ids.add(company_id)
 
 
 async def _company_id(
@@ -208,6 +242,7 @@ async def process(
     aliases: dict[str, int] | None = None,
     touch_seen: bool = True,
     whole_batch: bool = True,
+    changes: ChangeSet | None = None,
 ) -> Counts:
     """Parse and project raw items. Parser exceptions intentionally propagate.
 
@@ -297,7 +332,7 @@ async def process(
             # is already last_seen_at -- link_checked_at belongs to the probe
             # channel alone, a fetch of the posting's own URL.
             closed = values["status"] == "closed"
-            _, changed, created = await store.upsert_job_posting(
+            posting_id, changed, created = await store.upsert_job_posting(
                 conn,
                 source=source,
                 source_key=posting.external_id,
@@ -309,8 +344,15 @@ async def process(
                 touch_seen=touch_seen,
                 vendor_closed_at=seen_at if closed else None,
             )
+            if changed and changes is not None:
+                changes.add(posting_id, company_id)
             total += (
-                Counts(postings=1, created=1 if created else 0)
+                Counts(
+                    postings=1,
+                    created=1 if created else 0,
+                    changed_posting_ids=frozenset((posting_id,)),
+                    affected_company_ids=frozenset((company_id,)),
+                )
                 if changed
                 else Counts(unchanged=1)
             )

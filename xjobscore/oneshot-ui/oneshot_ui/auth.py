@@ -114,8 +114,7 @@ class AuthStore:
             return
         if not self.dsn:
             raise RuntimeError(
-                "No PostgreSQL DSN. Set XJOBSCORE_ONESHOT_DSN, XJOBSCORE_DSN, "
-                "or DATABASE_URL."
+                "No PostgreSQL DSN. Set DATABASE_URL."
             )
         self.pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=4)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 from xjobscore import router, run, silver, sources, store, work
+from xjobscore.net import NetError
 from xjobscore.records import LINK_DEAD
 from xjobscore.records import Fact, Feed, Item, Label, Posting, Record, Target, Unparseable
 
@@ -59,9 +61,86 @@ def test_fetch_all_cli_rejects_zero_concurrency():
         run.load_config(["--dsn", "postgresql://example/test", "--concurrency", "0"])
 
 
+def test_job_type_gold_enrichment_is_a_cli_choice():
+    config = run.load_config(
+        ["--dsn", "postgresql://example/test", "--enrich", "job_type"]
+    )
+
+    assert config.enrich == "job_type"
+
+
+def test_batch_cli_flag_is_rejected():
+    """Replaced by --cycle-budget-s: a cycle is bounded by time, not a count."""
+    with pytest.raises(SystemExit):
+        run.load_config(["--dsn", "postgresql://example/test", "--batch", "5"])
+
+
+@pytest.mark.parametrize(
+    "argv, env, expected",
+    [
+        ([], {}, 30.0),
+        (["--cycle-budget-s", "5"], {}, 5.0),
+        ([], {"XJOBSCORE_CYCLE_BUDGET_S": "12"}, 12.0),
+        (["--cycle-budget-s", "5"], {"XJOBSCORE_CYCLE_BUDGET_S": "12"}, 5.0),
+    ],
+)
+def test_cycle_budget_comes_from_the_flag_then_the_env(argv, env, expected, monkeypatch):
+    monkeypatch.delenv("XJOBSCORE_CYCLE_BUDGET_S", raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    config = run.load_config(["--dsn", "postgresql://example/test", *argv])
+    assert config.cycle_budget_s == expected
+
+
+def test_cycle_budget_must_be_positive():
+    with pytest.raises(SystemExit):
+        run.load_config(["--dsn", "postgresql://example/test", "--cycle-budget-s", "0"])
+
+
+def test_per_vendor_claims_have_an_index_and_a_live_migration():
+    """run.cycle claims per source now, so due_at alone no longer covers it."""
+    root = Path(__file__).parent.parent.parent
+    index = "CREATE INDEX feed_source_due_idx ON feed (source, due_at) WHERE polling;"
+    assert index in (root / "schema.sql").read_text()
+    migration = (
+        Path(__file__).parent.parent / "migrations" / "20260910_feed_source_due_idx.sql"
+    ).read_text()
+    assert (
+        "CREATE INDEX IF NOT EXISTS feed_source_due_idx ON feed (source, due_at) WHERE polling"
+        in migration
+    )
+
+
+def test_unified_runtime_schema_defaults_live_and_preserves_existing_intent():
+    root = Path(__file__).parent.parent.parent
+    schema = (root / "schema.sql").read_text()
+    migration = (
+        root / "xjobscore/migrations/20260923_unified_runtime.sql"
+    ).read_text()
+
+    assert "running    boolean NOT NULL DEFAULT true" in schema
+    assert "CREATE TABLE gold_control" in schema
+    assert "CREATE TABLE system_run" in schema
+    assert "ALTER TABLE scheduler_control ALTER COLUMN running SET DEFAULT true" in migration
+    assert "UPDATE scheduler_control" not in migration
+
+
 def test_sync_registry_cli_flag_is_rejected():
     with pytest.raises(SystemExit):
         run.load_config(["--dsn", "postgresql://example/test", "--sync-registry"])
+
+
+@pytest.mark.asyncio
+async def test_bare_maintenance_command_directs_to_unified_runtime(
+    monkeypatch, capsys
+):
+    async def unexpected_connect(*args, **kwargs):
+        raise AssertionError("a bare maintenance command must not touch PostgreSQL")
+
+    monkeypatch.setattr(store, "connect", unexpected_connect)
+
+    assert await run.main(["--dsn", "postgresql://example/test"]) == 2
+    assert "uv run xjobscore" in capsys.readouterr().err
 
 
 def test_schema_indexes_the_opportunities_filter_and_default_sort():
@@ -69,8 +148,22 @@ def test_schema_indexes_the_opportunities_filter_and_default_sort():
 
     assert "job_posting_job_type_active_idx" in schema
     assert "(job_type)" in schema
+    assert "job_domain" in schema
+    assert "job_posting_domain_active_idx" in schema
+    assert "ON job_posting (job_domain, job_type)" in schema
     assert "job_posting_fresh_active_idx" in schema
     assert "((COALESCE(posted_at, first_seen_at)) DESC, id DESC)" in schema
+
+
+def test_job_domain_has_a_live_database_migration():
+    root = Path(__file__).parent.parent.parent
+    migration = (
+        root / "xjobscore" / "migrations" / "20260910_job_domain.sql"
+    ).read_text()
+
+    assert "ADD COLUMN IF NOT EXISTS job_domain text" in migration
+    assert "ADD COLUMN IF NOT EXISTS job_domain_version smallint" in migration
+    assert "CREATE INDEX CONCURRENTLY IF NOT EXISTS job_posting_domain_active_idx" in migration
 
 
 def test_schema_carries_workday_count_probe_state():
@@ -472,9 +565,9 @@ async def test_poll_304_touches_postings_and_preserves_etag(monkeypatch):
     monkeypatch.setattr(run.sources, "get", lambda source: harvest)
     monkeypatch.setattr(store, "touch_source_postings", touch)
     monkeypatch.setattr(store, "finish_schedule_success", success)
-    monkeypatch.setattr(store, "append_poll_observation", observe)
+    monkeypatch.setattr(store, "append_poll_log", observe)
 
-    assert await run.poll(_Pool(), object(), feed, NOW) == "not_modified"
+    assert await run.poll(_Pool(), object(), feed, NOW) == "unchanged"
     # feed_id is what scopes the touch to postings still in the snapshot; a
     # blanket touch would re-stamp postings that vanished on an earlier poll.
     assert calls[0] == ("touch", "greenhouse:acme", NOW, feed.id)
@@ -483,7 +576,7 @@ async def test_poll_304_touches_postings_and_preserves_etag(monkeypatch):
     assert calls[1][1]["changed"] is False
     assert calls[2] == (
         "observe",
-        {"feed_id": 1, "polled_at": NOW, "status": "not_modified", "new_postings": 0},
+        {"feed_id": 1, "polled_at": NOW, "status": "unchanged", "new_postings": 0},
     )
 
 
@@ -509,12 +602,12 @@ async def test_poll_count_probe_uses_the_unchanged_path(monkeypatch):
     monkeypatch.setattr(run.sources, "get", lambda source: harvest)
     monkeypatch.setattr(store, "touch_source_postings", touch)
     monkeypatch.setattr(store, "finish_schedule_success", success)
-    monkeypatch.setattr(store, "append_poll_observation", observe)
+    monkeypatch.setattr(store, "append_poll_log", observe)
 
-    assert await run.poll(_Pool(), object(), feed, NOW) == "not_modified"
+    assert await run.poll(_Pool(), object(), feed, NOW) == "unchanged"
     assert calls[0] == ("touch", "greenhouse:acme", feed.id)
     assert calls[1][1]["changed"] is False
-    assert calls[2][1]["status"] == "not_modified"
+    assert calls[2][1]["status"] == "unchanged"
 
 
 @pytest.mark.asyncio
@@ -549,7 +642,7 @@ async def test_poll_unchanged_hash_skips_raw_and_silver(monkeypatch):
     monkeypatch.setattr(run.sources, "get", lambda source: harvest)
     monkeypatch.setattr(store, "touch_source_postings", touch)
     monkeypatch.setattr(store, "finish_schedule_success", success)
-    monkeypatch.setattr(store, "append_poll_observation", observe)
+    monkeypatch.setattr(store, "append_poll_log", observe)
     monkeypatch.setattr(router, "persist", unexpected)
     monkeypatch.setattr(silver, "process", unexpected)
 
@@ -594,7 +687,7 @@ async def test_poll_changed_snapshot_runs_bronze_then_silver(monkeypatch):
     monkeypatch.setattr(router, "persist", persist)
     monkeypatch.setattr(silver, "process", process)
     monkeypatch.setattr(store, "finish_schedule_success", success)
-    monkeypatch.setattr(store, "append_poll_observation", observe)
+    monkeypatch.setattr(store, "append_poll_log", observe)
 
     assert await run.poll(_Pool(), object(), feed, NOW) == "ok"
     assert events[:2] == ["bronze", "silver"]
@@ -634,7 +727,7 @@ async def test_partial_poll_persists_available_rows_and_backs_off(monkeypatch):
     monkeypatch.setattr(router, "persist", persist)
     monkeypatch.setattr(silver, "process", process)
     monkeypatch.setattr(store, "finish_schedule_failure", failure)
-    monkeypatch.setattr(store, "append_poll_observation", observe)
+    monkeypatch.setattr(store, "append_poll_log", observe)
 
     assert await run.poll(_Pool(), object(), feed, NOW) == "partial"
     assert events[:2] == ["bronze", "silver"]
@@ -664,7 +757,206 @@ async def test_network_failure_releases_lease_with_backoff(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lost_lease_records_no_poll_observation(monkeypatch):
+@pytest.mark.parametrize(
+    ("raised", "traceback_logged"),
+    [
+        # A deleted board is a vendor verdict, not a fault to debug.
+        (NetError("HTTP 404", url="https://x/jobs", status=404), False),
+        (NetError("HTTP 500", url="https://x/jobs", status=500), True),
+        (ValueError("unknown url type"), True),
+    ],
+)
+async def test_only_an_unexpected_harvest_failure_logs_a_traceback(
+    monkeypatch, caplog, raised, traceback_logged
+):
+    """404s are the bulk of failures on a full queue sweep; a stack trace each
+    buries the harvest bugs worth reading."""
+    async def harvest(feed, net):
+        raise raised
+
+    async def failure(conn, feed, *, now, due_at, etag=None):
+        return True
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "finish_schedule_failure", failure)
+
+    with caplog.at_level(logging.WARNING, logger="xjobscore.run"):
+        assert await run.poll(_Pool(), object(), _claimed_feed(), NOW) == "error"
+
+    # The harvest record only: the 404 path also runs the gone-check, which
+    # logs its own failure against this test's fake pool.
+    harvest_records = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith(("board gone", "harvest failed"))
+    ]
+    assert len(harvest_records) == 1
+    assert (harvest_records[0].exc_info is not None) is traceback_logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+        (NetError("HTTP 404", url="https://x/jobs", status=404), 404),
+        # A vendor answering the job endpoint with an HTML page: the request
+        # succeeded, so the 200 is the whole point of recording it.
+        (NetError("body is not JSON", url="https://x/jobs", status=200), 200),
+        # Answered by nobody -- there is no status to record, and a made-up one
+        # would read as a vendor verdict.
+        (NetError("timed out", url="https://x/jobs"), None),
+        # A config that leaves the URL template unresolved never reaches HTTP.
+        (ValueError("unknown url type"), None),
+    ],
+)
+async def test_failed_poll_records_the_status_behind_it(monkeypatch, raised, expected):
+    """`status` says a poll failed; `status_code` says what the vendor answered.
+
+    Without it a dead board, a blocked request and a broken config are one
+    indistinguishable 'error' -- the state that hid nine empty-config feeds.
+    """
+    rows = []
+
+    async def harvest(feed, net):
+        raise raised
+
+    async def failure(conn, claimed, **kwargs):
+        return True
+
+    async def observe(conn, **kwargs):
+        rows.append(kwargs)
+
+    async def not_gone(conn, feed_id):
+        return 0
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "finish_schedule_failure", failure)
+    monkeypatch.setattr(store, "append_poll_log", observe)
+    # This test is about what gets recorded, not about dropping: the 404 case
+    # would otherwise reach the gone-check and the fake connection behind it.
+    monkeypatch.setattr(store, "gone_strikes", not_gone)
+
+    assert await run.poll(_Pool(), object(), _claimed_feed(), NOW) == "error"
+    assert rows[0]["status"] == "error"
+    assert rows[0]["status_code"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("strikes", "dropped"),
+    [
+        (1, False),
+        (2, False),
+        # The third 404 IS the drop -- not a flag another pass acts on later.
+        (3, True),
+        (4, True),
+    ],
+)
+async def test_repeated_404_drops_the_feed_on_the_third_strike(monkeypatch, strikes, dropped):
+    """A board that answers 404 is gone, not busy; retrying it daily is waste.
+
+    Dropped rather than muted: `feed` goes and `poll_log` cascades with it,
+    while `token`, `company`, bronze and postings survive, so a later import
+    can bring the feed back.
+    """
+    drops = []
+
+    async def harvest(feed, net):
+        raise NetError("HTTP 404", url="https://x/jobs", status=404)
+
+    async def failure(conn, claimed, **kwargs):
+        return True
+
+    async def observe(conn, **kwargs):
+        return None
+
+    async def count(conn, feed_id):
+        return strikes
+
+    async def drop(conn, source, key):
+        drops.append((source, key))
+        return 7
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "finish_schedule_failure", failure)
+    monkeypatch.setattr(store, "append_poll_log", observe)
+    monkeypatch.setattr(store, "gone_strikes", count)
+    monkeypatch.setattr(store, "drop_feed", drop)
+
+    assert await run.poll(_Pool(), object(), _claimed_feed(), NOW) == "error"
+    assert drops == ([("greenhouse", "acme")] if dropped else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raised",
+    [
+        # Rate limiting and outages are exactly what backoff is for.
+        NetError("HTTP 429", url="https://x/jobs", status=429),
+        NetError("HTTP 503", url="https://x/jobs", status=503),
+        # The shared transport blips that hit every vendor at once. These are
+        # the reason the count reads `status_code` instead of `feed.strikes`.
+        NetError("timed out", url="https://x/jobs"),
+    ],
+)
+async def test_failures_that_are_not_404_never_drop_a_feed(monkeypatch, raised):
+    drops = []
+
+    async def harvest(feed, net):
+        raise raised
+
+    async def failure(conn, claimed, **kwargs):
+        return True
+
+    async def observe(conn, **kwargs):
+        return None
+
+    async def unexpected_count(conn, feed_id):
+        raise AssertionError("gone_strikes consulted for a non-404 failure")
+
+    async def drop(conn, source, key):
+        drops.append((source, key))
+        return 7
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "finish_schedule_failure", failure)
+    monkeypatch.setattr(store, "append_poll_log", observe)
+    monkeypatch.setattr(store, "gone_strikes", unexpected_count)
+    monkeypatch.setattr(store, "drop_feed", drop)
+
+    assert await run.poll(_Pool(), object(), _claimed_feed(), NOW) == "error"
+    assert drops == []
+
+
+@pytest.mark.asyncio
+async def test_a_lost_lease_drops_nothing(monkeypatch):
+    """Another worker owns this feed now; it files the row that would count."""
+    drops = []
+
+    async def harvest(feed, net):
+        raise NetError("HTTP 404", url="https://x/jobs", status=404)
+
+    async def lost_lease(conn, claimed, **kwargs):
+        return False
+
+    async def unexpected_count(conn, feed_id):
+        raise AssertionError("gone_strikes consulted without the lease")
+
+    async def drop(conn, source, key):
+        drops.append((source, key))
+        return 7
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "finish_schedule_failure", lost_lease)
+    monkeypatch.setattr(store, "gone_strikes", unexpected_count)
+    monkeypatch.setattr(store, "drop_feed", drop)
+
+    assert await run.poll(_Pool(), object(), _claimed_feed(), NOW) == "error"
+    assert drops == []
+
+
+@pytest.mark.asyncio
+async def test_lost_lease_records_no_poll_log(monkeypatch):
     """A reclaimed worker polled this feed too and files its own row.
 
     Recording ours as well would count one poll twice, which inflates lambda on
@@ -692,7 +984,7 @@ async def test_lost_lease_records_no_poll_observation(monkeypatch):
     monkeypatch.setattr(router, "persist", persist)
     monkeypatch.setattr(silver, "process", process)
     monkeypatch.setattr(store, "finish_schedule_success", lost_lease)
-    monkeypatch.setattr(store, "append_poll_observation", unexpected_observation)
+    monkeypatch.setattr(store, "append_poll_log", unexpected_observation)
 
     assert await run.poll(_Pool(), object(), feed, NOW) == "ok"
 
@@ -772,6 +1064,8 @@ async def test_silver_maps_posting_into_job_posting_contract(monkeypatch):
     counts = await silver.process(object(), feed, stored, {}, seen_at=NOW)
 
     assert counts.postings == 1
+    assert counts.changed_posting_ids == frozenset({9})
+    assert counts.affected_company_ids == frozenset({42})
     assert writes[0]["source"] == "greenhouse:acme"
     assert writes[0]["source_key"] == "123"
     assert writes[0]["company_id"] == 42
@@ -1158,6 +1452,8 @@ async def test_description_change_invalidates_gold_enrichments():
     assert "locations = EXCLUDED.locations" in upsert
     assert "country = EXCLUDED.country" not in upsert
     assert "job_type_meta" not in upsert
+    assert "job_domain = CASE" in upsert
+    assert "job_domain_version = CASE" in upsert
     assert "job_posting.title IS DISTINCT FROM EXCLUDED.title" in upsert
     assert (
         "job_posting.description IS DISTINCT FROM EXCLUDED.description" in upsert
@@ -1166,7 +1462,7 @@ async def test_description_change_invalidates_gold_enrichments():
         "job_posting.content_hash IS DISTINCT FROM EXCLUDED.content_hash" not in upsert
     )
     assert "- 'skills' - 'skills_meta'" in upsert
-    assert "- 'degree'" in upsert
+    assert "- 'degree' - 'degree_meta'" in upsert
     assert upsert.count("- 'summary' - 'summary_meta'") == 2
     # The tag and its revision stamp must be invalidated together.
     assert "degree_version = CASE" in upsert

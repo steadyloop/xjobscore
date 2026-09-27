@@ -1,7 +1,8 @@
-"""Schema-aligned scheduler, fetch, bronze, and silver pass.
+"""Pipeline primitives and explicit repair/debug commands.
 
-One invocation runs one cycle and exits. Scheduling repetition is deliberately
-left to cron or a launch agent rather than an internal sleep loop.
+The normal long-lived process is :mod:`xjobscore.runtime`. This module keeps
+the proven fetch/Bronze/Silver implementation it composes, plus deliberately
+finite maintenance operations such as replay, reconciliation, and dry runs.
 """
 
 from __future__ import annotations
@@ -11,24 +12,29 @@ import asyncio
 import logging
 import os
 import sys
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xjobscore import gold, probe, router, silver, sources, store, work
+import asyncpg
+
+from xjobscore import coverage_snapshot, gold, probe, router, silver, sources, store, work
 from xjobscore.net import DEFAULT_USER_AGENT, Net
 from xjobscore.records import Feed
 from xjobscore.work import Outcome
 
 if TYPE_CHECKING:
-    from asyncpg import Pool
+    from asyncpg import Connection, Pool
+    from xjobscore.pipeline import GoldCoordinator, GoldResult
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "Config",
+    "CycleResult",
     "cycle",
     "fetch_all",
     "load_config",
@@ -44,7 +50,11 @@ __all__ = [
 class Config:
     dsn: str
     user_agent: str
-    batch: int = 20
+    # Seconds a cycle keeps *claiming* feeds. Not a feed count: a batch of 20
+    # was 20 slots blocked on their slowest member, and 20 of anything is a
+    # different amount of work per vendor (0.17s for a Greenhouse board,
+    # 11s for a Workday one).
+    cycle_budget_s: float = 30.0
     dry_run: bool = False
     parse: bool = False
     fetch_all: bool = False
@@ -84,7 +94,11 @@ def load_config(argv: Sequence[str]) -> Config:
     parser = argparse.ArgumentParser(prog="xjobscore")
     parser.add_argument("--dsn")
     parser.add_argument("--user-agent")
-    parser.add_argument("--batch", type=int)
+    parser.add_argument(
+        "--cycle-budget-s",
+        type=float,
+        help="seconds to keep claiming due feeds; in-flight polls finish; default: 30",
+    )
     parser.add_argument("--lease-seconds", type=int)
     parser.add_argument("--dry-run", action="store_true", default=None)
     parser.add_argument("--parse", action="store_true", default=None)
@@ -111,13 +125,13 @@ def load_config(argv: Sequence[str]) -> Config:
         const="all",
         choices=("all", *(step.name for step in gold.steps())),
         metavar="NAME",
-        help="run all enrichments, or one named Gold step",
+        help="run posting enrichments (excluding dedup), or one named Gold step",
     )
     args = parser.parse_args(argv)
 
-    dsn = args.dsn or os.environ.get("XJOBSCORE_DSN") or os.environ.get("DATABASE_URL")
+    dsn = args.dsn or os.environ.get("DATABASE_URL")
     if not dsn:
-        raise ValueError("no dsn: pass --dsn or set XJOBSCORE_DSN/DATABASE_URL")
+        raise ValueError("no dsn: pass --dsn or set DATABASE_URL")
     enrich = args.enrich or os.environ.get("XJOBSCORE_ENRICH") or None
     known_enrichments = {"all", *(step.name for step in gold.steps())}
     if enrich is not None and enrich not in known_enrichments:
@@ -130,10 +144,17 @@ def load_config(argv: Sequence[str]) -> Config:
     )
     if concurrency < 1:
         parser.error("--concurrency must be at least 1")
+    cycle_budget_s = (
+        args.cycle_budget_s
+        if args.cycle_budget_s is not None
+        else float(os.environ.get("XJOBSCORE_CYCLE_BUDGET_S", "30"))
+    )
+    if cycle_budget_s <= 0:
+        parser.error("--cycle-budget-s must be positive")
     return Config(
         dsn=dsn,
         user_agent=args.user_agent or os.environ.get("XJOBSCORE_USER_AGENT") or DEFAULT_USER_AGENT,
-        batch=args.batch if args.batch is not None else int(os.environ.get("XJOBSCORE_BATCH", "20")),
+        cycle_budget_s=cycle_budget_s,
         lease_seconds=args.lease_seconds
         if args.lease_seconds is not None
         else int(os.environ.get("XJOBSCORE_LEASE_SECONDS", "3600")),
@@ -177,6 +198,17 @@ def _probe_url(feed: Feed) -> str | None:
     return template
 
 
+def _status_of(exc: BaseException) -> int | None:
+    """The HTTP status a failure carried, if it carried one.
+
+    ``NetError`` is the only exception that knows one, and it is ``None`` there
+    too whenever the request never got an answer. Read defensively: a source is
+    free to raise anything at all.
+    """
+    status = getattr(exc, "status", None)
+    return status if isinstance(status, int) else None
+
+
 async def _finish_failure(
     pool: Pool,
     feed: Feed,
@@ -184,30 +216,118 @@ async def _finish_failure(
     outcome: Outcome,
     *,
     new_postings: int = 0,
+    status_code: int | None = None,
 ) -> None:
     """Release a failed claim and record the attempt.
 
     ``new_postings`` is zero for a genuine error, which never reached silver. A
     truncated fetch did reach it and may have created rows, so the partial path
     passes its real count rather than pretending the poll produced nothing.
+
+    ``status_code`` is whatever HTTP status the failure carried, and ``None``
+    when it carried none -- a transport failure, or a fault raised before the
+    request. Diagnostic only: `outcome` alone still decides strikes and backoff.
     """
     due_at = work.next_due_at(feed.interval_s, feed.strikes, outcome, now)
     async with pool.acquire() as conn:
         if await store.finish_schedule_failure(conn, feed, now=now, due_at=due_at):
-            await store.append_poll_observation(
+            await store.append_poll_log(
                 conn,
                 feed_id=feed.id,
                 polled_at=now,
                 status=outcome,
                 new_postings=new_postings,
+                status_code=status_code,
             )
+            # Checked only on a 404, and only after the row above is written,
+            # so this poll is itself the third strike rather than a prelude to
+            # one. A 404 from a job board is not a transient fault the way a
+            # 429 or a 503 is: the board slug does not resolve, and retrying it
+            # daily forever is the state this replaces.
+            if status_code == 404:
+                # Guarded for the same reason the prior-item read above is:
+                # this is new surface a working poll never depended on. A fault
+                # here (a DB hiccup, not a data problem) should cost the drop,
+                # not turn an ordinary failed poll into an unhandled exception
+                # that takes the rest of the cycle with it. The feed keeps its
+                # strike and its backoff either way, so the next poll retries
+                # the drop with nothing lost.
+                try:
+                    await _drop_if_gone(conn, feed)
+                except Exception:
+                    logger.exception(
+                        "gone-check failed source=%s", store.source_instance(feed)
+                    )
         else:
             logger.warning("lost schedule lease while failing %s", store.source_instance(feed))
 
 
-async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
+async def _drop_if_gone(conn: Connection, feed: Feed) -> bool:
+    """Drop a feed whose board has answered 404 ``GONE_STRIKES`` times running.
+
+    Dropped, not muted: the `feed` row goes and `poll_log` cascades with it,
+    while `token`, `company`, bronze, and postings all survive. The
+    `feed_exited` row `store.drop_feed` writes to `token_log` is the only trace
+    that outlives the delete, so the count is logged here where it is still
+    known.
+    """
+    strikes = await store.gone_strikes(conn, feed.id)
+    if strikes < store.GONE_STRIKES:
+        return False
+    dropped = await store.drop_feed(conn, feed.source, feed.key)
+    if dropped is None:
+        return False
+    logger.warning(
+        "dropped %s after %d consecutive 404s", store.source_instance(feed), strikes
+    )
+    return True
+
+
+async def poll(
+    pool: Pool,
+    net: Net,
+    feed: Feed,
+    now: datetime,
+    *,
+    coordinator: GoldCoordinator | None = None,
+) -> Outcome:
     """Fetch one claimed feed and carry a changed snapshot through silver."""
     source = store.source_instance(feed)
+    changes = silver.ChangeSet()
+    stage_ms: dict[str, int] = {}
+    stage_counts: dict[str, object] = {}
+    system_run_id: int | None = None
+    if coordinator is not None:
+        try:
+            system_run_id = await coordinator.begin_feed(pool, feed)
+        except Exception:
+            # Telemetry is evidence about work, never a prerequisite for it.
+            logger.exception("could not start system run source=%s", source)
+
+    async def finish_system_run(
+        outcome: Outcome,
+        *,
+        gold_result: GoldResult | None = None,
+        error_stage: str | None = None,
+        error: str | None = None,
+    ) -> Outcome:
+        if coordinator is not None and system_run_id is not None:
+            try:
+                await coordinator.finish_feed(
+                    pool,
+                    system_run_id,
+                    outcome=outcome,
+                    changes=changes,
+                    gold_result=gold_result,
+                    stages=stage_ms,
+                    counts=stage_counts,
+                    error_stage=error_stage,
+                    error=error,
+                )
+            except Exception:
+                logger.exception("could not finish system run source=%s", source)
+        return outcome
+    fetch_started = time.monotonic()
     prior = None
     if feed.source in sources.REVISION_FIELDS:
         # Read-then-harvest, not inside harvest: the source boundary bars
@@ -227,13 +347,33 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
             logger.exception("prior-item read failed source=%s", source)
     try:
         record = await sources.reusing(feed.source, prior, now=now)(feed, net)
-    except Exception:
-        logger.exception("harvest failed source=%s", source)
-        await _finish_failure(pool, feed, now, "error")
-        return "error"
+    except Exception as exc:
+        stage_ms["fetch"] = round((time.monotonic() - fetch_started) * 1000)
+        status = _status_of(exc)
+        if status == 404:
+            # A 404 board is an answer, not a hiccup: the vendor deleted it,
+            # and there is no fault here to read a traceback for. Recorded the
+            # same as any failure -- `_drop_if_gone` is what acts on it, after
+            # GONE_STRIKES consecutive answers -- but logged as one line, so a
+            # real harvest bug still stands out in the log.
+            logger.warning("board gone (404) source=%s", source)
+        else:
+            logger.exception("harvest failed source=%s", source)
+        await _finish_failure(pool, feed, now, "error", status_code=status)
+        return await finish_system_run(
+            "error", error_stage="fetch", error=f"{type(exc).__name__}: {exc}"
+        )
+    stage_ms["fetch"] = round((time.monotonic() - fetch_started) * 1000)
+    stage_counts["fetch"] = {
+        "items": len(record.items),
+        "http_status": record.http_status,
+        "truncated": record.truncated,
+        "reused_items": record.reused_item_count,
+        "detail_fetched": record.detail_fetched_count,
+    }
 
     if record.http_status == 304 or record.count_unchanged:
-        due_at = work.next_due_at(feed.interval_s, feed.strikes, "not_modified", now)
+        due_at = work.next_due_at(feed.interval_s, feed.strikes, "unchanged", now)
         async with pool.acquire() as conn, conn.transaction():
             await store.touch_source_postings(conn, source, now, feed_id=feed.id)
             ok = await store.finish_schedule_success(
@@ -247,16 +387,16 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
                 last_modified=record.last_modified if record.last_modified is not None else feed.last_modified,
             )
             if ok:
-                await store.append_poll_observation(
+                await store.append_poll_log(
                     conn,
                     feed_id=feed.id,
                     polled_at=now,
-                    status="not_modified",
+                    status="unchanged",
                     new_postings=0,
                 )
         if not ok:
             logger.warning("lost schedule lease after 304 source=%s", source)
-        return "not_modified"
+        return await finish_system_run("unchanged")
 
     prepared = router.prepare(feed, record)
     response_hash = router.snapshot_hash(prepared)
@@ -278,11 +418,13 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
                 full_listing=record.full_listing,
                 last_modified=record.last_modified,
             )
-            # "ok", not "not_modified": the fetch returned a full body and only
-            # the snapshot hash matched. Keep the status matching what poll()
-            # returns for this path.
+            # "ok", not "unchanged": the content is indeed unchanged, but
+            # "unchanged" is reserved for the 304 path where no body crossed
+            # the wire. Here the vendor sent a full body and only the snapshot
+            # hash matched, so the fetch cost is the same as any "ok" poll.
+            # Keep the status matching what poll() returns for this path.
             if ok:
-                await store.append_poll_observation(
+                await store.append_poll_log(
                     conn,
                     feed_id=feed.id,
                     polled_at=now,
@@ -291,19 +433,55 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
                 )
         if not ok:
             logger.warning("lost schedule lease after unchanged poll source=%s", source)
-        return "ok"
+        return await finish_system_run("ok")
 
+    bronze_started = time.monotonic()
     try:
         async with pool.acquire() as conn, conn.transaction():
             stored = await router.persist(conn, feed, prepared)
+    except Exception as exc:
+        stage_ms["bronze"] = round((time.monotonic() - bronze_started) * 1000)
+        logger.exception("bronze persist failed source=%s", source)
+        await _finish_failure(pool, feed, now, "error")
+        return await finish_system_run(
+            "error", error_stage="bronze", error=f"{type(exc).__name__}: {exc}"
+        )
+    stage_ms["bronze"] = round((time.monotonic() - bronze_started) * 1000)
+    stage_counts["bronze"] = {
+        "rows": len(stored),
+        "inserted": sum(item.created for item in stored),
+    }
+
+    silver_started = time.monotonic()
+    try:
         async with pool.acquire() as conn, conn.transaction():
             counts = await silver.process(
-                conn, feed, stored, record.envelope, seen_at=now
+                conn, feed, stored, record.envelope, seen_at=now, changes=changes
             )
-    except Exception:
-        logger.exception("parse/persist failed source=%s", source)
+            changes.posting_ids.update(counts.changed_posting_ids)
+            changes.company_ids.update(counts.affected_company_ids)
+            if coordinator is not None:
+                await coordinator.mark_changed(conn, changes, current=now)
+    except Exception as exc:
+        stage_ms["silver"] = round((time.monotonic() - silver_started) * 1000)
+        # No status_code: the fetch already succeeded, so the HTTP leg is not
+        # what failed here and recording its 200 would misdirect the reader.
+        logger.exception("silver projection failed source=%s", source)
         await _finish_failure(pool, feed, now, "error")
-        return "error"
+        return await finish_system_run(
+            "error", error_stage="silver",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    stage_ms["silver"] = round((time.monotonic() - silver_started) * 1000)
+    stage_counts["silver"] = {
+        "postings": counts.postings,
+        "created": counts.created,
+        "unchanged": counts.unchanged,
+        "unresolved": counts.unresolved,
+        "unsupported": counts.unsupported,
+        "secondhand": counts.secondhand,
+        "unparseable": counts.unparseable,
+    }
 
     if counts.unresolved or counts.unsupported or counts.secondhand or counts.unparseable:
         logger.info(
@@ -317,9 +495,27 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
         )
 
     outcome: Outcome = "partial" if record.truncated else "ok"
+
+    async def enrich_changed() -> GoldResult | None:
+        if coordinator is None or not changes.posting_ids:
+            return None
+        # The source lease is released before this starts. Version stamps make
+        # a crash here recoverable by catch-up without refetching the source.
+        gold_started = time.monotonic()
+        try:
+            return await coordinator.enrich_changed(pool, changes)
+        finally:
+            stage_ms["gold"] = round((time.monotonic() - gold_started) * 1000)
+            coordinator.notify_changed()
+
     if outcome == "partial":
-        await _finish_failure(pool, feed, now, outcome, new_postings=counts.created)
-        return outcome
+        await _finish_failure(
+            pool, feed, now, outcome,
+            new_postings=counts.created,
+            status_code=record.http_status,
+        )
+        gold_result = await enrich_changed()
+        return await finish_system_run(outcome, gold_result=gold_result)
 
     due_at = work.next_due_at(feed.interval_s, feed.strikes, "ok", now)
     async with pool.acquire() as conn:
@@ -338,7 +534,7 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
         # Only when the lease held: a reclaimed worker polled this feed too and
         # records its own row, and two rows for one poll double-count lambda.
         if ok:
-            await store.append_poll_observation(
+            await store.append_poll_log(
                 conn,
                 feed_id=feed.id,
                 polled_at=now,
@@ -347,7 +543,17 @@ async def poll(pool: Pool, net: Net, feed: Feed, now: datetime) -> Outcome:
             )
     if not ok:
         logger.warning("lost schedule lease after success source=%s", source)
-    return "ok"
+    gold_result = await enrich_changed()
+    return await finish_system_run("ok", gold_result=gold_result)
+
+
+@dataclass(frozen=True, slots=True)
+class CycleResult:
+    polled: int = 0
+    # False when some vendor still had feeds due when the budget ran out, which
+    # is the caller's signal to run another cycle now rather than wait a tick.
+    drained: bool = True
+    by_source: dict[str, int] = field(default_factory=dict)
 
 
 async def cycle(
@@ -355,28 +561,110 @@ async def cycle(
     net: Net,
     cfg: Config,
     now: datetime,
-) -> int:
-    """Claim due feeds and poll them.
+    *,
+    coordinator: GoldCoordinator | None = None,
+    accepting: Callable[[], bool] | None = None,
+) -> CycleResult:
+    """Poll every due feed, one worker pool per vendor, within a time budget.
 
-    Feed records are already complete: PostgreSQL owns their adapter
-    configuration, company identity, and source metadata.
+    Each source gets `sources.width(source)` workers, and each worker claims
+    ONE due feed of its own source, polls it, and immediately goes back for
+    another. Nobody waits on a sibling: a batch-and-gather finishes when its
+    slowest member does, so one 11-second Workday poll used to leave nineteen
+    Greenhouse slots idle. Per-vendor queues are also what stops a vendor that
+    cannot keep up from monopolising the run -- falling behind makes its
+    `due_at` older, and one global `ORDER BY due_at` rewards exactly that.
+
+    The budget stops *claiming* only; a poll already in flight runs to
+    completion under its lease. Feed records are complete when claimed:
+    PostgreSQL owns their adapter configuration, company identity, and source
+    metadata.
     """
+    deadline = time.monotonic() + cfg.cycle_budget_s
     async with pool.acquire() as conn:
+        due = await store.due_sources(conn, now)
+        # A dry run takes no lease, so nothing would stop a refill loop
+        # reselecting the same rows forever: snapshot each queue instead and
+        # let the budget bound the work.
+        queues = (
+            {source: await store.due_feeds(conn, now, source=source) for source in due}
+            if cfg.dry_run
+            else {}
+        )
+
+    polled = dict.fromkeys(due, 0)
+    exhausted: set[str] = set()
+
+    async def claim_one(source: str, claimed_at: datetime) -> Feed | None:
         if cfg.dry_run:
-            claimed = await store.due_feeds(conn, now, cfg.batch)
-        else:
+            return queues[source].pop(0) if queues[source] else None
+        async with pool.acquire() as conn:
             claimed = await store.claim_due_feeds(
-                conn, now, cfg.batch, lease_seconds=cfg.lease_seconds
+                conn, claimed_at, 1, lease_seconds=cfg.lease_seconds, source=source
             )
-    if cfg.dry_run:
-        # Deliberately cold, not `sources.reusing`: a dry run exists to prove
-        # a feed still fetches end to end, and revision reuse would silently
-        # skip most of that proof on a warm cache -- the opposite of what
-        # "dry run" is for here.
-        await asyncio.gather(*(sources.get(feed.source)(feed, net) for feed in claimed))
-    else:
-        await asyncio.gather(*(poll(pool, net, feed, now) for feed in claimed))
-    return len(claimed)
+        return claimed[0] if claimed else None
+
+    async def worker(source: str) -> None:
+        while time.monotonic() < deadline and (
+            accepting is None or accepting()
+        ):
+            # A fresh `now` per claim, not the cycle's: every poll stamps
+            # `poll_log.polled_at` and computes `next_due_at` from the time it
+            # was claimed, and a 30-second cycle would otherwise backdate them
+            # all to its own start.
+            claimed_at = datetime.now(timezone.utc)
+            feed = await claim_one(source, claimed_at)
+            if feed is None:
+                exhausted.add(source)
+                return
+            polled[source] += 1
+            if cfg.dry_run:
+                # Deliberately cold, not `sources.reusing`: a dry run exists to
+                # prove a feed still fetches end to end, and revision reuse
+                # would silently skip most of that proof on a warm cache -- the
+                # opposite of what "dry run" is for here. Caught per feed so one
+                # dead board cannot end the whole proof, as in `fetch_all`.
+                try:
+                    await sources.get(feed.source)(feed, net)
+                except Exception:
+                    logger.exception(
+                        "dry-run harvest failed source=%s", store.source_instance(feed)
+                    )
+            else:
+                if coordinator is None:
+                    await poll(pool, net, feed, claimed_at)
+                else:
+                    await poll(
+                        pool, net, feed, claimed_at, coordinator=coordinator
+                    )
+
+    await asyncio.gather(
+        *(worker(source) for source in due for _ in range(sources.width(source)))
+    )
+
+    if not cfg.dry_run:
+        # One read-model refresh per cycle, never one per browser view or feed.
+        # It is presentation state, so a failure is logged without turning
+        # already-completed harvests into a failed polling cycle.
+        try:
+            await coverage_snapshot.refresh(pool)
+        except Exception:
+            logger.exception("coverage snapshot refresh failed")
+
+    by_source = {source: count for source, count in polled.items() if count}
+    result = CycleResult(
+        polled=sum(polled.values()),
+        # Vacuously true when nothing was due at all.
+        drained=exhausted == set(due),
+        by_source=by_source,
+    )
+    logger.info(
+        "cycle polled=%d drained=%s %s",
+        result.polled,
+        result.drained,
+        " ".join(f"{source}={count}" for source, count in sorted(by_source.items())),
+    )
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,6 +680,8 @@ async def fetch_all(
     pool: Pool,
     net: Net,
     cfg: Config,
+    *,
+    coordinator: GoldCoordinator | None = None,
 ) -> FetchAllResult:
     """Poll every currently claimable feed with bounded shared concurrency.
 
@@ -437,7 +727,12 @@ async def fetch_all(
             )
         if claimed is None:
             return "skipped"
-        outcome = await poll(pool, net, claimed, claimed_at)
+        if coordinator is None:
+            outcome = await poll(pool, net, claimed, claimed_at)
+        else:
+            outcome = await poll(
+                pool, net, claimed, claimed_at, coordinator=coordinator
+            )
         return outcome
 
     outcomes: list[str] = []
@@ -449,7 +744,7 @@ async def fetch_all(
     await asyncio.gather(*(worker() for _ in range(min(cfg.concurrency, len(candidates)))))
     return FetchAllResult(
         eligible=len(candidates),
-        polled=sum(outcome in {"ok", "not_modified"} for outcome in outcomes),
+        polled=sum(outcome in {"ok", "unchanged"} for outcome in outcomes),
         skipped=outcomes.count("skipped"),
         errors=outcomes.count("error"),
         partial=outcomes.count("partial"),
@@ -569,13 +864,41 @@ async def parse_all(pool: Pool, cfg: Config) -> list[tuple[Feed, silver.Counts]]
 async def run_enrichments(
     pool: Pool, cfg: Config
 ) -> dict[str, gold.Counts | Exception]:
-    """Run the selected enrichments, isolating each in its own transaction."""
+    """Run selected enrichments, retrying transient PostgreSQL deadlocks."""
     results: dict[str, gold.Counts | Exception] = {}
     selected = None if cfg.enrich == "all" else cfg.enrich
-    for step in gold.steps(selected):
+    steps = gold.steps(selected)
+    if cfg.enrich == "all":
+        # Bare --enrich is the routine per-posting enrichment path. Dedup is a
+        # destructive whole-table rebuild and remains available only when it
+        # is named explicitly with --enrich dedup.
+        steps = tuple(step for step in steps if step.name != "dedup")
+    for step in steps:
         try:
-            async with pool.acquire() as conn, conn.transaction():
-                results[step.name] = await step.rebuild(conn, dry_run=cfg.dry_run)
+            attempt = 0
+            while True:
+                try:
+                    async with pool.acquire() as conn:
+                        if step.atomic:
+                            async with conn.transaction():
+                                outcome = await step.rebuild(conn, dry_run=cfg.dry_run)
+                        else:
+                            # Each executemany is its own transaction. This keeps
+                            # row locks scoped to one batch instead of the entire
+                            # posting table scan.
+                            outcome = await step.rebuild(conn, dry_run=cfg.dry_run)
+                    results[step.name] = outcome
+                    break
+                except asyncpg.DeadlockDetectedError:
+                    attempt += 1
+                    delay = min(0.05 * 2 ** (attempt - 1), 2.0)
+                    logger.warning(
+                        "enrichment deadlocked; retrying name=%s attempt=%d delay=%.2fs",
+                        step.name,
+                        attempt,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
         except Exception as exc:  # one step's failure must not sink the layer
             logger.exception("enrichment failed name=%s", step.name)
             results[step.name] = exc
@@ -585,11 +908,25 @@ async def run_enrichments(
 async def main(argv: Sequence[str] | None = None) -> int:
     cfg = load_config(argv if argv is not None else sys.argv[1:])
     logging.basicConfig(level=os.environ.get("XJOBSCORE_LOG_LEVEL", "INFO"))
+    if not any((cfg.fetch_all, cfg.reconcile, cfg.parse, cfg.enrich, cfg.dry_run)):
+        print(
+            "No maintenance operation selected. Start the complete system with "
+            "`uv run xjobscore`; use --help for repair/debug operations.",
+            file=sys.stderr,
+        )
+        return 2
     pool = await store.connect(cfg.dsn)
     try:
         if cfg.fetch_all:
+            from xjobscore.pipeline import GoldCoordinator
+
             async with Net(user_agent=cfg.user_agent) as net:
-                result = await fetch_all(pool, net, cfg)
+                result = await fetch_all(
+                    pool,
+                    net,
+                    cfg,
+                    coordinator=None if cfg.dry_run else GoldCoordinator(),
+                )
             print(
                 f"eligible={result.eligible} polled={result.polled} "
                 f"partial={result.partial} errors={result.errors} skipped={result.skipped}"
@@ -629,16 +966,18 @@ async def main(argv: Sequence[str] | None = None) -> int:
                     f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
                 )
             return 1 if failed else 0
-        # One cycle, then exit. This CLI entry point is not a daemon: repeating
-        # it here is a job for cron or a launch agent, which restart cleanly,
-        # log per run, and cannot wedge a long-lived process holding a pool and
-        # a batch of feed leases. `cycle()` itself has no such assumption baked
-        # in, though: `inspector.runner.SchedulerRunner` calls it on a tick from
-        # inside the inspector's own long-lived process, reusing one `Net`
-        # across calls.
+        # The only flagless operation left in this maintenance CLI is a dry
+        # fetch proof. Production polling belongs to the unified runtime.
         async with Net(user_agent=cfg.user_agent) as net:
-            polled = await cycle(pool, net, cfg, datetime.now(timezone.utc))
-            print(f"polled={polled}{' (dry run, nothing written)' if cfg.dry_run else ''}")
+            result = await cycle(pool, net, cfg, datetime.now(timezone.utc))
+            per_source = " ".join(
+                f"{source}={count}" for source, count in sorted(result.by_source.items())
+            )
+            print(
+                f"polled={result.polled} drained={result.drained}"
+                f"{' ' + per_source if per_source else ''}"
+                f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
+            )
     finally:
         await pool.close()
     return 0

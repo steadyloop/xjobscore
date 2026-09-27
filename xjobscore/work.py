@@ -13,7 +13,7 @@ __all__ = [
     "next_strikes",
 ]
 
-Outcome = Literal["ok", "not_modified", "partial", "error"]
+Outcome = Literal["ok", "unchanged", "partial", "error"]
 MAX_BACKOFF_S = 86_400
 
 
@@ -24,7 +24,7 @@ def backoff_s(interval_s: int, strikes: int) -> int:
 
 def next_strikes(current: int, outcome: Outcome) -> int:
     """Successful fetches recover; partial and failed work accumulates strikes."""
-    return 0 if outcome in ("ok", "not_modified") else min(max(0, current) + 1, 32767)
+    return 0 if outcome in ("ok", "unchanged") else min(max(0, current) + 1, 32767)
 
 
 def next_due_at(

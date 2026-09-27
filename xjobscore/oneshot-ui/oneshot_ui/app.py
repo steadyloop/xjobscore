@@ -15,6 +15,7 @@ from .api_models import (
     ApplicationUpdate,
     ExternalApplicationCreate,
 )
+from .apply_api import GreenhouseClient, router as apply_router
 from .auth import AuthStore, current_account, session_account
 from .auth_api import router as auth_router
 from .config import Settings, load_settings
@@ -24,9 +25,30 @@ from .repository import (
     PostgresRepository,
     VALID_DEGREE_FIELDS,
     VALID_JOB_TYPES,
+    VALID_SEASONS,
 )
-from .resume_api import router as resume_router
+from .resume_api import render_router, router as resume_router
 from .resume_store import PostgresResumeStore
+
+
+def _logo_media_type(payload: bytes) -> str:
+    """Name the format the site served, since logos are stored verbatim.
+
+    Sniffing beats a stored `mime` column here: every candidate format decodes
+    in an `<img>` untouched, so the only thing a conversion step would buy is a
+    resize, and the box is 40px either way.
+    """
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if payload.startswith(b"RIFF") and payload[8:12] == b"WEBP":
+        return "image/webp"
+    if payload.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if payload.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if payload.startswith(b"\x00\x00\x01\x00"):
+        return "image/x-icon"
+    return "image/svg+xml"
 
 
 def create_app(
@@ -35,6 +57,7 @@ def create_app(
     repository: Any | None = None,
     resume_store: Any | None = None,
     auth_store: Any | None = None,
+    greenhouse: Any | None = None,
 ) -> FastAPI:
     resolved = settings or load_settings()
 
@@ -91,6 +114,10 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.settings = resolved
+    # Auto-apply: the board API and headless browser behind one object so a
+    # test can inject a fake and never open Chromium.
+    application.state.greenhouse = greenhouse or GreenhouseClient()
+    application.state.auto_apply_inflight = set()
 
     # The session is a signed cookie, so signing in stores no server-side row.
     # An unset secret falls back to a per-process random one: the app still runs
@@ -157,6 +184,7 @@ def create_app(
         job_type: list[str] = Query(default=[]),
         degree_field: list[str] = Query(default=[]),
         q: str = "",
+        season: str = "",
         sort: str = "fresh",
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
@@ -175,12 +203,16 @@ def create_app(
                 status_code=400,
                 detail=f"Unknown degree_field: {unknown_degree[0]}",
             )
+        season = season.strip().lower()
+        if season and season not in VALID_SEASONS:
+            raise HTTPException(status_code=400, detail=f"Unknown season: {season}")
         # No filter does not mean "everything": it means the classified default
         # scope. The unclassified pool is opt-in via an explicit parameter.
         return await store.list_jobs(
             job_types=job_type or list(DEFAULT_JOB_TYPES),
             degree_fields=degree_field,
             q=q,
+            season=season,
             sort=sort,
             limit=limit,
             offset=offset,
@@ -188,6 +220,21 @@ def create_app(
             # Guest tracking is browser-local, so the historical sentinel must
             # not hide jobs another anonymous visitor once added to it.
             hide_tracked=current_account(request) is not None,
+        )
+
+    @application.get("/api/companies/{company_id}/logo")
+    async def company_logo(
+        company_id: int, store: Any = Depends(public_store)
+    ) -> Response:
+        payload = await store.company_logo(company_id)
+        if not payload:
+            raise HTTPException(status_code=404, detail="No logo for that company")
+        return Response(
+            content=payload,
+            media_type=_logo_media_type(payload),
+            # A list page asks for ~30 of these at once and the bytes only move
+            # when a company rebrands, so revalidating per view is pure cost.
+            headers={"Cache-Control": "public, max-age=604800"},
         )
 
     @application.get("/api/source-coverage")
@@ -270,6 +317,11 @@ def create_app(
         return Response(status_code=204)
 
     application.include_router(auth_router)
+    application.include_router(apply_router)
+    # Rendering is public: a signed-out resume lives in the browser and is sent
+    # in the request. Included first so its fixed /render/* paths are matched
+    # before the gated router's parameterized ones.
+    application.include_router(render_router)
     # The resume router carries its own required-account dependency.
     application.include_router(resume_router)
 

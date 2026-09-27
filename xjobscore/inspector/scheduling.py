@@ -76,20 +76,22 @@ def feed_status(
     policy: dict[str, Any] | None,
     now: datetime,
 ) -> dict[str, Any]:
-    """One pill folding together enabled, paused_at, strikes, and staleness.
+    """One pill folding together polling, strikes, and staleness.
 
     Ordered most-severe first and first-match-wins: a paused feed is not also
     reported as stale, because the operator only needs the reason that actually
     explains what they are looking at. Deliberate intent outranks every derived
     signal below it -- a feed nobody is polling on purpose has not gone stale,
     it has been put down.
+
+    "Paused" and "disabled" used to be two states over two columns. They are one
+    now: ``feed.polling`` is false either way, and the operator was doing the
+    same thing both times.
     """
     if not policy or not policy.get("in_postgres"):
         return _status("unknown", "PostgreSQL state unavailable")
     if not policy.get("enabled"):
-        return _status("disabled", "feed.polling is false")
-    if policy.get("paused_at"):
-        return _status("paused", f"polling held since {policy['paused_at']}")
+        return _status("paused", "feed.polling is false")
 
     strikes = policy.get("strikes") or 0
     if strikes >= BACKING_OFF_STRIKES:

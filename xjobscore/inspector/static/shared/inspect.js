@@ -972,7 +972,7 @@ export function createInspector(container, { standalone = false, onClose, onMute
       return;
     }
 
-    const notModified = runs.filter((run) => run.status === "not_modified").length;
+    const notModified = runs.filter((run) => run.status === "unchanged").length;
     els.historySpark.replaceChildren(
       el("div", { style: "display:flex;align-items:center;gap:16px;margin-bottom:8px" },
         sparkline(

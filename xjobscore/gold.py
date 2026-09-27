@@ -2,7 +2,7 @@
 
 Every gold artifact is recoverable from ``job_posting``. Set-like artifacts
 such as duplicate groups are rebuilt wholesale; per-posting enrichments are
-stamped into ``job_posting.attributes`` once per silver content revision.
+stamped into ``job_posting`` once per silver content revision.
 Nothing here may hold human judgement or other irrecoverable state.
 
 Adding a gold concern means appending a ``Step``; improving an existing one
@@ -11,6 +11,7 @@ means changing its own pure helpers. The two axes stay independent.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -23,7 +24,9 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from xjobscore import degrees, skills, store, summaries
+import asyncpg
+
+from xjobscore import degrees, job_domain, skills, store, summaries
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -37,11 +40,15 @@ __all__ = [
     "Step",
     "ats_identity",
     "description_hash",
+    "degree_input_hash",
     "degree_payload",
+    "job_domain_label",
     "normalize_title",
     "plan_dedup",
     "skills_input_hash",
     "skills_payload",
+    "apply_incremental",
+    "stale_posting_ids",
     "summary_input_hash",
     "summary_payload",
     "steps",
@@ -75,14 +82,42 @@ class Step:
     name: str
     version: int
     rebuild: Callable[..., Awaitable[Counts]]
+    atomic: bool = False
+
+
+_DEADLOCK_BACKOFF_MAX_S = 2.0
+
+
+async def _executemany_with_deadlock_retry(
+    conn: Connection,
+    command: str,
+    args: Sequence[Sequence[Any]],
+    *,
+    step: str,
+) -> None:
+    """Retry one independently committed enrichment batch after a deadlock."""
+    attempt = 0
+    while True:
+        try:
+            await conn.executemany(command, args)
+            return
+        except asyncpg.DeadlockDetectedError:
+            attempt += 1
+            delay = min(0.05 * 2 ** (attempt - 1), _DEADLOCK_BACKOFF_MAX_S)
+            logger.warning(
+                "enrichment batch deadlocked; retrying name=%s attempt=%d delay=%.2fs",
+                step,
+                attempt,
+                delay,
+            )
+            await asyncio.sleep(delay)
 
 
 # TITLE NORMALIZATION ------------------------------------------------------
 #
-# `job_type` is no longer derived here. It is a parse-time, vendor-specific
-# field on `job_posting`; see xjobscore/classify.py and the per-vendor rule
-# tables in the adapters. Only the title normalizer survives, because dedup
-# and the inspector's parse preview both consume it.
+# The stored `job_type` opportunity kind remains a parse-time, vendor-specific
+# field; see xjobscore/classify.py and the per-vendor rule tables. The Gold step
+# named `job_type` below derives the orthogonal `job_domain` UI classification.
 
 _CONFUSABLES = str.maketrans({"ꓟ": "M", "ꓡ": "L", "ꓣ": "R"})
 
@@ -91,6 +126,115 @@ def normalize_title(value: str) -> str:
     """Normalize a silver title for derived grouping and classification work."""
     value = unicodedata.normalize("NFKC", value.translate(_CONFUSABLES)).casefold()
     return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
+# JOB DOMAIN ---------------------------------------------------------------
+
+_JOB_DOMAIN_VERSION = 1
+_JOB_DOMAIN_BATCH_SIZE = 1_000
+
+
+def job_domain_label(title: str, *, quant_employer: bool = False) -> str:
+    """Return the complete stored domain classification for one posting."""
+    evidence = job_domain.classify(title, quant_employer=quant_employer)
+    return evidence.label or job_domain.UNLABELED_FILTER
+
+
+async def _quant_company_ids(conn: Connection) -> set[int]:
+    """Compute the employer prior consumed by the canonical domain classifier."""
+    rows = await conn.fetch(
+        """
+        WITH company_postings AS MATERIALIZED (
+            SELECT company_id, COUNT(*) AS posting_count
+            FROM job_posting
+            WHERE status = 'active'
+            GROUP BY company_id
+        ), company_titles AS MATERIALIZED (
+            SELECT company_id, COUNT(*) AS quant_count
+            FROM job_posting
+            WHERE status = 'active'
+              AND title ~* $1
+              AND NOT (title ~* $2)
+            GROUP BY company_id
+        )
+        SELECT cp.company_id AS id
+        FROM company_postings cp
+        JOIN company_titles ct ON ct.company_id = cp.company_id
+        WHERE cp.posting_count >= 3
+          AND ct.quant_count::numeric / cp.posting_count >= 0.40
+        """,
+        job_domain.QUANT_PATTERN,
+        job_domain.FINANCE_FUNCTION_PATTERN,
+    )
+    return {int(row["id"]) for row in rows}
+
+
+async def _job_type_rebuild(
+    conn: Connection,
+    *,
+    dry_run: bool = False,
+) -> Counts:
+    """Materialize Software/Finance/Unlabeled for every typed opportunity."""
+    quant_company_ids = await _quant_company_ids(conn)
+    last_id = 0
+    enriched = 0
+    while True:
+        rows = await conn.fetch(
+            """
+            SELECT id, title, company_id, job_domain, job_domain_version
+            FROM job_posting
+            WHERE id > $1
+              AND job_type IS NOT NULL
+            ORDER BY id
+            LIMIT $2
+            """,
+            last_id,
+            _JOB_DOMAIN_BATCH_SIZE,
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        updates = []
+        for row in rows:
+            label = job_domain_label(
+                row["title"],
+                quant_employer=int(row["company_id"]) in quant_company_ids,
+            )
+            if (
+                row.get("job_domain") == label
+                and row.get("job_domain_version") == _JOB_DOMAIN_VERSION
+            ):
+                continue
+            updates.append(
+                (
+                    int(row["id"]),
+                    label,
+                    _JOB_DOMAIN_VERSION,
+                    row["title"],
+                    int(row["company_id"]),
+                )
+            )
+        if updates and not dry_run:
+            await _executemany_with_deadlock_retry(
+                conn,
+                """
+                UPDATE job_posting
+                SET job_domain = $2,
+                    job_domain_version = $3
+                WHERE id = $1
+                  AND title = $4
+                  AND company_id = $5
+                  AND job_type IS NOT NULL
+                  AND (
+                    job_domain IS DISTINCT FROM $2
+                    OR job_domain_version IS DISTINCT FROM $3
+                  )
+                """,
+                updates,
+                step="job_type",
+            )
+        enriched += len(updates)
+    return Counts(postings=enriched)
 
 
 # SKILLS -------------------------------------------------------------------
@@ -171,7 +315,8 @@ async def _skills_rebuild(
             for row in rows
         ]
         if not dry_run:
-            await conn.executemany(
+            await _executemany_with_deadlock_retry(
+                conn,
                 """
                 UPDATE job_posting
                 SET attributes = attributes || $2::jsonb
@@ -183,6 +328,7 @@ async def _skills_rebuild(
                   )
                 """,
                 updates,
+                step="skills",
             )
         enriched += len(updates)
     return Counts(postings=enriched)
@@ -260,7 +406,8 @@ async def _summaries_rebuild(
             for row in rows
         ]
         if not dry_run:
-            await conn.executemany(
+            await _executemany_with_deadlock_retry(
+                conn,
                 """
                 UPDATE job_posting
                 SET attributes = attributes || $2::jsonb
@@ -271,6 +418,7 @@ async def _summaries_rebuild(
                   AND COALESCE(attributes -> 'summary_meta' ->> 'version', '') <> $5
                 """,
                 updates,
+                step="summaries",
             )
         enriched += len(updates)
     return Counts(postings=enriched)
@@ -278,7 +426,7 @@ async def _summaries_rebuild(
 
 # DEGREE FIELDS ------------------------------------------------------------
 
-_DEGREES_VERSION = 5
+_DEGREES_VERSION = 6
 _DEGREES_BATCH_SIZE = 1_000
 
 
@@ -291,15 +439,32 @@ def _degree_text(description: str | None) -> str:
     return description or ""
 
 
-def degree_payload(title: str, description: str | None) -> dict[str, Any]:
+def degree_input_hash(title: str, description: str | None) -> str:
+    """Fingerprint exactly the posting text consumed by the degree matcher."""
+    return hashlib.sha256(f"{title}\n{description or ''}".encode("utf-8")).hexdigest()
+
+
+def degree_payload(
+    title: str,
+    description: str | None,
+    *,
+    parsed_at: datetime,
+) -> dict[str, Any]:
     """The complete JSONB patch for one degree-field enrichment result.
 
-    The taxonomy revision is not in here: it lives in ``job_posting.degree_version``
-    so the staleness scan stays indexable. Invalidation on an input change is the
-    upsert's job -- it clears both the tag and the column when title or
-    description moves -- so this carries no input fingerprint of its own.
+    The scalar taxonomy revision remains in ``job_posting.degree_version`` so
+    the staleness scan stays indexable. ``degree_meta.input_hash`` records the
+    exact title and description used by the matcher; the title is included
+    because a small set of fields deliberately declares ``title_patterns``.
     """
-    return {"degree": degrees.extract(_degree_text(description), title=title)}
+    return {
+        "degree": degrees.extract(_degree_text(description), title=title),
+        "degree_meta": {
+            "version": _DEGREES_VERSION,
+            "parsed_at": _utc_text(parsed_at),
+            "input_hash": degree_input_hash(title, description),
+        },
+    }
 
 
 async def _degrees_rebuild(
@@ -309,6 +474,7 @@ async def _degrees_rebuild(
     parsed_at: datetime | None = None,
 ) -> Counts:
     """Enrich each posting whose degree-field taxonomy is out of date."""
+    stamp = parsed_at or datetime.now(timezone.utc)
     last_id = 0
     enriched = 0
     while True:
@@ -340,15 +506,17 @@ async def _degrees_rebuild(
         updates = [
             (
                 int(row["id"]),
-                degree_payload(row["title"], row["description"]),
+                degree_payload(row["title"], row["description"], parsed_at=stamp),
                 row["title"],
                 row["description"] or "",
                 _DEGREES_VERSION,
+                degree_input_hash(row["title"], row["description"]),
             )
             for row in rows
         ]
         if not dry_run:
-            await conn.executemany(
+            await _executemany_with_deadlock_retry(
+                conn,
                 """
                 -- Single-row lookup by primary key, so this guard is a filter
                 -- and not an access path: IS DISTINCT FROM is the clearer
@@ -360,8 +528,18 @@ async def _degrees_rebuild(
                   AND title = $3
                   AND COALESCE(description, '') = $4
                   AND degree_version IS DISTINCT FROM $5
+                  -- Both operands cast: asyncpg declares no parameter
+                  -- types, so a bare `$2 #>> '{...}'` leaves Postgres
+                  -- choosing between every `unknown #>> unknown`
+                  -- candidate and refusing at prepare time. The SET
+                  -- clause's own `$2::jsonb` does not settle it -- a
+                  -- parameter's type is resolved once, for the whole
+                  -- statement, and an explicit cast there says nothing
+                  -- about this operand.
+                  AND $2::jsonb #>> '{degree_meta,input_hash}'::text[] = $6
                 """,
                 updates,
+                step="degrees",
             )
         enriched += len(updates)
     return Counts(postings=enriched)
@@ -606,16 +784,260 @@ async def _dedup_rebuild(conn: Connection, *, dry_run: bool = False) -> Counts:
     return plan.counts
 
 
+# INCREMENTAL APPLICATION --------------------------------------------------
+
+async def _incremental_job_type(
+    conn: Connection,
+    posting_ids: Sequence[int],
+    company_ids: Sequence[int],
+    *,
+    dry_run: bool,
+) -> Counts:
+    affected = {int(value) for value in company_ids}
+    if posting_ids:
+        affected.update(
+            int(row["company_id"])
+            for row in await conn.fetch(
+                "SELECT DISTINCT company_id FROM job_posting WHERE id = ANY($1::bigint[])",
+                list(posting_ids),
+            )
+        )
+    if not affected:
+        return Counts()
+
+    quant_company_ids = await _quant_company_ids(conn)
+    rows = await conn.fetch(
+        """
+        SELECT id, title, company_id, job_domain, job_domain_version
+        FROM job_posting
+        WHERE company_id = ANY($1::bigint[]) AND job_type IS NOT NULL
+        ORDER BY id
+        """,
+        sorted(affected),
+    )
+    updates = []
+    for row in rows:
+        label = job_domain_label(
+            row["title"], quant_employer=int(row["company_id"]) in quant_company_ids
+        )
+        if row["job_domain"] == label and row["job_domain_version"] == _JOB_DOMAIN_VERSION:
+            continue
+        updates.append(
+            (int(row["id"]), label, _JOB_DOMAIN_VERSION, row["title"], int(row["company_id"]))
+        )
+    if updates and not dry_run:
+        await _executemany_with_deadlock_retry(
+            conn,
+            """
+            UPDATE job_posting
+            SET job_domain = $2, job_domain_version = $3
+            WHERE id = $1 AND title = $4 AND company_id = $5
+              AND job_type IS NOT NULL
+            """,
+            updates,
+            step="job_type",
+        )
+    return Counts(postings=len(updates))
+
+
+async def _incremental_skills(
+    conn: Connection, posting_ids: Sequence[int], *, dry_run: bool
+) -> Counts:
+    if not posting_ids:
+        return Counts()
+    taxonomy_hash = skills.taxonomy_hash()
+    rows = await conn.fetch(
+        "SELECT id, description, attributes FROM job_posting WHERE id = ANY($1::bigint[])",
+        list(posting_ids),
+    )
+    stamp = datetime.now(timezone.utc)
+    updates = []
+    for row in rows:
+        meta = dict(row["attributes"] or {}).get("skills_meta") or {}
+        if str(meta.get("version", "")) == str(_SKILLS_VERSION) and meta.get(
+            "taxonomy_hash"
+        ) == taxonomy_hash:
+            continue
+        updates.append(
+            (
+                int(row["id"]),
+                skills_payload(row["description"], parsed_at=stamp),
+                row["description"] or "",
+            )
+        )
+    if updates and not dry_run:
+        await _executemany_with_deadlock_retry(
+            conn,
+            """
+            UPDATE job_posting SET attributes = attributes || $2::jsonb
+            WHERE id = $1 AND COALESCE(description, '') = $3
+            """,
+            updates,
+            step="skills",
+        )
+    return Counts(postings=len(updates))
+
+
+async def _incremental_degrees(
+    conn: Connection, posting_ids: Sequence[int], *, dry_run: bool
+) -> Counts:
+    if not posting_ids:
+        return Counts()
+    rows = await conn.fetch(
+        """
+        SELECT id, title, description, degree_version
+        FROM job_posting WHERE id = ANY($1::bigint[])
+        """,
+        list(posting_ids),
+    )
+    stamp = datetime.now(timezone.utc)
+    updates = []
+    for row in rows:
+        if row["degree_version"] == _DEGREES_VERSION:
+            continue
+        payload = degree_payload(row["title"], row["description"], parsed_at=stamp)
+        updates.append(
+            (
+                int(row["id"]), payload, row["title"], row["description"] or "",
+                _DEGREES_VERSION,
+            )
+        )
+    if updates and not dry_run:
+        await _executemany_with_deadlock_retry(
+            conn,
+            """
+            UPDATE job_posting
+            SET attributes = attributes || $2::jsonb, degree_version = $5
+            WHERE id = $1 AND title = $3 AND COALESCE(description, '') = $4
+            """,
+            updates,
+            step="degrees",
+        )
+    return Counts(postings=len(updates))
+
+
+async def _incremental_summaries(
+    conn: Connection, posting_ids: Sequence[int], *, dry_run: bool
+) -> Counts:
+    if not posting_ids:
+        return Counts()
+    rows = await conn.fetch(
+        """
+        SELECT id, title, description, attributes
+        FROM job_posting
+        WHERE id = ANY($1::bigint[]) AND job_type IS NOT NULL
+        """,
+        list(posting_ids),
+    )
+    stamp = datetime.now(timezone.utc)
+    updates = []
+    for row in rows:
+        meta = dict(row["attributes"] or {}).get("summary_meta") or {}
+        if str(meta.get("version", "")) == str(_SUMMARIES_VERSION):
+            continue
+        updates.append(
+            (
+                int(row["id"]),
+                summary_payload(row["title"], row["description"], parsed_at=stamp),
+                row["title"],
+                row["description"] or "",
+            )
+        )
+    if updates and not dry_run:
+        await _executemany_with_deadlock_retry(
+            conn,
+            """
+            UPDATE job_posting SET attributes = attributes || $2::jsonb
+            WHERE id = $1 AND title = $3 AND COALESCE(description, '') = $4
+              AND job_type IS NOT NULL
+            """,
+            updates,
+            step="summaries",
+        )
+    return Counts(postings=len(updates))
+
+
+async def apply_incremental(
+    conn: Connection,
+    name: str,
+    posting_ids: Sequence[int],
+    company_ids: Sequence[int] = (),
+    *,
+    dry_run: bool = False,
+) -> Counts:
+    """Apply one posting-local Gold step to a Silver change set.
+
+    Job-domain classification deliberately expands to every typed posting at
+    an affected company because its quant-employer prior is company-wide.
+    """
+    posting_ids = tuple(dict.fromkeys(int(value) for value in posting_ids))
+    company_ids = tuple(dict.fromkeys(int(value) for value in company_ids))
+    if name == "job_type":
+        return await _incremental_job_type(
+            conn, posting_ids, company_ids, dry_run=dry_run
+        )
+    if name == "skills":
+        return await _incremental_skills(conn, posting_ids, dry_run=dry_run)
+    if name == "degrees":
+        return await _incremental_degrees(conn, posting_ids, dry_run=dry_run)
+    if name == "summaries":
+        return await _incremental_summaries(conn, posting_ids, dry_run=dry_run)
+    raise ValueError(f"{name!r} is not an incremental Gold step")
+
+
+async def stale_posting_ids(
+    conn: Connection, name: str, *, limit: int = 1_000
+) -> list[int]:
+    """Return one bounded, deterministic batch still needing a Gold step."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    if name == "job_type":
+        query = """
+            SELECT id FROM job_posting
+            WHERE job_type IS NOT NULL
+              AND job_domain_version IS DISTINCT FROM $2
+            ORDER BY id LIMIT $1
+        """
+        rows = await conn.fetch(query, limit, _JOB_DOMAIN_VERSION)
+    elif name == "skills":
+        query = """
+            SELECT id FROM job_posting
+            WHERE COALESCE(attributes #>> '{skills_meta,version}', '') <> $2
+               OR COALESCE(attributes #>> '{skills_meta,taxonomy_hash}', '') <> $3
+            ORDER BY id LIMIT $1
+        """
+        rows = await conn.fetch(query, limit, str(_SKILLS_VERSION), skills.taxonomy_hash())
+    elif name == "degrees":
+        query = """
+            SELECT id FROM job_posting
+            WHERE degree_version IS DISTINCT FROM $2
+            ORDER BY id LIMIT $1
+        """
+        rows = await conn.fetch(query, limit, _DEGREES_VERSION)
+    elif name == "summaries":
+        query = """
+            SELECT id FROM job_posting
+            WHERE job_type IS NOT NULL
+              AND COALESCE(attributes #>> '{summary_meta,version}', '') <> $2
+            ORDER BY id LIMIT $1
+        """
+        rows = await conn.fetch(query, limit, str(_SUMMARIES_VERSION))
+    else:
+        raise ValueError(f"{name!r} is not an incremental Gold step")
+    return [int(row["id"]) for row in rows]
+
+
 # REGISTRY -----------------------------------------------------------------
 #
 # Steps are independent and order does not matter. Add ``requires`` and sort
 # only once a step genuinely reads another's output.
 
 STEPS: tuple[Step, ...] = (
+    Step("job_type", _JOB_DOMAIN_VERSION, _job_type_rebuild),
     Step("skills", _SKILLS_VERSION, _skills_rebuild),
     Step("degrees", _DEGREES_VERSION, _degrees_rebuild),
     Step("summaries", _SUMMARIES_VERSION, _summaries_rebuild),
-    Step("dedup", _STRATEGY_VERSION, _dedup_rebuild),
+    Step("dedup", _STRATEGY_VERSION, _dedup_rebuild, atomic=True),
 )
 
 

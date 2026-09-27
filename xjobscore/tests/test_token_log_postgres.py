@@ -17,6 +17,7 @@ import os
 import pytest
 
 from xjobscore.inspector import tokens, validator
+from xjobscore.inspector.policy import DROP_FEED_SQL
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("XJOBSCORE_TEST_DSN"),
@@ -88,3 +89,59 @@ async def test_missing_table_reads_as_unavailable_not_empty(core_schema):
         await conn.execute("DROP TABLE token_log")
 
     assert await tokens.recent_checks(pool, limit=10) is None
+
+
+async def seed_live(pool, ats: str, token: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO token(ats, token, status) VALUES ($1, $2, 'live')", ats, token
+        )
+
+
+async def test_promotion_and_drop_bracket_a_token_with_two_rows(core_schema):
+    """The pair `feed` cannot hold: it records neither a birth nor a death."""
+    pool = core_schema.pool
+    await seed_live(pool, "workable", "snap")
+
+    assert await tokens.promote_verified(pool, [("workable", "snap")]) == 1
+
+    # PolicyStore opens its own pool from a DSN and cannot be pointed at the
+    # throwaway schema, so run its statement against this one.
+    dropped_id = await pool.fetchval(DROP_FEED_SQL, "workable", "snap")
+    assert dropped_id is not None
+
+    events = await tokens.recent_feed_events(pool, limit=10)
+    assert [(row["token"], row["status"]) for row in events] == [
+        ("snap", "feed_exited"),
+        ("snap", "feed_entered"),
+    ]
+    # The drop is the whole point: `feed` is gone, the history is not.
+    assert await pool.fetchval("SELECT count(*) FROM feed") == 0
+
+
+async def test_muting_a_promoted_token_logs_the_exit(core_schema):
+    pool = core_schema.pool
+    await seed_live(pool, "greenhouse", "stripe")
+    await tokens.promote_verified(pool, [("greenhouse", "stripe")])
+
+    saved = await tokens.set_muted(pool, ats="greenhouse", token="stripe", muted=True)
+
+    assert saved["feed_dropped"] is True
+    events = await tokens.recent_feed_events(pool, limit=10)
+    assert [row["status"] for row in events] == ["feed_exited", "feed_entered"]
+
+
+async def test_the_two_tails_never_show_each_other_s_rows(core_schema):
+    """One column, two verbs -- so every read has to name the ones it wants."""
+    pool = core_schema.pool
+    await seed_live(pool, "no-such-vendor", "alpha")
+    await validator.validate_token("no-such-vendor", "alpha", pool=pool)
+
+    await seed_live(pool, "workable", "snap")
+    await tokens.promote_verified(pool, [("workable", "snap")])
+
+    checks = await tokens.recent_checks(pool, limit=10)
+    events = await tokens.recent_feed_events(pool, limit=10)
+
+    assert [row["status"] for row in checks] == ["unknown"]
+    assert [row["status"] for row in events] == ["feed_entered"]

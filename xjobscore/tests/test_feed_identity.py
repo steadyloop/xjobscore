@@ -27,8 +27,28 @@ def test_workday_keys_are_case_insensitive_endpoint_identities():
     )
 
 
+def test_greenhouse_keys_are_case_insensitive_endpoint_identities():
+    # `Duolingo` and `duolingo` are one board, so they must be one key.
+    assert canonical_feed_key("greenhouse", "Duolingo") == "duolingo"
+    assert canonical_feed_identity("greenhouse", "Acme") == ("greenhouse", "acme")
+
+
+def test_case_insensitive_vendors_fold_to_one_key():
+    # Each vendor here was checked against its live API: both spellings answer
+    # with the same board, so they must not become two rows.
+    assert canonical_feed_key("ashby", "Acorns") == "acorns"
+    assert canonical_feed_key("smartrecruiters", "LinkedIn3") == "linkedin3"
+    assert canonical_feed_key("oracle", "ewvl.fa.us8/CX_1") == "ewvl.fa.us8/cx_1"
+    assert canonical_feed_key("bullhorn", "34/2WXP1S") == "34/2wxp1s"
+
+
 def test_other_vendor_keys_keep_their_exact_spelling():
-    assert canonical_feed_key("greenhouse", "Acme") == "Acme"
+    assert canonical_feed_key("lever", "Acme") == "Acme"
+    # comeet's key carries an API token, which is not safe to case-fold.
+    assert (
+        canonical_feed_key("comeet", "98.008/89833903C282AF80")
+        == "98.008/89833903C282AF80"
+    )
 
 
 def test_workday_posting_namespace_uses_the_canonical_feed_identity():

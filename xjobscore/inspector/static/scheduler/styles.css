@@ -12,6 +12,7 @@
   --ops-ink: #1a1c1e;
   --ops-subtle: #5c6166;
   --ops-faint: #8b9096;
+  --ops-quiet: #6f9c7d;
   --ops-link: #1d4ed8;
   --ops-good: #0f7d33;
   --ops-good-soft: #e6f2e9;
@@ -33,6 +34,7 @@
   --ops-ink: #e8eaec;
   --ops-subtle: #9aa0a6;
   --ops-faint: #6b7076;
+  --ops-quiet: #4e7d64;
   --ops-link: #6ea8fe;
   --ops-good: #4cc38a;
   --ops-good-soft: #143024;
@@ -53,6 +55,7 @@
     --ops-ink: #e8eaec;
     --ops-subtle: #9aa0a6;
     --ops-faint: #6b7076;
+    --ops-quiet: #4e7d64;
     --ops-link: #6ea8fe;
     --ops-good: #4cc38a;
     --ops-good-soft: #143024;
@@ -687,8 +690,12 @@
   flex: none;
 }
 
+/* Fixed width on both: the words are 2-3 characters and the codes 0-3, so
+   without a reserved box every feed name starts at a different column and the
+   log stops being scannable down its left edge. */
 .ops-log-st {
   flex: none;
+  width: 3ch;
   font-weight: 700;
   color: var(--ops-subtle);
 }
@@ -697,17 +704,22 @@
   color: var(--ops-good);
 }
 
-.ops-log-st[data-status="error"] {
-  color: var(--ops-bad);
+/* Same word as `ok`, held back on two axes instead of one: dimmer green and
+   regular weight. 86% of the log is this row, so it has to read as texture
+   while still saying the poll succeeded. */
+.ops-log-st[data-status="unchanged"] {
+  color: var(--ops-quiet);
+  font-weight: 400;
 }
 
 .ops-log-st[data-status="partial"] {
   color: var(--ops-warn);
 }
 
-.ops-log-st[data-status="not_modified"] {
-  color: var(--ops-faint);
+.ops-log-st[data-status="error"] {
+  color: var(--ops-bad);
 }
+
 
 .ops-log-feed {
   overflow: hidden;
@@ -1012,6 +1024,30 @@
   color: var(--ops-subtle);
 }
 
+/* Recent-polls list: bare mark, no pill -- this list is read as a scanned
+   column of dozens, where a bordered chip per row turns into a ladder. */
+.ops-event-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.ops-event-mark {
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--ops-faint);
+}
+
+.ops-event-mark[data-status="ok"] { color: var(--ops-good); }
+.ops-event-mark[data-status="unchanged"] { color: var(--accent); }
+.ops-event-mark[data-status="partial"] { color: var(--ops-warn); }
+.ops-event-mark[data-status="error"] { color: var(--ops-bad); }
+
+.ops-event-code {
+  color: var(--ops-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .ops-panel-loading {
   padding: 24px 16px;
   color: var(--ops-faint);
@@ -1061,6 +1097,22 @@
   justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--ops-line-soft);
+}
+
+/* The rediscovery modifier reads as part of the sentence above it, not as a
+   second decision: same size, same muted tone, one line down. */
+.ops-dialog-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--ops-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ops-dialog-check input {
+  margin: 2px 0 0;
 }
 
 .ops-bulk-count {

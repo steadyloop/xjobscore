@@ -24,7 +24,7 @@ recommendation evidence.
 - At least 860 of the 8,397 had explicitly nontechnical titles such as sales,
   marketing, finance, accounting, legal, or recruiting.
 - A direct title cohort contained 2,461 postings. A separate cohort of 7,305
-  postings at `company.labels.biotech` employers showed that company membership
+  postings at `company.tags.biotech` employers showed that company membership
   alone is not sufficient: sales and translation titles were among its most
   frequent terms.
 - Mining technical, non-senior title families produced 1,983 proxy candidates
@@ -88,7 +88,7 @@ Technical/student markers include `engineer`, `scientist`, `research`,
 Generic technical titles require employer evidence. An employer is a candidate
 bio employer when either:
 
-- `company.labels` contains `biotech`; or
+- `company.tags` contains `biotech`; or
 - at least five current titles contain direct domain evidence and those titles
   are at least 2% of the employer's current postings; or
 - at least three current titles contain direct domain evidence and those titles

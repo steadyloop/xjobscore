@@ -22,15 +22,8 @@ promises could not happen, so the Scheduler page never reports a queued poll
 that nothing will ever claim.
 
 This class stays policy-only: it reads and writes the switch, never the
-polling loop itself. ``inspector.runner.SchedulerRunner`` is the collaborator
-that actually calls ``run.cycle`` from inside the inspector process, gated by
-this switch and by its own ``config.runner_enabled()`` check -- see that
-module's docstring for the two-level gate. That runner is the one place the
-inspector's PG coupling widens past policy: through its tick loop and its
-on-demand ``poll_feed_now`` (the Scheduler page's Fetch-all), it runs run.py's
-own worker path against ``raw_posting``, ``job_posting``,
-``poll_observation``, and the runtime ``feed`` columns this file otherwise
-treats as read-only.
+polling loop itself. ``xjobscore.runtime.SystemScheduler`` consumes the queue;
+Inspector requests can only move ``due_at`` and wake that scheduler.
 
 When no DSN is configured or PostgreSQL is unreachable the inspector runs in
 degraded mode: ``snapshot()`` returns None and mutations raise
@@ -88,6 +81,12 @@ class PollNowRefused(RuntimeError):
     def __init__(self, message: str, *, reason: str) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+# Re-exported, not redefined: the scheduler drops feeds automatically on
+# repeated 404s and must run the same statement this does. `store` owns it so
+# run.py can reach it without importing the inspector.
+DROP_FEED_SQL = store.DROP_FEED_SQL
 
 
 class PolicyStore:
@@ -281,21 +280,19 @@ class PolicyStore:
     async def set_paused(self, source: str, key: str, paused: bool) -> dict[str, Any]:
         """Hold or release production polling for one feed.
 
-        Distinct from ``set_enabled``: a held feed stays enabled, so it keeps its
-        place in every listing and its history stays legible. Only the queue
-        readers skip it.
+        Pause and disable were two columns writing one intent. This now writes
+        ``feed.polling`` like :meth:`set_enabled` does, so the two doors cannot
+        disagree about whether a feed is running. The feed keeps its row, which
+        is what keeps it listed on the Scheduler page and resumable.
         """
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            feed_id = await conn.fetchval(
-                "SELECT id FROM feed WHERE source = $1 AND key = $2", source, key
+            feed_id = await store.set_feed_enabled(
+                conn, source=source, key=key, enabled=not paused
             )
-            if feed_id is None:
-                raise FeedNotInPostgres(f"{source}:{key}")
-            updated = await store.set_schedule_paused(conn, feed_id, paused)
-        if not updated:
+        if feed_id is None:
             raise FeedNotInPostgres(f"{source}:{key}")
-        return {"feed_id": feed_id, "paused": paused}
+        return {"feed_id": feed_id, "paused": paused, "enabled": not paused}
 
     async def poll_now(self, source: str, key: str) -> dict[str, Any]:
         """Put one feed at the front of the production queue, to be polled now.
@@ -410,14 +407,14 @@ class PolicyStore:
         The database cascade removes poll observations with the feed. The token
         row is intentionally untouched, so a later explicit import or token
         heartbeat can bring the feed back.
+
+        The ``feed_exited`` row goes in the same statement as the delete, and
+        ``token_log`` has no FK, so it is the one trace of this feed that
+        survives the drop.
         """
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            feed_id = await conn.fetchval(
-                "DELETE FROM feed WHERE source = $1 AND key = $2 RETURNING id",
-                source,
-                key,
-            )
+            feed_id = await store.drop_feed(conn, source, key)
         if feed_id is None:
             raise FeedNotInPostgres(f"{source}:{key}")
         return {"feed_id": int(feed_id), "dropped": True}

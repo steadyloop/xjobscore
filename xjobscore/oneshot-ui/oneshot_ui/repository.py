@@ -25,22 +25,12 @@ from xjobscore.bioengineering import (
     TECHNICAL_OR_STUDENT_PATTERN,
 )
 from xjobscore.job_domain import (
-    ADJACENT_DISCIPLINE_PATTERN,
     FINANCE_FILTER,
-    FINANCE_FUNCTION_PATTERN,
-    IT_ROLE_PATTERN,
-    PROGRAM_NOISE_PATTERN,
-    QUANT_PATTERN,
-    QUANT_ROLE_PATTERN,
     SOFTWARE_FILTER,
-    SOFTWARE_RESCUE_PATTERN,
-    SOFTWARE_STRONG_PATTERN,
-    SOFTWARE_WEAK_PATTERN,
-    STUDENT_DOMAIN_GUARD_PATTERN,
-    STUDENT_DOMAIN_PATTERN,
     UNLABELED_FILTER,
 )
-from xjobscore.job_domain import NONTECHNICAL_PATTERN as DOMAIN_NONTECHNICAL_PATTERN
+from xjobscore.coverage_snapshot import board_state as _board_state
+from xjobscore.coverage_snapshot import empty_snapshot
 from xjobscore.degrees import canon as degree_canon
 from xjobscore.skill_labels import labels as skill_labels
 from xjobscore.skills import canon
@@ -76,9 +66,10 @@ DEFAULT_JOB_TYPES = ("intern", "coop", "student", "new_grad", "research")
 # keeps a name so the unclassified pool stays addressable.
 UNCLASSIFIED = "unclassified"
 VALID_JOB_TYPES = frozenset((*DEFAULT_JOB_TYPES, UNCLASSIFIED))
-# Domain labels are computed from the title at query time, so -- like
-# UNCLASSIFIED above -- nothing is stored and the residual pool still needs an
-# addressable name for manual review.
+SEASON_PATTERNS = {season: rf"\m{season}\M" for season in ("fall", "winter")}
+VALID_SEASONS = frozenset(SEASON_PATTERNS)
+# Gold stores domain labels on each typed posting. The API tokens mirror that
+# column and keep the residual pool addressable for manual review.
 DOMAIN_FILTERS = (SOFTWARE_FILTER, FINANCE_FILTER, UNLABELED_FILTER)
 VALID_DEGREE_FIELDS = frozenset(
     {
@@ -102,6 +93,8 @@ _US_STATE_NAMES = {
 _LOCATION_FIELDS = ("country", "state", "city")
 _LOCATION_DISPLAY_LIMIT = 3
 _BIO_COMPANY_CACHE_SECONDS = 300
+_JOB_COUNTS_CACHE_SECONDS = 30
+_JOB_COUNTS_CACHE_MAX_ENTRIES = 128
 
 
 class _CompanyCohortCache:
@@ -111,88 +104,58 @@ class _CompanyCohortCache:
         self.lock = asyncio.Lock()
 
 
-def _domain_predicates(
-    bind: Any, quant_company_ids: Iterable[int], requested: Iterable[str]
-) -> dict[str, str]:
-    """Render `job_domain.classify` as SQL, one predicate per requested domain.
+class _JobCountsCache:
+    """Small shared TTL cache for the expensive aggregate count query."""
 
-    `unlabeled` is derived from the other two rather than written out, so the
-    review queue cannot drift away from the labels it is the complement of.
+    def __init__(self) -> None:
+        self.values: dict[tuple[Any, ...], tuple[float, dict[str, int]]] = {}
+        self.locks: dict[tuple[Any, ...], asyncio.Lock] = {}
 
-    Only the requested domains are built, and each pattern binds at most once:
-    a parameter bound for a predicate that never reaches the SQL would be
-    rejected by the server as an argument-count mismatch.
-    """
-    markers: dict[str, str] = {}
-    employer_marker: list[str] = []
+    def _get(self, key: tuple[Any, ...]) -> dict[str, int] | None:
+        cached = self.values.get(key)
+        if cached is None:
+            return None
+        expires_at, counts = cached
+        if monotonic() >= expires_at:
+            self.values.pop(key, None)
+            lock = self.locks.get(key)
+            if lock is None or not lock.locked():
+                self.locks.pop(key, None)
+            return None
+        self.values.pop(key)
+        self.values[key] = cached
+        return dict(counts)
 
-    def marker(pattern: str) -> str:
-        # `job_domain` patterns are bounded for both engines, so the same
-        # constant drives `re` in Python and `~*` here.
-        if pattern not in markers:
-            markers[pattern] = bind(pattern)
-        return markers[pattern]
+    async def get_or_load(self, key: tuple[Any, ...], loader: Any) -> dict[str, int]:
+        cached = self._get(key)
+        if cached is not None:
+            return cached
+        lock = self.locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._get(key)
+            if cached is not None:
+                return cached
+            counts = dict(await loader())
+            self.values[key] = (
+                monotonic() + _JOB_COUNTS_CACHE_SECONDS,
+                counts,
+            )
+            while len(self.values) > _JOB_COUNTS_CACHE_MAX_ENTRIES:
+                oldest = next(iter(self.values))
+                self.values.pop(oldest, None)
+                old_lock = self.locks.get(oldest)
+                if old_lock is None or not old_lock.locked():
+                    self.locks.pop(oldest, None)
+            return dict(counts)
 
-    def title() -> str:
-        return f"regexp_replace(j.title, {marker(PROGRAM_NOISE_PATTERN)}, ' ', 'gi')"
-
-    def matches(pattern: str) -> str:
-        return f"{title()} ~* {marker(pattern)}"
-
-    def software() -> str:
-        # Stage 1: strong evidence, minus the adjacent-discipline steal.
-        strong = (
-            f"({matches(SOFTWARE_STRONG_PATTERN)} AND NOT "
-            f"({matches(ADJACENT_DISCIPLINE_PATTERN)} AND NOT "
-            f"{matches(SOFTWARE_RESCUE_PATTERN)}))"
-        )
-        # Stage 3: weak evidence, readable only once the stage 2 veto clears.
-        weak = (
-            f"(NOT {matches(DOMAIN_NONTECHNICAL_PATTERN)} AND "
-            f"{matches(SOFTWARE_WEAK_PATTERN)} AND NOT "
-            f"{matches(ADJACENT_DISCIPLINE_PATTERN)})"
-        )
-        # Stage 3b: a software domain noun paired with a student role noun,
-        # minus its non-software qualifiers.  Narrow by design -- see
-        # `STUDENT_DOMAIN_PATTERN`.
-        program = (
-            f"(NOT {matches(DOMAIN_NONTECHNICAL_PATTERN)} AND "
-            f"{matches(STUDENT_DOMAIN_PATTERN)} AND NOT "
-            f"{matches(STUDENT_DOMAIN_GUARD_PATTERN)})"
-        )
-        return f"({strong} OR {weak} OR {program})"
-
-    def finance() -> str:
-        # Stages 4 and 5 are reached only by falling through 1 to 3.
-        strong = (
-            f"({matches(SOFTWARE_STRONG_PATTERN)} AND NOT "
-            f"({matches(ADJACENT_DISCIPLINE_PATTERN)} AND NOT "
-            f"{matches(SOFTWARE_RESCUE_PATTERN)}))"
-        )
-        if not employer_marker:
-            employer_marker.append(bind(list(quant_company_ids)))
-        employer = f"c.id = ANY({employer_marker[0]}::bigint[])"
-        return (
-            f"(NOT {strong} AND NOT {matches(DOMAIN_NONTECHNICAL_PATTERN)} "
-            f"AND NOT ({matches(SOFTWARE_WEAK_PATTERN)} AND NOT "
-            f"{matches(ADJACENT_DISCIPLINE_PATTERN)}) "
-            f"AND NOT ({matches(STUDENT_DOMAIN_PATTERN)} AND NOT "
-            f"{matches(STUDENT_DOMAIN_GUARD_PATTERN)}) "
-            f"AND NOT {matches(FINANCE_FUNCTION_PATTERN)} "
-            f"AND ({matches(QUANT_PATTERN)} OR ({employer} AND "
-            f"{matches(QUANT_ROLE_PATTERN)} AND NOT "
-            f"{matches(IT_ROLE_PATTERN)})))"
-        )
-
-    predicates: dict[str, str] = {}
-    for name in requested:
-        if name == SOFTWARE_FILTER:
-            predicates[name] = software()
-        elif name == FINANCE_FILTER:
-            predicates[name] = finance()
-        elif name == UNLABELED_FILTER:
-            predicates[name] = f"(NOT {software()} AND NOT {finance()})"
-    return predicates
+    def invalidate_account(self, account_id: UUID) -> None:
+        for key in tuple(self.values):
+            if key[0] != account_id:
+                continue
+            self.values.pop(key, None)
+            lock = self.locks.get(key)
+            if lock is None or not lock.locked():
+                self.locks.pop(key, None)
 
 
 def _json_object(value: Any) -> dict[str, Any]:
@@ -403,40 +366,6 @@ def _ilike_pattern(value: str) -> str:
     return f"%{escaped}%"
 
 
-#: Strike count at which a feed's retry backoff reads as a hard failure —
-#: mirrors the inspector's BACKING_OFF_STRIKES (xjobscore/inspector/scheduling.py).
-_FAILING_STRIKES = 3
-#: A feed is stale once its last poll is older than this many intervals —
-#: mirrors the inspector's STALE_INTERVAL_MULTIPLE.
-_STALE_INTERVAL_MULTIPLE = 3
-
-
-def _board_state(
-    strikes: int,
-    last_poll_at: datetime | None,
-    paused_at: datetime | None,
-    interval_s: int,
-    now: datetime,
-) -> str:
-    """Classify one polling feed for the fleet heatmap.
-
-    Ordered most-deliberate-first: an operator hold outranks every derived
-    signal, repeated failures outrank staleness.
-    """
-    if paused_at is not None:
-        return "paused"
-    strikes = int(strikes or 0)
-    if strikes >= _FAILING_STRIKES:
-        return "failing"
-    if strikes > 0:
-        return "degraded"
-    if last_poll_at is None:
-        return "never"
-    if interval_s and (now - last_poll_at).total_seconds() > _STALE_INTERVAL_MULTIPLE * interval_s:
-        return "stale"
-    return "ok"
-
-
 def _timestamp(value: Any, *, end_of_day: bool = False) -> datetime | None:
     if value is None or not str(value).strip():
         return None
@@ -463,24 +392,21 @@ class PostgresRepository:
         account_id: UUID = LOCAL_ACCOUNT_ID,
         pool: asyncpg.Pool | None = None,
         _bio_company_cache: _CompanyCohortCache | None = None,
-        _quant_company_cache: _CompanyCohortCache | None = None,
+        _job_counts_cache: _JobCountsCache | None = None,
     ) -> None:
         self.dsn = dsn
         self.account_id = account_id
         self.pool = pool
         self._owns_pool = pool is None
         self._bio_company_cache = _bio_company_cache or _CompanyCohortCache()
-        self._quant_company_cache = (
-            _quant_company_cache or _CompanyCohortCache()
-        )
+        self._job_counts_cache = _job_counts_cache or _JobCountsCache()
 
     async def connect(self) -> None:
         if self.pool is not None:
             return
         if not self.dsn:
             raise RuntimeError(
-                "No PostgreSQL DSN. Set XJOBSCORE_ONESHOT_DSN, XJOBSCORE_DSN, "
-                "or DATABASE_URL."
+                "No PostgreSQL DSN. Set DATABASE_URL."
             )
         self.pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=8)
 
@@ -511,7 +437,7 @@ class PostgresRepository:
             account_id=account_id,
             pool=self._ready(),
             _bio_company_cache=self._bio_company_cache,
-            _quant_company_cache=self._quant_company_cache,
+            _job_counts_cache=self._job_counts_cache,
         )
 
     async def _bioengineering_company_ids(self) -> tuple[int, ...]:
@@ -543,7 +469,7 @@ class PostgresRepository:
                 FROM company c
                 JOIN company_postings cp ON cp.company_id = c.id
                 LEFT JOIN company_titles ct ON ct.company_id = c.id
-                WHERE c.labels ? 'biotech'
+                WHERE c.tags ? 'biotech'
                    OR (
                        COALESCE(ct.direct_count, 0) >= 5
                        AND ct.direct_count::numeric / cp.posting_count >= 0.02
@@ -559,46 +485,6 @@ class PostgresRepository:
             cache.expires_at = monotonic() + _BIO_COMPANY_CACHE_SECONDS
             return cache.ids
 
-    async def _quant_company_ids(self) -> tuple[int, ...]:
-        """Return the measured quant-employer prior, shared briefly across requests."""
-        cache = self._quant_company_cache
-        if monotonic() < cache.expires_at:
-            return cache.ids
-        async with cache.lock:
-            if monotonic() < cache.expires_at:
-                return cache.ids
-            # Measured over every active posting rather than the student slice:
-            # the same 40% threshold over the full corpus yields trading firms
-            # only, while the student slice alone admits insurers on 3 rows.
-            rows = await self._ready().fetch(
-                """
-                WITH company_postings AS MATERIALIZED (
-                    SELECT company_id, COUNT(*) AS posting_count
-                    FROM job_posting
-                    WHERE status = 'active'
-                    GROUP BY company_id
-                ), company_titles AS MATERIALIZED (
-                    SELECT company_id, COUNT(*) AS quant_count
-                    FROM job_posting
-                    WHERE status = 'active'
-                      AND title ~* $1
-                      AND NOT (title ~* $2)
-                    GROUP BY company_id
-                )
-                SELECT c.id
-                FROM company c
-                JOIN company_postings cp ON cp.company_id = c.id
-                JOIN company_titles ct ON ct.company_id = c.id
-                WHERE cp.posting_count >= 3
-                  AND ct.quant_count::numeric / cp.posting_count >= 0.40
-                """,
-                QUANT_PATTERN,
-                FINANCE_FUNCTION_PATTERN,
-            )
-            cache.ids = tuple(int(row["id"]) for row in rows)
-            cache.expires_at = monotonic() + _BIO_COMPANY_CACHE_SECONDS
-            return cache.ids
-
     @staticmethod
     def _job(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
         attributes = _json_object(row.get("attributes"))
@@ -609,6 +495,13 @@ class PostgresRepository:
             "source": row.get("source"),
             "source_url": row.get("source_url"),
             "company": row.get("company_name") or "Unknown company",
+            # Null when the harvest found nothing, which the client reads as
+            # "draw the initials instead".
+            "logo": (
+                f"/api/companies/{row['company_id']}/logo"
+                if row.get("has_logo")
+                else None
+            ),
             "title": row["title"],
             "summary": summary.strip() if isinstance(summary, str) and summary.strip() else None,
             "locations": locations,
@@ -640,6 +533,13 @@ class PostgresRepository:
             "other_sources": _other_sources(row.get("other_sources")),
         }
 
+    async def company_logo(self, company_id: int) -> bytes | None:
+        """Return the stored logo, or None when the harvest found none."""
+        pool = self._ready()
+        return await pool.fetchval(
+            "SELECT bytes FROM company_logo WHERE company_id = $1", company_id
+        )
+
     async def list_jobs(
         self,
         *,
@@ -648,11 +548,15 @@ class PostgresRepository:
         exclude_job_ids: Iterable[int] = (),
         hide_tracked: bool = True,
         q: str = "",
+        season: str = "",
         sort: str = "fresh",
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
         fields = tuple(dict.fromkeys(degree_fields))
+        season = season.strip().lower()
+        if season and season not in VALID_SEASONS:
+            raise ValueError(f"unknown season: {season}")
         # BioTech is the public umbrella.  It includes its broad parsed focus
         # tag as well as the stricter title/employer recommendation cohort that
         # formerly appeared as a separate BioEngineering filter.  Keep the
@@ -666,9 +570,6 @@ class PostgresRepository:
             else ()
         )
         domains_requested = tuple(f for f in fields if f in DOMAIN_FILTERS)
-        quant_company_ids = (
-            await self._quant_company_ids() if domains_requested else ()
-        )
         params: list[Any] = []
 
         def bind(value: Any) -> str:
@@ -748,10 +649,10 @@ class PostgresRepository:
                 )
                 field_clauses.append(f"({recommendation})")
             if domains_requested:
-                domain_sql = _domain_predicates(
-                    bind, quant_company_ids, domains_requested
+                domain_marker = bind(list(domains_requested))
+                field_clauses.append(
+                    f"j.job_domain = ANY({domain_marker}::text[])"
                 )
-                field_clauses.extend(domain_sql[name] for name in domains_requested)
             # Only BioTech and the domain labels contribute predicates, so
             # `field_clauses` is empty whenever an ordinary focus area is
             # selected alone. Appending an empty "()" would be a syntax error,
@@ -771,7 +672,14 @@ class PostgresRepository:
             )
         if q.strip():
             marker = bind(_ilike_pattern(q.strip()))
-            search = [f"c.name ILIKE {marker}", f"j.title ILIKE {marker}"]
+            # ``source`` is ``vendor:key``; only the vendor half is searchable
+            # so "greenhouse" lists every Greenhouse board without the board
+            # key leaking unrelated matches ("apple" hitting "appleseed").
+            search = [
+                f"c.name ILIKE {marker}",
+                f"j.title ILIKE {marker}",
+                f"split_part(j.source, ':', 1) ILIKE {marker}",
+            ]
             skill_ids = _skill_search_ids(q)
             if skill_ids:
                 skill_marker = bind(list(skill_ids))
@@ -779,11 +687,27 @@ class PostgresRepository:
                     f"(j.attributes -> 'skills') ?| {skill_marker}::text[]"
                 )
             clauses.append(f"({' OR '.join(search)})")
+        if season:
+            # Seasonal views intentionally inspect the canonical description as
+            # well as the title. Ordinary free-text search stays on the compact
+            # title/company/skills surface because descriptions are both noisy
+            # and substantially more expensive to scan for arbitrary input.
+            marker = bind(SEASON_PATTERNS[season])
+            clauses.append(
+                f"(j.title ~* {marker} "
+                f"OR COALESCE(j.description, '') ~* {marker})"
+            )
         # Tab totals honor every non-type filter (search, degree field, and a
         # user's tracked postings), but do not inherit the selected tab's type
-        # predicate or the other tabs would all read zero.
+        # predicate or the other tabs would all read zero. Empty search, season,
+        # and exclusion sets have a small shared TTL cache; arbitrary search,
+        # seasonal, and browser-local exclusion combinations are uncached.
         counts_where = " AND ".join(clauses)
         counts_params = tuple(params)
+        counts_cache_key = (
+            (self.account_id if hide_tracked else None),
+            tuple(sorted(fields)),
+        ) if not q.strip() and not season and not excluded else None
         types = tuple(dict.fromkeys(job_types))
         if types:
             # `unclassified` is not a stored value -- it is the NULL pool, so it
@@ -797,45 +721,48 @@ class PostgresRepository:
             clauses.append(f"({' OR '.join(wanted)})")
         where = " AND ".join(clauses)
         pool = self._ready()
-        # Counting and reading a page use the same filter predicate but
-        # neither depends on the other. Run them on separate pool connections
-        # so a large count does not hold the first visible results hostage.
-        # Keep the filter arguments separate: binding LIMIT/OFFSET below must
-        # not change the count query's positional parameters.
+        # Counting and reading a page use the same filter predicate but neither
+        # depends on the other. Keep their arguments separate and start both
+        # before awaiting either one.
         filter_params = tuple(params)
-        total_read = pool.fetchval(
-            f"""
-            SELECT COUNT(*)
-            FROM job_posting j
-            JOIN company c ON c.id = j.company_id
-            LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
-            WHERE {where}
-            """,
-            *filter_params,
-        )
-        type_counts_read = pool.fetchrow(
-            f"""
-            SELECT
-                COUNT(*) FILTER (WHERE j.job_type = 'intern') AS intern,
-                COUNT(*) FILTER (WHERE j.job_type = 'coop') AS coop,
-                COUNT(*) FILTER (WHERE j.job_type = 'student') AS student,
-                COUNT(*) FILTER (WHERE j.job_type = 'new_grad') AS new_grad,
-                COUNT(*) FILTER (WHERE j.job_type = 'research') AS research
-            FROM job_posting j
-            JOIN company c ON c.id = j.company_id
-            LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
-            WHERE {counts_where}
-              AND j.job_type = ANY(ARRAY[
-                  'intern', 'coop', 'student', 'new_grad', 'research'
-              ]::text[])
-            """,
-            *counts_params,
+
+        async def read_type_counts() -> dict[str, int]:
+            row = await pool.fetchrow(
+                f"""
+                SELECT
+                    COUNT(*) FILTER (WHERE j.job_type = 'intern') AS intern,
+                    COUNT(*) FILTER (WHERE j.job_type = 'coop') AS coop,
+                    COUNT(*) FILTER (WHERE j.job_type = 'student') AS student,
+                    COUNT(*) FILTER (WHERE j.job_type = 'new_grad') AS new_grad,
+                    COUNT(*) FILTER (WHERE j.job_type = 'research') AS research
+                FROM job_posting j
+                JOIN company c ON c.id = j.company_id
+                LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
+                WHERE {counts_where}
+                  AND j.job_type = ANY(ARRAY[
+                      'intern', 'coop', 'student', 'new_grad', 'research'
+                  ]::text[])
+                """,
+                *counts_params,
+            )
+            return {
+                job_type: int(row.get(job_type) or 0)
+                for job_type in DEFAULT_JOB_TYPES
+            }
+
+        type_counts_read = (
+            self._job_counts_cache.get_or_load(
+                counts_cache_key, read_type_counts
+            )
+            if counts_cache_key is not None
+            else read_type_counts()
         )
         if sort == "company":
             ordering = "c.name, j.title, j.id"
         elif sort == "title":
             ordering = "j.title, c.name, j.id"
         else:
+            direction = "ASC" if sort == "oldest" else "DESC"
             # Recency is the outer bucket. Within each calendar day, rank core
             # US hubs, then their suburbs, the rest of the US, and no location.
             # Bind the policy after the count reads: these values are page-only
@@ -850,7 +777,7 @@ class PostgresRepository:
             )
             ordering = f"""
                 (COALESCE(j.posted_at, j.first_seen_at)
-                    AT TIME ZONE '{RECENCY_TIME_ZONE}')::date DESC NULLS LAST,
+                    AT TIME ZONE '{RECENCY_TIME_ZONE}')::date {direction} NULLS LAST,
                 CASE
                     WHEN EXISTS (
                         SELECT 1 FROM jsonb_array_elements(j.locations) location
@@ -883,8 +810,8 @@ class PostgresRepository:
                     ) THEN 3
                     ELSE 4
                 END,
-                COALESCE(j.posted_at, j.first_seen_at) DESC NULLS LAST,
-                j.id DESC
+                COALESCE(j.posted_at, j.first_seen_at) {direction} NULLS LAST,
+                j.id {direction}
             """
         limit_marker = bind(max(1, min(limit, 500)))
         offset_marker = bind(max(0, offset))
@@ -895,9 +822,13 @@ class PostgresRepository:
                 j.locations, j.source_url, j.apply_url, j.posted_at,
                 j.first_seen_at, j.last_seen_at, j.status, j.attributes,
                 j.job_type, j.remote, j.part_time,
+                j.company_id, (logo.bytes IS NOT NULL) AS has_logo,
                 COALESCE(alternates.other_sources, '[]'::jsonb) AS other_sources
             FROM job_posting j
             JOIN company c ON c.id = j.company_id
+            -- Presence only: the bytes are served by their own cacheable route,
+            -- so a card that has no logo never fires a request that 404s.
+            LEFT JOIN company_logo logo ON logo.company_id = j.company_id
             LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
             LEFT JOIN LATERAL (
                 SELECT jsonb_agg(
@@ -930,160 +861,62 @@ class PostgresRepository:
             """,
             *params,
         )
-        total, type_counts, rows = await asyncio.gather(total_read, type_counts_read, page_read)
+        if types and all(job_type in DEFAULT_JOB_TYPES for job_type in types):
+            type_counts, rows = await asyncio.gather(type_counts_read, page_read)
+            total = sum(type_counts[job_type] for job_type in types)
+        else:
+            total_read = pool.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM job_posting j
+                JOIN company c ON c.id = j.company_id
+                LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
+                WHERE {where}
+                """,
+                *filter_params,
+            )
+            total, type_counts, rows = await asyncio.gather(
+                total_read, type_counts_read, page_read
+            )
         return {
             "jobs": [self._job(row) for row in rows],
             "total": int(total or 0),
             "job_type_counts": {
-                job_type: int(type_counts[job_type] or 0)
+                job_type: type_counts[job_type]
                 for job_type in DEFAULT_JOB_TYPES
             },
             "limit": limit,
             "offset": offset,
         }
 
-    async def source_coverage(self) -> dict[str, Any]:
-        rows = await self._ready().fetch(
+    async def _coverage_snapshot(self) -> tuple[dict[str, Any], Any]:
+        row = await self._ready().fetchrow(
             """
-            WITH feed_stats AS (
-                SELECT
-                    f.source,
-                    COUNT(*) FILTER (WHERE f.polling) AS board_count,
-                    COUNT(*) FILTER (WHERE f.polling AND f.last_poll_at IS NOT NULL) AS polled_count,
-                    -- A paused feed is held on purpose: it is overdue by design
-                    -- and must not be counted as something to go and fix.
-                    COUNT(*) FILTER (
-                        WHERE f.polling AND f.paused_at IS NULL AND (
-                            COALESCE(f.strikes, 0) > 0
-                            OR (
-                                f.due_at < now()
-                                AND (f.hold_until IS NULL OR f.hold_until < now())
-                            )
-                        )
-                    ) AS attention_count,
-                    MAX(f.last_poll_at) FILTER (WHERE f.polling) AS last_poll_at
-                FROM feed f
-                GROUP BY f.source
-            ),
-            posting_stats AS (
-                SELECT
-                    f.source,
-                    COUNT(j.id) FILTER (WHERE j.status = 'active') AS coverage,
-                    COUNT(*) FILTER (
-                        WHERE j.first_seen_at >= date_trunc('day', now())
-                    ) AS added_today
-                FROM feed f
-                LEFT JOIN job_posting j
-                    ON j.source = f.source || ':' || f.key
-                GROUP BY f.source
-            )
-            SELECT
-                f.source,
-                f.board_count,
-                f.polled_count,
-                f.attention_count,
-                f.last_poll_at,
-                COALESCE(p.coverage, 0) AS coverage,
-                COALESCE(p.added_today, 0) AS added_today
-            FROM feed_stats f
-            LEFT JOIN posting_stats p ON p.source = f.source
-            ORDER BY COALESCE(p.coverage, 0) DESC, f.source
+            SELECT payload, computed_at
+            FROM coverage_snapshot
+            ORDER BY computed_at DESC
+            LIMIT 1
             """
         )
-        items = []
-        for row in rows:
-            board_count = int(row["board_count"] or 0)
-            polled_count = int(row["polled_count"] or 0)
-            attention_count = int(row["attention_count"] or 0)
-            if board_count == 0:
-                health = "Disabled"
-            elif polled_count == 0:
-                health = "Not polled"
-            elif attention_count:
-                health = "Needs attention"
-            elif polled_count < board_count:
-                health = "Partial"
-            else:
-                health = "Healthy"
-            items.append(
-                {
-                    "source": row["source"],
-                    "type": "ATS",
-                    "board_count": board_count,
-                    "coverage": int(row["coverage"] or 0),
-                    "last_poll_at": _iso(row["last_poll_at"]),
-                    "health": health,
-                    "added_today": int(row["added_today"] or 0),
-                }
-            )
-        return {
-            "sources": items,
-            "source_count": len(items),
-            "total_coverage": sum(item["coverage"] for item in items),
-            "total_added_today": sum(item["added_today"] for item in items),
-        }
+        if row is None:
+            return empty_snapshot(), None
+        return _json_object(row["payload"]), _iso(row["computed_at"])
+
+    async def source_coverage(self) -> dict[str, Any]:
+        snapshot, computed_at = await self._coverage_snapshot()
+        fallback = empty_snapshot()["source_coverage"]
+        payload = snapshot.get("source_coverage", fallback)
+        result = dict(payload) if isinstance(payload, dict) else dict(fallback)
+        result["computed_at"] = computed_at
+        return result
 
     async def board_map(self) -> dict[str, Any]:
-        rows = await self._ready().fetch(
-            """
-            SELECT f.source, f.key, f.strikes, f.last_poll_at, f.paused_at,
-                   f.interval_s, COALESCE(p.coverage, 0) AS coverage,
-                   c.name AS company_name
-            FROM feed f
-            LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
-            LEFT JOIN company c ON c.id = t.company_id
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*) AS coverage FROM job_posting j
-                WHERE j.source = f.source || ':' || f.key AND j.status = 'active'
-            ) p ON true
-            WHERE f.polling
-            ORDER BY f.source, f.key
-            """
-        )
-        added_today = await self._ready().fetchval(
-            """
-            SELECT COUNT(*) FROM job_posting j
-            WHERE j.first_seen_at >= date_trunc('day', now())
-            """
-        )
-        now = datetime.now(timezone.utc)
-        providers: dict[str, dict[str, Any]] = {}
-        state_totals = {"ok": 0, "degraded": 0, "failing": 0, "stale": 0, "paused": 0, "never": 0}
-        for row in rows:
-            state = _board_state(
-                row["strikes"], row["last_poll_at"], row["paused_at"], row["interval_s"] or 0, now
-            )
-            state_totals[state] += 1
-            provider = providers.setdefault(
-                row["source"], {"source": row["source"], "board_count": 0, "err_count": 0, "boards": []}
-            )
-            provider["board_count"] += 1
-            if state in ("failing", "degraded"):
-                provider["err_count"] += 1
-            provider["boards"].append(
-                {
-                    "key": row["key"],
-                    "company": row["company_name"] or row["key"],
-                    "state": state,
-                    "strikes": int(row["strikes"] or 0),
-                    "last_poll_at": _iso(row["last_poll_at"]),
-                    "coverage": int(row["coverage"] or 0),
-                }
-            )
-        ordered = sorted(providers.values(), key=lambda p: (-p["board_count"], p["source"]))
-        return {
-            "providers": ordered,
-            "totals": {
-                "boards": len(rows),
-                "providers": len(ordered),
-                "ok": state_totals["ok"],
-                "erroring": state_totals["failing"] + state_totals["degraded"],
-                "stale": state_totals["stale"],
-                "paused": state_totals["paused"],
-                "never": state_totals["never"],
-                "added_today": int(added_today or 0),
-            },
-        }
+        snapshot, computed_at = await self._coverage_snapshot()
+        fallback = empty_snapshot()["board_map"]
+        payload = snapshot.get("board_map", fallback)
+        result = dict(payload) if isinstance(payload, dict) else dict(fallback)
+        result["computed_at"] = computed_at
+        return result
 
     @staticmethod
     def _application(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
@@ -1098,11 +931,13 @@ class PostgresRepository:
             "stage": row["stage"],
             "closed_reason": row.get("closed_reason"),
             "apply_url_snapshot": row.get("apply_url_snapshot"),
+            "resume_variant": row.get("resume_variant"),
             "submitted_at": _iso(row.get("submitted_at")),
             "next_action": row.get("next_action"),
             "next_due_at": _iso(row.get("next_due_at")),
             "note": row.get("note") or "",
             "updated_at": _iso(row.get("updated_at")),
+            "stage_changed_at": _iso(row.get("stage_changed_at")),
         }
 
     async def _get_application(
@@ -1111,10 +946,20 @@ class PostgresRepository:
         row = await connection.fetchrow(
             """
             SELECT
-                id, job_posting_id, company_snapshot, title_snapshot,
-                location_snapshot, stage, closed_reason, apply_url_snapshot,
-                submitted_at, next_action, next_due_at, note, updated_at
+                a.id, a.job_posting_id, a.company_snapshot, a.title_snapshot,
+                a.location_snapshot, a.stage, a.closed_reason,
+                a.apply_url_snapshot, a.resume_variant, a.submitted_at,
+                a.next_action, a.next_due_at, a.note, a.updated_at,
+                COALESCE(moved.at, a.updated_at) AS stage_changed_at
             FROM job_application a
+            -- Every stage change writes a stage_changed event, so the board can
+            -- order by "most recently moved" without a column of its own. The
+            -- fallback keeps rows that predate the event log orderable.
+            LEFT JOIN LATERAL (
+                SELECT max(e.occurred_at) AS at
+                FROM job_application_event e
+                WHERE e.job_application_id = a.id AND e.to_stage IS NOT NULL
+            ) moved ON true
             WHERE a.id = $1 AND a.account_id = $2
             """,
             application_id,
@@ -1148,10 +993,20 @@ class PostgresRepository:
         rows = await self._ready().fetch(
             """
             SELECT
-                id, job_posting_id, company_snapshot, title_snapshot,
-                location_snapshot, stage, closed_reason, apply_url_snapshot,
-                submitted_at, next_action, next_due_at, note, updated_at
+                a.id, a.job_posting_id, a.company_snapshot, a.title_snapshot,
+                a.location_snapshot, a.stage, a.closed_reason,
+                a.apply_url_snapshot, a.resume_variant, a.submitted_at,
+                a.next_action, a.next_due_at, a.note, a.updated_at,
+                COALESCE(moved.at, a.updated_at) AS stage_changed_at
             FROM job_application a
+            -- Every stage change writes a stage_changed event, so the board can
+            -- order by "most recently moved" without a column of its own. The
+            -- fallback keeps rows that predate the event log orderable.
+            LEFT JOIN LATERAL (
+                SELECT max(e.occurred_at) AS at
+                FROM job_application_event e
+                WHERE e.job_application_id = a.id AND e.to_stage IS NOT NULL
+            ) moved ON true
             WHERE a.account_id = $1
             ORDER BY
                 CASE a.stage
@@ -1162,8 +1017,8 @@ class PostgresRepository:
                     WHEN 'considering' THEN 5
                     ELSE 6
                 END,
-                a.next_due_at NULLS LAST,
-                a.updated_at DESC
+                COALESCE(moved.at, a.updated_at) DESC,
+                a.next_due_at NULLS LAST
             """,
             self.account_id,
         )
@@ -1260,7 +1115,9 @@ class PostgresRepository:
                 None,
                 None,
             )
-            return await self._get_application(connection, application_id)
+            result = await self._get_application(connection, application_id)
+        self._job_counts_cache.invalidate_account(self.account_id)
+        return result
 
     async def create_external_application(
         self,
@@ -1316,7 +1173,8 @@ class PostgresRepository:
                 """
                 SELECT
                     job_posting_id, company_snapshot, title_snapshot,
-                    apply_url_snapshot, stage, closed_reason, submitted_at
+                    location_snapshot, apply_url_snapshot, stage, closed_reason,
+                    submitted_at
                 FROM job_application
                 WHERE id = $1 AND account_id = $2
                 FOR UPDATE
@@ -1330,6 +1188,7 @@ class PostgresRepository:
             for request_name, column in (
                 ("company", "company_snapshot"),
                 ("title", "title_snapshot"),
+                ("location", "location_snapshot"),
                 ("apply_url_snapshot", "apply_url_snapshot"),
             ):
                 if not external and request_name in changes and changes[request_name] != current[column]:
@@ -1346,8 +1205,6 @@ class PostgresRepository:
                     raise ValueError("closed_reason is only valid when stage is closed")
                 closed_reason = None
             stage_changed = stage != current["stage"]
-            if stage_changed and stage == "applied" and not changes.get("confirmed"):
-                raise ValueError("human submission confirmation is required")
 
             values: dict[str, Any] = {
                 "stage": stage,
@@ -1364,6 +1221,8 @@ class PostgresRepository:
                     if not title:
                         raise ValueError("title is required")
                     values["title_snapshot"] = title
+                if "location" in changes:
+                    values["location_snapshot"] = str(changes["location"] or "").strip()
                 if "apply_url_snapshot" in changes:
                     url = str(changes["apply_url_snapshot"] or "").strip()
                     parsed = urlsplit(url)
@@ -1373,6 +1232,8 @@ class PostgresRepository:
             for name in ("next_action", "note"):
                 if name in changes:
                     values[name] = changes[name] or ""
+            if "resume_variant" in changes:
+                values["resume_variant"] = str(changes["resume_variant"] or "").strip() or None
             if "submitted_at" in changes:
                 values["submitted_at"] = _timestamp(changes["submitted_at"])
             if "next_due_at" in changes:
@@ -1410,10 +1271,60 @@ class PostgresRepository:
                 )
             return await self._get_application(connection, application_id)
 
+    async def record_application_event(
+        self, application_id: int, event_type: str, note: str | None = None
+    ) -> bool:
+        """Append a non-stage event to one of this account's applications."""
+        result = await self._ready().execute(
+            """
+            INSERT INTO job_application_event(job_application_id, event_type, note)
+            SELECT id, $2, $3 FROM job_application WHERE id = $1 AND account_id = $4
+            """,
+            application_id,
+            event_type,
+            note,
+            self.account_id,
+        )
+        return result == "INSERT 0 1"
+
+    # -- auto-apply answer bank -------------------------------------------
+    #
+    # Custom-question answers live under account.profile -> 'apply_answers',
+    # keyed by the normalised question label. The column was unused and the
+    # bank is small, so it needs no table of its own.
+
+    async def get_apply_answers(self) -> dict[str, Any]:
+        raw = await self._ready().fetchval(
+            "SELECT profile -> 'apply_answers' FROM account WHERE id = $1",
+            self.account_id,
+        )
+        value = json.loads(raw) if isinstance(raw, str) else raw
+        return value if isinstance(value, dict) else {}
+
+    async def merge_apply_answers(self, answers: dict[str, Any]) -> dict[str, Any]:
+        if answers:
+            await self._ready().execute(
+                """
+                UPDATE account
+                SET profile = jsonb_set(
+                    profile, '{apply_answers}',
+                    COALESCE(profile -> 'apply_answers', '{}'::jsonb) || $2::jsonb,
+                    true
+                )
+                WHERE id = $1
+                """,
+                self.account_id,
+                json.dumps(answers),
+            )
+        return await self.get_apply_answers()
+
     async def delete_application(self, application_id: int) -> bool:
         result = await self._ready().execute(
             "DELETE FROM job_application WHERE id = $1 AND account_id = $2",
             application_id,
             self.account_id,
         )
-        return result == "DELETE 1"
+        deleted = result == "DELETE 1"
+        if deleted:
+            self._job_counts_cache.invalidate_account(self.account_id)
+        return deleted

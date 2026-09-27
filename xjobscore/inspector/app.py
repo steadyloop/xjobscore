@@ -4,22 +4,19 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import sqlite3
 from typing import Any, Literal
 from uuid import UUID
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from xjobscore.inspector import config, scheduling, telemetry
 from xjobscore.inspector.cache import now_utc
 from xjobscore.inspector.db import CatalogDB
-from xjobscore.inspector.duplicate_groups import current_fingerprint
-from xjobscore.inspector.duplicate_groups import query as duplicate_group_query
-from xjobscore.inspector import fields as fields_recon
-from xjobscore.inspector import mapping as field_mapping
 from xjobscore.inspector.persistence import ResultStore
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
@@ -27,15 +24,7 @@ from xjobscore.inspector.policy import (
     PolicyUnavailable,
     PollNowRefused,
 )
-from xjobscore.inspector.postings import detail as posting_detail
-from xjobscore.inspector.postings import query as posting_query
 from xjobscore.inspector.profile import source_profile, wire_content_type
-from xjobscore.inspector.query import format_error as query_format_error
-from xjobscore.inspector.query import run as query_run_sql
-from xjobscore.inspector.query import schema as query_schema_sql
-from xjobscore.inspector.review import detail as review_detail
-from xjobscore.inspector.review import query as review_query
-from xjobscore.inspector.review import set_labels as review_set_labels
 from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.inspector.service import InspectorService
 from xjobscore.inspector.token_heartbeat import (
@@ -46,16 +35,33 @@ from xjobscore.inspector.token_heartbeat import (
     heartbeat_snapshot as token_heartbeat_snapshot,
     set_paused as token_heartbeat_set_paused,
 )
+from xjobscore import logo_harvest
+from xjobscore.inspector import companies as companies_view
 from xjobscore.inspector.tokens import query as tokens_query
 from xjobscore.inspector.tokens import recent_checks as tokens_recent_checks
 from xjobscore.inspector.tokens import promote_verified as tokens_promote_verified
+from xjobscore.inspector.tokens import recent_feed_events as tokens_recent_feed_events
 from xjobscore.inspector.tokens import set_muted as tokens_set_muted
 from xjobscore.inspector.tokens import set_note as tokens_set_note
 from xjobscore.inspector.tokens import set_tags as tokens_set_tags
+from xjobscore.keyscan_import import import_keyscan_tokens
+from starlette.concurrency import run_in_threadpool
+
+from xjobscore.feed_identity import canonical_feed_key
+from xjobscore.keyscan_import import resolve_ats as resolve_keyscan_ats
+from xjobscore.inspector import keyscan_control
+from xjobscore.inspector import keyscan_view
 from xjobscore.inspector import validator
 from xjobscore.sources import UnknownSource
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class KeyscanRunBody(BaseModel):
+    date_from: str | None = None
+    date_to: str | None = None
+    crawl_ids: str | None = None
+    sources: str | None = None
 
 
 class PolicyOptions(BaseModel):
@@ -84,41 +90,6 @@ class SchedulerControlOptions(BaseModel):
 
 class TokenHeartbeatControl(BaseModel):
     paused: bool
-
-
-class PostingLabel(BaseModel):
-    """One label upsert; ``label: null`` clears the row's label instead."""
-
-    source: str
-    source_key: str
-    label: Literal["relevant", "irrelevant", "unsure"] | None = None
-    note: str | None = None
-    title_snapshot: str | None = None
-    company_snapshot: str | None = None
-
-
-class PostingLabelsBody(BaseModel):
-    labels: list[PostingLabel]
-
-
-class ReviewLabel(BaseModel):
-    """One opus-bucket decision for a single ``job_posting`` row."""
-
-    id: int
-    label: Literal["tech", "non-tech", "ambiguous", "other"]
-
-
-class ReviewLabelsBody(BaseModel):
-    labels: list[ReviewLabel]
-
-
-class DuplicateReviewBody(BaseModel):
-    decision: Literal["correct", "incorrect", "needs_review", "hidden"] | None = None
-    note: str | None = None
-
-
-class QueryBody(BaseModel):
-    sql: str
 
 
 class TokenIdentity(BaseModel):
@@ -157,6 +128,35 @@ class TokenMutedBody(TokenIdentity):
     muted: bool
 
 
+class CompanyVerifyBody(BaseModel):
+    """Operator corrections. Omitted means "leave alone"; "" means "clear".
+
+    The two have to stay distinguishable: ``None`` for a field the dialog never
+    showed and ``""`` for a box the operator deliberately emptied are different
+    instructions, and collapsing them would silently wipe columns.
+    """
+
+    name: str | None = None
+    domain: str | None = None
+    description: str | None = None
+
+
+class CompanyReviewBody(BaseModel):
+    state: Literal["rejected", "pending"]
+
+
+class CompanyMergeBody(BaseModel):
+    """The row that survives. The path's company is the one folded in."""
+
+    target_id: int
+
+
+class CompanyLogoBody(BaseModel):
+    """Fetch against a domain the operator has typed but not yet saved."""
+
+    domain: str | None = None
+
+
 def _policy_error(exc: Exception) -> HTTPException:
     if isinstance(exc, PollNowRefused):
         # Same 409 shape as an unimported feed, but the hint names what to fix
@@ -180,6 +180,7 @@ def _policy_error(exc: Exception) -> HTTPException:
 
 def create_app(
     *,
+    runtime: Any | None = None,
     catalog: Any | None = None,
     store: Any | None = None,
     user_agent: str | None = None,
@@ -189,44 +190,58 @@ def create_app(
     gold_job: Any | None = None,
 ) -> FastAPI:
     """Build an inspector app, optionally with injected test collaborators."""
-
-    store = store if store is not None else ResultStore(
-        config.persistence_dsn(), schema=config.persistence_schema()
-    )
-    policy_store = policy if policy is not None else PolicyStore(config.dsn_or_none())
-    # The catalog borrows the policy pool rather than opening its own. Feed
-    # inventory is PostgreSQL-only.
-    database = catalog if catalog is not None else CatalogDB(policy_store)
-    inspector = InspectorService(
-        database,
-        user_agent=user_agent or config.user_agent(),
-        result_store=store,
-        company_store=policy_store,
-    )
-    # Off by default (config.runner_enabled()): every test process and every
-    # dev laptop's inspector must stay inert unless someone opts in. See
-    # runner.py's module docstring for the full two-switch gate.
-    scheduler_runner = runner if runner is not None else SchedulerRunner(
-        policy_store,
-        enabled=config.runner_enabled(),
-        user_agent=user_agent or config.user_agent(),
-        tick_s=config.runner_tick_s(),
-        batch=config.runner_batch(),
-        lease_seconds=config.runner_lease_s(),
-    )
-    heartbeat_runner = token_runner if token_runner is not None else TokenHeartbeatRunner(
-        policy_store,
-        enabled=config.token_heartbeat_enabled(),
-        tick_s=config.token_heartbeat_tick_s(),
-        batch=config.token_heartbeat_batch(),
-        interval_seconds=config.token_heartbeat_interval_s(),
-        retry_seconds=config.token_heartbeat_retry_s(),
-        lease_seconds=config.token_heartbeat_lease_s(),
-    )
-    dedup_job = gold_job if gold_job is not None else GoldJob(policy_store)
+    if runtime is not None:
+        store = runtime.result_store
+        policy_store = runtime.policy
+        database = runtime.catalog
+        inspector = runtime.inspector
+        scheduler_runner = runtime.scheduler
+        heartbeat_runner = runtime.heartbeat
+        dedup_job = None
+    else:
+        store = store if store is not None else ResultStore(
+            config.persistence_dsn(), schema=config.persistence_schema()
+        )
+        policy_store = policy if policy is not None else PolicyStore(config.dsn_or_none())
+        # The catalog borrows the policy pool rather than opening its own. Feed
+        # inventory is PostgreSQL-only.
+        database = catalog if catalog is not None else CatalogDB(policy_store)
+        inspector = InspectorService(
+            database,
+            user_agent=user_agent or config.user_agent(),
+            result_store=store,
+            company_store=policy_store,
+        )
+        # Legacy construction exists for isolated tests and imports only. The
+        # normal process injects UnifiedRuntime and has no deploy-time gate.
+        scheduler_runner = runner if runner is not None else SchedulerRunner(
+            policy_store,
+            enabled=False,
+            user_agent=user_agent or config.user_agent(),
+            tick_s=config.runner_tick_s(),
+            cycle_budget_s=config.runner_budget_s(),
+            lease_seconds=config.runner_lease_s(),
+        )
+        heartbeat_runner = token_runner if token_runner is not None else TokenHeartbeatRunner(
+            policy_store,
+            enabled=False,
+            tick_s=config.token_heartbeat_tick_s(),
+            batch=config.token_heartbeat_batch(),
+            interval_seconds=config.token_heartbeat_interval_s(),
+            retry_seconds=config.token_heartbeat_retry_s(),
+            lease_seconds=config.token_heartbeat_lease_s(),
+        )
+        dedup_job = gold_job if gold_job is not None else GoldJob(policy_store)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        if runtime is not None:
+            await runtime.start()
+            try:
+                yield
+            finally:
+                await runtime.stop()
+            return
         await database.connect()
         try:
             await store.initialize()
@@ -249,6 +264,7 @@ def create_app(
     application.state.scheduler_runner = scheduler_runner
     application.state.token_heartbeat_runner = heartbeat_runner
     application.state.gold_job = dedup_job
+    application.state.system_runtime = runtime
 
     async def merged_feed_rows() -> list[dict[str, Any]]:
         rows = await inspector.feed_rows()
@@ -269,18 +285,12 @@ def create_app(
         return rows
 
     def scheduled_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Scheduler-page rows: feeds production is actually polling.
+        """Scheduler-page rows: every feed with a row in ``feed``.
 
-        ``feed.polling`` *is* the membership test. The Feeds page owns it end to
-        end -- its toggle imports the feed on first flip and switches it off
-        afterwards -- so enabling a feed there is what puts it on the Scheduler,
-        and disabling it is what takes it off. Nothing on the Scheduler widens
-        or narrows that set.
-
-        A paused feed (``feed.paused_at`` set, ``enabled`` still true)
-        deliberately stays visible. That is the entire point of pausing rather
-        than disabling: holding a feed's polling should not cost you the ability
-        to see it, read its history, or resume it.
+        Membership is the row's existence, not ``feed.polling``. The column says
+        whether a member is *running*, and the page's Pause/Resume writes it --
+        so a held feed has to stay listed or there would be no way to resume it.
+        Leaving the fleet is Drop or Mute, which delete the row.
 
         With PostgreSQL down (policy None) membership is unknowable, so keep
         every row rather than flash an empty page.
@@ -289,10 +299,7 @@ def create_app(
             row
             for row in rows
             if row["feed_ref"] is not None
-            and (
-                row["policy"] is None
-                or (row["policy"].get("in_postgres") and row["policy"].get("enabled"))
-            )
+            and (row["policy"] is None or row["policy"].get("in_postgres"))
         ]
 
     async def configured_feed(ref: str) -> dict[str, Any]:
@@ -309,6 +316,34 @@ def create_app(
         return {
             "ok": True,
             "postgres": policy_store.status(),
+        }
+
+    @application.get("/healthz")
+    async def healthz() -> dict[str, bool]:
+        return {"ok": True}
+
+    @application.get("/readyz")
+    async def readyz() -> Response:
+        if runtime is None:
+            ready = bool(policy_store.status().get("connected"))
+            payload: dict[str, Any] = {"ready": ready, "mode": "legacy"}
+        else:
+            payload = await runtime.status()
+            ready = bool(payload["ready"])
+        return JSONResponse(payload, status_code=200 if ready else 503)
+
+    @application.get("/api/system")
+    async def system_status() -> dict[str, Any]:
+        if runtime is not None:
+            return await runtime.status()
+        return {
+            "ready": False,
+            "lock_owned": False,
+            "postgres": policy_store.status(),
+            "scheduler": scheduler_runner.status(),
+            "pipeline": None,
+            "heartbeat": None,
+            "mode": "legacy",
         }
 
     @application.get("/api/feeds")
@@ -532,7 +567,7 @@ def create_app(
         return {"feed_ref": feed_ref, **result}
 
     # --- Scheduler: production poll telemetry ------------------------------
-    # Reads public.poll_observation, which run.py appends to once per completed
+    # Reads public.poll_log, which run.py appends to once per completed
     # poll. Every response still has to be correct with the table absent,
     # present but empty, and populated -- see `telemetry_available`.
 
@@ -588,6 +623,10 @@ def create_app(
             "runner": scheduler_runner.status(),
         }
 
+    def runner_accepting() -> bool:
+        status = scheduler_runner.status()
+        return bool(status.get("alive") and status.get("accepting", True))
+
     @application.get("/api/scheduler/overview")
     async def scheduler_overview() -> dict[str, Any]:
         current = now_utc()
@@ -621,10 +660,19 @@ def create_app(
             await policy_store.set_scheduler_running(body.running, body.note)
         except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
+        if body.running:
+            scheduler_runner.nudge()
         return await control_payload()
 
     @application.post("/api/gold/dedup")
     async def gold_dedup_start() -> dict[str, Any]:
+        if runtime is not None:
+            pool = await _public_pool()
+            queued = await runtime.coordinator.queue_dedup(
+                pool, current=now_utc()
+            )
+            runtime.gold_worker.nudge()
+            return queued
         try:
             dedup_job.start()
         except RuntimeError as exc:
@@ -633,6 +681,9 @@ def create_app(
 
     @application.get("/api/gold/dedup")
     async def gold_dedup_status() -> dict[str, Any]:
+        if runtime is not None:
+            pool = await _public_pool()
+            return (await runtime.coordinator.status(pool))["gold"]
         return dedup_job.as_dict()
 
     @application.get("/api/scheduler/feeds")
@@ -677,24 +728,24 @@ def create_app(
             "events": events or [],
         }
 
-    @application.post("/api/scheduler/feeds/{feed_ref}/poll-now")
+    @application.post("/api/scheduler/feeds/{feed_ref}/poll-now", status_code=202)
     async def scheduler_poll_now(feed_ref: str) -> dict[str, Any]:
         """Poll one feed now: front of the queue, and wake the runner for it.
 
         The fetch still happens on the production path -- policy writes the
         queue position, the runner's run.cycle claims and polls it -- so
-        leasing, vendor pacing, and poll_observation behave exactly as a
+        leasing, vendor pacing, and poll_log behave exactly as a
         scheduled poll. ``runner_alive`` tells the page whether the poll is
         about to happen in this process or is waiting on another one's tick.
         """
         row = await configured_feed(feed_ref)
         # Checked here rather than in policy.py: aliveness is a property of this
         # process, not of the database. Cheap and DSN-free, so it goes first.
-        if not scheduler_runner.status()["alive"]:
+        if not runner_accepting():
             raise _policy_error(
                 PollNowRefused(
                     "no scheduler runner is listening, so nothing would poll this "
-                    "feed; start one with XJOBSCORE_INSPECTOR_RUNNER=1",
+                    "feed; start the system with `uv run xjobscore`",
                     reason="no_runner",
                 )
             )
@@ -703,9 +754,13 @@ def create_app(
         except (PolicyUnavailable, PollNowRefused, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
         scheduler_runner.nudge()
-        return {**result, "runner_alive": scheduler_runner.status()["alive"]}
+        return {
+            **result,
+            "queued": True,
+            "runner_alive": scheduler_runner.status()["alive"],
+        }
 
-    @application.post("/api/scheduler/poll-now")
+    @application.post("/api/scheduler/poll-now", status_code=202)
     async def scheduler_poll_now_all(
         options: PollNowOptions | None = None,
     ) -> dict[str, Any]:
@@ -716,30 +771,46 @@ def create_app(
         among themselves. The nudge still applies -- the drain loop should start
         working the backlog now, not on the next tick.
         """
+        if not runner_accepting():
+            raise _policy_error(
+                PollNowRefused(
+                    "no unified scheduler is listening",
+                    reason="no_runner",
+                )
+            )
         source = (options or PollNowOptions()).source
         try:
             result = await policy_store.poll_now_all(source)
         except (PolicyUnavailable, PollNowRefused, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
         scheduler_runner.nudge()
-        return {**result, "runner_alive": scheduler_runner.status()["alive"]}
+        return {
+            **result,
+            "queued": True,
+            "runner_alive": scheduler_runner.status()["alive"],
+        }
 
-    @application.post("/api/scheduler/feeds/{feed_ref}/fetch")
+    @application.post("/api/scheduler/feeds/{feed_ref}/fetch", status_code=202)
     async def scheduler_fetch(feed_ref: str) -> dict[str, Any]:
-        """Fetch one feed through the production path, driven by the browser.
-
-        Unlike poll-now this does not queue: it claims a lease, runs run.poll,
-        and answers when the poll has finished -- raw_posting, job_posting,
-        poll_observation and all. Needs neither the runner loop nor
-        scheduler_control.running, because the caller is the scheduler here.
-        A harvest failure is not an HTTP error: it answers 200 with
-        ``status: "error"``, the same vocabulary poll_observation records.
-        """
+        """Queue one production poll; HTTP requests never execute workers."""
         row = await configured_feed(feed_ref)
+        if not runner_accepting():
+            raise _policy_error(
+                PollNowRefused(
+                    "no unified scheduler is listening",
+                    reason="no_runner",
+                )
+            )
         try:
-            return await scheduler_runner.poll_feed_now(row["source"], row["key"])
+            result = await policy_store.poll_now(row["source"], row["key"])
         except (PolicyUnavailable, PollNowRefused, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
+        scheduler_runner.nudge()
+        return {
+            **result,
+            "queued": True,
+            "runner_alive": scheduler_runner.status()["alive"],
+        }
 
     async def _public_pool():
         """The borrowed public pool, or a 503 naming what is unreachable."""
@@ -751,367 +822,6 @@ def create_app(
             )
         return pool
 
-    @application.get("/api/postings")
-    async def postings(
-        source: str | None = None,
-        status: str = "active",
-        label_state: str = "all",
-        search: str = "",
-        search_field: str = "all",
-        intern_signal: bool = False,
-        order: str = "newest",
-        seed: str = "",
-        limit: int = Query(default=50, ge=1, le=200),
-        offset: int = Query(default=0, ge=0),
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            labels = await store.posting_labels()
-            return {
-                "postgres": policy_store.status(),
-                **await posting_query(
-                    pool,
-                    labels,
-                    source=source,
-                    status=status,
-                    label_state=label_state,
-                    search=search,
-                    search_field=search_field,
-                    intern_signal=intern_signal,
-                    order=order,
-                    seed=seed,
-                    limit=limit,
-                    offset=offset,
-                ),
-            }
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    @application.post("/api/postings/labels")
-    async def posting_labels_write(body: PostingLabelsBody) -> dict[str, Any]:
-        if not body.labels:
-            raise HTTPException(status_code=400, detail="labels must not be empty")
-        upserts = [entry.model_dump() for entry in body.labels if entry.label]
-        clears = [
-            (entry.source, entry.source_key)
-            for entry in body.labels
-            if entry.label is None
-        ]
-        try:
-            written = await store.set_posting_labels(upserts)
-            cleared = await store.delete_posting_labels(clears)
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"Inspector database unavailable: {exc}"
-            ) from exc
-        return {"written": written, "cleared": cleared}
-
-    @application.get("/api/postings/{posting_id}")
-    async def posting_item(posting_id: int) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            labels = await store.posting_labels()
-            value = await posting_detail(pool, labels, posting_id)
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-        if value is None:
-            raise HTTPException(status_code=404, detail="Posting not found")
-        return value
-
-    @application.get("/api/review")
-    async def review(
-        source: str | None = None,
-        label: str = "all",
-        state: str = "unreviewed",
-        search: str = "",
-        order: str = "newest",
-        limit: int = Query(default=50, ge=1, le=200),
-        offset: int = Query(default=0, ge=0),
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            return {
-                "postgres": policy_store.status(),
-                **await review_query(
-                    pool,
-                    source=source,
-                    label=label,
-                    state=state,
-                    search=search,
-                    order=order,
-                    limit=limit,
-                    offset=offset,
-                ),
-            }
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    @application.post("/api/review/labels")
-    async def review_labels_write(body: ReviewLabelsBody) -> dict[str, Any]:
-        if not body.labels:
-            raise HTTPException(status_code=400, detail="labels must not be empty")
-        pool = await _public_pool()
-        try:
-            written = await review_set_labels(
-                pool, [entry.model_dump() for entry in body.labels]
-            )
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-        return {"written": written}
-
-    @application.get("/api/review/{posting_id}")
-    async def review_item(posting_id: int) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            value = await review_detail(pool, posting_id)
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-        if value is None:
-            raise HTTPException(status_code=404, detail="Posting not found")
-        return value
-
-    @application.get("/api/duplicate-groups")
-    async def duplicate_groups(
-        source: str | None = None,
-        review_state: str = "unreviewed",
-        search: str = "",
-        intern_signal: bool = False,
-        order: str = "newest",
-        seed: str = "",
-        limit: int = Query(default=50, ge=1, le=100),
-        offset: int = Query(default=0, ge=0),
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            reviews = await store.duplicate_group_reviews()
-            return {
-                "postgres": policy_store.status(),
-                **await duplicate_group_query(
-                    pool,
-                    reviews,
-                    source=source,
-                    review_state=review_state,
-                    search=search,
-                    intern_signal=intern_signal,
-                    order=order,
-                    seed=seed,
-                    limit=limit,
-                    offset=offset,
-                ),
-            }
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"Duplicate review unavailable: {exc}"
-            ) from exc
-
-    @application.post("/api/duplicate-groups/{group_id}/review")
-    async def duplicate_group_review(
-        group_id: UUID, body: DuplicateReviewBody
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            fingerprint = await current_fingerprint(pool, group_id)
-            if fingerprint is None:
-                raise HTTPException(status_code=404, detail="Duplicate group not found")
-            note = body.note.strip() if body.note and body.note.strip() else None
-            if body.decision is None:
-                await store.delete_duplicate_group_review(
-                    group_id=str(group_id), fingerprint=fingerprint
-                )
-                review = None
-            else:
-                await store.set_duplicate_group_review(
-                    group_id=str(group_id),
-                    fingerprint=fingerprint,
-                    decision=body.decision,
-                    note=note,
-                )
-                review = {"decision": body.decision, "note": note}
-            return {
-                "group_id": str(group_id),
-                "fingerprint": fingerprint,
-                "review": review,
-            }
-        except HTTPException:
-            raise
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"Duplicate review unavailable: {exc}"
-            ) from exc
-
-    @application.post("/api/query")
-    async def query_run(body: QueryBody) -> dict[str, Any]:
-        """Run one read-only SQL statement against the pipeline database.
-
-        POST, not GET with a query string: SQL does not belong in a URL, and
-        the answer must not be cached. See ``query.run`` for the three layers
-        that keep this from ever writing.
-        """
-        pool = await _public_pool()
-        try:
-            return await query_run_sql(pool, body.sql)
-        except ValueError as exc:
-            # The admin's SQL failed the allowlist -- not a database problem.
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except asyncpg.PostgresError as exc:
-            # Syntax error, the READ ONLY transaction refusing a write,
-            # statement_timeout firing -- all the admin's SQL being wrong,
-            # unlike the postings routes above where a PostgresError means
-            # the database itself is unhealthy.
-            raise HTTPException(status_code=400, detail=query_format_error(exc)) from exc
-        except OSError as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    @application.get("/api/query/schema")
-    async def query_schema() -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            return await query_schema_sql(pool)
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    # ------ fields (raw_posting field recon)
-    #
-    # Read-only throughout, and split by cost on purpose: /survey is a
-    # sampled census that answers in ~2s, /values is an exact full scan of
-    # one chosen path. See fields.py for the measurements behind the split.
-
-    @application.get("/api/fields/adapters")
-    async def fields_adapters(force: bool = False) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            return await fields_recon.adapters(pool, force=force)
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    @application.get("/api/fields/feeds")
-    async def fields_feeds(adapter: str) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            return await fields_recon.feeds(pool, adapter)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    @application.get("/api/fields/mapping")
-    async def fields_mapping(adapter: str) -> dict[str, Any]:
-        """How the adapter's config reads its payload. No database at all."""
-        try:
-            fields_recon._validate_adapter(adapter)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {**field_mapping.adapter_map(adapter), "domains": field_mapping.domains()}
-
-    @application.get("/api/fields/survey")
-    async def fields_survey(
-        adapter: str,
-        feed: str | None = None,
-        sample: int = fields_recon.DEFAULT_SAMPLE,
-        depth: int = Query(default=fields_recon.DEFAULT_DEPTH, ge=1, le=fields_recon.MAX_DEPTH),
-        seed: str = "",
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            result = await fields_recon.survey(
-                pool, adapter, feed=feed, sample=sample, depth=depth, seed=seed
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-        # Annotated here rather than in fields.py so the SQL layer stays
-        # ignorant of the source configs, and so a config that fails to
-        # introspect can never break the census itself.
-        annotations = field_mapping.annotate(
-            [row["path"] for row in result["paths"]], adapter
-        )
-        for row in result["paths"]:
-            row["mapped"] = annotations.get(row["path"], {"fields": [], "inherited": None})
-        return result
-
-    @application.get("/api/fields/values")
-    async def fields_values(
-        adapter: str,
-        path: str,
-        feed: str | None = None,
-        limit: int = Query(default=fields_recon.VALUE_LIMIT, ge=1, le=fields_recon.MAX_VALUE_LIMIT),
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            result = await fields_recon.values(
-                pool, adapter, path, feed=feed, limit=limit
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-        annotation = field_mapping.annotate([path], adapter)[path]
-        chains = [field_mapping.chain(name) for name in annotation["fields"]]
-        # The collapse preview only runs for a field whose narrowing is a
-        # pure function of the value alone; everything else reports the chain
-        # without pretending to evaluate it.
-        collapsed: dict[str, dict[str, str | None]] = {}
-        observed = [entry["value"] for entry in result["values"]]
-        for name in annotation["fields"]:
-            preview = field_mapping.preview(name, observed)
-            if preview:
-                collapsed[name] = preview
-        return {**result, "mapped": annotation, "chains": chains, "collapsed": collapsed}
-
-    @application.get("/api/fields/examples")
-    async def fields_examples(
-        adapter: str,
-        path: str,
-        value: str | None = None,
-        feed: str | None = None,
-        limit: int = Query(default=fields_recon.EXAMPLE_LIMIT, ge=1, le=fields_recon.EXAMPLE_LIMIT),
-    ) -> dict[str, Any]:
-        pool = await _public_pool()
-        try:
-            return await fields_recon.examples(
-                pool, adapter, path, value, feed=feed, limit=limit
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except (OSError, asyncpg.PostgresError) as exc:
-            raise HTTPException(
-                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
-            ) from exc
-
-    # --- Tokens: the discovery inventory and its promotion into feed -------
-    # public.token holds every board key ever seen; public.feed is the curated
-    # set the scheduler polls. Promotion is the one write, and it creates
-    # candidates -- enabling them stays a Feeds page decision.
 
     @application.get("/api/tokens")
     async def tokens(
@@ -1177,7 +887,11 @@ def create_app(
 
     @application.get("/api/tokens/log")
     async def token_log(limit: int = 50) -> dict[str, Any]:
-        """The newest liveness probes -- the page's tail log.
+        """The newest liveness probes and the newest feed arrivals/departures.
+
+        Both tails come from ``token_log`` and both panels refresh together, so
+        one route serves them rather than making the page poll twice for two
+        slices of the same table.
 
         Degrades the way the scheduler's fetch log does: a missing table or an
         unreachable database reports ``log_available: false`` rather than an
@@ -1186,12 +900,16 @@ def create_app(
         """
         pool = await policy_store.pool_or_none()
         checks = None
+        events = None
         if pool is not None:
             checks = await tokens_recent_checks(pool, limit=limit)
+            events = await tokens_recent_feed_events(pool, limit=limit)
         return {
             "postgres": policy_store.status(),
             "log_available": checks is not None,
             "checks": checks or [],
+            "feed_log_available": events is not None,
+            "feed_events": events or [],
         }
 
     @application.get("/api/tokens/heartbeat")
@@ -1330,6 +1048,336 @@ def create_app(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
             ) from exc
 
+    # --- KeyScan -------------------------------------------------------
+    # Read-only views over keyscan's own SQLite file, plus the one write the
+    # page can make (the existing keyscan_import bridge). These are `def`, not
+    # `async def`, on purpose: every call is blocking sqlite3, so FastAPI must
+    # run them in its threadpool rather than on the event loop.
+
+    def _keyscan_read(call, *args, **kwargs):
+        try:
+            return call(*args, **kwargs)
+        except keyscan_view.DatabaseMissing as exc:
+            # Not an error: an inspector on a machine that has never run a
+            # scan is working correctly, it just has nothing to show.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except sqlite3.Error as exc:
+            raise HTTPException(
+                status_code=503, detail=f"keyscan database unreadable: {exc}"
+            ) from exc
+
+    async def _annotate_in_postgres(rows: list[dict[str, Any]]) -> None:
+        """Set `in_postgres` on each row, or None when PostgreSQL is unreachable.
+
+        Names are mapped through the import bridge's own helpers first: keyscan
+        stores pre-rename labels and Workday's mixed-case tokens, so a raw
+        (ats, token) comparison would report live rows as missing.
+        """
+        for row in rows:
+            row["in_postgres"] = None
+        if not rows:
+            return
+        wanted = []
+        for row in rows:
+            ats = resolve_keyscan_ats(row["ats"])
+            wanted.append((ats, canonical_feed_key(ats, row["key"])))
+        try:
+            pool = await _public_pool()
+            found = await pool.fetch(
+                """
+                SELECT ats, token FROM token
+                 WHERE (ats, token) IN (
+                       SELECT * FROM unnest($1::text[], $2::text[]))
+                """,
+                [pair[0] for pair in wanted],
+                [pair[1] for pair in wanted],
+            )
+        except (OSError, asyncpg.PostgresError, RuntimeError, HTTPException):
+            # Degraded, not broken: the page still lists candidates, it just
+            # cannot say which are already in the inventory.
+            return
+        present = {(record["ats"], record["token"]) for record in found}
+        for row, pair in zip(rows, wanted):
+            row["in_postgres"] = pair in present
+
+    @application.get("/api/keyscan/status")
+    def keyscan_status() -> dict[str, Any]:
+        run = _keyscan_read(keyscan_view.status)
+        if run is not None and run.get("status") == "running":
+            # A row can say `running` after its process died (kill -9, power
+            # cut). The page needs that distinction to avoid offering a cancel
+            # for a run that is already wreckage.
+            run["pid_alive"] = keyscan_control.process_alive(run.get("pid"))
+        return {"run": run}
+
+    @application.get("/api/keyscan/tally")
+    def keyscan_tally() -> dict[str, Any]:
+        return _keyscan_read(keyscan_view.tally)
+
+    @application.get("/api/keyscan/coverage")
+    def keyscan_coverage() -> dict[str, Any]:
+        """The crawls x vendors scan-coverage matrix, computed locally."""
+        return _keyscan_read(keyscan_view.coverage)
+
+    @application.get("/api/keyscan/runs")
+    def keyscan_runs(limit: int = 20) -> dict[str, Any]:
+        return {"runs": _keyscan_read(keyscan_view.runs, limit=limit)}
+
+    @application.get("/api/keyscan/runs/{run_id}/log")
+    def keyscan_run_log(run_id: str, offset: int = 0, limit: int = 200) -> dict[str, Any]:
+        return _keyscan_read(keyscan_view.run_log, run_id, offset=offset, limit=limit)
+
+    @application.get("/api/keyscan/found")
+    def keyscan_found(limit: int = 30) -> dict[str, Any]:
+        return {"found": _keyscan_read(keyscan_view.found, limit=limit)}
+
+    @application.get("/api/keyscan/candidates")
+    async def keyscan_candidates(
+        status: str | None = None,
+        source: str | None = None,
+        q: str = "",
+        imported: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Candidates, annotated with whether each is really in PostgreSQL.
+
+        `imported_at` is only keyscan's record of what the bridge sent, which
+        is not the same question as "is this in the inventory now" -- a token
+        can reach `token` by another path, and a sent row can be missing. So
+        membership is checked against PostgreSQL itself.
+
+        Async, so the blocking SQLite reads go to the threadpool explicitly.
+        """
+        rows = await run_in_threadpool(
+            _keyscan_read,
+            keyscan_view.candidates,
+            status_filter=status,
+            source=source,
+            query=q,
+            imported=imported,
+            limit=limit,
+            offset=offset,
+        )
+        total = await run_in_threadpool(
+            _keyscan_read,
+            keyscan_view.candidate_count,
+            status_filter=status,
+            source=source,
+            query=q,
+            imported=imported,
+        )
+        await _annotate_in_postgres(rows)
+        return {"candidates": rows, "total": total, "offset": offset}
+
+    @application.post("/api/keyscan/run", status_code=202)
+    def keyscan_run(body: KeyscanRunBody) -> dict[str, Any]:
+        """Launch a detached ``keyscan crawl``.
+
+        Returns as soon as the OS has the process; keyscan writes its own
+        ``runs`` row moments later and the page finds it on the next poll.
+        """
+        try:
+            return _keyscan_read(
+                keyscan_control.start,
+                date_from=body.date_from,
+                date_to=body.date_to,
+                crawl_ids=body.crawl_ids,
+                sources=body.sources,
+            )
+        except keyscan_control.RunAlreadyActive as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except keyscan_control.LaunchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @application.get("/api/keyscan/crawls")
+    async def keyscan_crawls() -> dict[str, Any]:
+        """Real Common Crawl snapshots available right now, for the run picker."""
+        # Imported here, not at module scope: `keyscan.core` pulls in duckdb,
+        # and the read-only page should not pay for that on every inspector
+        # start (see keyscan_control.cancel for the same reasoning).
+        from keyscan.core import Keyscan, KeyscanError
+
+        scan = Keyscan(keyscan_view.database_path().parent)
+        try:
+            return await scan.list_crawls()
+        except KeyscanError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @application.post("/api/keyscan/runs/{run_id}/cancel")
+    def keyscan_cancel(run_id: str) -> dict[str, Any]:
+        """Stop a running scan by writing the row it polls -- no signal."""
+        try:
+            return _keyscan_read(keyscan_control.cancel, run_id)
+        except keyscan_control.LaunchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @application.post("/api/keyscan/import")
+    async def keyscan_import() -> dict[str, Any]:
+        """Bulk-load keyscan's confirmed-live tokens into PostgreSQL.
+
+        Delegates to the same idempotent bridge the CLI uses; unresolvable
+        rows are skipped and retried on every future run, so calling this
+        twice is cheap and safe.
+        """
+        pool = await _public_pool()
+        path = keyscan_view.database_path()
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"no keyscan database at {path}")
+        try:
+            result = await import_keyscan_tokens(pool, path)
+        except (OSError, sqlite3.Error, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"import failed: {exc}"
+            ) from exc
+        return {
+            "written": result.written,
+            "skipped": result.skipped,
+            "by_ats": result.by_ats,
+        }
+
+    async def _company_or_404(company_id: int):
+        pool = await _public_pool()
+        row = await companies_view.get(pool, company_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no company {company_id}")
+        return row
+
+    def _company_write_error(
+        exc: Exception, owner: dict[str, Any] | None = None
+    ) -> HTTPException:
+        if isinstance(exc, asyncpg.UniqueViolationError):
+            # company.domain is UNIQUE and nothing else on the row is. A
+            # collision means this domain already names a different company,
+            # which is a merge the operator has to make deliberately -- so the
+            # refusal names the other row rather than leaving it to be hunted.
+            detail: dict[str, Any] = {
+                "message": "that domain already belongs to another company",
+                "hint": "domain-taken",
+            }
+            if owner is not None:
+                detail["owner"] = owner
+                detail["message"] = (
+                    f"{owner['name']} already owns that domain"
+                )
+            return HTTPException(status_code=409, detail=detail)
+        if isinstance(exc, ValueError):
+            return HTTPException(status_code=400, detail=str(exc))
+        return HTTPException(status_code=503, detail=f"PostgreSQL unavailable: {exc}")
+
+    @application.get("/api/companies")
+    async def companies(
+        filter: str = "queue",
+        order: str = "impact",
+        search: str = "",
+        limit: int = Query(default=100, ge=1, le=5000),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return {
+                "postgres": policy_store.status(),
+                **await companies_view.query(
+                    pool,
+                    filter=filter,
+                    order=order,
+                    search=search,
+                    limit=limit,
+                    offset=offset,
+                ),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+
+    @application.get("/api/companies/{company_id}")
+    async def company_detail(company_id: int) -> dict[str, Any]:
+        return await _company_or_404(company_id)
+
+    @application.post("/api/companies/{company_id}/verify")
+    async def company_verify(
+        company_id: int, body: CompanyVerifyBody
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            row = await companies_view.verify(
+                pool,
+                company_id,
+                name=body.name,
+                domain=body.domain,
+                description=body.description,
+            )
+        except asyncpg.UniqueViolationError as exc:
+            owner = await companies_view.owner_of_domain(pool, body.domain)
+            raise _company_write_error(exc, owner) from exc
+        except (ValueError, OSError, asyncpg.PostgresError) as exc:
+            raise _company_write_error(exc) from exc
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no company {company_id}")
+        return row
+
+    @application.post("/api/companies/{company_id}/merge")
+    async def company_merge(
+        company_id: int, body: CompanyMergeBody
+    ) -> dict[str, Any]:
+        """Fold `company_id` into `body.target_id`; the target survives."""
+        pool = await _public_pool()
+        try:
+            row = await companies_view.merge(pool, company_id, body.target_id)
+        except (ValueError, OSError, asyncpg.PostgresError) as exc:
+            raise _company_write_error(exc) from exc
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no company {company_id} or {body.target_id}",
+            )
+        return row
+
+    @application.post("/api/companies/{company_id}/logo")
+    async def company_logo_fetch(
+        company_id: int, body: CompanyLogoBody
+    ) -> dict[str, Any]:
+        """Harvest this company's logo from its own site, now."""
+        pool = await _public_pool()
+        try:
+            payload = await logo_harvest.harvest_one(
+                pool, company_id, domain=body.domain
+            )
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise _company_write_error(exc) from exc
+        if payload is None:
+            # Not an error: a domain that ships no usable icon is a real
+            # answer, and the row now records that it was asked.
+            return {"has_logo": False, "bytes": 0}
+        return {"has_logo": True, "bytes": len(payload)}
+
+    @application.get("/api/companies/{company_id}/logo")
+    async def company_logo_image(company_id: int) -> Response:
+        """Serve the stored logo so the page can show what it just fetched."""
+        pool = await _public_pool()
+        payload = await pool.fetchval(
+            "SELECT bytes FROM company_logo WHERE company_id = $1", company_id
+        )
+        if not payload:
+            raise HTTPException(status_code=404, detail="no logo")
+        return Response(content=bytes(payload), media_type="image/png")
+
+    @application.post("/api/companies/{company_id}/review")
+    async def company_review(
+        company_id: int, body: CompanyReviewBody
+    ) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            row = await companies_view.set_review(pool, company_id, state=body.state)
+        except (ValueError, OSError, asyncpg.PostgresError) as exc:
+            raise _company_write_error(exc) from exc
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no company {company_id}")
+        return row
+
     @application.get("/")
     async def index():
         return FileResponse(STATIC_DIR / "index.html")
@@ -1342,37 +1390,22 @@ def create_app(
     async def scheduler_page():
         return FileResponse(STATIC_DIR / "scheduler" / "index.html")
 
-    @application.get("/postings")
-    async def postings_page():
-        return FileResponse(STATIC_DIR / "postings" / "index.html")
+    @application.get("/system")
+    async def system_page():
+        return FileResponse(STATIC_DIR / "system" / "index.html")
 
-    @application.get("/review")
-    async def review_page():
-        return FileResponse(STATIC_DIR / "review" / "index.html")
-
-    @application.get("/query")
-    async def query_page():
-        return FileResponse(STATIC_DIR / "query" / "index.html")
-
-    @application.get("/fields")
-    async def fields_page():
-        return FileResponse(STATIC_DIR / "fields" / "index.html")
 
     @application.get("/tokens")
     async def tokens_page():
         return FileResponse(STATIC_DIR / "tokens" / "index.html")
 
-    @application.get("/regex")
-    async def regex_page():
-        return FileResponse(STATIC_DIR / "regex" / "index.html")
+    @application.get("/keyscan")
+    async def keyscan_page():
+        return FileResponse(STATIC_DIR / "keyscan" / "index.html")
+
+    @application.get("/companies")
+    async def companies_page():
+        return FileResponse(STATIC_DIR / "companies" / "index.html")
 
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return application
-
-
-app = create_app()
-
-
-def service() -> InspectorService:
-    """Compatibility accessor for code that imports the default app service."""
-    return app.state.inspector

@@ -34,7 +34,30 @@ Portfolio  https://
 
 ---
 
-## 2. Entries
+## 2. Variants
+
+Fill this in **first**: a variant key is what every bullet and skill below is
+tagged with, and the studio refuses a tag it has not been told about.
+
+A variant is one kind of resume you tailor toward. Nothing is built in — you
+define the set, in **Content bank → Variants**, one per line as `key label`:
+
+```
+swe      Systems SWE
+quant    Quant Research
+```
+
+`key` is stored on bullets, skills and resumes (lowercased, ≤40 chars); `label`
+is only what the studio prints (≤80). A line with no space is a key that labels
+itself. `all` is reserved and cannot be a variant — it is the audience meaning
+"show on every resume".
+
+Removing a variant that bullets or skills still carry is refused with a 409
+naming the count, so a tag can never be silently orphaned. Retag them first.
+
+---
+
+## 3. Entries
 
 An *entry* is one org/school/project. Repeat this block per entry — there is no
 cap. Studio tab: **Content bank → Add entry**.
@@ -72,13 +95,14 @@ every bullet you might ever use, here, once. Repeat per bullet.
 
 ```
 Text:            (required, ≤600)
-Audience:        (all | swe | quant | research)   default: all
+Audience:        (all, or one of your §2 variant keys)   default: all
 Tags:            comma-separated, e.g. python, optimization
 Defense notes:   (≤4000) what you'd say to "tell me more about this"
 ```
 
-**Audience** filters what the builder offers you: a bullet tagged `quant` is
-dimmed when you're building a `swe` resume. `all` always shows. Defense notes
+**Audience** filters what the builder offers you: a bullet tagged with one
+variant is dimmed when you're building a resume of another. `all` always shows,
+and is the right default until you have a reason to split. Defense notes
 never print — they exist so you can't put a bullet on a resume you can't defend
 in an interview.
 
@@ -99,7 +123,7 @@ Shape that survives all of it: **verb + what + how + number**, no `I`, under
 
 ---
 
-## 3. Skills
+## 4. Skills
 
 Flat bank, deduplicated by (category, name) — a duplicate is a 409. Category
 must be exactly one of `language` · `framework` · `tool` · `coursework` · `math`.
@@ -115,7 +139,7 @@ math:        (prints as "Math & Methods")
 coursework:  (prints under Education, not in Skills)
 ```
 
-| Category | Name (≤120) | Audience (all/swe/quant/research) |
+| Category | Name (≤120) | Audience (all, or a §2 variant key) |
 |---|---|---|
 | | | |
 | | | |
@@ -123,11 +147,18 @@ coursework:  (prints under Education, not in Skills)
 
 ---
 
-## 4. Target postings
+## 5. Target postings
 
 One per job you're tailoring to. Paste the **full** JD text — coverage analysis
 reads it literally and reports matched / in-bank-but-not-shown / missing.
 Studio tab: **Targets**.
+
+You usually will not type this by hand. Open a queued job in **Applications**
+and press **Tailor resume**: it creates the target from the tracked posting,
+company, title and URL already filled and the job description pasted in for you,
+then drops you in the Builder. Pressing it twice reopens the same target. Type
+one in only for a job that is not in the queue — or when the posting's vendor
+supplies no description, which leaves `jd_text` empty for you to fill.
 
 ```
 Company:      (required, ≤300)
@@ -141,17 +172,21 @@ Note:         (≤4000) referral contact, recruiter, deadline, …
 Coverage never invents a skill for you. `missing` terms are surfaced so
 skipping them is a conscious decision, not an oversight.
 
+The term list behind `missing` is yours to edit (**Content bank → Vocabulary**).
+It ships seeded with software, GPU and quant terminology; if you work in another
+field, replace it, or `missing` will keep reporting nothing useful.
+
 ---
 
-## 5. The resume itself
+## 6. The resume itself
 
 A resume is a name + template parameters + which bullets and skills to show.
 Studio tab: **Builder**.
 
 ```
 Name:               (required, ≤300)   e.g. "Jane Kim — SWE — Stripe"
-Target posting:     (pick one from §4, or none)
-Variant:            (swe | quant | research)   drives audience filtering
+Target posting:     (pick one from §5, or none)
+Variant:            (one of your §2 keys, or none)   drives audience filtering
 Availability line:  (≤300)   e.g. "Available for Spring 2027 co-op"
 Education note:     (≤300)   e.g. "GPA: 3.8/4.0"
 ```
@@ -179,7 +214,7 @@ original.
 
 ---
 
-## 6. What is not yours to choose
+## 7. What is not yours to choose
 
 The template is fixed by design — single column, New Computer Modern, US Letter,
 0.55in × 0.5in margins, ATS-parseable. There is no template picker, and section
@@ -189,7 +224,9 @@ Skills. That is how every export stays inside the format rules.
 **One page is a hard error**, not a warning. If `/check` reports 2 pages, cut
 bullets — the builder will not export around it.
 
-PDF export needs Typst installed (`brew install typst`); without it the studio
-shows a badge, `/pdf` returns 503, and the linter still runs minus the page
-count. `GET /api/resume/resumes/{id}/source` returns the raw `.typ` if you want
-to hand-tune outside the studio.
+PDF export needs nothing installed: the Typst compiler is a Python dependency
+(`typst` on PyPI), so `uv sync` is the whole setup and the page count always
+runs. `/pdf` returns 503 only when a document genuinely fails to compile, with
+the compiler's own message as the reason.
+`GET /api/resume/resumes/{id}/source` returns the raw `.typ` if you want to
+hand-tune outside the studio.

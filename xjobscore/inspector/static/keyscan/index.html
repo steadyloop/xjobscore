@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xJobscore</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/keyscan/styles.css?v=31">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body class="keyscan-page">
+  <header id="topnav"></header>
+  <main class="page">
+
+    <p class="ks-note" id="page-note" hidden></p>
+
+    <div class="ks-cmd mono">
+      <span class="ks-cmd-name">keyscan crawl</span>
+      <span class="ks-crawls" id="crawls-field">
+        <button type="button" class="ks-crawls-btn" id="crawls-btn"
+                aria-haspopup="listbox" aria-expanded="false" aria-controls="crawls-panel">loading…</button>
+        <div class="ks-crawls-panel" id="crawls-panel" role="listbox" aria-label="Common Crawl snapshots" hidden></div>
+      </span>
+      <span class="ks-flag">--vendor</span>
+      <select id="sources" class="ks-inline" aria-label="Sources">
+        <option value="" selected>all</option>
+        <!-- Whole-tier picks sit with `all` at the top; the optgroups below
+             are the same sets, named, so the heading and the tier option
+             always agree. `other` is the remainder: rules with no tier. -->
+        <option>tier1</option>
+        <option>tier2</option>
+        <optgroup label="tier1">
+          <option>ashby</option>
+          <option>avature</option>
+          <option>eightfold</option>
+          <option>greenhouse</option>
+          <option>lever</option>
+          <option>oracle</option>
+          <option>smartrecruiters</option>
+          <option>workable</option>
+          <option>workday</option>
+        </optgroup>
+        <optgroup label="tier2">
+          <option>adp</option>
+          <option>bamboohr</option>
+          <option>ukg</option>
+        </optgroup>
+        <optgroup label="other">
+          <option>icims</option>
+          <option>successfactors</option>
+        </optgroup>
+      </select>
+      <span class="grow"></span>
+      <button class="btn primary small" type="button" id="start-run-btn">run</button>
+    </div>
+
+    <section class="ks-run mono" id="run-box" aria-label="Latest run" hidden>
+      <div class="ks-run-top">
+        <span class="ks-run-id" id="run-id"></span>
+        <span id="run-state"></span>
+        <span id="run-meta"></span>
+        <span class="grow"></span>
+        <span class="ks-dim" id="run-phase"></span>
+        <button class="btn small" type="button" id="cancel-btn" hidden>cancel</button>
+      </div>
+      <div class="ks-run-bar" id="run-progress" hidden>
+        <div class="ks-run-track"><span id="run-fill"></span></div>
+        <span class="ks-run-pct mono" id="run-pct"></span>
+      </div>
+      <div class="ks-run-stages">
+        <span class="ks-run-plus" id="run-counts"></span>
+      </div>
+      <div class="ks-run-error c-err" id="run-error" hidden></div>
+    </section>
+
+    <!-- Two groups, two timescales each: the runs group pairs this run's
+         stream with past runs, the inventory group pairs the live tail of
+         discoveries with the full candidates table. Each opens with its
+         one-line summary: the run box above, the tally below. -->
+    <div class="ks-columns">
+      <section class="ks-pane" aria-label="Run log">
+        <h2 class="ks-pane-title mono"><span>run log</span> <span class="ks-src" id="log-src"></span></h2>
+        <div class="ks-lines" id="run-log-lines" aria-live="off"></div>
+      </section>
+
+      <section class="ks-pane" aria-labelledby="history-title">
+        <h2 class="ks-pane-title mono" id="history-title">run history</h2>
+        <div class="table-wrap ks-scroll">
+          <table class="data ks-table" id="history-table">
+            <thead>
+              <tr>
+                <th>run</th>
+                <th>methods</th>
+                <th>status</th>
+                <th class="num">found</th>
+                <th class="num">live</th>
+                <th class="num">dead</th>
+                <th>started</th>
+                <th>took</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <p class="ks-tally mono" id="tally"></p>
+
+    <div class="ks-columns">
+      <section class="ks-pane" aria-label="New keys">
+        <h2 class="ks-pane-title mono">new keys</h2>
+        <div class="ks-lines" id="activity-lines" aria-live="off"></div>
+      </section>
+
+      <section class="ks-pane" aria-labelledby="candidates-title">
+        <div class="ks-pane-head">
+          <h2 class="ks-pane-title mono" id="candidates-title">candidates <span class="ks-src" id="candidates-count"></span></h2>
+          <div class="grow"></div>
+          <select id="vendor-filter" class="ks-inline" title="Vendor" aria-label="Vendor">
+            <option value="">all vendors</option>
+            <option>greenhouse</option>
+            <option>lever</option>
+            <option>ashby</option>
+            <option>workday</option>
+            <option>workable</option>
+            <option>oracle</option>
+          </select>
+          <select id="validation-filter" class="ks-inline" title="Validation" aria-label="Validation">
+            <option value="">any status</option>
+            <option value="live">live</option>
+            <option value="dead">dead</option>
+            <option value="unknown">unknown</option>
+          </select>
+          <select id="imported-filter" class="ks-inline" title="Inventory" aria-label="Inventory">
+            <option value="">imported or not</option>
+            <option value="pending">not in postgres</option>
+            <option value="imported">already imported</option>
+          </select>
+          <input type="search" id="search" class="ks-inline" placeholder="filter…" autocomplete="off">
+        </div>
+        <div class="table-wrap ks-scroll">
+          <table class="data ks-table" id="candidates-table">
+            <tbody id="candidates-body"></tbody>
+          </table>
+        </div>
+        <div class="ks-empty" id="candidates-empty" hidden>no keys match these filters.</div>
+        <div class="ks-more">
+          <button class="ks-link" type="button" id="more-btn" hidden>load more</button>
+        </div>
+      </section>
+    </div>
+
+    <p class="ks-foot mono" id="foot"></p>
+  </main>
+
+  <script type="module" src="/static/keyscan/app.js?v=31"></script>
+</body>
+</html>

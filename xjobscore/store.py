@@ -20,9 +20,10 @@ __all__ = [
     "alias_candidates",
     "absent_postings",
     "all_feeds",
-    "append_poll_observation",
+    "append_poll_log",
     "claim_due_feeds",
     "claim_feed",
+    "due_sources",
     "close_posting_by_key",
     "connect",
     "dedup_candidates",
@@ -138,11 +139,20 @@ async def claim_due_feeds(
     limit: int,
     *,
     lease_seconds: int = 3600,
+    source: str | None = None,
 ) -> list[Feed]:
-    """Lease due feed rows atomically for horizontally safe workers."""
+    """Lease due feed rows atomically for horizontally safe workers.
+
+    `source` restricts the claim to one vendor, which is how `run.cycle`'s
+    per-vendor worker pools each take the next feed of their own queue without
+    a slow vendor's backlog crowding out a fast one. Spelled as a conditional
+    clause rather than `($4 IS NULL OR f.source = $4)` so the unfiltered claim
+    still plans on `feed_due_idx` and the filtered one on `feed_source_due_idx`.
+    """
     lease_until = now + timedelta(seconds=max(60, lease_seconds))
+    source_clause = "AND f.source = $4" if source is not None else ""
     rows = await conn.fetch(
-        """
+        f"""
         WITH picked AS (
             SELECT f.id
             FROM feed f
@@ -150,6 +160,10 @@ async def claim_due_feeds(
               AND f.paused_at IS NULL
               AND f.due_at <= $1
               AND (f.hold_until IS NULL OR f.hold_until <= $1)
+              {source_clause}
+            -- Oldest due first, within the vendor as well as across all of
+            -- them: policy.poll_now backdates due_at by 3650 days so an
+            -- express poll sorts to the front, and it must still do so here.
             ORDER BY f.due_at, f.id
             FOR UPDATE OF f SKIP LOCKED
             LIMIT $2
@@ -170,7 +184,7 @@ async def claim_due_feeds(
             -- `f.hold_until` here is the *pre-claim* value -- NULL on a feed
             -- nobody has polled. finish_schedule_*() then guards on
             -- `hold_until = $7`, which never matches NULL, so every completed
-            -- poll reported a lost lease and skipped its poll_observation row.
+            -- poll reported a lost lease and skipped its poll_log row.
             x.hold_until,
             t.company_id,
             c.name AS company_name
@@ -183,6 +197,7 @@ async def claim_due_feeds(
         now,
         max(1, limit),
         lease_until,
+        *([source] if source is not None else []),
     )
     return [_feed_from_row(row) for row in rows]
 
@@ -251,20 +266,58 @@ async def all_feeds(conn: Connection) -> list[Feed]:
     return [_feed_from_row(row) for row in rows]
 
 
-async def due_feeds(conn: Connection, now: datetime, limit: int) -> list[Feed]:
-    """Read the claimable queue without taking leases, for dry runs."""
+async def due_sources(conn: Connection, now: datetime) -> list[str]:
+    """Every source with at least one claimable feed right now.
+
+    `run.cycle` spawns a worker pool per name returned and nothing at all for
+    the rest, so this is deliberately the same predicate `claim_due_feeds`
+    uses -- a source listed here must have something for its workers to claim.
+    """
     rows = await conn.fetch(
-        _FEED_SELECT
-        + """
+        """
+        SELECT DISTINCT f.source
+        FROM feed f
         WHERE f.polling
           AND f.paused_at IS NULL
           AND f.due_at <= $1
           AND (f.hold_until IS NULL OR f.hold_until <= $1)
-        ORDER BY f.due_at, f.id
-        LIMIT $2
+        ORDER BY f.source
         """,
         now,
-        max(1, limit),
+    )
+    return [row["source"] for row in rows]
+
+
+async def due_feeds(
+    conn: Connection,
+    now: datetime,
+    limit: int | None = None,
+    *,
+    source: str | None = None,
+) -> list[Feed]:
+    """Read the claimable queue without taking leases, for dry runs.
+
+    `limit=None` reads the whole queue: a dry run takes no lease, so there is
+    nothing to stop a refill loop reselecting the same rows forever. `cycle`
+    snapshots this once per source instead and lets its time budget bound the
+    work.
+    """
+    source_clause = "AND f.source = $2" if source is not None else ""
+    limit_clause = "" if limit is None else f"LIMIT ${2 + (source is not None)}"
+    rows = await conn.fetch(
+        _FEED_SELECT
+        + f"""
+        WHERE f.polling
+          AND f.paused_at IS NULL
+          AND f.due_at <= $1
+          AND (f.hold_until IS NULL OR f.hold_until <= $1)
+          {source_clause}
+        ORDER BY f.due_at, f.id
+        {limit_clause}
+        """,
+        now,
+        *([source] if source is not None else []),
+        *([max(1, limit)] if limit is not None else []),
     )
     return [_feed_from_row(row) for row in rows]
 
@@ -376,13 +429,14 @@ async def finish_schedule_failure(
     return result == "UPDATE 1"
 
 
-async def append_poll_observation(
+async def append_poll_log(
     conn: Connection,
     *,
     feed_id: int,
     polled_at: datetime,
     status: str,
     new_postings: int = 0,
+    status_code: int | None = None,
 ) -> None:
     """Record what one completed poll did -- the Scheduler page's only input.
 
@@ -390,17 +444,80 @@ async def append_poll_observation(
     a later poll adds a row rather than revising this one. ``status`` mirrors
     ``work.Outcome``; ``new_postings`` counts first sightings only, never
     re-seen postings whose content merely changed.
+
+    ``status_code`` is the HTTP status behind that outcome, and ``None`` when
+    there is none to record: a transport failure, or a fault raised before the
+    request went out. It explains a row, never routes one -- ``status`` remains
+    the only value the scheduler reads.
     """
     await conn.execute(
         """
-        INSERT INTO poll_observation (feed_id, polled_at, status, new_postings)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO poll_log (feed_id, polled_at, status, new_postings, status_code)
+        VALUES ($1, $2, $3, $4, $5)
         """,
         feed_id,
         polled_at,
         status,
         new_postings,
+        status_code,
     )
+
+
+# Hoisted so both the inspector's manual drop and the scheduler's automatic one
+# run this exact statement rather than two copies of it. The log row goes in the
+# same CTE as the delete, and `token_log` has no FK, so it is the only trace of
+# the feed that survives.
+DROP_FEED_SQL = """
+WITH dropped AS (
+    DELETE FROM feed
+     WHERE source = $1 AND key = $2
+ RETURNING id, source, key
+), logged AS (
+    INSERT INTO token_log (checked_at, ats, token, status)
+    SELECT now(), source, key, 'feed_exited' FROM dropped
+)
+SELECT id FROM dropped
+"""
+
+# Consecutive 404s that justify dropping a feed rather than retrying it forever.
+GONE_STRIKES = 3
+
+
+async def gone_strikes(conn: Connection, feed_id: int) -> int:
+    """Count 404s recorded for this feed since its last successful poll.
+
+    Reads `poll_log` rather than a column of its own: `status_code` is already
+    the durable record of what a failure carried, so nothing new has to be
+    stored to answer this.
+
+    An `ok` or `unchanged` poll resets the count -- the board answered, so
+    whatever was wrong is over. A failure that carried NO status does NOT
+    reset it: that is a transport failure, the shared blips that hit every
+    vendor at once, and letting one of those rescue a genuinely dead board is
+    the whole reason this counts 404s instead of `feed.strikes`.
+    """
+    return await conn.fetchval(
+        """
+        SELECT count(*) FROM poll_log
+         WHERE feed_id = $1
+           AND status_code = 404
+           AND polled_at > COALESCE(
+               (SELECT max(polled_at) FROM poll_log
+                 WHERE feed_id = $1 AND status IN ('ok', 'unchanged')),
+               '-infinity'::timestamptz)
+        """,
+        feed_id,
+    )
+
+
+async def drop_feed(conn: Connection, source: str, key: str) -> int | None:
+    """Delete a feed, leaving its token, company, bronze, and postings intact.
+
+    Returns the dropped feed's id, or None when no such feed was there. The
+    `token` row is deliberately untouched, so a later explicit import or a
+    token heartbeat can bring the feed back.
+    """
+    return await conn.fetchval(DROP_FEED_SQL, source, key)
 
 
 async def save_raw(
@@ -472,7 +589,10 @@ async def set_feeds_enabled(
     ``polling`` through because this explicit operator action must resurrect a
     feed that was previously switched off.
 
-    Disabling never inserts: a feed absent from PostgreSQL is already off.
+    Disabling never inserts: a feed absent from PostgreSQL is already off, so
+    only the enable branch can log ``feed_entered`` -- and only for the rows
+    ``xmax = 0`` marks as genuinely new. Flipping ``polling`` on an existing
+    feed is not an entry; the row was already in the table.
     """
     if not identities:
         return 0
@@ -493,11 +613,17 @@ async def set_feeds_enabled(
         return int(result.rsplit(" ", 1)[-1])
     rows = await conn.fetch(
         """
-        INSERT INTO feed(source, key, polling)
-        SELECT source, key, true
-        FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
-        ON CONFLICT (source, key) DO UPDATE SET polling = true
-        RETURNING id
+        WITH upserted AS (
+            INSERT INTO feed(source, key, polling)
+            SELECT source, key, true
+            FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
+            ON CONFLICT (source, key) DO UPDATE SET polling = true
+            RETURNING id, source, key, (xmax = 0) AS inserted
+        ), logged AS (
+            INSERT INTO token_log (checked_at, ats, token, status)
+            SELECT now(), source, key, 'feed_entered' FROM upserted WHERE inserted
+        )
+        SELECT id FROM upserted
         """,
         sources,
         keys,
@@ -646,7 +772,7 @@ async def upsert_job_posting(
     Returns ``(id, changed, created)``. The two flags differ only when a posting
     we already had comes back with new content: ``changed`` is true, ``created``
     is false. That gap is the whole distinction between churn and arrivals, and
-    ``poll_observation.new_postings`` is defined on ``created`` alone.
+    ``poll_log.new_postings`` is defined on ``created`` alone.
 
     ``touch_seen`` is false for replay. A replay reparses stored payloads; it
     observes nothing about whether the posting is still listed, and stamping
@@ -688,6 +814,23 @@ async def upsert_job_posting(
                 remote = EXCLUDED.remote,
                 part_time = EXCLUDED.part_time,
                 locations = EXCLUDED.locations,
+                -- The Gold domain consumes title and company context, and is
+                -- only defined for typed opportunities. Clear both value and
+                -- stamp whenever one of those inputs changes.
+                job_domain = CASE
+                    WHEN job_posting.title IS DISTINCT FROM EXCLUDED.title
+                        OR job_posting.company_id IS DISTINCT FROM EXCLUDED.company_id
+                        OR job_posting.job_type IS DISTINCT FROM EXCLUDED.job_type
+                    THEN NULL
+                    ELSE job_posting.job_domain
+                END,
+                job_domain_version = CASE
+                    WHEN job_posting.title IS DISTINCT FROM EXCLUDED.title
+                        OR job_posting.company_id IS DISTINCT FROM EXCLUDED.company_id
+                        OR job_posting.job_type IS DISTINCT FROM EXCLUDED.job_type
+                    THEN NULL
+                    ELSE job_posting.job_domain_version
+                END,
                 -- Skills consume only description; degree fields and summaries
                 -- consume title and description. Comparing those inputs avoids
                 -- invalidating them when unrelated stable fields change, or when
@@ -696,12 +839,12 @@ async def upsert_job_posting(
                     WHEN job_posting.description IS DISTINCT FROM EXCLUDED.description
                     THEN (job_posting.attributes
                           - 'skills' - 'skills_meta'
-                          - 'degree'
+                          - 'degree' - 'degree_meta'
                           - 'summary' - 'summary_meta')
                          || EXCLUDED.attributes
                     WHEN job_posting.title IS DISTINCT FROM EXCLUDED.title
                     THEN (job_posting.attributes
-                          - 'degree'
+                          - 'degree' - 'degree_meta'
                           - 'summary' - 'summary_meta')
                          || EXCLUDED.attributes
                     ELSE job_posting.attributes || EXCLUDED.attributes
@@ -779,7 +922,7 @@ async def absent_postings(
 
     Absence is only meaningful against a *complete* poll. A truncated listing, a
     dead token, or a half-failed pagination makes every posting in the source
-    look absent at once, so the cutoff comes from ``poll_observation`` --
+    look absent at once, so the cutoff comes from ``poll_log`` --
     append-only, and ``run.poll`` records 'ok' only for a fetch that finished
     (``truncated`` becomes 'partial'). ``feed.last_poll_at`` cannot stand in for
     it: that column records the attempt, not the outcome.
@@ -794,7 +937,7 @@ async def absent_postings(
         WHERE p.source = $1
           AND p.status = 'active'
           AND p.last_seen_at < (
-              SELECT max(polled_at) FROM poll_observation
+              SELECT max(polled_at) FROM poll_log
               WHERE feed_id = $2 AND status = 'ok'
           )
         ORDER BY p.id
@@ -984,10 +1127,16 @@ async def import_feed(
     source, key = canonical_feed_identity(source, key)
     feed_id = await conn.fetchval(
         """
-        INSERT INTO feed(source, key, polling)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
-        RETURNING id
+        WITH upserted AS (
+            INSERT INTO feed(source, key, polling)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
+            RETURNING id, source, key, (xmax = 0) AS inserted
+        ), logged AS (
+            INSERT INTO token_log (checked_at, ats, token, status)
+            SELECT now(), source, key, 'feed_entered' FROM upserted WHERE inserted
+        )
+        SELECT id FROM upserted
         """,
         source,
         key,
@@ -1008,7 +1157,8 @@ async def import_feeds(
 
     ``xmax = 0`` distinguishes the two branches: PostgreSQL leaves it zero on a
     genuine insert and non-zero on the update path, which is the only way to
-    tell them apart when both return a row.
+    tell them apart when both return a row. It also gates the ``feed_entered``
+    log row, so re-importing a feed that already exists logs nothing.
     """
     if not identities:
         return (0, 0)
@@ -1017,11 +1167,17 @@ async def import_feeds(
     )
     rows = await conn.fetch(
         """
-        INSERT INTO feed(source, key, polling)
-        SELECT source, key, $3
-        FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
-        ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
-        RETURNING id, (xmax = 0) AS inserted
+        WITH upserted AS (
+            INSERT INTO feed(source, key, polling)
+            SELECT source, key, $3
+            FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
+            ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
+            RETURNING id, source, key, (xmax = 0) AS inserted
+        ), logged AS (
+            INSERT INTO token_log (checked_at, ats, token, status)
+            SELECT now(), source, key, 'feed_entered' FROM upserted WHERE inserted
+        )
+        SELECT id, inserted FROM upserted
         """,
         [source for source, _ in identities],
         [key for _, key in identities],

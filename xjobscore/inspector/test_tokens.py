@@ -1,6 +1,6 @@
 """Unit tests for tokens.py's validation, shaping, and SQL assembly -- no DB.
 
-Same precedent as test_postings.py: the SQL itself is exercised by running the
+The SQL itself is exercised by running the
 page against a real database. What is tested here is what is easy to get
 silently wrong -- filter validation, the predicate each filter selects, the
 arguments handed to the pool, the clamps, and the shaping the page depends on.

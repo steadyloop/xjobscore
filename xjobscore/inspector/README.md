@@ -5,24 +5,19 @@ on demand, inspect the raw `harvest()` payload and the `parse()` preview side
 by side, read per-request network telemetry (timing, retries, rate-limit
 headers), and set polling policy. A Feed-detail fetch is a manual,
 side-effect-free look at a feed — it stages its result in the inspector's own
-schema and never touches `raw_posting` or `job_posting`. The Scheduler page is
-the exception: its Poll now hands work to the production poller, and its Fetch
-all runs the production path (`run.poll`) directly, one feed per request —
-either way the real tables get written, not staging.
+schema and never touches `raw_posting` or `job_posting`. Scheduler actions only
+write durable queue positions; the unified runtime owns all production work.
 
-Production polling is a separate, opt-in concern: set `XJOBSCORE_INSPECTOR_RUNNER`
-and this process will also run `run.py`'s real worker path — harvest through
-`job_posting`, content-hash dedup and all — on a tick, started and stopped from
-the Scheduler page's pause/resume button. See "Scheduler" below and
-`runner.py`'s module docstring for exactly what that widens.
+Inspector is always served by the unified process alongside the scheduler,
+incremental Gold workers, dedup checkpoints, and token heartbeat.
 
 Run it from the repository checkout:
 
 ```sh
-uv run python -m xjobscore.inspector
+uv run xjobscore
 ```
 
-Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
+Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
 
 ## Pages
 
@@ -41,7 +36,7 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   confirmation click.
 
   Each ATS row also carries a **Drop** button — a hard `DELETE` of the feed
-  row, which cascades to remove its `poll_observation` history too
+  row, which cascades to remove its `poll_log` history too
   (`ON DELETE CASCADE`). It's the only way a feed leaves `public.feed` once
   created; disabling just flips the switch, Drop actually removes the row.
   Direct/Board rows have no Drop control — out of scope for now.
@@ -89,7 +84,7 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   **Poll now** means now. It backdates `due_at` well past the whole backlog
   rather than to `now()` — `store.claim_due_feeds` orders by `due_at`
   *ascending*, so `now()` sorts an express feed *behind* everything already
-  overdue — and then wakes the in-process runner so the poll happens in seconds
+  overdue — and then wakes the unified scheduler so the poll happens in seconds
   instead of on the next tick. Because it promises a poll, it refuses (409, with
   the reason) rather than queueing one that could not happen: a paused scheduler,
   no runner listening, a disabled or paused feed, or a poll of that feed already
@@ -97,19 +92,13 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   `finish_schedule_success`/`_failure` overwrites it.
 
   **Fetch matching feeds** (the filter bar's Fetch matching button, or a
-  vendor header's `poll all`) opens a confirmation/progress dialog. It does not
-  queue: the browser drives a small worker pool over the matching (filtered)
-  feeds — collapsed groups included, since collapsing is a view convenience
-  and never changes what a bulk action touches — one
-  `POST /api/scheduler/feeds/{ref}/fetch` each, and every request claims a
-  lease and runs `run.poll` — the production path, `raw_posting` through
-  `poll_observation` — before answering. It needs PostgreSQL but neither the
-  runner loop nor `scheduler_control.running`: the operator clicking it *is*
-  the scheduler. Per-feed policy still holds — a paused, disabled, or
-  already-claimed feed refuses (409) instead of polling, and paused rows are
-  skipped client-side. A harvest that runs and fails is a 200 whose
-  `status: "error"` the progress counter reports as failed. Stop prevents new
-  work from starting while allowing requests already in flight to finish.
+  vendor header's `poll all`) opens a confirmation/progress dialog. The browser
+  writes durable express queue positions for the matching feeds — collapsed
+  groups included — and the unified scheduler claims them. Per-feed policy
+  still holds: paused, disabled, or already-claimed feeds refuse rather than
+  reporting a queue position that cannot be honored. Every accepted production
+  polling request returns `202 Accepted`; completion is observed through the
+  run telemetry rather than held open in the HTTP request.
 
   **Vendor grouping** keeps current configured cost next to the feeds that
   create it. Paused feeds issue no requests, so they remain in each vendor's
@@ -121,11 +110,14 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
 
   Vendor HTTP protection is separate from feed cadence. `net.py` still caps
   per-host concurrency and reacts to 429 responses so an operator-set interval
-  cannot disable production's rate-limit safeguards.
+  cannot disable production's rate-limit safeguards. The scheduler's per-vendor
+  worker pools are sized from those same numbers (`sources.width` reads the
+  adapter's configured concurrency and `net._VENDOR_CAPS`) rather than
+  restating them, so a pool can never be wider than what `net.py` will pass.
 
-  `run.py` appends one `poll_observation` row per completed poll — status and
+  `run.py` appends one `poll_log` row per completed poll — status and
   first-sighting count, never a revision of an earlier row. Three states have to
-  render correctly and are visibly distinct: PostgreSQL down, `poll_observation`
+  render correctly and are visibly distinct: PostgreSQL down, `poll_log`
   absent or empty (a database nothing has polled against yet), and populated. In
   the first two every unknown telemetry value reads "—", never `0` — a zero
   would claim the poller ran and found nothing. Connection, runner, and
@@ -146,109 +138,12 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
 
   A separate, global **Pause / Resume** button in the
   header controls `scheduler_control.running` — the one switch that decides
-  whether *any* feed gets polled by this inspector process, independent of
-  every feed's own `enabled`/`paused_at`. It is what `inspector.runner.
-  SchedulerRunner` reads on every tick; see "Running the scheduler in-process"
-  below. The header shows running/paused, whether a process is actually
+  whether *any* feed gets polled by the unified system, independent of
+  every feed's own `enabled`/`paused_at`. It is what
+  `runtime.SystemScheduler` reads on every tick. The header shows
+  running/paused, whether a process is actually
   supervising it (a stale `running = true` with no live runner is reported,
   not hidden), and the last completed cycle.
-- **Postings** (`/postings`) — browser and labeling queue over
-  `public.job_posting` (read via the policy store's borrowed pool). Each entry
-  shows the gold row's actual fields; the detail pane follows a keyboard
-  cursor (`j`/`k`), and `1`/`2`/`3` write a triage label — `relevant` /
-  `irrelevant` / `unsure` — that upserts immediately into
-  `{schema}.posting_label`, keyed `(source, source_key)` so it survives a
-  posting row being deleted and reinserted. Labels are hand-made ground truth
-  for a future internship classifier; they live in the inspector's schema
-  precisely because gold tables are rebuilt destructively. A shuffled order
-  (seeded, stable across pagination) plus an "Unlabeled" filter and an
-  "Intern titles" stratum filter make an unbiased labeling draw practical.
-  The same page's **Duplicate review** mode pages by candidate group, nests
-  every member beneath one group row, and compares location, ATS identity, and
-  description evidence without loading full descriptions. `1`/`2`/`3` mark a
-  group correct / incorrect / needs-review. Reviews live in
-  `{schema}.duplicate_group_review`, keyed by group and evidence fingerprint;
-  a rebuild that changes the evidence returns that group to the unreviewed
-  queue while retaining its prior review history. Hidden groups leave the
-  ordinary queues but remain recoverable through the **Hidden** filter. Press
-  `?` for the keymap.
-  A **Rebuild duplicate groups** button reruns the gold dedup step
-  (`gold.steps("dedup")`) against `public.job_posting`, replacing
-  `job_posting_dup_group` entirely. It is deliberately manual and separate
-  from the poll loop: the rebuild is a destructive full-table recompute, too
-  heavy to run on every tick. A completed rebuild refreshes Duplicate review
-  automatically; Inspector reviews are not stored in the replaced gold table.
-- **Review** (`/review`) — triage queue over every `job_posting` carrying an
-  `attributes.opus` key: the CS-internship recon set, first tagged by a
-  title-only regex pass into `tech` / `non-tech` / `ambiguous` / `other`.
-  Unlike Postings' hand labels, the decision here lives inside
-  `job_posting.attributes` itself, with a small provenance trio —
-  `opus_by` (`machine` or `human`), `opus_at`, and `opus_machine` (the
-  original regex guess, never overwritten by a review) — so a corrected row
-  and its prior guess both stay visible. Same keyboard idiom as Postings:
-  `j`/`k` moves the cursor, `1`–`4` writes a bucket and advances, `u` undoes
-  the last write, `o` opens the posting. The default filter is
-  **Unreviewed**, so the queue has somewhere to drain to; a **Changed**
-  filter isolates rows where a human decision differs from the machine
-  guess, which is what makes the correction rate visible. Press `?` for the
-  keymap.
-- **Query** (`/query`) — ad-hoc SQL over the pipeline database (`public`, via
-  the same borrowed pool as Postings), for questions no purpose-built page
-  answers. A schema sidebar (live from `information_schema`, with an
-  approximate row count per table), a few starter snippets, and a
-  browser-local history of past queries sit alongside a plain SQL editor;
-  `⌘/Ctrl+Enter` runs, and clicking a result row expands its full JSON.
-
-  Strictly read-only, enforced in `query.py` by three independent layers, not
-  by inspecting the SQL string: (1) the statement must start with
-  `SELECT`/`WITH`/`TABLE`/`EXPLAIN`; (2) it runs through asyncpg's extended
-  query protocol, which PostgreSQL itself refuses to run more than one
-  command through; (3) the whole thing executes inside a `START TRANSACTION
-  READ ONLY` that is always rolled back, never committed — so even a
-  data-modifying CTE that passes layer 1 fails at the database. A 10s
-  `statement_timeout` and a 500-row cap (enforced by only ever fetching that
-  many from the portal) keep a runaway query from hanging the page.
-- **Fields** (`/fields`) — bronze field recon: what an adapter's payloads
-  actually contain, and what each field collapses to downstream. It replaces
-  the hand-written surveys under `doc/raw_postings/`, which were generated by
-  ad-hoc SQL and went stale the moment a board changed.
-
-  Pick an adapter to get a **path census** over `raw_posting.data->'payload'`
-  — every JSON path, its type(s), coverage, fill rate, distinct count, and the
-  canonical `Posting` field the adapter's config reads it into. Click a path
-  for its **exact value histogram** across every current posting, the collapse
-  chain (`workplaceType → Posting.workplace_type_raw → silver._remote() →
-  attributes.remote ∈ {yes, hybrid}`), and — where the collapse is a pure
-  function of the value alone — what each observed value actually becomes.
-  Clicking a value shows whole payloads that carry it. The whole selection
-  lives in the query string, so a finding is a link.
-
-  **The census is sampled and the histogram is exact, and the page always says
-  which.** That split is a measurement, not a preference: on the live database
-  a full depth-3 walk of the largest adapter takes ~108 s, the same walk over
-  2,000 payloads takes ~2 s, and an exact histogram of one chosen path takes
-  ~1–4 s. The cost is detoasting `data` (a 69 MB heap in front of >1 GB of
-  TOAST), not finding rows, so **no index helps** and none is proposed —
-  filtering by adapter is ~100 ms of a query that runs for seconds. What does
-  help is choosing *before* detoasting: every statement starts from a heap-only
-  `DISTINCT ON` that resolves the latest revision per posting while touching no
-  jsonb, and the sample is drawn by hashed id rather than by `LIMIT` on that
-  `DISTINCT ON` — a bare limit would take whichever tenants sort first
-  alphabetically and report one company's schema as the adapter's.
-
-  Two honesty requirements the code enforces. The nine `xml`/`html` adapters
-  store a document in a string, not a JSON object; they get an explicit "no
-  field tree" state and their configured extraction paths, never an empty
-  table. And an adapter whose parser is hand-written Python
-  (`taleo`, `avature`, `hn`, …) reports that its mapping is not introspectable
-  rather than reporting that it maps nothing.
-
-  `mapping.py` is pure — it reads the config tables and the `registry/
-  job-posting` canons, no database — so `/api/fields/mapping` keeps answering
-  while PostgreSQL is down. `fields.py` never writes: every statement runs
-  inside a rolled-back read-only transaction, and a path from the browser
-  reaches SQL only as bind parameters (the parse decides *how many* laterals to
-  emit, never any of the text).
 - **Tokens** (`/tokens`) — the discovery inventory, and the one place an ATS
   board becomes a pollable one. `public.token` holds every `(ats, token)`
   pair ever seen, live or dead. Tokens are ATS-only; `public.feed` is the
@@ -290,25 +185,100 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_INSPECTOR_PORT` overrides).
   never been checked at all. It is deliberately unfiltered, so the backlog
   number does not move when someone narrows the table.
 
-  Under it, the **token check log** tails `public.token_log`, one append-only
-  row per liveness probe (`checked_at`, `ats`, `token`, `status`). This is the
-  only place a token's history exists: `token.status`/`checked_at` hold just
-  the latest answer, so a live → dead → live flip leaves three rows here and
-  no trace there. The row is written in the same statement that updates
-  `token`, so the two cannot disagree. Ordered by `id`, not `checked_at` —
-  a batch probes three boards at once and their timestamps can tie. A missing
+  Under it sit two tails, side by side, both reading `public.token_log`
+  (`checked_at`, `ats`, `token`, `status`) and differing only in which verbs
+  they keep. One append-only table, two kinds of row.
+
+  The **token check log** keeps the liveness verbs — `unknown`, `live`, `dead`,
+  one row per probe. This is the only place a token's status history exists:
+  `token.status`/`checked_at` hold just the latest answer, so a live → dead →
+  live flip leaves three rows here and no trace there. The row is written in
+  the same statement that updates `token`, so the two cannot disagree.
+
+  The **feed in/out log** keeps `feed_entered` and `feed_exited`, written in the
+  same statement as the `INSERT`/`DELETE` on `feed` that they describe. `feed`
+  records neither — a row carries no birth timestamp and **Drop** is a hard
+  delete — so without these rows an identity that came and went leaves nothing
+  behind at all. `token_log` has no FK precisely so a `feed_exited` row can
+  outlive the feed it describes. Entry means *a `feed` row was created*, not
+  *`polling` was switched on*: flipping the switch on a feed that already exists
+  logs nothing. Rendered as `→` and `←`, since direction is the whole content.
+
+  Both are ordered by `id`, never `checked_at` — a batch probes three boards at
+  once and their timestamps can tie, and a promote writes `live` and
+  `feed_entered` from one statement, so theirs tie by construction. A missing
   `token_log` reads as *log unavailable*, never as an empty log; "nothing is
   recording" and "nothing was checked" are different statements. Nothing
   prunes it yet: at one batch of 20 every six hours it grows by roughly 2.4k
-  rows a month, plus whatever **Check** and **Validate all** add.
+  rows a month, plus whatever **Check**, **Validate all**, and promotions add.
 
   The page is read + enable only — no delete. `token.status` belongs to the
   liveness prober here, separate from `feed.polling`; removing a feed
   entirely is **Drop**, on the Feeds page (see above) — a hard delete that
-  also erases the feed's `poll_observation` history.
+  also erases the feed's `poll_log` history.
 
   `token.config` is PostgreSQL data. A config-driven feed must have its adapter
   values stored on its token row before it is enabled.
+
+- **Companies** (`/companies`) — the verification queue over `public.company`,
+  and the only writer `company.reviewed` has ever had. Nothing set a verdict
+  before this page, so every unreviewed row is a guess — names arrive as ATS
+  token slugs (`8fleet-inc`, `a-place-for-mom`) and domains as unreviewed
+  inferences (`8fleet-inc` → `eightfleet.com`).
+
+  There is deliberately **no staging table**. A candidate *is* a `company` row
+  carrying `reviewed = 'pending'`; confirming one writes that column rather
+  than copying between tables. `job_posting.company_id` is `NOT NULL`, so every
+  row here already backs live postings — this page decides whether the company
+  that exists is *right*, and never creates or deletes one.
+
+  The default **Queue** view is unverified rows that carry active serving
+  postings, ordered by how many. That ordering is the point: verifying Micron
+  once settles 441 postings, while alphabetical order would bury it behind
+  hundreds of single-posting companies. The wider `unverified` view drops the
+  posting requirement — an unreviewed company with nothing to apply to is real,
+  but it is not backlog.
+
+  Each row carries the evidence needed to decide without leaving the page, and
+  the fields are editable in place rather than behind a dialog. The left column
+  names the row: the token that leads somewhere (an `eightfold` token sorts
+  first but is an unreadable URL fragment, so a `workday` token beside it wins),
+  the active serving count, and the freshest posting's title. Beside it sit the
+  links worth opening — the vendor's public board rebuilt from the token, the
+  Greenhouse `boards-api` endpoint that simply returns the employer's own name,
+  the sample posting, and a web search on the best term available.
+
+  Three outcomes. **Save** writes the boxes and stamps the verdict; an omitted
+  field is left alone and an emptied one is cleared, which are different
+  instructions. A domain left blank is filled from the greyed guess in its
+  placeholder, never from a value the operator cannot see. **Reject** marks the
+  row and leaves it in place — `job_posting_company_id_fkey` is `NO ACTION`, so
+  a company carrying postings cannot be deleted at all, and a DELETE would
+  simply fail. **Reopen** returns either verdict to the queue.
+
+  A verdict does not make the row jump out of the view. The written row stays
+  where it was, tinted, so the operator keeps their place; the pill counts are
+  adjusted locally by the same rules the server counts by.
+
+  A rename always writes `company_alias`. `silver` resolves incoming
+  `company_raw` strings through that table, and it keeps seeing the token slug
+  on the wire long after the display name is fixed, so dropping the old
+  spelling would break resolution for the postings the rename was meant to
+  improve. Aliases are written `ON CONFLICT DO NOTHING`: an `alias_norm` already
+  owned by another company stays owned by it, because a verification is not a
+  merge.
+
+  The verdict lives in columns — `reviewed` (`pending`/`verified`/`rejected`,
+  NOT NULL, CHECKed), `reviewed_at`, `reviewed_by` — so unreviewed is a value
+  rather than an absence and a typo'd verdict fails loudly. `tags` keeps only
+  the original machine guess (`name_machine`, `domain_machine`), written once
+  and never overwritten, so the share of domains an operator actually had to
+  correct stays measurable after the fact; Reopen clears the verdict and keeps
+  the provenance.
+
+  Publishing is already safe without a filter here: `publish.py` derives its
+  company set from the postings it publishes, so an unverified row with no
+  serving postings never reaches production.
 
 ## Architecture
 
@@ -325,14 +295,10 @@ Everything is PostgreSQL, but in two deliberately separate places:
   PostgreSQL down the policy layer runs in degraded mode: policy controls
   disable, everything else works.
 
-  That "policy only" boundary describes `policy.py`, not the process. When
-  `inspector.runner.SchedulerRunner` is enabled and `scheduler_control.running`
-  is true, this same process also runs `run.cycle` — writing `raw_posting`,
-  `job_posting`, `poll_observation`, and the runtime `feed` columns for
-  whatever feeds it polls, exactly as `run.py`'s CLI would. The Scheduler
-  page's Fetch visible action takes the same path per feed on demand
-  (`SchedulerRunner.poll_feed_now`), with neither gate required. See "Running
-  the scheduler in-process" below.
+  That "policy only" boundary describes `policy.py`, not the process.
+  `runtime.SystemScheduler` consumes the durable queue and writes
+  `raw_posting`, `job_posting`, `poll_log`, and Gold outputs. HTTP requests
+  never execute production workers.
 
 - **The `inspector` schema — a bounded staging area the inspector owns.** One
   latest usable fetch per feed keeps its payload, envelope, validator, and
@@ -345,67 +311,44 @@ Set `XJOBSCORE_INSPECTOR_STORE_DSN` to move inspector staging into a different
 database entirely; `XJOBSCORE_INSPECTOR_SCHEMA` renames the schema and refuses
 `public`.
 
-## Running the scheduler in-process
+## Unified runtime
 
-Set `XJOBSCORE_INSPECTOR_RUNNER=1` and this inspector process becomes a valid
-place to run production polling — `inspector.runner.SchedulerRunner` calls
-`run.cycle` on a tick (`XJOBSCORE_INSPECTOR_RUNNER_TICK_S`, default 60 s),
-reusing one long-lived `Net` (so adaptive per-host 429 pacing survives across
-cycles, unlike a cron process that discards it every run).
+`uv run xjobscore` is the only normal process. It holds a PostgreSQL advisory
+lock, so a second system cannot accidentally double outbound traffic. The
+persisted `scheduler_control.running` value is the sole polling switch: fresh
+databases run, while an operator pause survives restarts.
 
-Two independent switches gate every cycle:
-
-- **`XJOBSCORE_INSPECTOR_RUNNER`** (env var, read once at startup) — whether
-  *this process* is allowed to poll at all. Off by default, so a stray dev
-  instance or the test suite can never accidentally poll production feeds.
-- **`scheduler_control.running`** (PostgreSQL, read fresh every tick) — the
-  operator's pause/resume, driven from the Scheduler page and persisted so a
-  process restart cannot silently undo a deliberate pause. Defaults to `false`:
-  a database freshly brought up to this schema polls nothing until told to.
-
-A process with the env var off still serves the control API and the button
-still works — it just reports `runner.alive: false`, which the Scheduler page
-distinguishes from "paused" (nothing is listening vs. deliberately stopped).
-
-The Scheduler page's Fetch visible action bypasses both switches on purpose:
-`SchedulerRunner.poll_feed_now` claims a single-feed lease and runs `run.poll`
-per request, sharing the runner's `Net` (one per-host pacing budget covers the
-loop and the on-demand fetches together). It works
-with `XJOBSCORE_INSPECTOR_RUNNER` unset — the operator driving the browser is
-the schedule — while per-feed `enabled`/`paused_at` and held leases are still
-honored with a refusal.
-
-The dedup step (`job_posting_dup_group`) is **not** part of this loop — it
-stays a manual "Rebuild duplicate groups" action on the Postings page, gated
-single-flight by `inspector.runner.GoldJob`, because it is a destructive
-full-table rebuild too heavy for every tick.
-
-Nothing else should be scheduling `run.py` once this is on — leases
-(`FOR UPDATE OF s SKIP LOCKED`) make a second concurrent poller safe, but two
-pollers still double the outbound request rate against every ATS.
+Changed fetches run Bronze, Silver, and posting-local Gold. Failed Gold steps
+remain stale and are retried without refetching. Global dedup is generation
+tracked and runs after the queue drains and 30 seconds have been quiet, or
+after five minutes at most. Scheduler buttons enqueue work and wake the loop;
+they never perform it in an HTTP request.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `XJOBSCORE_INSPECTOR_PORT` | `8765` | HTTP port (loopback only) |
-| `XJOBSCORE_INSPECTOR_DSN` / `XJOBSCORE_DSN` / `DATABASE_URL` | — | PostgreSQL DSN; **required** — the result store no longer has a file fallback |
+| `XJOBSCORE_PORT` | `8765` | HTTP port (loopback only) |
+| `XJOBSCORE_HOST` | `127.0.0.1` | HTTP bind host |
+| `DATABASE_URL` | — | PostgreSQL DSN; **required** — the result store no longer has a file fallback |
 | `XJOBSCORE_INSPECTOR_STORE_DSN` | the DSN above | Separate database for inspector staging data |
 | `XJOBSCORE_INSPECTOR_SCHEMA` | `inspector` | Schema owning the staging tables; may not be `public` |
-| `XJOBSCORE_INSPECTOR_USER_AGENT` | `net.DEFAULT_USER_AGENT` (a Chrome browser string) | Outbound UA |
-| `XJOBSCORE_INSPECTOR_RUNNER` | `false` | Allow this process to run `run.cycle` in-process; see "Running the scheduler in-process" |
-| `XJOBSCORE_INSPECTOR_RUNNER_TICK_S` | `60` | Seconds between scheduler ticks |
-| `XJOBSCORE_INSPECTOR_RUNNER_BATCH` | `20` | Feeds claimed per `run.cycle` call, same meaning as `run.py`'s `--batch` |
-| `XJOBSCORE_INSPECTOR_RUNNER_LEASE_S` | `3600` | Schedule lease duration, same meaning as `run.py`'s `--lease-seconds` |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT` | `true` | Allow this process to run the token validation/promotion heartbeat (`token_heartbeat.paused` is the runtime pause) |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_TICK_S` | `60` | Seconds between heartbeat queue checks |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_BATCH` | `20` | Maximum tokens revalidated in one cycle |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_INTERVAL_S` | `21600` | Delay after a successful cycle (six hours) |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_RETRY_S` | `900` | Delay after a system-level cycle failure |
-| `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_LEASE_S` | `900` | Exclusive cycle lease duration |
+| `XJOBSCORE_USER_AGENT` | `net.DEFAULT_USER_AGENT` | Outbound UA |
+| `XJOBSCORE_TICK_S` | `60` | Seconds between scheduler checks |
+| `XJOBSCORE_CYCLE_BUDGET_S` | `30` | Seconds one cycle keeps claiming feeds |
+| `XJOBSCORE_LEASE_SECONDS` | `3600` | Feed claim lease duration |
+| `XJOBSCORE_SHUTDOWN_GRACE_S` | `30` | Seconds active work may finish before cancellation |
+| `XJOBSCORE_HEARTBEAT_TICK_S` | `60` | Seconds between heartbeat queue checks |
+| `XJOBSCORE_HEARTBEAT_BATCH` | `20` | Maximum tokens revalidated in one cycle |
+| `XJOBSCORE_HEARTBEAT_INTERVAL_S` | `21600` | Delay after a successful cycle (six hours) |
+| `XJOBSCORE_HEARTBEAT_RETRY_S` | `900` | Delay after a system-level cycle failure |
+| `XJOBSCORE_HEARTBEAT_LEASE_S` | `900` | Exclusive cycle lease duration |
 
 `.env` files in the working directory or repo root are honored with
-`setdefault` semantics.
+`setdefault` semantics. The former `XJOBSCORE_INSPECTOR_PORT`, user-agent,
+runner-timing, and heartbeat-timing names remain deprecated aliases for one
+release. `XJOBSCORE_INSPECTOR_RUNNER` itself is removed; the persisted
+Scheduler control is the only polling switch.
 
 ## Tests
 
@@ -415,17 +358,9 @@ PYTHONPATH=. .venv/bin/pytest xjobscore/inspector/
 
 Route tests run over `create_app(...)` with injected fakes (catalog, policy,
 runner, gold job) and no network. The policy layer is unit-tested against
-recording fakes. `test_runner.py` covers `SchedulerRunner`'s pause, drain, and
-error-backoff behavior, plus `GoldJob`'s single-flight rebuild — also with no
-network. `create_app()`'s defaults leave the runner
-disabled, so nothing in this suite (or a bare `uv run python -m
-xjobscore.inspector`) polls production without `XJOBSCORE_INSPECTOR_RUNNER`
-set explicitly.
-
-`test_mapping.py` and `test_fields.py` need neither a database nor fixtures:
-the first asserts against the real source configs and canons, so a config edit
-that changes an adapter's reads surfaces there; the second pins the path
-compiler's contract, including that no path text ever reaches the SQL string.
+recording fakes. `test_runner.py` retains coverage for the old isolated runner
+mechanics, while runtime tests cover the unified supervisor. `create_app()`
+without an injected runtime remains inert, so route tests cannot poll feeds.
 
 Store tests need a real PostgreSQL: each builds a throwaway `inspector_test_*`
 schema and drops it on teardown, so they never see the pipeline's tables.

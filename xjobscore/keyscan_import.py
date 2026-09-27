@@ -1,4 +1,4 @@
-"""Bulk-import keyscan's discovered tokens into xjobscore's own token table.
+"""Bulk-import keyscan's discovered tenants into xjobscore's own token table.
 
 keyscan (``keyscan/``) discovers ATS tokens by scanning Common Crawl into its
 own SQLite database, entirely separate from xjobscore's Postgres schema. This
@@ -59,7 +59,7 @@ _TENANT_PREFIXED_ATS = {"workday", "oracle"}
 @dataclass(frozen=True, slots=True)
 class Row:
     keyscan_ats: str  # the label as stored in keyscan's own database
-    keyscan_token: str  # exact keyscan spelling, used to mark its row imported
+    keyscan_key: str  # exact keyscan spelling, used to mark its row imported
     ats: str  # the label to write into xjobscore (post-rename mapping)
     token: str  # canonical destination spelling
     status: str
@@ -84,8 +84,8 @@ def load_pending(db_path: Path) -> list[Row]:
     con.row_factory = sqlite3.Row
     try:
         rows = con.execute(
-            """SELECT ats, token, status, checked_at, discovered_at
-               FROM token
+            """SELECT ats, key, status, checked_at, discovered_at
+               FROM tenants
                WHERE status IN ('live', 'dead') AND imported_at IS NULL"""
         ).fetchall()
     finally:
@@ -96,9 +96,9 @@ def load_pending(db_path: Path) -> list[Row]:
         result.append(
             Row(
                 keyscan_ats=row["ats"],
-                keyscan_token=row["token"],
+                keyscan_key=row["key"],
                 ats=ats,
-                token=canonical_feed_key(ats, row["token"]),
+                token=canonical_feed_key(ats, row["key"]),
                 status=row["status"],
                 checked_at=(
                     datetime.fromisoformat(row["checked_at"])
@@ -115,8 +115,8 @@ def _mark_imported(db_path: Path, written: list[Row], *, now: str) -> None:
     con = sqlite3.connect(db_path)
     try:
         con.executemany(
-            "UPDATE token SET imported_at = ? WHERE ats = ? AND token = ?",
-            [(now, row.keyscan_ats, row.keyscan_token) for row in written],
+            "UPDATE tenants SET imported_at = ? WHERE ats = ? AND key = ?",
+            [(now, row.keyscan_ats, row.keyscan_key) for row in written],
         )
         con.commit()
     finally:
@@ -152,7 +152,11 @@ async def import_keyscan_tokens(
             resolved_rows.append((row, company_id))
 
         if not dry_run:
-            now = datetime.now().astimezone()
+            # Whole seconds on both sides: `_mark_imported` records this same
+            # stamp into keyscan's sqlite with second precision, so keeping
+            # microseconds here would leave the two copies of one import batch
+            # unequal and unjoinable.
+            now = datetime.now().astimezone().replace(microsecond=0)
             async with conn.transaction():
                 for row, company_id in resolved_rows:
                     # A resolved row can still be declined: the conflict-branch
@@ -184,12 +188,12 @@ async def import_keyscan_tokens(
 
 
 def _env_dsn() -> str | None:
-    return os.environ.get("XJOBSCORE_DSN") or os.environ.get("DATABASE_URL")
+    return os.environ.get("DATABASE_URL")
 
 
 async def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dsn", help="Postgres DSN; default: $XJOBSCORE_DSN or $DATABASE_URL")
+    parser.add_argument("--dsn", help="Postgres DSN; default: $DATABASE_URL")
     parser.add_argument(
         "--keyscan-db", type=Path, default=DEFAULT_KEYSCAN_DB, help="path to keyscan's SQLite database"
     )
@@ -200,7 +204,7 @@ async def main(argv: Sequence[str] | None = None) -> int:
 
     dsn = args.dsn or _env_dsn()
     if not dsn:
-        raise ValueError("no dsn: pass --dsn or set XJOBSCORE_DSN/DATABASE_URL")
+        raise ValueError("no dsn: pass --dsn or set DATABASE_URL")
     if not args.keyscan_db.exists():
         raise ValueError(f"keyscan database not found: {args.keyscan_db}")
 

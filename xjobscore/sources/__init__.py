@@ -19,11 +19,14 @@ owns those.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from functools import partial
 from importlib import import_module
+from urllib.parse import urlsplit
 
+from xjobscore import net as net_module
 from xjobscore.net import Net
 from xjobscore.records import Canonical, Feed, Item, Record
 from xjobscore.sources import avature, dayforce, hn, join, taleo, zohorecruit
@@ -36,7 +39,7 @@ docxtract = import_module(".docxtract", __name__)
 
 __all__ = [
     "PARSERS", "REVISION_FIELDS", "REVISION_REFRESH_WINDOWS", "SOURCES", "Harvest", "Parse",
-    "UnknownSource", "docxtract", "get", "json_api", "parser", "reusing",
+    "UnknownSource", "docxtract", "get", "json_api", "parser", "reusing", "width",
 ]
 
 Harvest = Callable[[Feed, Net], Awaitable[Record]]
@@ -161,6 +164,88 @@ REVISION_REFRESH_WINDOWS: dict[str, int] = {
     # which left such edits permanently stale.
     "smartrecruiters": 86_400,
 }
+
+
+# Host *shape* of a source's list endpoint, for the sources whose own config
+# cannot say. Two facts are read off these and nothing else: whether the host
+# is per-tenant (a `{placeholder}` in it) and which `net._VENDOR_CAPS` suffix
+# binds it. No width is ever written here -- `width()` derives those from each
+# adapter's own concurrency constant, so this table cannot drift one.
+_HOST_TEMPLATES: dict[str, str] = {
+    "eightfold": "{host}.eightfold.ai",  # config's list netloc is the bare `{host}`
+    "taleo": "{key}.taleo.net",          # real host comes from feed.config["url"]
+    "avature": "{key}.avature.net",
+    "join": "join.com",
+    "zohorecruit": "{key}.zohorecruit.com",
+    "dayforce": "jobs.dayforcehcm.com",
+    "hn": "hn.algolia.com",
+    "janestreet": "www.janestreet.com",
+    "workatastartup": "www.workatastartup.com",
+}
+
+# Per-feed request fan-out of the bespoke adapters, read from each module's own
+# constant so a retune there is a retune here.
+_BESPOKE_FAN_OUT: dict[str, Callable[[], int]] = {
+    "taleo": lambda: taleo._CONCURRENCY,
+    "avature": lambda: avature.CONCURRENCY,
+    "join": lambda: join.CONCURRENCY,
+}
+
+
+def _config(name: str) -> dict:
+    return json_api.CONFIGS.get(name) or docxtract.CONFIGS.get(name) or {}
+
+
+def _list_host_template(name: str) -> str:
+    """Netloc of this source's list URL template ("" when unknown)."""
+    if name in _HOST_TEMPLATES:
+        return _HOST_TEMPLATES[name]
+    return urlsplit(_config(name).get("list", {}).get("url", "")).netloc
+
+
+def _fan_out(name: str) -> int:
+    """Most requests one poll of this source keeps in flight at once."""
+    if name in _BESPOKE_FAN_OUT:
+        return _BESPOKE_FAN_OUT[name]()
+    config = _config(name)
+    listing = config.get("list", {})
+    return max(
+        1,
+        listing.get("concurrency", 1),
+        listing.get("page", {}).get("concurrency", 1),  # `page` nests inside `list`
+        config.get("detail", {}).get("concurrency", 1),
+        config.get("detail_concurrency", 1),            # docxtract's spelling
+    )
+
+
+def width(name: str) -> int:
+    """How many feeds of `name` one polling cycle may have in flight.
+
+    Derived, never declared: the number is whatever this source's own
+    concurrency and `net`'s vendor cap already leave room for. A second copy
+    of a width is how the inspector once measured 8 while production ran 4
+    (see `inspector/service.py`), and here the cost would be worse than a
+    wrong number on a page -- workers wider than the cap sit holding feed
+    leases while queued on a semaphore.
+
+    - Shared host (one netloc for every tenant): every feed contends on the
+      list leg, so that leg's width is the vendor's whole budget. Without one
+      the source is on `Net._throttle`'s serialized 1 req/s path, where extra
+      workers only queue, so the answer is 1.
+    - Per-tenant host: the per-host semaphore does not bind across feeds, and
+      `_VENDOR_CAPS` is the only cross-feed ceiling -- so the pool is the cap
+      divided by what one poll itself keeps in flight. No cap means
+      unmeasured, and unmeasured is 1, not unlimited.
+    - An unregistered name is 1; `poll` raising `UnknownSource` is where that
+      failure belongs, not here.
+    """
+    host = _list_host_template(name)
+    if host and "{" not in host:
+        return max(1, _config(name).get("list", {}).get("concurrency", 1))
+    cap = net_module.vendor_cap(re.sub(r"\{[^}]*\}", "x", host)) if host else None
+    if cap is None:
+        return 1
+    return max(1, cap // _fan_out(name))
 
 
 def reusing(

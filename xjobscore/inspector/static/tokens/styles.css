@@ -91,11 +91,25 @@
 .tok-summary .tok-sum-bad { color: var(--err); }
 .tok-summary .tok-sum-sep { color: var(--border); }
 
+/* Side by side, because the two tails answer the same question from opposite
+   ends: what the prober found, and what that made the fleet do. Collapses to
+   one column before either can get too narrow to read a token in. */
+.tok-logs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .tok-logs { grid-template-columns: 1fr; }
+}
+
 .tok-log {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   max-height: 168px;
-  margin-bottom: var(--space-4);
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
@@ -156,6 +170,13 @@
 
 .tok-log-st[data-status="live"] { color: var(--ok-text); }
 .tok-log-st[data-status="dead"] { color: var(--err); }
+
+/* Feed events render as arrows, not words: -> and <- read as direction at a
+   glance where "entered"/"exited" only differ in their middle letters. */
+.tok-log-st[data-status="feed_entered"],
+.tok-log-st[data-status="feed_exited"] { width: 2ch; }
+.tok-log-st[data-status="feed_entered"] { color: var(--ok-text); }
+.tok-log-st[data-status="feed_exited"] { color: var(--err); }
 
 .tok-log-token {
   overflow: hidden;

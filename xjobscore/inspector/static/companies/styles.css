@@ -1,0 +1,124 @@
+/* Company review page. Scoped to the body class; tokens from shared/tokens.css. */
+
+.companies-page .co-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.companies-page .co-summary {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.companies-page .grow { flex: 1; }
+
+.companies-page .t-token {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.companies-page .t-meta {
+  display: block;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.companies-page .t-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85em;
+}
+
+.companies-page .t-links a {
+  color: var(--accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.companies-page .t-links a:hover { text-decoration: underline; }
+
+.companies-page .t-links .t-host {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.companies-page td input,
+.companies-page td textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.companies-page td textarea {
+  resize: vertical;
+  min-height: 46px;
+  line-height: 1.35;
+}
+
+.companies-page td input::placeholder,
+.companies-page td textarea::placeholder { color: var(--text-muted); }
+
+/* A reviewed row stays in place after the verdict so the operator can see
+   what they just did; the tint is what tells them it is off the queue. */
+.companies-page tr[data-state="verified"] > td { background: color-mix(in srgb, var(--ok) 7%, transparent); }
+.companies-page tr[data-state="rejected"] > td { background: color-mix(in srgb, var(--text-muted) 10%, transparent); }
+.companies-page tr[data-state="rejected"] .t-token { text-decoration: line-through; }
+
+.companies-page .t-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.companies-page .t-more {
+  color: var(--text-muted);
+}
+
+.companies-page .t-error {
+  display: block;
+  font-size: 0.8em;
+  color: var(--err);
+  margin-top: 2px;
+}
+
+.companies-page .co-summary.co-error { color: var(--err); }
+
+/* The merge offer appears only under a row whose save was refused, so it is
+   styled as part of that error rather than as a permanent action. */
+.companies-page .t-merge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  margin-top: var(--space-1);
+}
+
+/* Logo control lives under the domain box: the domain is what makes the fetch
+   possible, so the result belongs beside its cause. */
+.companies-page .t-logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.companies-page .t-logo img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}

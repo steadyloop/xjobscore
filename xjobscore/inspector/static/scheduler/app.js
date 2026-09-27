@@ -40,7 +40,6 @@ const OVERVIEW_REFRESH_MS = 30_000;
 const FEEDS_REFRESH_MS = 60_000;
 const LOG_REFRESH_MS = 5000;
 const COUNTDOWN_TICK_MS = 15_000;
-const POLL_NOW_SETTLE_MS = 3000;
 const BULK_FETCH_CONCURRENCY = 8;
 const BULK_POLICY_CONCURRENCY = 8;
 const EXPANDED_STORAGE_KEY = "scheduler-expanded-providers";
@@ -72,7 +71,7 @@ const state = {
 const alertEl = document.getElementById("system-alert");
 const runStateEl = document.getElementById("run-state");
 const runToggleEl = document.getElementById("run-toggle");
-const clockEl = document.getElementById("utc-clock");
+const clockEl = document.getElementById("local-clock");
 const summaryEl = document.getElementById("summary-line");
 const emptyEl = document.getElementById("sched-empty");
 const countEl = document.getElementById("row-count");
@@ -81,6 +80,7 @@ const logLinesEl = document.getElementById("live-log-lines");
 const logDotEl = document.getElementById("live-log-dot");
 const fetchMatchingEl = document.getElementById("fetch-matching");
 const bulkDialogEl = document.getElementById("bulk-dialog");
+const removeDialogEl = document.getElementById("remove-dialog");
 const toastEl = document.getElementById("toast");
 const tableEl = document.getElementById("sched-table");
 let renderToken = 0;
@@ -109,9 +109,13 @@ const STATUS_TEXT = {
   stale: "stale",
   never_polled: "new",
   paused: "paused",
-  disabled: "off",
   unknown: "?",
 };
+
+// Pause and disable are one column now: `held` is simply polling = false.
+function isHeld(feed) {
+  return feed.policy?.enabled === false;
+}
 
 function statusMark(status) {
   return el(
@@ -146,8 +150,12 @@ function showToast(message, tone = "ok") {
   }, 4200);
 }
 
+const CLOCK_FORMAT = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true, timeZoneName: "short",
+});
+
 function renderClock() {
-  clockEl.textContent = `${new Date().toISOString().slice(11, 19)} UTC`;
+  clockEl.textContent = CLOCK_FORMAT.format(new Date());
 }
 
 function renderHeader() {
@@ -324,12 +332,47 @@ async function loadFeeds() {
   }
 }
 
+// One cell, not a word plus a number: "ERR 404" states the failure twice, and
+// at 86% `unchanged` the log's job is to stay quiet until something happens.
+// A failed poll shows its status code, coloured -- the number IS the word.
+// The fallback only appears when there is no code to show (a transport error,
+// or any row written before poll_log.status_code existed), where the word is
+// the only signal left.
 const LOG_STATUS = {
   ok: "OK",
+  unchanged: "OK",
+  partial: "OK",
   error: "ERR",
-  not_modified: "304",
-  partial: "PART",
 };
+
+function logMark(status, statusCode) {
+  return statusCode && (status === "error" || status === "partial")
+    ? String(statusCode)
+    : LOG_STATUS[status] ?? status;
+}
+
+// ok is spelled out -- "ok" is already the shortest word for it, so a glyph
+// would not save space, only meaning. unchanged/partial share a checkmark
+// (both mean the poll succeeded) and error gets the ballot X.
+const EVENT_MARK = { ok: "ok", unchanged: "\u2713", partial: "\u2713", error: "\u2717" };
+const EVENT_LABEL = { ok: "OK", unchanged: "Unchanged", partial: "Partial", error: "Error" };
+
+function eventMark(status, statusCode) {
+  return el(
+    "span",
+    { class: "ops-event-status" },
+    el(
+      "span",
+      {
+        class: "ops-event-mark",
+        "data-status": status,
+        title: EVENT_LABEL[status] ?? status,
+      },
+      EVENT_MARK[status] ?? "\u2013"
+    ),
+    statusCode ? el("span", { class: "ops-event-code" }, String(statusCode)) : null
+  );
+}
 
 function renderLiveLog() {
   logDotEl.dataset.state = state.logAvailable ? "live" : "off";
@@ -349,12 +392,12 @@ function renderLiveLog() {
         el("time", { title: exactTime(event.polled_at) },
           (event.polled_at ?? "").slice(11, 19)),
         el("span", { class: "ops-log-st", "data-status": event.status },
-          LOG_STATUS[event.status] ?? event.status),
+          logMark(event.status, event.status_code)),
         el("span", { class: "ops-log-feed", title: `${event.source}:${event.key}` }, event.key),
         el("span", { class: "ops-log-note" },
           event.new_postings
             ? `${formatCount(event.new_postings)} new`
-            : event.status === "not_modified" ? "not modified" : "no new")
+            : event.status === "unchanged" ? "unchanged" : "no new")
       )
     )
   );
@@ -402,7 +445,7 @@ function dash(className = null) {
 }
 
 function rowActionCell(feed) {
-  const blocked = pollNowBlocked(feed);
+  const blocked = fetchBlocked(feed);
   const canEdit = state.connected && feed.policy?.in_postgres;
   return el(
     "td",
@@ -413,10 +456,10 @@ function rowActionCell(feed) {
         class: "ops-row-btn",
         type: "button",
         disabled: blocked ? "" : null,
-        title: blocked ?? "Put this feed first in the production queue",
-        onclick: (event) => pollNow(feed, event.currentTarget),
+        title: blocked ?? "Fetch this feed right now",
+        onclick: (event) => fetchFeedNow(feed, event.currentTarget),
       },
-      "poll"
+      "fetch"
     ),
     el(
       "button",
@@ -424,9 +467,9 @@ function rowActionCell(feed) {
         class: "ops-row-btn",
         type: "button",
         disabled: canEdit ? null : "",
-        onclick: (event) => setPaused(feed, !feed.policy?.paused_at, event.currentTarget),
+        onclick: (event) => setPaused(feed, !isHeld(feed), event.currentTarget),
       },
-      feed.policy?.paused_at ? "resume" : "pause"
+      isHeld(feed) ? "resume" : "pause"
     )
   );
 }
@@ -434,7 +477,7 @@ function rowActionCell(feed) {
 function feedRow(feed, nowMs) {
   const status = feed.sched.status;
   const name = feed.company_name || feed.key;
-  const due = dueInfo(feed.policy?.due_at, feed.policy?.paused_at, nowMs);
+  const due = dueInfo(feed.policy?.due_at, isHeld(feed), nowMs);
   const jobs = jobsToday(feed);
   const errs = feed.telemetry?.error_count_7d ?? 0;
   return el(
@@ -503,13 +546,13 @@ function intervalsCell(intervals) {
   return el("td", { class: "num secondary" }, text);
 }
 
-/* Group-level actions mirror the row pair. "poll all" reuses the bulk fetch
+/* Group-level actions mirror the row pair. "fetch all" reuses the bulk fetch
    dialog scoped to this provider; pause/resume fans out the per-feed policy
    write and reports one outcome. Both are gated on PostgreSQL like the rows. */
 function groupActionCell(group) {
   const editable = group.rows.filter((feed) => feed.policy?.in_postgres);
-  const allPaused = editable.length > 0 && editable.every((feed) => feed.policy?.paused_at);
-  const pollable = group.rows.filter((feed) => !feed.policy?.paused_at);
+  const allPaused = editable.length > 0 && editable.every(isHeld);
+  const pollable = group.rows.filter((feed) => !isHeld(feed));
   return el(
     "td",
     { class: "ops-row-actions" },
@@ -524,7 +567,7 @@ function groupActionCell(group) {
           : "PostgreSQL is unavailable.",
         onclick: () => openBulkDialog({ feeds: group.rows, label: group.source }),
       },
-      "poll all"
+      "fetch all"
     ),
     el(
       "button",
@@ -696,12 +739,14 @@ function tickCountdowns() {
   }
 }
 
+// telemetry.feed_daily_counts buckets by UTC day, so these labels format in UTC
+// too -- a local-zone label would name the wrong day for viewers west of UTC.
 function dayLabels(count) {
   const labels = [];
   for (let offset = count - 1; offset >= 0; offset -= 1) {
     const date = new Date();
     date.setUTCDate(date.getUTCDate() - offset);
-    labels.push(date.toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    labels.push(date.toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric" }));
   }
   return labels;
 }
@@ -832,7 +877,7 @@ function intervalEditor(feed) {
         "Apply interval"
       )
     ),
-    el("p", { class: "ops-help" }, "Changes future cadence only. Use Poll now when this feed should run immediately.")
+    el("p", { class: "ops-help" }, "Changes future cadence only. Use Fetch when this feed should run immediately.")
   );
 }
 
@@ -845,36 +890,25 @@ function detailStat(label, value, title = null) {
   );
 }
 
-function pollNowBlocked(feed) {
-  if (!state.connected) return "PostgreSQL is unavailable.";
-  if (!feed.policy?.in_postgres) return "Import this feed before polling it.";
-  if (feed.policy?.enabled === false) return "Enable this feed on the Feeds page first.";
-  if (feed.policy?.paused_at) return "Resume this feed before polling it now.";
-  if (feed.policy?.hold_until && new Date(feed.policy.hold_until) > new Date()) {
-    return "A poll of this feed is already running.";
-  }
-  if (!state.overview?.control?.running) return "Resume the scheduler before polling now.";
-  if (!state.overview?.runner?.alive) return "No scheduler runner is listening.";
-  return null;
-}
-
-/* Sync fetch bypasses the queue and the runner, so it skips the
-   scheduler-running/runner-alive checks pollNowBlocked applies. */
+/* Fetch bypasses the queue and the runner, so there are no
+   scheduler-running/runner-alive conditions to check -- which is exactly why it
+   replaced Poll now rather than sitting beside it. */
 function fetchBlocked(feed) {
   if (!state.connected) return "PostgreSQL is unavailable.";
   if (!feed.policy?.in_postgres) return "Import this feed before fetching it.";
-  if (feed.policy?.enabled === false) return "Enable this feed on the Feeds page first.";
-  if (feed.policy?.paused_at) return "Resume this feed before fetching it now.";
+  if (isHeld(feed)) return "Resume this feed before fetching it now.";
   if (feed.policy?.hold_until && new Date(feed.policy.hold_until) > new Date()) {
     return "A poll of this feed is already running.";
   }
   return null;
 }
 
-/* Drop and mute both remove the feed; mute additionally mutes the discovery
-   token so the heartbeat cannot promote it back. Panel-only on purpose: they
-   are irreversible, so they stay behind an opened feed rather than sitting in
-   every row of the board. */
+/* Mute and Drop both delete the feed row; the only difference is whether the
+   discovery token is muted so the heartbeat cannot promote it back. They open
+   the same dialog, preset to their own answer, so the choice is still visible
+   -- and reversible -- at the moment of deletion rather than only in the label
+   of the button already clicked. Panel-only on purpose: irreversible, so it
+   stays behind an opened feed rather than sitting in every row of the board. */
 function removeBlocked(feed) {
   if (!state.connected) return "PostgreSQL is unavailable.";
   if (!feed.policy?.in_postgres || !feed.policy?.feed_id) {
@@ -883,55 +917,93 @@ function removeBlocked(feed) {
   return null;
 }
 
-function muteBlocked(feed) {
-  if (feed.category !== "ATS") return "Mute is ATS-only.";
-  return removeBlocked(feed);
+/* Muting writes token.muted, and only ATS feeds have a discovery token. A
+   Direct or Board feed can be dropped, just never kept from coming back. */
+function canMute(feed) {
+  return feed.category === "ATS" && !removeBlocked(feed);
 }
 
-async function removeFeed(feed, button, { verb, past, gerund, confirmation, run }) {
+function muteBlocked(feed) {
+  return removeBlocked(feed) ?? (canMute(feed) ? null : "No discovery token to mute.");
+}
+
+async function runRemoval(feed, { rediscover }) {
   const label = feed.company_name || feed.key;
-  if (!window.confirm(confirmation)) return;
-  const original = button.textContent;
-  button.disabled = true;
-  button.textContent = `${gerund}…`;
   try {
-    await run(feed);
+    // Muting is the atomic token-side mutation: it clears the feed row *and*
+    // sets token.muted in one statement, so there is no drop-then-mute race.
+    await (rediscover ? dropFeed(feed) : muteFeed(feed));
     if (state.selectedRef === feed.feed_ref) closePanel();
     await Promise.all([loadOverview(), loadFeeds()]);
-    showToast(`${label} ${past}.`);
+    showToast(
+      rediscover
+        ? `${label} dropped; it can be rediscovered.`
+        : `${label} muted and dropped.`
+    );
   } catch (error) {
-    reportFeedMessage(feed, `Could not ${verb} this feed: ${error.message}`, "error");
-    button.disabled = false;
-    button.textContent = original;
+    reportFeedMessage(feed, `Could not remove this feed: ${error.message}`, "error");
   }
 }
 
-function dropSelected(feed, button) {
+/* Rediscovery on is what Drop means: the heartbeat re-probes the token once it
+   reads dead and promotes the feed back, so a dropped feed can return hours
+   later. Mute is the one that stays gone. Pause covers the "just stop it for
+   now" case, and is the only reversible member of the three. */
+function openRemoveDialog(feed, { rediscover = false } = {}) {
   const label = feed.company_name || feed.key;
-  return removeFeed(feed, button, {
-    verb: "drop",
-    past: "dropped",
-    gerund: "Dropping",
-    confirmation:
-      `Drop ${label} (${feed.source}/${feed.key})? ` +
-      "This removes its feed and poll history, but leaves the token unmuted " +
-      "and eligible for future promotion.",
-    run: dropFeed,
-  });
-}
+  const mutable = canMute(feed);
+  const checkbox = el("input", { type: "checkbox", id: "remove-rediscover" });
+  checkbox.checked = rediscover || !mutable;
+  checkbox.disabled = !mutable;
 
-function muteSelected(feed, button) {
-  const label = feed.company_name || feed.key;
-  return removeFeed(feed, button, {
-    verb: "mute",
-    past: "muted",
-    gerund: "Muting",
-    confirmation:
-      `Mute ${label} (${feed.source}/${feed.key})? ` +
-      "This removes its feed and prevents automatic promotion from adding " +
-      "it back. Existing job postings are kept.",
-    run: muteFeed,
+  // The checkbox is the same switch as the two buttons that open this dialog,
+  // so heading and confirm both track it rather than the button clicked.
+  const verb = () => (checkbox.checked ? "Drop" : "Mute");
+  const heading = el("h2", { id: "remove-title" }, `${verb()} ${label}?`);
+  const confirmBtn = el("button", { class: "btn danger", type: "button" }, verb());
+  checkbox.addEventListener("change", () => {
+    heading.textContent = `${verb()} ${label}?`;
+    confirmBtn.textContent = verb();
   });
+  confirmBtn.addEventListener("click", async () => {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Working…";
+    removeDialogEl.close();
+    await runRemoval(feed, { rediscover: checkbox.checked });
+  });
+
+  removeDialogEl.replaceChildren(
+    el(
+      "header",
+      { class: "ops-dialog-header" },
+      heading
+    ),
+    el(
+      "div",
+      { class: "ops-dialog-body" },
+      el("p", {}, `${feed.source}:${feed.key} leaves the fleet. Its poll history goes with it; job postings already harvested are kept.`),
+      el(
+        "label",
+        { class: "ops-dialog-check" },
+        checkbox,
+        el(
+          "span",
+          {},
+          "Let this board be rediscovered automatically",
+          mutable
+            ? null
+            : el("span", { class: "muted" }, " — no discovery token to mute")
+        )
+      )
+    ),
+    el(
+      "div",
+      { class: "ops-dialog-footer" },
+      el("button", { class: "btn", type: "button", onclick: () => removeDialogEl.close() }, "Cancel"),
+      confirmBtn
+    )
+  );
+  removeDialogEl.showModal();
 }
 
 /* Feed-level outcome messaging: inline in the panel when the feed is the one
@@ -948,8 +1020,8 @@ function reportFeedMessage(feed, message, tone = "ok") {
 function renderDetailPanel(feed, events) {
   if (!feed || feed.feed_ref !== state.selectedRef) return;
   const status = feed.sched.status;
-  const blocked = pollNowBlocked(feed);
-  const noDrop = removeBlocked(feed);
+  const blocked = fetchBlocked(feed);
+  const noRemove = removeBlocked(feed);
   const noMute = muteBlocked(feed);
   const spark = feed.spark ?? [];
   const labels = dayLabels(spark.length);
@@ -979,18 +1051,7 @@ function renderDetailPanel(feed, events) {
           class: "btn primary",
           type: "button",
           disabled: blocked ? "" : null,
-          title: blocked ?? "Put this feed first in the production queue",
-          onclick: (event) => pollNow(feed, event.currentTarget),
-        },
-        "Poll now"
-      ),
-      el(
-        "button",
-        {
-          class: "btn",
-          type: "button",
-          disabled: fetchBlocked(feed) ? "" : null,
-          title: fetchBlocked(feed) ?? "Fetch this feed right now, bypassing the queue",
+          title: blocked ?? "Fetch this feed right now",
           onclick: (event) => fetchFeedNow(feed, event.currentTarget),
         },
         "Fetch"
@@ -1001,20 +1062,9 @@ function renderDetailPanel(feed, events) {
           class: "btn",
           type: "button",
           disabled: state.connected && feed.policy?.in_postgres ? null : "",
-          onclick: (event) => setPaused(feed, !feed.policy?.paused_at, event.currentTarget),
+          onclick: (event) => setPaused(feed, !isHeld(feed), event.currentTarget),
         },
-        feed.policy?.paused_at ? "Resume" : "Pause"
-      ),
-      el(
-        "button",
-        {
-          class: "btn ops-panel-danger",
-          type: "button",
-          disabled: noDrop ? "" : null,
-          title: noDrop ?? "Drop this feed without muting its token",
-          onclick: (event) => dropSelected(feed, event.currentTarget),
-        },
-        "Drop"
+        isHeld(feed) ? "Resume" : "Pause"
       ),
       el(
         "button",
@@ -1022,15 +1072,28 @@ function renderDetailPanel(feed, events) {
           class: "btn ops-panel-danger",
           type: "button",
           disabled: noMute ? "" : null,
-          title: noMute ?? "Mute token and remove feed",
-          onclick: (event) => muteSelected(feed, event.currentTarget),
+          title: noMute ?? "Drop this feed and mute its token so it cannot come back",
+          onclick: () => openRemoveDialog(feed, { rediscover: false }),
         },
         "Mute"
+      ),
+      el(
+        "button",
+        {
+          class: "btn ops-panel-danger",
+          type: "button",
+          disabled: noRemove ? "" : null,
+          title: noRemove ?? "Drop this feed from the fleet; it can be rediscovered",
+          onclick: () => openRemoveDialog(feed, { rediscover: true }),
+        },
+        "Drop"
       )
     ),
-    state.panelMessage || blocked
-      ? el("div", { class: "ops-inline-message", role: "status" }, state.panelMessage ?? blocked)
-      : null,
+    // replaceChildren() stringifies whatever it is handed, so a bare null child
+    // renders the text "null" -- spread an empty list instead of passing one.
+    ...(state.panelMessage || blocked
+      ? [el("div", { class: "ops-inline-message", role: "status" }, state.panelMessage ?? blocked)]
+      : []),
     intervalEditor(feed),
     el(
       "section",
@@ -1042,7 +1105,7 @@ function renderDetailPanel(feed, events) {
         detailStat("Last poll", relativeTime(feed.policy?.last_poll_at), exactTime(feed.policy?.last_poll_at)),
         detailStat(
           "Next due",
-          feed.policy?.paused_at ? "Paused" : relativeTime(feed.policy?.due_at),
+          isHeld(feed) ? "Paused" : relativeTime(feed.policy?.due_at),
           exactTime(feed.policy?.due_at)
         ),
         detailStat("Last result", lastResult),
@@ -1082,7 +1145,7 @@ function renderDetailPanel(feed, events) {
                 "li",
                 {},
                 el("time", { title: exactTime(event.polled_at) }, relativeTime(event.polled_at)),
-                statusChip(event.status),
+                eventMark(event.status, event.status_code),
                 el("span", { class: "ops-event-note" }, event.new_postings ? `${formatCount(event.new_postings)} new` : "No new postings")
               )
             )
@@ -1190,7 +1253,7 @@ async function setPaused(feed, paused, button) {
   const original = button.textContent;
   button.disabled = true;
   try {
-    await api(`/api/feeds/${feed.feed_ref}/policy`, { body: { paused } });
+    await api(`/api/feeds/${feed.feed_ref}/policy`, { body: { enabled: !paused } });
     showToast(`${feed.company_name || feed.key} ${paused ? "paused" : "resumed"}.`);
     await Promise.all([loadOverview(), loadFeeds()]);
     if (state.selectedRef === feed.feed_ref) await loadDetail(feed.feed_ref, true);
@@ -1201,22 +1264,21 @@ async function setPaused(feed, paused, button) {
   }
 }
 
-async function pollNow(feed, button) {
+/* Production work always enters the scheduler queue. The request returns once
+   the queue position is durable; progress then appears in the fetch log. */
+async function fetchFeedNow(feed, button) {
+  const label = feed.company_name || feed.key;
   const original = button.textContent;
   button.disabled = true;
+  button.textContent = "queueing…";
   try {
-    await api(`/api/scheduler/feeds/${feed.feed_ref}/poll-now`, { body: {} });
-    if (state.selectedRef === feed.feed_ref) {
-      state.panelMessage = "Polling now. The result will appear here when the production fetch completes.";
-      renderDetailPanel(feed, state.detailEvents);
-    }
-    showToast(`${feed.company_name || feed.key} moved to the front of the queue.`);
-    setTimeout(async () => {
-      await Promise.allSettled([loadOverview(), loadFeeds()]);
-      if (state.selectedRef === feed.feed_ref) await loadDetail(feed.feed_ref, false);
-    }, POLL_NOW_SETTLE_MS);
+    await api(`/api/scheduler/feeds/${feed.feed_ref}/fetch`, { body: {} });
+    showToast(`${label} queued for the unified pipeline.`, "ok");
+    await Promise.all([loadOverview(), loadFeeds()]);
+    if (state.selectedRef === feed.feed_ref) await loadDetail(feed.feed_ref, true);
   } catch (error) {
-    reportFeedMessage(feed, `Could not poll this feed: ${error.message}`, "error");
+    reportFeedMessage(feed, `Could not fetch this feed: ${error.message}`, "error");
+  } finally {
     button.disabled = false;
     button.textContent = original;
   }
@@ -1224,7 +1286,7 @@ async function pollNow(feed, button) {
 
 async function setPausedMany(feeds, paused, label, button) {
   const verb = paused ? "Pause" : "Resume";
-  const targets = feeds.filter((feed) => Boolean(feed.policy?.paused_at) !== paused);
+  const targets = feeds.filter((feed) => isHeld(feed) !== paused);
   if (!targets.length) return;
   if (!window.confirm(`${verb} all ${formatCount(targets.length)} ${label} feeds?`)) return;
   const original = button.textContent;
@@ -1236,7 +1298,7 @@ async function setPausedMany(feeds, paused, label, button) {
     while (cursor < targets.length) {
       const feed = targets[cursor++];
       try {
-        await api(`/api/feeds/${feed.feed_ref}/policy`, { body: { paused } });
+        await api(`/api/feeds/${feed.feed_ref}/policy`, { body: { enabled: !paused } });
       } catch {
         failed += 1;
       }
@@ -1256,12 +1318,12 @@ async function setPausedMany(feeds, paused, label, button) {
   button.textContent = original;
 }
 
-/* Bulk fetch targets: the provider group behind "poll all", otherwise every
+/* Bulk fetch targets: the provider group behind "fetch all", otherwise every
    feed matching the current filters — collapsed or not. Collapsing is a view
    convenience and never changes what a bulk action touches. */
 function fetchCandidates() {
   const pool = state.bulkScope?.feeds ?? visibleFeeds();
-  return pool.filter((feed) => !feed.policy?.paused_at);
+  return pool.filter((feed) => !isHeld(feed));
 }
 
 function bulkScopeLabel() {
@@ -1292,16 +1354,16 @@ function renderBulkDialog() {
 
   const done = progress.phase === "done";
   const title = done
-    ? progress.cancelled ? "Fetch stopped" : "Fetch complete"
-    : progress.cancelled ? "Stopping fetches…" : `Fetching ${bulkScopeLabel()}…`;
-  const summary = `${formatCount(progress.completed)} of ${formatCount(progress.total)} completed`;
+    ? progress.cancelled ? "Queueing stopped" : "Feeds queued"
+    : progress.cancelled ? "Stopping…" : `Queueing ${bulkScopeLabel()}…`;
+  const summary = `${formatCount(progress.completed)} of ${formatCount(progress.total)} queued`;
   bulkDialogEl.replaceChildren(
     el("header", { class: "ops-dialog-header" }, el("h2", { id: "bulk-title" }, title)),
     el(
       "div",
       { class: "ops-dialog-body" },
       el("div", { class: "ops-bulk-count" }, `${progress.completed}/${progress.total}`),
-      el("p", {}, done ? summary : "Production writes are in progress. Stopping prevents new fetches; in-flight requests still finish."),
+      el("p", {}, done ? summary : "Queue positions are being written. The unified scheduler owns all production work."),
       el("progress", { max: String(progress.total), value: String(progress.completed) }),
       el(
         "div",
@@ -1356,8 +1418,7 @@ async function runBulkFetch() {
     while (cursor < feeds.length && !progress.cancelled) {
       const feed = feeds[cursor++];
       try {
-        const result = await api(`/api/scheduler/feeds/${feed.feed_ref}/fetch`, { body: {} });
-        if (result?.status === "error") progress.failed += 1;
+        await api(`/api/scheduler/feeds/${feed.feed_ref}/fetch`, { body: {} });
       } catch {
         progress.failed += 1;
       }
@@ -1372,8 +1433,8 @@ async function runBulkFetch() {
   if (state.selectedRef) await loadDetail(state.selectedRef, false);
   renderBulkDialog();
   showToast(progress.cancelled
-    ? `Fetch stopped after ${formatCount(progress.completed)} feeds.`
-    : `Fetched ${formatCount(progress.completed)} feeds${progress.failed ? `; ${progress.failed} failed` : ""}.`,
+    ? `Queueing stopped after ${formatCount(progress.completed)} feeds.`
+    : `Queued ${formatCount(progress.completed)} feeds${progress.failed ? `; ${progress.failed} failed` : ""}.`,
   progress.failed ? "error" : "ok");
 }
 
