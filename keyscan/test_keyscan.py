@@ -16,8 +16,9 @@ import keyscan.core as keyscan_core
 import keyscan.verify as keyscan_verify
 from keyscan.__main__ import _progress_line
 from keyscan.core import Keyscan, KeyscanError, _Cancelled, _select_crawls, selftest
+from keyscan.name_boards import name_from_title
 from keyscan.probe import default_request, probe_rule
-from keyscan.rules import BY_SOURCE, SOURCE_GROUPS, expand_sources, extract
+from keyscan.rules import BY_SOURCE, SOURCE_GROUPS, expand_sources, extract, surt_range
 from keyscan.verify import synthetic_token, verify_source, verify_sources
 
 
@@ -62,19 +63,29 @@ def test_cli_progress_renders_milestones_without_network_noise():
     }) is None
 
 
+def _flat(entry: dict) -> dict:
+    """A log entry with its `detail` payload lifted, for assertions."""
+    return {**entry, **(entry.get("detail") or {})}
+
+
 def test_durable_log_event_is_forwarded_to_progress_observer(tmp_path: Path):
     events: list[dict] = []
     scan = Keyscan(tmp_path / "work", progress=events.append)
-    run_id = scan._new_run(["commoncrawl"], 1, ["greenhouse"])
+    scan._new_run(["commoncrawl"], 1, ["greenhouse"])
     scan._log(
-        "info", "commoncrawl", "scan checkpoint", event="scan_checkpoint",
+        "info", "crawl", "scan checkpoint", event="scan_checkpoint",
         crawl="CC-MAIN-TEST", files=104, total_files=600,
         candidates=12, vendors=1, took_ms=1000,
     )
     scan._finish("interrupted")
 
-    assert any(entry.get("event") == "scan_checkpoint" for entry in events)
-    assert all(entry["run_id"] == run_id for entry in events)
+    assert any(_flat(entry).get("event") == "scan_checkpoint" for entry in events)
+    # Four fields carry every line; the rest is nested rather than merged in
+    # beside them, so a detail can never shadow one of the four.
+    assert all({"at", "level", "function", "message"} <= entry.keys() for entry in events)
+    checkpoint = next(entry for entry in events if entry["message"] == "scan checkpoint")
+    assert checkpoint["function"] == "crawl"
+    assert checkpoint["detail"]["files"] == 104
 
 
 def test_commoncrawl_date_range_selects_overlapping_crawl_weeks():
@@ -100,6 +111,39 @@ def test_commoncrawl_date_range_uses_exact_collection_coverage():
     assert _select_crawls(collections, {
         "date_from": "2026-07-10", "date_to": "2026-07-10",
     }) == ["CC-MAIN-2026-30"]
+
+
+def test_select_crawls_prefers_explicit_crawl_ids_over_a_date_range():
+    collections = [
+        {"id": "CC-MAIN-2026-30"},
+        {"id": "CC-MAIN-2026-25"},
+        {"id": "CC-MAIN-2026-21"},
+    ]
+    # An id no longer in the live collection list is dropped rather than
+    # scanned blind -- the picker's list can age relative to a launch.
+    assert _select_crawls(collections, {
+        "crawl_ids": ["CC-MAIN-2026-21", "CC-MAIN-2026-99"],
+        "date_from": "2026-06-21", "date_to": "2026-07-20",
+    }) == ["CC-MAIN-2026-21"]
+
+
+def test_new_run_accepts_explicit_crawl_ids(tmp_path: Path):
+    scan = Keyscan(tmp_path / "work")
+    with pytest.raises(KeyscanError, match="invalid crawl id"):
+        scan._new_run(["commoncrawl"], crawl_ids=["not-a-crawl"])
+    with pytest.raises(KeyscanError, match="not more than one"):
+        scan._new_run(
+            ["commoncrawl"], crawl_ids=["CC-MAIN-2026-30"],
+            date_from="2026-01-01", date_to="2026-02-01",
+        )
+
+    run_id = scan._new_run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-30", "CC-MAIN-2026-25"])
+    assert scan.status(run_id)["config"] == {
+        "archives": False,
+        "crawl_ids": ["CC-MAIN-2026-30", "CC-MAIN-2026-25"],
+        "sources": [],
+    }
+    scan._finish("cancelled")
 
 
 def test_new_commoncrawl_run_requires_a_valid_complete_date_range(tmp_path: Path):
@@ -144,13 +188,19 @@ async def test_board_run_validates_and_logs(tmp_path: Path, monkeypatch):
     run_id = await scan.run(["board"])
 
     assert scan.status(run_id)["status"] == "completed"
-    live = {(row["ats"], row["token"]) for row in scan.list_candidates(status="live")}
+    live = {(row["ats"], row["key"]) for row in scan.list_candidates(status="live")}
     assert ("greenhouse", "acme") in live
-    entries, _ = scan.tail_log(run_id)
-    assert any(entry["phase"] == "validate" for entry in entries)
-    request = next(entry for entry in entries if entry.get("event") == "request_timing")
-    assert request["outcome"] == "ok"
-    assert {"elapsed_ms", "queue_ms", "throttle_delay_ms", "retry_delay_ms"} <= request.keys()
+    entries = [_flat(entry) for entry in scan.tail_log(run_id)[0]]
+    assert any(entry["function"] == "validate" for entry in entries)
+    # A request that succeeded is counted, not narrated: its only record is the
+    # summary. That is the whole point -- 23,098 success lines across this
+    # machine's runs said nothing a handful of summaries would not. A failure
+    # still keeps its own line, because each one is separately actionable.
+    summary = next(entry for entry in entries if entry.get("event") == "network_summary")
+    failures = [entry for entry in entries if entry["message"] == "request failed"]
+    assert summary["requests"] > len(failures)
+    assert summary["failed"] == len(failures)
+    assert summary["median_ms"] is not None
     assert any(entry.get("event") == "phase_timing" for entry in entries)
 
 
@@ -179,7 +229,7 @@ async def test_probe_enriches_unbound_candidate_from_metadata(tmp_path: Path):
     assert validation[2]["company_name_source"] == "metadata_json"
     with scan._connect() as con:
         details = con.execute(
-            "SELECT details FROM token WHERE ats = 'greenhouse' AND token = 'acme'"
+            "SELECT details FROM tenants WHERE ats = 'greenhouse' AND key = 'acme'"
         ).fetchone()["details"]
     assert json.loads(details)["company_name"] == "Acme Incorporated"
 
@@ -204,7 +254,7 @@ def test_workday_candidates_use_one_lowercase_list_identity(tmp_path: Path):
     assert first == second == ("workday", "nvidia/wd5/nvidiaexternalcareersite")
     rows = scan.list_candidates(source="workday")
     assert len(rows) == 1
-    assert rows[0]["token"] == "nvidia/wd5/nvidiaexternalcareersite"
+    assert rows[0]["key"] == "nvidia/wd5/nvidiaexternalcareersite"
 
 
 @pytest.mark.asyncio
@@ -228,7 +278,7 @@ async def test_source_scoping_filters_discovery_and_validation(tmp_path: Path, m
     run_id = await scan.run(["board"], sources=["lever"])
 
     assert scan.status(run_id)["config"]["sources"] == ["lever"]
-    assert [(row["ats"], row["token"]) for row in scan.list_candidates()] == [("lever", "acme")]
+    assert [(row["ats"], row["key"]) for row in scan.list_candidates()] == [("lever", "acme")]
     assert "boards-api.greenhouse.io" not in requested_hosts
 
 
@@ -271,6 +321,42 @@ def test_a_source_group_is_exactly_its_expanded_member_list(tmp_path: Path):
     assert sorted(group_rules) == sorted(members)
 
 
+def test_merged_query_narrows_each_branch_to_its_ranges_files():
+    """With harvested footers, a branch lists only files its range can hit.
+
+    Files outside every range would be pruned by DuckDB's zone maps anyway;
+    narrowing here keeps them out of the SQL entirely, and a batch no branch
+    can use produces no query at all (None), not an empty UNION.
+    """
+    greenhouse, ashby = BY_SOURCE["greenhouse"], BY_SOURCE["ashby"]
+    gh_range = surt_range(greenhouse.domains[0])
+    ashby_range = surt_range(ashby.domains[0])
+    urls = ["a.parquet", "b.parquet"]
+
+    narrowed = keyscan_core._merged_query(
+        [greenhouse, ashby], urls,
+        {gh_range: {"a.parquet", "b.parquet"}, ashby_range: {"b.parquet"}},
+    )
+    gh_branch, ashby_branch = [
+        part for part in narrowed.split("UNION ALL") if "SELECT" in part
+    ][:2]
+    assert "'a.parquet'" in gh_branch and "'b.parquet'" in gh_branch
+    assert "'a.parquet'" not in ashby_branch and "'b.parquet'" in ashby_branch
+
+    # No mapping entry for a range means no file can hold it: branch dropped.
+    only_gh = keyscan_core._merged_query(
+        [greenhouse, ashby], urls, {gh_range: {"a.parquet"}},
+    )
+    assert "greenhouse" in only_gh and "ashby" not in only_gh
+
+    # And a batch nothing overlaps is answered without DuckDB.
+    assert keyscan_core._merged_query([greenhouse, ashby], urls, {}) is None
+
+    # No mapping (unharvested crawl) keeps the old every-branch-every-file shape.
+    full = keyscan_core._merged_query([greenhouse, ashby], urls)
+    assert full.count("'a.parquet'") == full.count("'b.parquet'") == 2
+
+
 BOARD_LISTINGS = json.dumps([
     {"url": "https://job-boards.greenhouse.io/acme", "company_name": "Acme", "title": "SWE Intern", "active": True},
     {"url": "https://jobs.ashbyhq.com/OpenAI/123", "company_name": "OpenAI", "title": "ML Intern", "active": True},
@@ -299,10 +385,12 @@ async def test_board_run_extracts_tokens_from_listings(tmp_path: Path, monkeypat
     run_id = await scan.run(["board"])
 
     assert scan.status(run_id)["status"] == "completed"
-    rows = {(row["ats"], row["token"]): row for row in scan.list_candidates()}
+    rows = {(row["ats"], row["key"]): row for row in scan.list_candidates()}
     assert set(rows) == {
         ("greenhouse", "acme"),
-        ("ashby", "OpenAI"),
+        # The listing spells it `OpenAI`; ashby ignores token casing, so it is
+        # stored folded and cannot become a second row for the same board.
+        ("ashby", "openai"),
         ("workday", "nvidia/wd5/nvidiaexternalcareersite"),
     }
     assert rows[("greenhouse", "acme")]["details"]["company_name"] == "Acme"
@@ -311,7 +399,7 @@ async def test_board_run_extracts_tokens_from_listings(tmp_path: Path, monkeypat
     # overwrite it.
     feed_url = "https://raw.githubusercontent.com/acme/board/dev/listings.json"
     with scan._connect() as con:
-        methods = {row["method"] for row in con.execute("SELECT DISTINCT method FROM token")}
+        methods = {row["method"] for row in con.execute("SELECT DISTINCT method FROM tenants")}
     assert methods == {f"board:{feed_url}"}
 
 
@@ -411,7 +499,7 @@ async def test_board_run_resumes_from_its_checkpoint(tmp_path: Path):
     assert scan.status(run_id)["checkpoint"]["board_index"] == 1
     await scan.resume(run_id)
     assert scan.status(run_id)["status"] == "completed"
-    assert scan.list_candidates(status="live")[0]["token"] == "acme"
+    assert scan.list_candidates(status="live")[0]["key"] == "acme"
 
 
 @pytest.mark.asyncio
@@ -427,6 +515,63 @@ async def test_robots_reports_shared_blocks_and_per_tenant_unknown(tmp_path: Pat
         {"source": "greenhouse", "host": "job-boards.greenhouse.io", "status": "blocked"},
         {"source": "teamtailor", "host": "(per-tenant host)", "status": "unknown"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_crawls_reports_real_windows_newest_first(tmp_path: Path):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == keyscan_core.COLLINFO
+        return httpx.Response(200, json=[
+            {"id": "CC-MAIN-2026-21", "name": "May 2026 Index"},  # no from/to: falls back to the ISO week
+            {
+                "id": "CC-MAIN-2026-30", "name": "July 2026 Index",
+                "from": "2026-07-10T07:05:34", "to": "2026-07-23T01:13:28",
+            },
+            {"id": "not-a-crawl", "name": "bogus"},  # unparseable either way: dropped
+        ])
+
+    scan = Keyscan(tmp_path / "work", transport=transport(handler))
+    result = await scan.list_crawls()
+    assert result["source"] == "live"
+    assert result["error"] is None
+    assert result["crawls"] == [
+        {"id": "CC-MAIN-2026-30", "name": "July 2026 Index", "from": "2026-07-10", "to": "2026-07-23"},
+        {"id": "CC-MAIN-2026-21", "name": "May 2026 Index", "from": "2026-05-18", "to": "2026-05-24"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_crawls_falls_back_to_the_cache_when_unreachable(tmp_path: Path):
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(200, json=[{
+                "id": "CC-MAIN-2026-30", "name": "July 2026 Index",
+                "from": "2026-07-10T07:05:34", "to": "2026-07-23T01:13:28",
+            }])
+        raise httpx.ConnectError("network is down", request=request)
+
+    scan = Keyscan(tmp_path / "work", transport=transport(handler))
+    live = await scan.list_crawls()
+    assert live["source"] == "live"
+
+    stale = await scan.list_crawls()
+    assert stale["source"] == "cache"
+    assert stale["error"] and "network is down" in stale["error"]
+    assert stale["fetched_at"] == live["fetched_at"]
+    assert stale["crawls"] == live["crawls"]
+
+
+@pytest.mark.asyncio
+async def test_list_crawls_raises_when_unreachable_and_never_cached(tmp_path: Path):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network is down", request=request)
+
+    scan = Keyscan(tmp_path / "work", transport=transport(handler))
+    with pytest.raises(KeyscanError, match="network is down"):
+        await scan.list_crawls()
 
 
 @pytest.mark.asyncio
@@ -525,7 +670,7 @@ async def test_comeet_promotes_public_locator_to_adapter_composite(tmp_path: Pat
     scan._finish("cancelled")
 
     candidate = scan.list_candidates(source="comeet")[0]
-    assert (candidate["token"], candidate["status"], candidate["details"]["job_count"]) == (f"98.008/{api_token}", "live", 2)
+    assert (candidate["key"], candidate["status"], candidate["details"]["job_count"]) == (f"98.008/{api_token}", "live", 2)
     assert candidate["canonical_url"] == "https://www.comeet.com/jobs/acme/98.008"
 
 
@@ -557,7 +702,7 @@ async def test_token_merges_sightings_across_methods(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_commoncrawl_checkpoint_can_resume_without_network_parquet(tmp_path: Path):
     class CrawlFixture(FixtureScan):
-        def _cc_scan_sources(self, crawl, rules, urls, loop):
+        def _cc_scan_sources(self, crawl, rules, urls, loop, urls_for_range=None):
             return {
                 rule.source: (
                     [{"token": "acme", "url_count": 3, "urls": ["https://boards.greenhouse.io/acme"]}]
@@ -583,7 +728,7 @@ async def test_commoncrawl_checkpoint_can_resume_without_network_parquet(tmp_pat
     assert "CC-MAIN-TEST/greenhouse" in status["checkpoint"]["cc_done"]
     assert scan.list_candidates(source="greenhouse")[0]["status"] == "live"
     entries, _ = scan.tail_log(run_id)
-    timing = next(entry for entry in entries if entry.get("event") == "operation_timing")
+    timing = next(entry for entry in map(_flat, entries) if entry.get("event") == "operation_timing")
     assert timing["operation"] == "commoncrawl_merged_scan"
     assert timing["crawl"] == "CC-MAIN-TEST"
 
@@ -593,7 +738,7 @@ async def test_commoncrawl_attempts_later_snapshots_but_fails_an_incomplete_run(
     attempted: list[str] = []
 
     class PartiallyFailingScan(FixtureScan):
-        def _cc_scan_sources(self, crawl, rules, urls, loop):
+        def _cc_scan_sources(self, crawl, rules, urls, loop, urls_for_range=None):
             attempted.append(crawl)
             if crawl == "CC-MAIN-BROKEN":
                 raise duckdb.IOException("Could not resolve hostname")
@@ -704,7 +849,7 @@ async def test_candidates_are_recorded_at_checkpoints_not_only_at_the_end(tmp_pa
     `on_candidates` exists to fix that -- this proves it, by calling
     `_cc_scan_sources` exactly as `_commoncrawl` does (real event loop, real
     `call_soon_threadsafe`) and nothing else: no final re-recording loop runs
-    here, so a candidate in the token table only got there via a checkpoint.
+    here, so a candidate in the tenants table only got there via a checkpoint.
     """
     shards = [
         _synthetic_index(tmp_path / f"s{n}.parquet",
@@ -722,10 +867,10 @@ async def test_candidates_are_recorded_at_checkpoints_not_only_at_the_end(tmp_pa
 
     # The pure scan result covers all 9 -- unaffected by when recording ran.
     assert {r["token"] for r in records["greenhouse"]} == {f"co{n}" for n in range(9)}
-    # Every token is already in the token table, though `_cc_scan_sources`
+    # Every token is already in the tenants table, though `_cc_scan_sources`
     # itself never calls `_record_candidate` and no final loop ran afterward
     # -- the only path to the DB here was `on_candidates` at a checkpoint.
-    tokens = {row["token"] for row in scan.list_candidates(source="greenhouse")}
+    tokens = {row["key"] for row in scan.list_candidates(source="greenhouse")}
     assert tokens == {f"co{n}" for n in range(9)}
 
 
@@ -864,7 +1009,7 @@ def test_failed_remote_batch_reopens_connection_without_replaying_completed_batc
         "CC-MAIN-TEST", [BY_SOURCE["greenhouse"]],
         ["first.parquet", "second.parquet"],
         lambda source: tmp_path / "cache" / f"{source}.parquet",
-        target_mbps=0, batch_files=1, checkpoint_files=1,
+        target_mbps=0, batch_files=1, checkpoint_files=1, batch_backoff=(0.0,),
         on_candidates=candidates.extend, on_retry=retries.append,
     )
 
@@ -879,6 +1024,7 @@ def test_failed_remote_batch_reopens_connection_without_replaying_completed_batc
         "batch_files": 1,
         "attempt": 2,
         "max_attempts": keyscan_core.BATCH_ATTEMPTS,
+        "backoff_s": 0.0,
         "error": "IOException: Could not resolve hostname",
     }]
 
@@ -948,10 +1094,11 @@ def test_checkpoint_fires_every_n_files_with_per_window_stats(tmp_path: Path):
     # overshoots the next boundary: each batch's *entire* haul reports as one
     # checkpoint (files_done checked once per batch, not once per file), which
     # is what pushes the windows to sizes 3/3/1 -- files=[3, 6, 7] -- rather
-    # than landing cleanly on 2/4/6. In production batch_files(8) is tiny next
-    # to checkpoint_files(100), so this overshoot is a few percent, not 50%;
-    # exercising it here at an exaggerated ratio is what proves a checkpoint
-    # is never skipped outright even when a batch spans one.
+    # than landing cleanly on 2/4/6. Production now runs the two equal
+    # (CHECKPOINT_FILES = BATCH_FILES), so a batch lands exactly on a boundary
+    # and there is no overshoot at all; exercising it here at a ratio that
+    # cannot divide evenly is what proves the two knobs stay independent and
+    # that a checkpoint is never skipped outright even when a batch spans one.
     assert [c["files"] for c in checkpoints] == [3, 6, 7]
     # Each company appears under both vendors in every file, so an N-file
     # window finds N companies x 2 vendors = 2N fresh (source, token) pairs.
@@ -1043,7 +1190,7 @@ async def test_streaming_validation_leaves_nothing_for_the_final_sweep(tmp_path:
 
         async def _validate(self, run):
             with self._connect() as con:
-                before = con.execute("SELECT count(*) FROM token WHERE checked_at IS NULL").fetchone()[0]
+                before = con.execute("SELECT count(*) FROM tenants WHERE checked_at IS NULL").fetchone()[0]
             swept.append(before)
             await super()._validate(run)
 
@@ -1058,7 +1205,7 @@ async def test_streaming_validation_leaves_nothing_for_the_final_sweep(tmp_path:
     await scan.run(["board"])
 
     assert swept == [0]
-    assert scan.list_candidates(status="live")[0]["token"] == "acme"
+    assert scan.list_candidates(status="live")[0]["key"] == "acme"
 
 
 @pytest.mark.asyncio
@@ -1082,7 +1229,7 @@ async def test_probe_failure_is_logged_without_aborting_the_run(tmp_path: Path):
     entries, _ = scan.tail_log(run_id)
     assert any(entry["message"] == "candidate probe failed" for entry in entries)
     with scan._connect() as con:
-        row = con.execute("SELECT status, checked_at FROM token WHERE ats = 'greenhouse' AND token = 'acme'").fetchone()
+        row = con.execute("SELECT status, checked_at FROM tenants WHERE ats = 'greenhouse' AND key = 'acme'").fetchone()
     assert row["status"] == "unknown" and row["checked_at"] is None
 
 
@@ -1105,7 +1252,7 @@ async def test_validate_method_drains_a_backlog_without_crawling(tmp_path: Path)
         )
     scan._finish("interrupted")
     with scan._connect() as con:
-        unprobed = con.execute("SELECT count(*) FROM token WHERE checked_at IS NULL").fetchone()[0]
+        unprobed = con.execute("SELECT count(*) FROM tenants WHERE checked_at IS NULL").fetchone()[0]
     assert unprobed == 3
 
     run_id = await scan.run(["validate"])
@@ -1248,7 +1395,7 @@ async def test_icims_vanity_token_retrieves_its_json_job_listings(tmp_path: Path
         details={"company_name": "Paychex"},
     )
     candidate = scan.list_candidates(source="icims")[0]
-    assert candidate["token"] == "paychex"
+    assert candidate["key"] == "paychex"
     assert candidate["canonical_url"] == "https://careers.paychex.com/api/jobs?page=1"
     async with httpx.AsyncClient(transport=scan.transport, follow_redirects=True) as client:
         scan._client = client
@@ -1691,7 +1838,7 @@ async def test_validation_stops_and_records_the_first_refusal(tmp_path: Path, mo
     assert all(row["checked_at"] is None and row["status"] == "unknown" for row in rows)
 
     entries, _ = scan.tail_log(run_id)
-    assert any(entry.get("event") == "blocked" for entry in entries)
+    assert any(_flat(entry).get("event") == "blocked" for entry in entries)
 
 
 def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: Path):
@@ -1716,7 +1863,6 @@ def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: 
             artifact_dir TEXT NOT NULL DEFAULT '',
             pid INTEGER,
             error TEXT,
-            created_at TEXT NOT NULL DEFAULT '',
             started_at TEXT NOT NULL DEFAULT '',
             finished_at TEXT
         );
@@ -1769,19 +1915,20 @@ def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: 
 
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
-    token_columns = {row["name"] for row in con.execute("PRAGMA table_info(token)")}
+    tenant_columns = {row["name"] for row in con.execute("PRAGMA table_info(tenants)")}
     run_columns = {row["name"] for row in con.execute("PRAGMA table_info(runs)")}
-    assert "imported_at" in token_columns
+    assert "imported_at" in tenant_columns
+    assert "key" in tenant_columns and "token" not in tenant_columns
     assert "blocked_json" in run_columns
-    row = con.execute("SELECT * FROM token WHERE ats = 'greenhouse' AND token = 'acme'").fetchone()
+    row = con.execute("SELECT * FROM tenants WHERE ats = 'greenhouse' AND key = 'acme'").fetchone()
     workday_rows = con.execute(
-        "SELECT * FROM token WHERE ats IN ('workday', 'workday-list')"
+        "SELECT * FROM tenants WHERE ats IN ('workday', 'workday-list')"
     ).fetchall()
     # The retired label is the interim one now: `workday-list` was renamed back
     # to `workday` on 2026-08-26 when the gated detail leg landed.
     with pytest.raises(sqlite3.IntegrityError, match="renamed back to workday"):
         con.execute(
-            """INSERT INTO token(ats, token, canonical_url, discovered_at)
+            """INSERT INTO tenants(ats, key, canonical_url, discovered_at)
                VALUES ('workday-list', 'acme/wd1/jobs', 'https://example.test', '2026-01-01')"""
         )
     con.close()
@@ -1790,10 +1937,177 @@ def test_initialize_adds_new_columns_to_an_existing_database_in_place(tmp_path: 
     assert len(workday_rows) == 1
     migrated = workday_rows[0]
     assert migrated["ats"] == "workday"
-    assert migrated["token"] == "nvidia/wd5/nvidiaexternalcareersite"
+    assert migrated["key"] == "nvidia/wd5/nvidiaexternalcareersite"
     assert migrated["status"] == "live"
     assert migrated["checked_at"] == "2026-01-02T00:00:00+00:00"
     assert migrated["discovered_at"] == "2025-12-01T00:00:00+00:00"
     assert json.loads(migrated["urls"]) == ["old", "new"]
     assert json.loads(migrated["details"])["company_name"] == "NVIDIA"
     assert json.loads(migrated["details"])["job_count"] == 42
+
+
+def _titled(title: str) -> str:
+    return f"<html><head><title>{title}</title></head><body></body></html>"
+
+
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        # The three vendors, as each actually titles its board.
+        ("Eliza Jobs", "Eliza"),                       # ashby
+        ("Zopa", "Zopa"),                              # lever
+        ("Intertek USA", "Intertek USA"),              # oracle
+        ("daa All Open Jobs", "daa"),
+        ("BTN Career Sites", "BTN"),
+        ("STACK Infrastructure APAC Jobs", "STACK Infrastructure APAC"),
+        ("Barnes &amp; Thornburg LLP", "Barnes & Thornburg LLP"),
+        # The suffix needs a separator in front of it. Without one the
+        # alternation matches inside a word and an employer is renamed by its
+        # own name: "Snagajob" came back as "Snaga".
+        ("Snagajob", "Snagajob"),
+        ("Career Group", "Career Group"),
+        # Found by walking the live boards in slices of ten. Oracle names the
+        # *site*, and wraps the boilerplate on either side of the employer.
+        ("Careers at CBIZ", "CBIZ"),
+        ("Onity External Career Site", "Onity"),
+        ("Pittsburg State University Career Site Minimal", "Pittsburg State University"),
+        # ...but "Global" is the employer's word, not Oracle's.
+        ("TWE Global Careers", "TWE Global"),
+        ("ESM Vacancies", "ESM"),
+        # A title built inside a JavaScript string keeps its escapes.
+        (r"Macy\'s", "Macy's"),
+        # The required separator again, on a live lever board: not "Go".
+        ("Gojob", "Gojob"),
+    ],
+)
+def test_board_title_yields_the_employer(title, expected):
+    # Oracle is the free-text vendor, so it carries every furniture case.
+    assert name_from_title(title, "oracle")[0] == expected
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Jobs",
+        "Careers",
+        # Oracle's untouched default names the product, not the customer.
+        "Talent Acquisition",
+        "Not found \u2013 404 error",
+        "Just a moment...",
+        "Attention Required! | Cloudflare",
+        "",
+        # Oracle's other default, and an ashby board whose owner set no name.
+        "Candidate Experience site",
+        "Jobs",
+        # The whole title was furniture; what survives names no employer.
+        "Global Career Site",
+        "Sitio de experiencia de candidatos",
+    ],
+)
+def test_a_title_that_names_no_employer_is_refused(title):
+    assert name_from_title(title, "oracle")[0] is None
+
+
+def test_no_title_element_at_all():
+    # Workday ships the board as an empty shell and fills it in from script.
+    assert name_from_title("", "oracle") == (None, "none")
+
+
+@pytest.mark.parametrize(
+    "title, ats, expected",
+    [
+        # Ashby publishes a format; anything that is not that format is
+        # refused rather than guessed at.
+        ("Eliza Jobs", "ashby", "Eliza"),
+        ("Jobs", "ashby", None),
+        ("TowardJobs", "ashby", None),
+        # Lever prints the account name and nothing else, so stripping there
+        # can only damage a real one. Both of these are employers.
+        ("TowardJobs", "lever", "TowardJobs"),
+        ("Gojob", "lever", "Gojob"),
+        ("Zopa", "lever", "Zopa"),
+    ],
+)
+def test_each_vendor_gets_its_own_contract(title, ats, expected):
+    assert name_from_title(title, ats)[0] == expected
+
+
+@pytest.mark.parametrize(
+    "title, ats, confidence",
+    [
+        ("Eliza Jobs", "ashby", "exact"),
+        ("Zopa", "lever", "exact"),
+        ("Intertek USA", "oracle", "exact"),
+        # Furniture had to be removed to reach the name: right far more often
+        # than not, but not provable for a title nobody has seen.
+        ("Careers at CBIZ", "oracle", "stripped"),
+        ("Onity External Career Site", "oracle", "stripped"),
+        ("Jobs", "ashby", "none"),
+    ],
+)
+def test_confidence_says_whether_anything_was_guessed(title, ats, confidence):
+    assert name_from_title(title, ats)[1] == confidence
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # A title assembled in a JavaScript string keeps that string's escapes.
+        (r"Macy\'s", "Macy's"),
+        (r"Carri\u00E8re SNCF", "Carrière SNCF"),
+    ],
+)
+def test_javascript_escapes_are_undone(raw, expected):
+    assert name_from_title(raw, "oracle")[0] == expected
+
+
+# ----------------------------------------------------------------------
+# enum
+# ----------------------------------------------------------------------
+
+def test_words_to_tokens_takes_the_first_label_and_dedupes():
+    from keyscan.enumerate import words_to_tokens
+
+    tokens, dropped = words_to_tokens(["AMD.com", "www.spglobal.com", "amd", "# note", "", "bad word", "sig.com"])
+    assert tokens == ["amd", "spglobal", "sig"]
+    assert dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_enum_writes_only_live_guesses_and_treats_nxdomain_as_absent(tmp_path: Path, monkeypatch):
+    from keyscan import enumerate as enum_mod
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if host == "careers.amd.com":
+            return httpx.Response(200, json={"jobs": [{"data": {"req_id": "1"}}], "totalCount": 3})
+        if host == "careers.flaky.com":
+            return httpx.Response(503)
+        raise httpx.ConnectError("nxdomain", request=request)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        enum_mod.httpx, "AsyncClient",
+        lambda **kw: real_client(transport=transport(handler), **kw),
+    )
+    scan = Keyscan(tmp_path / "work")
+    scan.initialize()
+    scan._new_run(["board"], 6)
+    scan._record_candidate("icims", "known", "board:test", ["https://careers.known.com/careers/jobs"])
+    scan._finish("cancelled")
+
+    result = await enum_mod.enumerate_tokens(
+        str(scan.db_path), "icims", ["amd.com", "nope.com", "flaky.com", "known.com"],
+    )
+    assert result["known"] == 1
+    assert result["probed"] == 3
+    assert result["absent"] == 1
+    assert result["live"] == [{"key": "amd", "name": None, "job_count": 3}]
+    assert result["inconclusive"] == [{"key": "flaky", "reason": "http_503"}]
+    assert result["written"] == 1
+
+    rows = {row["key"]: row for row in scan.list_candidates(source="icims")}
+    assert set(rows) == {"known", "amd"}
+    assert rows["amd"]["status"] == "live"
+    assert rows["amd"]["method"] == "enum"
+    assert rows["amd"]["canonical_url"] == "https://careers.amd.com/api/jobs?page=1"

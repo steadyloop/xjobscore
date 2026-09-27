@@ -61,18 +61,39 @@ HTTP_TIMEOUT_SECONDS = 120
 HTTP_RETRIES = 3
 HTTP_RETRY_BACKOFF = 2
 HTTP_RETRY_WAIT_MS = 250
-BATCH_ATTEMPTS = 3
+BATCH_ATTEMPTS = 4
+# Common Crawl's guidance for a 503 is explicit: never retry inside a second,
+# and back off to at least ten. Reconnecting immediately -- which is what this
+# used to do -- spends every attempt inside the same throttle window, so a
+# blip that clears in a minute instead costs the whole snapshot, and then the
+# next one, since the run moves on while still being refused.
+BATCH_BACKOFF_SECONDS = (10.0, 30.0, 90.0)
+# DuckDB defaults to one thread per core, and each one opens its own
+# connection to the same host. Four keeps a scan moving without arriving as a
+# ten-way fan-out from a single IP.
+DUCKDB_THREADS = 4
 # Smaller batches pace more smoothly but pay more query overhead; eight files is
 # a few seconds of transfer, so the sleep between them stays short enough that
 # a cancel lands promptly.
 BATCH_FILES = 8
-# A crawl always ships exactly 600 in-scope files (300 warc + 300
-# crawldiagnostics; verified stable across 5 crawls spanning 2024-03..2026-07),
-# so this doesn't need to be adaptive the way BATCH_FILES's pacing does --
-# every ~100 files is close enough to "6 checkpoints per crawl" regardless of
-# vendor count. Not a multiple of BATCH_FILES on purpose: forcing one would
-# couple two independent knobs for no benefit.
-CHECKPOINT_FILES = 100
+# One checkpoint per batch: the threshold is only tested at a batch boundary,
+# so this is the finest granularity expressible, and it costs nothing -- the
+# rows are already in hand from the batch that just returned, and the post-scan
+# pass re-upserts them idempotently either way. The old value of 100 assumed
+# every scan reads all 600 in-scope files; a footer-planned scan reads far
+# fewer (66 for CC-MAIN-2026-34), never reached the threshold, and so streamed
+# no candidates at all -- the entire backlog arrived at once, vendor-ordered,
+# with every worker parked on one host's lock.
+CHECKPOINT_FILES = BATCH_FILES
+# A log line names the CLI verb that produced it. The run row keeps recording
+# the method (`commoncrawl`, `board`) -- the vocabulary its `phase` column and
+# `cc_done` markers already speak -- and this maps one to the other, so a
+# reader greps the log for the command they typed.
+FUNCTION_OF_PHASE = {"commoncrawl": "crawl", "board": "scan", "validate": "validate"}
+# How many successful requests one `network summary` line stands for. Low
+# enough that a long phase still reports as it goes, high enough that the
+# summaries never become the noise they were introduced to replace.
+NETWORK_SUMMARY_EVERY = 250
 # Public GitHub-hosted job boards.  They publish no tokens of their own; each
 # listing row carries a per-posting ATS deep link that `extract` reduces to a
 # token.  `archive` marks the maintainers' frozen history, worth one seeding
@@ -102,6 +123,11 @@ COMEET_API_TOKEN = re.compile(
 )
 
 
+def _new_network_stats() -> dict[str, Any]:
+    """The running tally one `network summary` line is built from."""
+    return {"requests": 0, "failed": 0, "ms": [], "hosts": set()}
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -116,7 +142,7 @@ _STATUS = {"live": "live", "absent": "dead", "inconclusive": "unknown"}
 
 
 def _merge(old: dict[str, Any], new: dict[str, Any] | None = None, **overrides: Any) -> dict[str, Any]:
-    """Combine ``token.details`` dicts across sightings.
+    """Combine ``tenants.details`` dicts across sightings.
 
     A fresh value wins unless it is ``None``, in which case the previously
     recorded value (if any) survives -- e.g. a probe that finds no company
@@ -131,12 +157,25 @@ def _merge(old: dict[str, Any], new: dict[str, Any] | None = None, **overrides: 
     return merged
 
 
+# Kept in step with xjobscore's `feed_identity.CASE_INSENSITIVE_SOURCES`: a
+# spelling keyscan stores as distinct becomes a duplicate row downstream. The
+# two lists move together -- folding on one side only is what mints the
+# duplicate, because keyscan would then hand `acorns` to a table holding
+# `Acorns`. See that module for the live probe behind each entry.
+CASE_INSENSITIVE_SOURCES = frozenset({
+    "workday", "greenhouse", "ashby", "smartrecruiters",
+    "oracle", "ukg", "bullhorn", "recruitcrm",
+    "workable", "dayforce", "simplify",
+})
+# `lever` and `fountain` are verified case-SENSITIVE -- see feed_identity.
+
+
 def _canonical_token(source: str, token: str) -> str:
     """Return keyscan's one stored spelling for a vendor endpoint."""
-    return token.lower() if source == "workday" else token
+    return token.lower() if source in CASE_INSENSITIVE_SOURCES else token
 
 
-_CRAWL_WEEK = re.compile(r"^CC-MAIN-(\d{4})-(\d{2})$")
+CRAWL_ID_RE = re.compile(r"^CC-MAIN-(\d{4})-(\d{2})$")
 
 
 def _iso_date(value: str, option: str) -> date:
@@ -160,36 +199,53 @@ def _date_range(date_from: str | None, date_to: str | None) -> tuple[date, date]
     return start, end
 
 
-def _select_crawls(collections: list[dict[str, Any]], config: dict[str, Any]) -> list[str]:
-    """Select snapshots overlapping an inclusive calendar-date range.
+def _crawl_window(row: dict[str, Any]) -> tuple[date, date] | None:
+    """A snapshot's real coverage window, or its ID-derived week as a fallback.
 
     The collection API publishes each snapshot's exact ``from``/``to`` crawl
     timestamps; use those rather than treating the week-like ID as its actual
     coverage. The ID-derived week remains a fallback for fixtures or older API
-    responses. Legacy saved runs retain their old newest-N behavior so they
+    responses.
+    """
+    try:
+        return datetime.fromisoformat(str(row["from"])).date(), datetime.fromisoformat(str(row["to"])).date()
+    except (KeyError, TypeError, ValueError):
+        match = CRAWL_ID_RE.fullmatch(str(row.get("id", "")))
+        if match is None:
+            return None
+        try:
+            start = date.fromisocalendar(int(match[1]), int(match[2]), 1)
+        except ValueError:
+            return None
+        return start, start + timedelta(days=6)
+
+
+def _select_crawls(collections: list[dict[str, Any]], config: dict[str, Any]) -> list[str]:
+    """Resolve a run's configured scope to actual snapshot IDs.
+
+    An explicit ``crawl_ids`` list (the UI's snapshot picker, or ``--crawls``)
+    takes precedence and is filtered to whatever the collection API currently
+    reports -- a snapshot named in an old saved run can have aged out. Failing
+    that, snapshots overlapping an inclusive calendar-date range are selected.
+    Legacy saved runs with neither retain their old newest-N behavior so they
     remain resumable.
     """
+    crawl_ids = config.get("crawl_ids")
+    if crawl_ids:
+        available = {str(row.get("id", "")) for row in collections}
+        return [crawl for crawl in crawl_ids if crawl in available]
     selected_range = _date_range(config.get("date_from"), config.get("date_to"))
     if selected_range is None:
         return [row["id"] for row in collections[: int(config.get("crawls", 6))]]
     start, end = selected_range
     result: list[str] = []
     for row in collections:
-        crawl = str(row.get("id", ""))
-        try:
-            crawl_start = datetime.fromisoformat(str(row["from"])).date()
-            crawl_end = datetime.fromisoformat(str(row["to"])).date()
-        except (KeyError, TypeError, ValueError):
-            match = _CRAWL_WEEK.fullmatch(crawl)
-            if match is None:
-                continue
-            try:
-                crawl_start = date.fromisocalendar(int(match[1]), int(match[2]), 1)
-            except ValueError:
-                continue
-            crawl_end = crawl_start + timedelta(days=6)
+        window = _crawl_window(row)
+        if window is None:
+            continue
+        crawl_start, crawl_end = window
         if crawl_start <= end and crawl_end >= start:
-            result.append(crawl)
+            result.append(str(row.get("id", "")))
     return result
 
 
@@ -205,22 +261,22 @@ def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
     row so a newer, not-yet-imported verdict remains pending.
     """
     dirty = con.execute(
-        """SELECT 1 FROM token
+        """SELECT 1 FROM tenants
            WHERE ats = 'workday-list'
-              OR (ats = 'workday' AND token <> lower(token))
+              OR (ats = 'workday' AND key <> lower(key))
            LIMIT 1"""
     ).fetchone()
     if dirty is None:
         return
 
     rows = con.execute(
-        "SELECT * FROM token WHERE ats IN ('workday', 'workday-list')"
+        "SELECT * FROM tenants WHERE ats IN ('workday', 'workday-list')"
     ).fetchall()
     groups: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
-        groups.setdefault(row["token"].lower(), []).append(row)
+        groups.setdefault(row["key"].lower(), []).append(row)
 
-    con.execute("DELETE FROM token WHERE ats IN ('workday', 'workday-list')")
+    con.execute("DELETE FROM tenants WHERE ats IN ('workday', 'workday-list')")
     rule = BY_SOURCE["workday"]
     for token, sightings in groups.items():
         # ISO timestamps sort chronologically. A checked row outranks an
@@ -235,7 +291,7 @@ def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
         )
         ordered = sorted(
             sightings,
-            key=lambda row: (row["discovered_at"], row["ats"], row["token"]),
+            key=lambda row: (row["discovered_at"], row["ats"], row["key"]),
         )
         urls: list[str] = []
         details: dict[str, Any] = {}
@@ -246,13 +302,20 @@ def _migrate_workday_tokens(con: sqlite3.Connection) -> None:
         # checked_at, so replay it last after combining discovery evidence.
         details = _merge(details, json.loads(winner["details"]))
         canonical_url = rule.board_url.format(**rule.urls(token))
+        # Any sighting that learned a name keeps it: consolidation must not
+        # lose one because the winning row happened to be probed before the
+        # name was resolved.
+        name = next(
+            (row["name"] for row in (winner, *ordered) if row["name"]), None
+        )
         con.execute(
-            """INSERT INTO token(
-                   ats, token, status, canonical_url, urls, method, run_id,
+            """INSERT INTO tenants(
+                   ats, key, name, status, canonical_url, urls, method, run_id,
                    details, discovered_at, checked_at, imported_at
-               ) VALUES ('workday', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               ) VALUES ('workday', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 token,
+                name,
                 winner["status"],
                 canonical_url,
                 _json(list(dict.fromkeys(urls))[:5]),
@@ -281,45 +344,56 @@ def _sql_str(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _merged_query(rules: list[Rule], urls: list[str]) -> str:
+def _merged_query(
+    rules: list[Rule], urls: list[str],
+    urls_for_range: dict[tuple[str, str], set[str]] | None = None,
+) -> str | None:
     """One pass over the index that classifies every vendor in `rules`.
 
-    Reading a crawl's 600 parquet files costs ~180MB of footer/metadata traffic
-    before a single matching row is returned, and that cost is identical for
-    every vendor.  Scanning per vendor pays it once per vendor; this pays it
-    once per crawl.  The extraction itself is unchanged -- the same
-    `surt_range`, `where_sql` and `token_sql` fragments the per-vendor query
-    used -- so `selftest` still covers it.
+    One scan per (vendor, domain), unioned.  The shape matters more than it
+    looks: each branch filters on a *single* surtkey range, and only a lone
+    ``>= AND <`` conjunction lets DuckDB read a file's footer, compare it to
+    the row-group zone maps and skip the file without downloading a byte.
+    Folding the ranges into one top-level ``OR`` -- which this used to do, to
+    save re-reading footers per vendor -- silently defeats that: DuckDB gives
+    up on pruning and reads the whole ``url_surtkey`` column of every row
+    group.  Measured against CC-MAIN-2025-33, one warc part costs 0MB with a
+    single range and 259MB with the ranges OR'd, and a footer is only 0.3MB,
+    so the merge was paying 235MB per file to save 3MB.
+
+    A row cannot land in two branches: ranges are derived from domains, and no
+    two rules share one.  A rule with no domains (icims, whose ``where_sql``
+    is ``FALSE``) contributes no branch, which is what it did before too.
+
+    `urls_for_range` -- when the planner had harvested footers -- names which
+    files each surtkey range can possibly hit, so a branch lists only those,
+    and a branch none of `urls` can satisfy is left out entirely.  DuckDB's
+    zone maps would prune the same row groups anyway; this just skips
+    compiling branches whose answer is already known to be empty.  Returns
+    None when no branch survives, meaning `urls` holds nothing for `rules`.
     """
-    # Both CASEs must branch in the same order so `source` and `token` stay
-    # aligned.  A row dispatched to the wrong vendor is self-correcting: that
-    # vendor's regex will not match, `token` becomes '', and the outer WHERE
-    # drops it.
-    sources = " ".join(
-        f"WHEN ({rule.where_sql}) THEN {_sql_str(rule.source)}" for rule in rules
-    )
-    tokens = " ".join(
-        f"WHEN ({rule.where_sql}) THEN {token_sql(rule)}" for rule in rules
-    )
-    # Kept as a top-level disjunction rather than folded into each branch:
-    # DuckDB's zone maps prune row groups from this, which is the entire reason
-    # a ~600GB index costs a few hundred MB to scan.
-    ranges = " OR ".join(
-        f"(url_surtkey >= '{low}' AND url_surtkey < '{high}')"
-        for rule in rules for low, high in map(surt_range, rule.domains)
-    )
-    hosts = " OR ".join(f"({rule.where_sql})" for rule in rules)
     stop = ", ".join(_sql_str(value) for value in sorted(STOP))
-    files = "[" + ", ".join(_sql_str(url) for url in urls) + "]"
+    branches = []
+    for rule in rules:
+        for low, high in map(surt_range, rule.domains):
+            branch_urls = urls if urls_for_range is None else [
+                url for url in urls if url in urls_for_range.get((low, high), ())
+            ]
+            if not branch_urls:
+                continue
+            files = "[" + ", ".join(_sql_str(url) for url in branch_urls) + "]"
+            branches.append(f"""
+            SELECT {_sql_str(rule.source)} AS source, {token_sql(rule)} AS token, url
+            FROM read_parquet({files})
+            WHERE url_surtkey >= '{low}' AND url_surtkey < '{high}'
+              AND ({rule.where_sql})
+        """)
+    if not branches:
+        return None
+    branches = " UNION ALL ".join(branches)
     return f"""
         SELECT source, token, count(*) AS url_count, min(url, 5) AS urls
-        FROM (
-            SELECT CASE {sources} END AS source,
-                   CASE {tokens} END AS token,
-                   url
-            FROM read_parquet({files})
-            WHERE ({ranges}) AND ({hosts})
-        )
+        FROM ({branches})
         WHERE source IS NOT NULL AND token <> ''
           AND lower(split_part(token, '/', 1)) NOT IN ({stop})
           AND regexp_matches(token, '{TOKEN_RE.pattern}')
@@ -331,6 +405,7 @@ def _duckdb_http() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
     for setting in (
+        f"SET threads={DUCKDB_THREADS}",
         "SET enable_http_metadata_cache=true",
         f"SET http_retries={HTTP_RETRIES}",
         f"SET http_retry_backoff={HTTP_RETRY_BACKOFF}",
@@ -456,11 +531,13 @@ def cc_scan_sources(
     *, target_mbps: float = TARGET_MBPS, batch_files: int = BATCH_FILES,
     checkpoint_files: int = CHECKPOINT_FILES,
     batch_attempts: int = BATCH_ATTEMPTS,
+    batch_backoff: tuple[float, ...] = BATCH_BACKOFF_SECONDS,
     should_cancel: Callable[[], None] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
     on_candidates: Callable[[list[tuple[str, str, int, list[str]]]], None] | None = None,
     on_retry: Callable[[dict[str, Any]], None] | None = None,
+    urls_for_range: dict[tuple[str, str], set[str]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Scan every vendor in `rules` in ONE pass over the crawl's columnar index.
 
@@ -495,11 +572,15 @@ def cc_scan_sources(
                 if should_cancel is not None:
                     should_cancel()
                 before, started = _link_bytes(), time.monotonic()
-                attempts = max(1, batch_attempts)
+                # None: no branch's range can hit any file of this batch, so
+                # the batch's answer is empty without asking DuckDB.
+                query = _merged_query(pending, batch, urls_for_range)
+                attempts = max(1, batch_attempts) if query is not None else 0
+                rows: list[tuple[str, str, int, list[str]]] = []
                 for attempt in range(1, attempts + 1):
                     try:
                         rows = con.execute(
-                            f"INSERT INTO _batches {_merged_query(pending, batch)} "
+                            f"INSERT INTO _batches {query} "
                             "RETURNING source, token, url_count, urls"
                         ).fetchall()
                         break
@@ -508,15 +589,24 @@ def cc_scan_sources(
                             raise
                         if should_cancel is not None:
                             should_cancel()
+                        backoff = (
+                            batch_backoff[min(attempt, len(batch_backoff)) - 1]
+                            if batch_backoff else 0.0
+                        )
                         if on_retry is not None:
                             on_retry({
                                 "files": files_done,
                                 "batch_files": len(batch),
                                 "attempt": attempt + 1,
                                 "max_attempts": attempts,
+                                "backoff_s": backoff,
                                 "error": f"{type(exc).__name__}: {exc}",
                             })
                         con.close()
+                        # Waited before reconnecting, not after: the point is to
+                        # let the far side recover, and a fresh connection made
+                        # immediately would just spend itself on the next refusal.
+                        _sleep(backoff, should_cancel)
                         con = _batch_connection(completed_rows)
                 completed_rows.extend(rows)
                 elapsed = time.monotonic() - started
@@ -632,11 +722,16 @@ class Keyscan:
         self._controls: dict[str, str | None] = {}
         self._run_id: str | None = None
         self._phase_started: tuple[str, float] | None = None
+        # The CLI verb a log line belongs to. `_request` is shared by every
+        # function, so it reads this rather than labelling its lines with a
+        # transport ("network") that no function is named after.
+        self._function = "run"
+        self._network = _new_network_stats()
         self._cancelled = False
         self._initialized = False
         # Set only while a run streams validation; `_record_candidate` uses its
         # presence to decide whether a newly seen token is probed immediately.
-        # Keyed by (ats, token), the token table's primary key.
+        # Keyed by (ats, token), the tenants table's primary key.
         self._validation_queue: asyncio.Queue[tuple[str, str]] | None = None
         self._validating: set[tuple[str, str]] = set()
         self._validated_count = 0
@@ -657,6 +752,38 @@ class Keyscan:
             # WAL lets a SQL client read the file while a scan writes to it,
             # which matters because the database is keyscan's only output.
             con.execute("PRAGMA journal_mode = WAL")
+            # `token` became `tenants` on 2026-09-02: a row is one ATS tenant,
+            # and the old name shadowed its own `token` column in every query.
+            # This has to run BEFORE the CREATE below, which would otherwise
+            # leave an empty `tenants` beside the populated legacy table.
+            # SQLite carries indexes and triggers across a rename under their
+            # old names, so drop those and let the CREATEs re-make them.
+            tables = {
+                row["name"]
+                for row in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    " AND name IN ('token', 'tenants')"
+                )
+            }
+            if "token" in tables and "tenants" not in tables:
+                con.execute("ALTER TABLE token RENAME TO tenants")
+            # `tenants.token` stuttered, and the value is not a credential: it
+            # is the vendor's natural key for one board (greenhouse calls it a
+            # board token, lever a site, workday a tenant). Renamed with the
+            # table, and before the CREATE below, whose IF NOT EXISTS would
+            # leave a legacy `token` column in place for every later statement.
+            # PRAGMA on a missing table returns no rows, so this is safe on a
+            # fresh database.
+            columns = {row["name"] for row in con.execute("PRAGMA table_info(tenants)")}
+            if "token" in columns and "key" not in columns:
+                con.execute("ALTER TABLE tenants RENAME COLUMN token TO key")
+            con.executescript(
+                """
+                DROP INDEX IF EXISTS keyscan_token_review;
+                DROP INDEX IF EXISTS keyscan_token_run;
+                DROP INDEX IF EXISTS keyscan_token_canonical;
+                """
+            )
             con.executescript(
                 """
                 PRAGMA foreign_keys = ON;
@@ -677,15 +804,23 @@ class Keyscan:
                     -- so a later run is not left guessing why tokens are still
                     -- `unknown`.
                     blocked_json TEXT,
-                    created_at TEXT NOT NULL,
+                    -- No `created_at`: a run is inserted at the moment it
+                    -- starts, so it only ever held the same timestamp as
+                    -- `started_at`. Ordering uses `started_at`.
                     started_at TEXT NOT NULL,
                     finished_at TEXT
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS keyscan_one_active
                     ON runs(status) WHERE status = 'running';
-                CREATE TABLE IF NOT EXISTS token (
+                CREATE TABLE IF NOT EXISTS tenants (
                     ats           TEXT NOT NULL CHECK (ats <> 'workday-list'),
-                    token         TEXT NOT NULL,
+                    key           TEXT NOT NULL,
+                    -- The employer behind the board, once a probe has learned
+                    -- it. Promoted out of `details.company_name` because it is
+                    -- the one field a reader wants beside the key, and the one
+                    -- an importer resolves a company by. NULL until a probe
+                    -- finds it; not every vendor's payload carries a name.
+                    name          TEXT,
                     status        TEXT NOT NULL DEFAULT 'unknown'
                         CHECK (status IN ('unknown','live','dead')),
                     canonical_url TEXT NOT NULL,
@@ -699,21 +834,90 @@ class Keyscan:
                     -- once this row has been written to xjobscore's own token
                     -- table. NULL means never imported.
                     imported_at   TEXT,
-                    PRIMARY KEY (ats, token)
+                    PRIMARY KEY (ats, key)
                 );
-                CREATE INDEX IF NOT EXISTS keyscan_token_review
-                    ON token(status, ats);
-                CREATE INDEX IF NOT EXISTS keyscan_token_run
-                    ON token(run_id);
-                CREATE UNIQUE INDEX IF NOT EXISTS keyscan_token_canonical
-                    ON token(ats, canonical_url);
+                CREATE INDEX IF NOT EXISTS keyscan_tenants_review
+                    ON tenants(status, ats);
+                CREATE INDEX IF NOT EXISTS keyscan_tenants_run
+                    ON tenants(run_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS keyscan_tenants_canonical
+                    ON tenants(ats, canonical_url);
+                -- The last successful `collinfo.json` fetch, so the snapshot
+                -- picker still has something to show when Common Crawl's index
+                -- is unreachable. Replaced wholesale on every live fetch, never
+                -- merged, so it can never mix rows from two different fetches.
+                CREATE TABLE IF NOT EXISTS crawls_cache (
+                    id         TEXT PRIMARY KEY,
+                    name       TEXT NOT NULL,
+                    from_date  TEXT NOT NULL,
+                    to_date    TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL
+                );
+                -- One row per row group of Common Crawl's columnar index: the
+                -- span of `url_surtkey` it holds, and what reading it costs.
+                --
+                -- This is the index *of* the index. A vendor's domains become a
+                -- surtkey range, and a row group whose span misses that range
+                -- cannot hold one of its URLs -- so the range alone says which
+                -- files are worth opening. Without this table that answer costs
+                -- ~186MB of footer reads per crawl, paid again on every run;
+                -- with it the same answer is two string comparisons per row,
+                -- ~0.5ms for a whole crawl, offline.
+                --
+                -- Rows are immutable once written. A published snapshot never
+                -- changes, so a range recorded here stays true forever, and
+                -- `harvested_at` is provenance rather than an expiry.
+                --
+                -- Kept at row-group rather than file granularity because the
+                -- footer read that fills this table yields row groups anyway:
+                -- storing the coarser thing would discard `bytes` -- the only
+                -- way to know a fetch's size before issuing it -- and buying it
+                -- back later would mean re-reading every footer.
+                CREATE TABLE IF NOT EXISTS footers (
+                    crawl        TEXT    NOT NULL,
+                    -- Path as the crawl manifest gives it; the URL is CC_CDN +
+                    -- part, so a probe never re-fetches the manifest either.
+                    part         TEXT    NOT NULL,
+                    -- Ordinal position in the file's footer. Parquet stores no
+                    -- id of its own; position is stable because the file is.
+                    rg           INTEGER NOT NULL,
+                    lo           TEXT    NOT NULL,
+                    hi           TEXT    NOT NULL,
+                    -- Compressed bytes of just the columns a scan reads, for
+                    -- this row group -- not the row group, and not the file.
+                    bytes        INTEGER NOT NULL,
+                    harvested_at TEXT    NOT NULL,
+                    PRIMARY KEY (crawl, part, rg)
+                ) WITHOUT ROWID;
+                -- One row per (vendor, crawl) already scanned. A published
+                -- snapshot never changes and extraction is deterministic, so
+                -- the pair recorded here can only reproduce tokens already in
+                -- `tenants`; the row's existence is the whole fact.
+                --
+                -- Written after the vendor's scan of that crawl finishes, never
+                -- before: a crawl abandoned mid-way must leave no row, or the
+                -- next run skips the part it never read.
+                --
+                -- Keyed `(ats, crawl)` because "where has greenhouse been?" is
+                -- asked more often than "what is done for this crawl?".
+                CREATE TABLE IF NOT EXISTS scanned (
+                    ats        TEXT NOT NULL,
+                    crawl      TEXT NOT NULL,
+                    scanned_at TEXT NOT NULL,
+                    PRIMARY KEY (ats, crawl)
+                ) WITHOUT ROWID;
                 """
             )
             # CREATE TABLE IF NOT EXISTS does not add columns to a table that
             # already exists on disk -- upgrade older databases in place.
-            existing_columns = {row["name"] for row in con.execute("PRAGMA table_info(token)")}
+            existing_columns = {row["name"] for row in con.execute("PRAGMA table_info(tenants)")}
             if "imported_at" not in existing_columns:
-                con.execute("ALTER TABLE token ADD COLUMN imported_at TEXT")
+                con.execute("ALTER TABLE tenants ADD COLUMN imported_at TEXT")
+            if "name" not in existing_columns:
+                # Appended rather than placed after `key` -- SQLite has no
+                # positional ADD COLUMN, and a table rebuild is not worth the
+                # column order. Fresh databases get it from the CREATE above.
+                con.execute("ALTER TABLE tenants ADD COLUMN name TEXT")
             # DROP FIRST, and before the migration. A database written by the
             # 2026-08-22 build carries triggers that ABORT on `ats = 'workday'`
             # -- the name that is canonical again -- so the migration below
@@ -724,6 +928,8 @@ class Keyscan:
                 """
                 DROP TRIGGER IF EXISTS keyscan_token_workday_insert;
                 DROP TRIGGER IF EXISTS keyscan_token_workday_update;
+                DROP TRIGGER IF EXISTS keyscan_tenants_workday_insert;
+                DROP TRIGGER IF EXISTS keyscan_tenants_workday_update;
                 """
             )
             _migrate_workday_tokens(con)
@@ -732,13 +938,13 @@ class Keyscan:
             # databases after the legacy rows above have been consolidated.
             con.executescript(
                 """
-                CREATE TRIGGER IF NOT EXISTS keyscan_token_workday_insert
-                BEFORE INSERT ON token WHEN NEW.ats = 'workday-list'
+                CREATE TRIGGER IF NOT EXISTS keyscan_tenants_workday_insert
+                BEFORE INSERT ON tenants WHEN NEW.ats = 'workday-list'
                 BEGIN
                     SELECT RAISE(ABORT, 'workday-list was renamed back to workday');
                 END;
-                CREATE TRIGGER IF NOT EXISTS keyscan_token_workday_update
-                BEFORE UPDATE OF ats ON token WHEN NEW.ats = 'workday-list'
+                CREATE TRIGGER IF NOT EXISTS keyscan_tenants_workday_update
+                BEFORE UPDATE OF ats ON tenants WHEN NEW.ats = 'workday-list'
                 BEGIN
                     SELECT RAISE(ABORT, 'workday-list was renamed back to workday');
                 END;
@@ -747,6 +953,10 @@ class Keyscan:
             run_columns = {row["name"] for row in con.execute("PRAGMA table_info(runs)")}
             if "blocked_json" not in run_columns:
                 con.execute("ALTER TABLE runs ADD COLUMN blocked_json TEXT")
+            if "created_at" in run_columns:
+                # Dropped: it was written with the same value as `started_at`
+                # on every insert, and only ever read to order by.
+                con.execute("ALTER TABLE runs DROP COLUMN created_at")
             # A process crash cannot retain a usable in-memory task.  Do not
             # interrupt a currently running CLI merely because another
             # process is inspecting its status.
@@ -766,7 +976,7 @@ class Keyscan:
 
     def status(self, run_id: str | None = None) -> dict[str, Any] | None:
         self.initialize()
-        sql = "SELECT * FROM runs" + (" WHERE id = ?" if run_id else " ORDER BY created_at DESC LIMIT 1")
+        sql = "SELECT * FROM runs" + (" WHERE id = ?" if run_id else " ORDER BY started_at DESC LIMIT 1")
         with self._connect() as con:
             row = con.execute(sql, (run_id,) if run_id else ()).fetchone()
         result = _row(row)
@@ -790,13 +1000,13 @@ class Keyscan:
                 params.append(value)
         if query.strip():
             clauses.append(
-                "(token LIKE ? OR canonical_url LIKE ? OR json_extract(details, '$.company_name') LIKE ?)"
+                "(key LIKE ? OR canonical_url LIKE ? OR json_extract(details, '$.company_name') LIKE ?)"
             )
             params.extend([f"%{query.strip()}%"] * 3)
         params.append(max(1, min(limit, 1000)))
         with self._connect() as con:
             rows = con.execute(
-                "SELECT * FROM token WHERE " + " AND ".join(clauses) + " ORDER BY ats, token LIMIT ?",
+                "SELECT * FROM tenants WHERE " + " AND ".join(clauses) + " ORDER BY ats, key LIMIT ?",
                 params,
             ).fetchall()
         return [_row(row) for row in rows if row is not None]
@@ -839,6 +1049,7 @@ class Keyscan:
         self, methods: Iterable[str], crawls: int | None = None,
         sources: Iterable[str] | None = None, archives: bool = False, *,
         date_from: str | None = None, date_to: str | None = None,
+        crawl_ids: Iterable[str] | None = None,
     ) -> str:
         selected = tuple(dict.fromkeys(methods))
         unknown = set(selected) - METHODS
@@ -846,10 +1057,20 @@ class Keyscan:
             detail = ", ".join(sorted(unknown)) if unknown else "at least one method"
             raise KeyscanError(f"unknown method(s): {detail}")
         selected_range = _date_range(date_from, date_to)
-        if selected_range is not None and crawls is not None:
+        selected_crawl_ids = tuple(dict.fromkeys(crawl_ids)) if crawl_ids else None
+        if selected_crawl_ids is not None and (selected_range is not None or crawls is not None):
+            raise KeyscanError("use a date range, crawls, or explicit crawl ids -- not more than one")
+        if selected_crawl_ids is not None:
+            invalid = [crawl for crawl in selected_crawl_ids if not CRAWL_ID_RE.fullmatch(crawl)]
+            if invalid:
+                raise KeyscanError(f"invalid crawl id(s): {', '.join(invalid)}")
+        elif selected_range is not None and crawls is not None:
             raise KeyscanError("use a date range or crawls, not both")
-        if "commoncrawl" in selected and selected_range is None and crawls is None:
-            raise KeyscanError("commoncrawl requires both --from and --to")
+        if (
+            "commoncrawl" in selected
+            and selected_range is None and crawls is None and selected_crawl_ids is None
+        ):
+            raise KeyscanError("commoncrawl requires --from/--to or crawl ids")
         if crawls is not None and not 1 <= crawls <= 12:
             raise KeyscanError("crawls must be between 1 and 12")
         selected_sources = expand_sources(tuple(dict.fromkeys(sources or ())))
@@ -865,7 +1086,9 @@ class Keyscan:
             "sources": selected_sources,
             "archives": bool(archives),
         }
-        if selected_range is not None:
+        if selected_crawl_ids is not None:
+            config["crawl_ids"] = list(selected_crawl_ids)
+        elif selected_range is not None:
             config.update(date_from=date_from, date_to=date_to)
         elif crawls is not None:
             config["crawls"] = crawls
@@ -874,17 +1097,17 @@ class Keyscan:
             with self._connect() as con:
                 con.execute(
                     """INSERT INTO runs(id, methods_json, config_json, status, phase, checkpoint_json,
-                       artifact_dir, pid, created_at, started_at)
-                       VALUES (?, ?, ?, 'running', 'starting', ?, ?, ?, ?, ?)""",
-                    (run_id, _json(selected), _json(config), _json(checkpoint), str(artifact), os.getpid(), now, now),
+                       artifact_dir, pid, started_at)
+                       VALUES (?, ?, ?, 'running', 'starting', ?, ?, ?, ?)""",
+                    (run_id, _json(selected), _json(config), _json(checkpoint), str(artifact), os.getpid(), now),
                 )
         except sqlite3.IntegrityError as exc:
             raise ActiveRunError("a keyscan run is already active") from exc
         self._run_id = run_id
         self._log(
-            "info", "starting", "run started", methods=selected, crawls=crawls,
-            date_from=date_from, date_to=date_to, sources=selected_sources or "all",
-            archives=bool(archives),
+            "info", "run", "run started", methods=selected, crawls=crawls,
+            date_from=date_from, date_to=date_to, crawl_ids=list(selected_crawl_ids) if selected_crawl_ids else None,
+            sources=selected_sources or "all", archives=bool(archives),
         )
         return run_id
 
@@ -892,10 +1115,71 @@ class Keyscan:
         self, methods: Iterable[str], crawls: int | None = None,
         sources: Iterable[str] | None = None, archives: bool = False, *,
         date_from: str | None = None, date_to: str | None = None,
+        crawl_ids: Iterable[str] | None = None,
     ) -> str:
         return await self._run(self._new_run(
-            methods, crawls, sources, archives, date_from=date_from, date_to=date_to,
+            methods, crawls, sources, archives, date_from=date_from, date_to=date_to, crawl_ids=crawl_ids,
         ))
+
+    async def list_crawls(self) -> dict[str, Any]:
+        """Real Common Crawl snapshots, newest first -- or the last successful
+        listing if the collection API will not answer right now.
+
+        Each entry's ``from``/``to`` is the collection API's own coverage
+        window when published, otherwise derived from the ID's ISO week --
+        the same resolution ``_select_crawls`` uses, so what a caller sees
+        here is exactly what picking that ID will scan.
+
+        Every live fetch overwrites ``crawls_cache`` wholesale, so a caller
+        that gets ``source: "cache"`` back is seeing exactly one past fetch,
+        never a mix. Only an empty cache turns an outage into a real error.
+        """
+        self.initialize()
+        error: str | None = None
+        try:
+            async with httpx.AsyncClient(
+                timeout=15, follow_redirects=True, headers={"User-Agent": USER_AGENT},
+                transport=self.transport,
+            ) as client:
+                response = await client.get(COLLINFO)
+            if response.status_code != 200:
+                raise KeyscanError(f"Common Crawl collection list returned HTTP {response.status_code}")
+            crawls: list[dict[str, str]] = []
+            for row in response.json():
+                window = _crawl_window(row)
+                if window is None:
+                    continue
+                start, end = window
+                crawls.append({
+                    "id": str(row.get("id", "")),
+                    "name": str(row.get("name", "")),
+                    "from": start.isoformat(),
+                    "to": end.isoformat(),
+                })
+            crawls.sort(key=lambda entry: entry["from"], reverse=True)
+        except (httpx.HTTPError, KeyscanError) as exc:
+            error = str(exc)
+        else:
+            fetched_at = utc_now()
+            with self._connect() as con:
+                con.execute("DELETE FROM crawls_cache")
+                con.executemany(
+                    "INSERT INTO crawls_cache(id, name, from_date, to_date, fetched_at) VALUES (?, ?, ?, ?, ?)",
+                    [(c["id"], c["name"], c["from"], c["to"], fetched_at) for c in crawls],
+                )
+            return {"crawls": crawls, "source": "live", "fetched_at": fetched_at, "error": None}
+
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT id, name, from_date, to_date, fetched_at FROM crawls_cache ORDER BY from_date DESC"
+            ).fetchall()
+        if not rows:
+            raise KeyscanError(f"unable to retrieve Common Crawl collection list: {error}")
+        cached = [
+            {"id": row["id"], "name": row["name"], "from": row["from_date"], "to": row["to_date"]}
+            for row in rows
+        ]
+        return {"crawls": cached, "source": "cache", "fetched_at": rows[0]["fetched_at"], "error": error}
 
     @staticmethod
     def _selected_sources(run: dict[str, Any]) -> set[str] | None:
@@ -915,7 +1199,7 @@ class Keyscan:
             except sqlite3.IntegrityError as exc:
                 raise ActiveRunError("a keyscan run is already active") from exc
         self._run_id = run_id
-        self._log("info", "resuming", "run resumed")
+        self._log("info", "run", "run resumed")
         return await self._run(run_id)
 
     def cancel(self, run_id: str) -> None:
@@ -983,7 +1267,7 @@ class Keyscan:
         except _Cancelled:
             self._finish("cancelled")
         except Exception as exc:
-            self._log("error", "failed", "run failed", error=f"{type(exc).__name__}: {exc}")
+            self._log("error", "run", "run failed", error=f"{type(exc).__name__}: {exc}")
             self._finish("failed", f"{type(exc).__name__}: {exc}")
             raise
         finally:
@@ -1001,7 +1285,7 @@ class Keyscan:
                 "UPDATE runs SET status = ?, phase = ?, counts_json = ?, error = ?, finished_at = ? WHERE id = ?",
                 (status, status, _json(counts), error, utc_now(), self._run_id),
             )
-        self._log("info" if status == "completed" else "warning", status, f"run {status}", **counts)
+        self._log("info" if status == "completed" else "warning", "run", f"run {status}", **counts)
 
     def _run_row(self, run_id: str) -> dict[str, Any]:
         run = self.status(run_id)
@@ -1017,6 +1301,20 @@ class Keyscan:
         with self._connect() as con:
             con.execute("UPDATE runs SET checkpoint_json = ? WHERE id = ?", (_json(checkpoint), self._run_id))
 
+    def _mark_scanned(self, source: str, crawl: str) -> None:
+        """Record that `source`'s scan of `crawl` ran to completion.
+
+        Unlike the run checkpoint's `cc_done` marker -- which dies with its
+        run -- this survives into every future run, and is what lets one skip
+        a (vendor, crawl) pair scanned weeks ago. OR IGNORE, so a resumed run
+        re-completing a pair keeps the original timestamp.
+        """
+        with self._connect() as con:
+            con.execute(
+                "INSERT OR IGNORE INTO scanned(ats, crawl, scanned_at) VALUES (?, ?, ?)",
+                (source, crawl, utc_now()),
+            )
+
     def _phase(self, phase: str) -> None:
         assert self._run_id
         now = time.monotonic()
@@ -1024,7 +1322,11 @@ class Keyscan:
         with self._connect() as con:
             con.execute("UPDATE runs SET phase = ? WHERE id = ?", (phase, self._run_id))
         self._phase_started = (phase, now)
-        self._log("info", phase, f"phase {phase}")
+        # The run row keeps its own vocabulary (`commoncrawl`, `board`); the log
+        # speaks the CLI's, so a reader looks for `crawl` under the command they
+        # typed rather than the method name behind it.
+        self._function = FUNCTION_OF_PHASE.get(phase, phase)
+        self._log("info", self._function, "started")
 
     def _close_phase_timing(self, finished: float | None = None) -> None:
         """Append a completed-phase measurement without persisting new state."""
@@ -1032,23 +1334,131 @@ class Keyscan:
             return
         phase, started = self._phase_started
         self._phase_started = None
+        function = FUNCTION_OF_PHASE.get(phase, phase)
+        self._flush_network(function)
         elapsed_ms = round(1000 * ((finished or time.monotonic()) - started))
-        self._log("info", phase, "phase timing", event="phase_timing", elapsed_ms=elapsed_ms)
+        self._log("info", function, "finished", event="phase_timing", elapsed_ms=elapsed_ms)
+
+    def _flush_network(self, function: str | None = None) -> None:
+        """Emit one summary for the requests that have succeeded since the last.
+
+        A successful request is not worth a line of its own -- there were 23,098
+        of them across the runs on this machine, against 3,850 that failed --
+        but the aggregate is: it is the only record of how fast a host answered
+        and how often it refused. So successes are counted here and failures
+        keep their own line, which is the shape those two facts deserve.
+        """
+        stats = self._network
+        if not stats["requests"]:
+            return
+        times = sorted(stats["ms"])
+        self._network = _new_network_stats()
+        self._log(
+            "info", function or self._function, "network summary",
+            event="network_summary", requests=stats["requests"], failed=stats["failed"],
+            median_ms=times[len(times) // 2] if times else None,
+            slowest_ms=times[-1] if times else None,
+            hosts=len(stats["hosts"]),
+        )
 
     def _artifact(self) -> Path:
         assert self._run_id
         run = self._run_row(self._run_id)
         return Path(run["artifact_dir"])
 
-    def _log(self, level: str, phase: str, message: str, **details: Any) -> None:
+    def _harvested_parts(
+        self, crawl: str, rules: list[Rule], expected: int,
+    ) -> dict[tuple[str, str], set[str]] | None:
+        """Manifest paths worth opening for `rules`, from the `footers` table.
+
+        A harvested crawl already has every row group's `url_surtkey` span on
+        disk, so the question "which files could hold this vendor" is answered
+        by string comparison rather than by re-reading 600 parquet footers over
+        the network -- the same answer, ~186MB cheaper, and it is the same
+        answer *every* run, which is why re-deriving it was the waste.
+
+        Trusted only when every in-scope file of the crawl was harvested.  A
+        part with no rows here is indistinguishable from a part whose ranges
+        miss every vendor, so a half-finished harvest -- a 403 mid-sweep is
+        enough -- would narrow the scan to the files it happens to know, find
+        fewer tokens, and let the run record that vendor as fully scanned.
+        Wrong quietly, and permanently. Short of `expected` we scan everything.
+
+        Returns None for "no opinion, read them all" -- never an empty dict,
+        which would instead mean "read nothing".  The result is keyed by
+        surtkey range so the scan can hand each query branch only the files
+        its range can hit, rather than every planned file.
+        """
+        ranges = [surt_range(domain) for rule in rules for domain in rule.domains]
+        if not ranges:
+            return None
+        with self._connect() as con:
+            harvested = con.execute(
+                "SELECT count(DISTINCT part) AS parts FROM footers WHERE crawl = ?",
+                (crawl,),
+            ).fetchone()["parts"]
+            if harvested < expected:
+                if harvested:
+                    self._log(
+                        "warning", "crawl", "footers incomplete; scanning every file",
+                        crawl=crawl, harvested=harvested, expected=expected,
+                    )
+                return None
+            # One OR'd pass rather than a query per range: the table is small
+            # and local, so the cost is in round trips, not comparisons. The
+            # per-range split happens here in Python off the same rows.
+            clause = " OR ".join("NOT (hi <= ? OR lo >= ?)" for _ in ranges)
+            arguments: list[str] = [crawl]
+            for low, high in ranges:
+                arguments += [low, high]
+            rows = con.execute(
+                f"SELECT part, rg, bytes, lo, hi FROM footers WHERE crawl = ? AND ({clause})",
+                arguments,
+            ).fetchall()
+        wanted = {
+            (low, high): {
+                row["part"] for row in rows
+                if not (row["hi"] <= low or row["lo"] >= high)
+            }
+            for low, high in ranges
+        }
+        parts = {row["part"] for row in rows}
+        # What the plan costs, before a byte of it is fetched. `bytes` is the
+        # footers table's whole reason for holding row groups rather than
+        # files, so the number is free here and worth saying out loud: a run
+        # that reads it against what it actually pulled is how a scan that
+        # over-fetches gets noticed.
+        self._log(
+            "info", "crawl", "row groups selected", event="plan",
+            crawl=crawl, row_groups=len(rows), files=len(parts), of=expected,
+            bytes=sum(row["bytes"] for row in rows),
+            sources=[rule.source for rule in rules],
+        )
+        return wanted
+
+    def _log(self, level: str, function: str, message: str, **detail: Any) -> None:
+        """Append one line to the run's log.
+
+        Four fields carry the line -- when, which function, what happened --
+        and everything else is nested under `detail`. The nesting is the point:
+        details used to sit at the top level, so a detail named `message` or
+        `level` would quietly overwrite the field of that name.
+
+        `function` is the CLI verb whose work produced the line: `crawl`,
+        `scan`, `validate`, or `run` for the lifecycle itself. It replaces the
+        old `phase`, which was two things at once -- a stage of the run for
+        eight of its values, and "this is an HTTP request" for `network`, the
+        one value that was never a stage at all.
+        """
         if not self._run_id:
             return
         artifact = self._artifact()
         artifact.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "at": utc_now(), "run_id": self._run_id, "level": level,
-            "phase": phase, "message": message, **details,
+        entry: dict[str, Any] = {
+            "at": utc_now(), "level": level, "function": function, "message": message,
         }
+        if detail:
+            entry["detail"] = detail
         with (artifact / "run.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(_json(entry) + "\n")
         if self.progress is not None:
@@ -1082,7 +1492,7 @@ class Keyscan:
     def _counts(self, run_id: str) -> dict[str, int]:
         with self._connect() as con:
             rows = con.execute(
-                "SELECT status, count(*) AS n FROM token WHERE run_id = ? GROUP BY status",
+                "SELECT status, count(*) AS n FROM tenants WHERE run_id = ? GROUP BY status",
                 (run_id,)
             ).fetchall()
         counts = {row["status"]: row["n"] for row in rows}
@@ -1114,15 +1524,21 @@ class Keyscan:
         retry_delay_ms = 0
         response: httpx.Response | None = None
         outcome = "transport_error"
-        async with self._semaphore, lock:
+        # Host lock first, then the semaphore.  The other order lets every
+        # worker queued behind one slow host sit on a global permit while
+        # doing nothing: a single vendor host that answers in 25s drains the
+        # budget and the whole run marches at its cadence.  Taking the host
+        # lock first means a worker only claims a permit once it is actually
+        # about to issue a request.
+        async with lock, self._semaphore:
             queue_ms = round(1000 * (time.monotonic() - started))
             last = self._host_last.get(host, 0.0)
             wait = self.request_delay - (time.monotonic() - last)
             if wait > 0:
                 throttle_delay_ms = round(1000 * wait)
                 self._log(
-                    "info", "network", "request delay", event="delay", cause="configured_host_delay",
-                    host=host, delay_ms=throttle_delay_ms,
+                    "info", self._function, "request delay", event="delay",
+                    cause="configured_host_delay", host=host, delay_ms=throttle_delay_ms,
                 )
                 await asyncio.sleep(wait)
             self._host_last[host] = time.monotonic()
@@ -1131,9 +1547,10 @@ class Keyscan:
                     response = await self._client.request(method, url, json=json_body, headers=headers)
                 except asyncio.CancelledError:
                     self._log(
-                        "warning", "network", "request timing", event="request_timing", method=method,
-                        host=host, attempts=attempt + 1, outcome="cancelled", queue_ms=queue_ms,
-                        throttle_delay_ms=throttle_delay_ms, retry_delay_ms=retry_delay_ms,
+                        "warning", self._function, "request cancelled", event="request_timing",
+                        method=method, host=host, attempts=attempt + 1, outcome="cancelled",
+                        queue_ms=queue_ms, throttle_delay_ms=throttle_delay_ms,
+                        retry_delay_ms=retry_delay_ms,
                         elapsed_ms=round(1000 * (time.monotonic() - started)),
                     )
                     raise
@@ -1169,7 +1586,20 @@ class Keyscan:
             details["status_code"] = response.status_code
         if retry_causes:
             details["retry_causes"] = retry_causes
-        self._log("info" if outcome == "ok" else "warning", "network", "request timing", **details)
+        # A success is counted, not narrated -- `_flush_network` speaks for the
+        # batch of them. A failure keeps its own line: each one is separately
+        # actionable, and reading them back is how a refused run gets diagnosed.
+        elapsed_ms = details["elapsed_ms"]
+        stats = self._network
+        stats["requests"] += 1
+        stats["ms"].append(elapsed_ms)
+        stats["hosts"].add(host)
+        if outcome == "ok":
+            if stats["requests"] >= NETWORK_SUMMARY_EVERY:
+                self._flush_network()
+        else:
+            stats["failed"] += 1
+            self._log("warning", self._function, "request failed", **details)
         return response
 
     def _note_refusal(self, host: str, url: str, response: httpx.Response) -> bool:
@@ -1228,33 +1658,43 @@ class Keyscan:
             # promotion, so it is the durable rediscovery key.
             existing = (
                 con.execute(
-                    "SELECT token, urls, details FROM token WHERE ats = ? AND canonical_url = ?",
+                    "SELECT key, urls, details FROM tenants WHERE ats = ? AND canonical_url = ?",
                     (source, canonical),
                 ).fetchone()
                 if source == "comeet" else
                 con.execute(
-                    "SELECT token, urls, details FROM token WHERE ats = ? AND token = ?",
+                    "SELECT key, urls, details FROM tenants WHERE ats = ? AND key = ?",
                     (source, token),
                 ).fetchone()
             )
             if existing is None:
                 con.execute(
-                    """INSERT INTO token(ats, token, canonical_url, urls, method, run_id, details, discovered_at)
+                    """INSERT INTO tenants(ats, key, canonical_url, urls, method, run_id, details, discovered_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (source, token, canonical, _json(urls[:5]), method, self._run_id, _json(details), now),
                 )
                 key_token = token
             else:
-                key_token = existing["token"]
+                key_token = existing["key"]
                 merged_urls = list(dict.fromkeys([*json.loads(existing["urls"]), *urls]))[:5]
                 merged_details = _merge(json.loads(existing["details"]), details)
                 con.execute(
-                    """UPDATE token
+                    """UPDATE tenants
                        SET urls = ?, method = COALESCE(method, ?), run_id = ?, details = ?
-                       WHERE ats = ? AND token = ?""",
+                       WHERE ats = ? AND key = ?""",
                     (_json(merged_urls), method, self._run_id, _json(merged_details), source, key_token),
                 )
         key = (source, key_token)
+        # One line the first time a token is seen, and only then. A crawl
+        # re-records the same token at every checkpoint that touches it, so
+        # logging re-sightings too put 30,589 lines in one run against 1,757
+        # real discoveries -- the same drowning the `network` successes caused,
+        # rebuilt one field over.
+        if existing is None:
+            self._log(
+                "info", self._function, "candidate found",
+                event="candidate", ats=source, token=key_token, urls=len(urls),
+            )
         if self._validation_queue is not None:
             self._validation_queue.put_nowait(key)
         return key
@@ -1268,16 +1708,32 @@ class Keyscan:
         adapter_token = details.pop("_comeet_adapter_token", None)
         with self._connect() as con:
             if adapter_token:
-                con.execute("UPDATE token SET token = ? WHERE ats = ? AND token = ?", (adapter_token, ats, token))
+                con.execute("UPDATE tenants SET key = ? WHERE ats = ? AND key = ?", (adapter_token, ats, token))
                 token = adapter_token
-            existing = con.execute("SELECT details FROM token WHERE ats = ? AND token = ?", (ats, token)).fetchone()
+            existing = con.execute("SELECT details FROM tenants WHERE ats = ? AND key = ?", (ats, token)).fetchone()
             assert existing is not None
             merged = _merge(json.loads(existing["details"]), details, verdict=validation, job_count=job_count)
+            # `name` mirrors `details.company_name` into a column of its own so
+            # a reader (and keyscan_import's company resolution) need not parse
+            # JSON. COALESCE keeps a name an earlier probe found when this one
+            # came back without one -- a board with zero open jobs often has no
+            # employer in its payload, and that is not evidence the name changed.
             con.execute(
-                """UPDATE token SET status = ?, checked_at = ?, run_id = ?, details = ?
-                   WHERE ats = ? AND token = ?""",
-                (_STATUS[validation], now, self._run_id, _json(merged), ats, token),
+                """UPDATE tenants
+                      SET status = ?, checked_at = ?, run_id = ?, details = ?,
+                          name = COALESCE(?, name)
+                    WHERE ats = ? AND key = ?""",
+                (
+                    _STATUS[validation], now, self._run_id, _json(merged),
+                    merged.get("company_name"), ats, token,
+                ),
             )
+        # The verdict, as it lands. `validation progress` still summarises every
+        # 250, but only this says which token got which answer.
+        self._log(
+            "info", "validate", "candidate validated", event="validated",
+            ats=ats, token=token, verdict=_STATUS[validation], job_count=job_count,
+        )
 
     # ------------------------------------------------------------------
     # Secondary GitHub-hosted job boards
@@ -1289,7 +1745,7 @@ class Keyscan:
         archives = bool(run["config"].get("archives"))
         feeds = [feed for feed in BOARD_FEEDS if archives or not feed.get("archive")]
         start = int(run["checkpoint"].get("board_index", 0))
-        self._log("info", "board", "scanning secondary job boards", total=len(feeds), start=start, archives=archives)
+        self._log("info", "scan", "scanning secondary job boards", total=len(feeds), start=start, archives=archives)
         for index, feed in enumerate(feeds[start:], start):
             self._check_cancelled()
             url = BOARD_RAW.format(**feed)
@@ -1305,10 +1761,10 @@ class Keyscan:
         try:
             rows = response.json()
         except ValueError:
-            self._log("warning", "board", "listings payload was not valid JSON", url=feed_url)
+            self._log("warning", "scan", "listings payload was not valid JSON", url=feed_url)
             return
         if not isinstance(rows, list):
-            self._log("warning", "board", "listings payload was not a list", url=feed_url)
+            self._log("warning", "scan", "listings payload was not a list", url=feed_url)
             return
         for row in rows:
             if not isinstance(row, dict):
@@ -1354,7 +1810,7 @@ class Keyscan:
                 if marker in done:
                     continue
                 if not rule.domains:
-                    self._log("info", "commoncrawl", "vendor has no bounded crawl domain", crawl=crawl, source=rule.source)
+                    self._log("info", "crawl", "vendor has no bounded crawl domain", crawl=crawl, source=rule.source)
                     done.add(marker)
                     self._checkpoint(cc_done=sorted(done))
                     continue
@@ -1363,18 +1819,51 @@ class Keyscan:
                 continue
             manifest = await self._request("GET", CC_PATHS.format(crawl=crawl))
             if manifest is None or manifest.status_code != 200:
-                self._log("warning", "commoncrawl", "crawl manifest unavailable", crawl=crawl)
+                self._log("warning", "crawl", "crawl manifest unavailable", crawl=crawl)
                 failed_crawls.append(crawl)
                 continue
             try:
                 paths = gzip.decompress(manifest.content).decode().splitlines()
             except (OSError, UnicodeDecodeError) as exc:
-                self._log("warning", "commoncrawl", "invalid crawl manifest", crawl=crawl, error=str(exc))
+                self._log("warning", "crawl", "invalid crawl manifest", crawl=crawl, error=str(exc))
                 failed_crawls.append(crawl)
                 continue
-            urls = [CC_CDN + path for path in paths if path.endswith(".parquet") and ("/subset=warc/" in path or "/subset=crawldiagnostics/" in path)]
+            in_scope = [
+                path for path in paths
+                if path.endswith(".parquet")
+                and ("/subset=warc/" in path or "/subset=crawldiagnostics/" in path)
+            ]
+            # A harvested crawl narrows this to the handful of files whose key
+            # ranges can hold one of these vendors; an unharvested one returns
+            # None and every file is read, exactly as before.
+            wanted = self._harvested_parts(crawl, pending, len(in_scope))
+            if wanted is not None:
+                union = set().union(*wanted.values()) if wanted else set()
+                selected = [path for path in in_scope if path in union]
+                urls_for_range = {
+                    key: {CC_CDN + part for part in parts}
+                    for key, parts in wanted.items()
+                }
+            else:
+                selected, urls_for_range = in_scope, None
+            urls = [CC_CDN + path for path in selected]
+            # The plan itself is logged by `_harvested_parts`, which is where
+            # the row-group count and byte estimate are known; saying it twice
+            # here only differed by leaving those out.
+            if not urls:
+                # Harvested, and no file in the crawl can hold these vendors.
+                # That is a finished answer, not a failure: mark them done so a
+                # later run does not re-ask.
+                self._log(
+                    "info", "crawl", "no file in this crawl can hold these vendors",
+                    crawl=crawl, sources=[rule.source for rule in pending],
+                )
+                for rule in pending:
+                    done.add(f"{crawl}/{rule.source}")
+                self._checkpoint(cc_done=sorted(done))
+                continue
             self._log(
-                "info", "commoncrawl", "crawl started", event="crawl_start",
+                "info", "crawl", "crawl started", event="crawl_start",
                 crawl=crawl, snapshot=crawl_index, snapshots=len(crawls),
                 files=len(urls), vendors=len(pending),
             )
@@ -1384,16 +1873,18 @@ class Keyscan:
             started = time.monotonic()
             try:
                 loop = asyncio.get_running_loop()
-                records = await asyncio.to_thread(self._cc_scan_sources, crawl, pending, urls, loop)
+                records = await asyncio.to_thread(
+                    self._cc_scan_sources, crawl, pending, urls, loop, urls_for_range,
+                )
             except _Cancelled:
                 # `_Cancelled` is an Exception, so without this it would be
                 # swallowed below and the run would roll on to the next crawl.
                 raise
             except Exception as exc:
                 sources = [rule.source for rule in pending]
-                self._log("warning", "commoncrawl", "crawl scan failed", crawl=crawl, sources=sources, error=str(exc))
+                self._log("warning", "crawl", "crawl scan failed", crawl=crawl, sources=sources, error=str(exc))
                 self._log(
-                    "warning", "commoncrawl", "Common Crawl merged timing", event="operation_timing",
+                    "warning", "crawl", "Common Crawl merged timing", event="operation_timing",
                     operation="commoncrawl_merged_scan", crawl=crawl, sources=sources,
                     outcome="error", elapsed_ms=round(1000 * (time.monotonic() - started)),
                 )
@@ -1401,7 +1892,7 @@ class Keyscan:
                 continue
             elapsed_ms = round(1000 * (time.monotonic() - started))
             self._log(
-                "info", "commoncrawl", "Common Crawl merged timing", event="operation_timing",
+                "info", "crawl", "Common Crawl merged timing", event="operation_timing",
                 operation="commoncrawl_merged_scan", crawl=crawl,
                 sources=[rule.source for rule in pending], outcome="ok",
                 candidates=sum(len(rows) for rows in records.values()), elapsed_ms=elapsed_ms,
@@ -1415,7 +1906,8 @@ class Keyscan:
                     self._record_candidate(rule.source, record["token"], "cc", record["urls"], details={"crawl": crawl, "url_count": record["url_count"]})
                 done.add(f"{crawl}/{rule.source}")
                 self._checkpoint(cc_done=sorted(done))
-                self._log("info", "commoncrawl", "vendor scanned", crawl=crawl, source=rule.source, candidates=len(rows))
+                self._mark_scanned(rule.source, crawl)
+                self._log("info", "crawl", "vendor scanned", crawl=crawl, source=rule.source, candidates=len(rows))
         if failed_crawls:
             raise KeyscanError(
                 f"{len(failed_crawls)} Common Crawl snapshot(s) failed: "
@@ -1424,21 +1916,23 @@ class Keyscan:
 
     def _cc_scan_sources(
         self, crawl: str, rules: list[Rule], urls: list[str], loop: asyncio.AbstractEventLoop,
+        urls_for_range: dict[tuple[str, str], set[str]] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         artifact = self._artifact() / "commoncrawl" / crawl
         return cc_scan_sources(
             crawl, rules, urls, lambda source: artifact / f"{source}.parquet",
             target_mbps=self.target_mbps, checkpoint_files=self.checkpoint_files,
+            urls_for_range=urls_for_range,
             # Runs in a worker thread, so this opens its own SQLite connection
             # each call; that is what makes a mid-scan `keyscan cancel` land.
             should_cancel=self._check_cancelled,
             # Same worker thread as should_cancel above; `_log` only appends to
             # a file, no shared connection to open per call.
             on_checkpoint=lambda stats: self._log(
-                "info", "commoncrawl", "scan checkpoint", event="scan_checkpoint", crawl=crawl, **stats,
+                "info", "crawl", "scan checkpoint", event="scan_checkpoint", crawl=crawl, **stats,
             ),
             on_retry=lambda stats: self._log(
-                "warning", "commoncrawl", "retrying crawl batch with fresh connection",
+                "warning", "crawl", "retrying crawl batch with fresh connection",
                 event="batch_retry", crawl=crawl, **stats,
             ),
             # `_record_candidate` ends by pushing onto `self._validation_queue`,
@@ -1529,7 +2023,7 @@ class Keyscan:
         ats, token = key
         with self._connect() as con:
             row = con.execute(
-                "SELECT * FROM token WHERE ats = ? AND token = ? AND checked_at IS NULL",
+                "SELECT * FROM tenants WHERE ats = ? AND key = ? AND checked_at IS NULL",
                 (ats, token),
             ).fetchone()
         candidate = _row(row)
@@ -1555,9 +2049,9 @@ class Keyscan:
         self._phase("validate")
         with self._connect() as con:
             candidates = con.execute(
-                """SELECT ats, token FROM token
+                """SELECT ats, key FROM tenants
                    WHERE run_id IS NOT ? OR checked_at IS NULL
-                   ORDER BY ats, token""",
+                   ORDER BY ats, key""",
                 (self._run_id,),
             ).fetchall()
         selected_sources = self._selected_sources(run)
@@ -1570,7 +2064,7 @@ class Keyscan:
             if row["ats"] not in VALIDATED_SOURCES:
                 continue
             if selected_sources is None or row["ats"] in selected_sources:
-                by_source.setdefault(row["ats"], []).append((row["ats"], row["token"]))
+                by_source.setdefault(row["ats"], []).append((row["ats"], row["key"]))
         pending = [
             key
             for group in zip_longest(*by_source.values())
@@ -1603,7 +2097,7 @@ class Keyscan:
         rule = BY_SOURCE[candidate["ats"]]
         return await probe_rule(
             rule,
-            candidate["token"],
+            candidate["key"],
             request=self._request,
             controls=self._controls,
             canonical_url=candidate.get("canonical_url", ""),
@@ -1672,6 +2166,27 @@ def _company_name(payload: Any) -> str | None:
             company = values[0].get("company")
             if isinstance(company, dict):
                 name = _company_name(company)
+                if name:
+                    return name
+            # greenhouse and recruitee stamp the employer onto every posting
+            # as a flat string rather than a nested object. Reading it here
+            # is what lets greenhouse skip its `name_url` second request.
+            flat = values[0].get("company_name")
+            if isinstance(flat, str):
+                name = _clean_company_name(flat)
+                if name:
+                    return name
+    # Oracle answers with a search envelope whose facets summarise the
+    # requisitions; the organizations facet is the employer. Its own
+    # `LegalEmployer` is null on every tenant measured, so this is the only
+    # name the payload carries.
+    items = payload.get("items")
+    if isinstance(items, list) and items and isinstance(items[0], dict):
+        facet = items[0].get("organizationsFacet")
+        if isinstance(facet, list) and facet and isinstance(facet[0], dict):
+            value = facet[0].get("Name")
+            if isinstance(value, str):
+                name = _clean_company_name(value)
                 if name:
                     return name
     return None

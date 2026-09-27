@@ -9,12 +9,12 @@ Run from the repository root:
 
 ```sh
 PYTHONPATH=. uv run python -m keyscan selftest
-PYTHONPATH=. uv run python -m keyscan run --methods commoncrawl --from 2026-01-01 --to 2026-08-21
-PYTHONPATH=. uv run python -m keyscan run --methods commoncrawl --from 2026-06-01 --to 2026-08-21 --sources adp,oracle,ukg
-PYTHONPATH=. uv run python -m keyscan run --methods board --archives
+PYTHONPATH=. uv run python -m keyscan crawl --from 2026-01-01 --to 2026-08-21
+PYTHONPATH=. uv run python -m keyscan crawl --from 2026-06-01 --to 2026-08-21 --vendor adp,oracle,ukg
+PYTHONPATH=. uv run python -m keyscan scan --archives
 ```
 
-`run` and `resume` print a compact live progress stream to stderr while keeping
+`crawl`, `scan`, `validate`, and `resume` print a compact live progress stream to stderr while keeping
 the final JSON result alone on stdout. Common Crawl reports approximately every
 100 files (104/200/304/400/504/600 with the default eight-file batches), plus
 retries, snapshot completion, validation totals, and final status. Pass
@@ -23,7 +23,7 @@ is written regardless.
 
 Working state is local to `keyscan/work/`:
 
-- `keyscan.sqlite` holds runs, candidates, evidence, and checkpoints.
+- `keyscan.sqlite` holds runs, tenants, evidence, and checkpoints.
 - `runs/<id>/run.jsonl` is the append-only log for that run.
 - `runs/<id>/commoncrawl/` holds resumable parquet output.
 
@@ -39,22 +39,24 @@ Results leave keyscan by reading the database directly:
 
 ```sh
 sqlite3 keyscan/work/keyscan.sqlite \
-  "SELECT source, token, job_count FROM candidates WHERE validation = 'live'"
+  "SELECT ats, key, json_extract(details, '\$.job_count') AS job_count
+     FROM tenants WHERE status = 'live'"
 ```
 
 Ctrl-C records an interrupted run; resume it with `resume <run-id>`.
 
 ## Discovery methods
 
-There are two, and they are independent.
+There are two, and they are independent. A third, `enum`, covers the vendor
+neither can reach.
 
-`--methods commoncrawl` scans Common Crawl's columnar index with DuckDB, one
+`crawl` scans Common Crawl's columnar index with DuckDB, one
 vendor at a time, checkpointing each finished crawl so an interrupted run
 resumes where it stopped. `robots` reports which shared ATS hosts block CCBot
 — a vendor that blocks it will never appear in the index, which is the
 difference between a broken rule and a genuine blind spot.
 
-`--methods board` reads public GitHub-hosted internship boards (`BOARD_FEEDS`
+`scan` reads public GitHub-hosted internship boards (`BOARD_FEEDS`
 in `core.py`). These boards publish no tokens directly -- each listing row
 carries a per-posting ATS deep link, which `rules.extract` reduces to a
 `(source, token)` pair. `company_id` is always null; a token lands with only
@@ -64,6 +66,21 @@ The boards' live listing files change a few times a week at most, so `board`
 is cheap to run often. `--archives` additionally reads their frozen
 `archived/*.json` history -- worth one seeding pass, pointless on a recurring
 poll, so it is off by default.
+
+`enum` is dictionary enumeration for a vendor with no domain to scan: iCIMS
+serves each board on the customer's own `careers.{x}.com`, so the only way in
+is to guess `x`. It takes a wordlist (one word or domain per line; a domain
+contributes its first label), probes each guess with the vendor's own rule,
+and writes only the boards that answered `live`, as `method = 'enum'`. Misses
+are counted, not stored. A company list is the natural dictionary:
+
+```sh
+psql -At -c "SELECT domain FROM company WHERE domain ~ '\.com$'" xjobscore \
+  | PYTHONPATH=. uv run python -m keyscan enum --vendor icims
+```
+
+`--dry-run` probes and reports without writing; `--concurrency` bounds probes
+in flight (default 16).
 
 ## Validation runs alongside discovery
 
@@ -75,12 +92,12 @@ scan and then queues every probe behind one lock.
 
 A run still ends with a sweep, which is what backfills a resumed run and
 retries anything a probe dropped. The sweep feeds the same worker pool, and
-`--methods validate` runs it with no discovery at all — use that to drain a
+`validate` runs it with no discovery at all — use that to drain a
 backlog of already-discovered tokens rather than re-fetching crawl manifests:
 
 ```sh
-PYTHONPATH=. uv run python -m keyscan run --methods validate
-PYTHONPATH=. uv run python -m keyscan run --methods validate --sources greenhouse
+PYTHONPATH=. uv run python -m keyscan validate
+PYTHONPATH=. uv run python -m keyscan validate --vendor greenhouse
 ```
 
 A failed probe is logged and leaves its candidate unvalidated for the next run

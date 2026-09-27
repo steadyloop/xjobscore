@@ -259,7 +259,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # reach it (``domains=()``, ``where_sql="FALSE"``).
     "tier1": (
         "greenhouse", "workable", "workday", "ashby", "lever", "oracle",
-        "eightfold", "smartrecruiters", "successfactors", "avature",
+        "eightfold", "smartrecruiters", "avature",
     ),
     # SMB payroll-ATS cluster that carries biotech (doc/raw_postings/criteria/
     # vendor-list.md). Discovery-only: none of these are in VALIDATED_SOURCES,
