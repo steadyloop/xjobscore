@@ -8,6 +8,10 @@
     applications: "/applications",
     application: id => `/applications/${encodeURIComponent(id)}`,
     externalApplications: "/applications/external",
+    autoApplyPreview: id => `/applications/${encodeURIComponent(id)}/auto-apply/preview`,
+    autoApply: id => `/applications/${encodeURIComponent(id)}/auto-apply`,
+    resumes: "/resume/resumes",
+    targetFromApplication: id => `/resume/jobs/from-application/${encodeURIComponent(id)}`,
     sourceCoverage: "/source-coverage",
     sourceBoards: "/source-coverage/boards",
   });
@@ -17,9 +21,6 @@
     ...options,
   });
   async function transport(path, options = {}, privateData = false) {
-    if (root.OneShotSampleData?.isEnabled?.()) {
-      return root.OneShotSampleData.request(path, options);
-    }
     if (privateData && root.OneShotVisitorData && await root.OneShotVisitorData.isLocal()) {
       return root.OneShotVisitorData.request(path, options);
     }
@@ -42,13 +43,23 @@
     return new Promise(() => {});
   }
 
+  const errorMessage = (payload, status) => {
+    const detail = payload?.detail;
+    if (typeof detail === "string" && detail) return detail;
+    if (Array.isArray(detail)) {
+      const messages = detail.map(item => (typeof item === "string" ? item : item?.msg)).filter(Boolean);
+      if (messages.length) return [...new Set(messages)].join(". ");
+    }
+    return `Request failed (${status})`;
+  };
+
   async function request(path, options = {}, privateData = false) {
     const response = await transport(path, options, privateData);
     // Sample-data mode short-circuits before fetch, so it never yields a 401.
     if (response.status === 401) return redirectToLogin();
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.detail || `Request failed (${response.status})`);
+    if (!response.ok) throw new Error(errorMessage(payload, response.status));
     return payload;
   }
 
@@ -62,19 +73,32 @@
     return encoded ? `?${encoded}` : "";
   };
 
+  // Signed-out application tracking is browser-local. Signed-in tracking lives
+  // in PostgreSQL, so it has no browser-side store.
+  const applicationStore = async () => (
+    root.OneShotVisitorData && await root.OneShotVisitorData.isLocal()
+      ? root.OneShotVisitorData
+      : null
+  );
+
   root.OneShotAPI = {
     health: () => request(ROUTES.health),
     jobs: {
       list: async filters => {
         const values = { ...(filters || {}) };
-        if (!root.OneShotSampleData?.isEnabled?.() && root.OneShotVisitorData
-            && await root.OneShotVisitorData.isLocal()) {
-          values.exclude_job_id = root.OneShotVisitorData.applicationJobIds();
+        const tracker = await applicationStore();
+        if (tracker) {
+          const liveIds = tracker.applicationJobIds().filter(id =>
+            String(id).trim() !== "" && Number.isSafeInteger(Number(id)));
+          if (liveIds.length) values.exclude_job_id = liveIds;
         }
         return request(`${ROUTES.jobs}${query(values)}`);
       },
-      addToApplications: (id, job) => {
-        if (!root.OneShotSampleData?.isEnabled?.()) root.OneShotVisitorData?.rememberJob(job);
+      addToApplications: async (id, job) => {
+        // The browser-local tracker snapshots the public posting before its
+        // private POST; a signed-in tracker reads the posting from PostgreSQL.
+        const tracker = await applicationStore();
+        tracker?.rememberJob(job);
         return request(ROUTES.addToApplications(id), { method: "POST" }, true);
       },
     },
@@ -84,6 +108,19 @@
       createExternal: body => request(ROUTES.externalApplications, { method: "POST", body: JSON.stringify(body) }, true),
       update: (id, body) => request(ROUTES.application(id), { method: "PATCH", body: JSON.stringify(body) }, true),
       remove: id => request(ROUTES.application(id), { method: "DELETE" }, true),
+      // Auto-apply is server-only: it needs the account's resume and a
+      // browser on the server, so the guest (browser-local) tracker never
+      // handles it and a signed-out reader is sent to the login page.
+      autoApplyPreview: id => request(ROUTES.autoApplyPreview(id), { method: "POST" }),
+      autoApply: (id, body) => request(ROUTES.autoApply(id), { method: "POST", body: JSON.stringify(body) }),
+    },
+    resumes: {
+      list: () => request(ROUTES.resumes, {}, true),
+      // Turn a queued application into a resume target. Idempotent server-side,
+      // so a double click returns the existing target rather than forking it.
+      targetFromApplication: id => request(
+        ROUTES.targetFromApplication(id), { method: "POST" }, true,
+      ),
     },
     sources: {
       coverage: () => request(ROUTES.sourceCoverage),
@@ -91,5 +128,5 @@
     },
   };
 
-  if (typeof module !== "undefined" && module.exports) module.exports = { ROUTES, query };
+  if (typeof module !== "undefined" && module.exports) module.exports = { ROUTES, query, errorMessage };
 })(typeof window !== "undefined" ? window : globalThis);

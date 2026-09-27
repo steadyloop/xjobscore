@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="description" content="Mockup: how cleared postings leave the OneShot Opportunities feed. Mock data.">
+<title>Clearing the Feed</title>
+<style>
+:root {
+  --paper: #fffefa; --ground: #f4f3ee; --ink: #18211b; --muted: #626b64; --faint: #7c847e;
+  --line: #dddfd6; --line-strong: #c7cbc0;
+  --green: #28704f; --green-soft: #e3f2e8; --amber: #985c13; --amber-soft: #fff0d8; --red: #9e3b32; --red-soft: #fae9e6;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --shadow: 0 8px 28px rgb(24 33 27 / 7%);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input, select { color: inherit; font: inherit; }
+button, select { cursor: pointer; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+kbd { display: inline-block; min-width: 17px; border: 1px solid var(--line); border-radius: 5px; background: var(--ground); padding: 1px 5px; color: var(--muted); font: 700 9px/14px var(--mono); text-align: center; }
+
+.view { max-width: 1320px; padding: 34px 36px 80px 56px; }
+.section-kicker { color: var(--muted); font: 750 9px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.page-head .section-kicker { margin: 0 0 6px; color: var(--green); font-size: 10px; }
+.page-head h1 { margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: -.045em; }
+
+/* NEW: today's tally. Lives in the header's empty right half. */
+.tally { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); overflow: hidden; }
+.tally div { padding: 8px 14px; display: grid; gap: 2px; }
+.tally div + div { border-left: 1px solid var(--line); }
+.tally small { color: var(--faint); font: 700 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.tally b { font: 700 15px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+.tally .left b { color: var(--green); }
+
+.controls { border-bottom: 1px solid var(--line); margin-top: 30px; }
+.filterbar { display: flex; align-items: center; gap: 23px; }
+.filter { position: relative; display: inline-flex; align-items: baseline; gap: 6px; border: 0; background: transparent; padding: 0 1px 12px; color: var(--muted); font-size: 14px; font-weight: 720; }
+.filter.active { color: var(--ink); }
+.filter.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 3px 3px 0 0; background: var(--ink); content: ""; }
+.filter-count { color: var(--faint); font: 700 10px/1 var(--mono); }
+.filter.active .filter-count { color: var(--green); }
+.degree-filterbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 11px 0 13px; }
+.degree-filter { border: 1px solid var(--line-strong); border-radius: 999px; background: var(--paper); padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.degree-filter.active { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+
+.search-surface { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.search { height: 38px; flex: 1; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); padding: 0 10px; color: var(--faint); }
+.search svg { width: 16px; height: 16px; stroke-width: 2; }
+.search input { width: 100%; height: 37px; border: 0; outline: 0; background: transparent; font-size: 14px; color: var(--ink); }
+.sort { width: 120px; height: 38px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); padding: 0 3px 0 9px; color: var(--muted); font-size: 12px; font-weight: 650; }
+/* NEW: the one toggle that makes the list shrink. On by default. */
+.toggle { height: 38px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); padding: 0 11px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.toggle i { position: relative; width: 26px; height: 14px; border-radius: 7px; background: var(--line-strong); transition: background .15s; }
+.toggle i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: white; transition: left .15s; }
+.toggle.on { color: var(--ink); } .toggle.on i { background: var(--green); } .toggle.on i::after { left: 14px; }
+
+.grid { display: grid; grid-template-columns: minmax(430px, 1fr) minmax(360px, 460px); gap: 12px 13px; margin-top: 12px; align-items: start; }
+@media (max-width: 850px) { .grid { grid-template-columns: 1fr; } .detail { position: static !important; } }
+.list { display: grid; align-content: start; gap: 8px; }
+.recency-bucket { margin: 9px 2px 1px; color: var(--faint); font: 700 10px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.recency-bucket:first-child { margin-top: 1px; }
+
+/* NEW: fold line. Cleared cards don't vanish silently; they stack here. */
+.fold { display: flex; align-items: center; gap: 10px; border: 1px dashed var(--line-strong); border-radius: 10px; padding: 8px 12px; color: var(--muted); font-size: 11px; }
+.fold b { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.fold .sp { flex: 1; }
+.fold button { border: 0; background: none; padding: 0; color: var(--green); font: inherit; font-weight: 700; border-bottom: 1px solid currentColor; }
+.fold button.undo { color: var(--muted); }
+.fold[hidden] { display: none; }
+
+/* Card: exactly the current card, plus a hover/selected action cluster on the right. */
+.opportunity { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); padding: 12px 14px; box-shadow: 0 1px 2px rgb(24 33 27 / 3%); cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background-color .16s ease, opacity .22s ease; }
+.opportunity:hover { transform: translateY(-1px); border-color: #b9beb4; box-shadow: var(--shadow); }
+.opportunity.selected { border-color: var(--green); background: #f4faf6; }
+.job-logo { width: 40px; height: 40px; align-self: start; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; background: #f8f8f4; font: 800 11px var(--mono); }
+.opportunity-main { min-width: 0; }
+.job-company { color: var(--ink); font-size: 13px; font-weight: 760; letter-spacing: -.01em; }
+.opportunity-main h3 { margin: 3px 0 0; font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -.015em; }
+.card-meta { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.tag { display: inline-flex; border-radius: 5px; padding: 3px 7px; font: 600 10px/1.25 var(--mono); white-space: nowrap; background: #edeee8; color: var(--muted); }
+.tag.lang { background: linear-gradient(180deg, #e3f2e8 0%, #d8eadf 100%); color: #1f6848; font-weight: 700; }
+
+/* NEW: the two verbs, on every card, only visible when you're on it. */
+.acts { align-self: start; display: flex; gap: 5px; opacity: 0; transition: opacity .14s; }
+.opportunity:hover .acts, .opportunity.selected .acts, .opportunity:focus-within .acts { opacity: 1; }
+.act { display: inline-flex; align-items: center; gap: 5px; height: 28px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--paper); padding: 0 8px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.act svg { width: 13px; height: 13px; stroke-width: 2.2; }
+.act kbd { margin-left: 2px; }
+.act.apply:hover { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+.act.skip:hover { border-color: #d9b5b0; background: var(--red-soft); color: var(--red); }
+
+/* NEW: leaving. Card fades and the gap closes, so the next one moves under your eye. */
+.opportunity.leaving { opacity: 0; transform: translateX(14px); pointer-events: none; }
+.opportunity.leaving.skipping { transform: translateX(-14px); }
+.wrap { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .22s ease .12s, margin .22s ease .12s; }
+.wrap > * { min-height: 0; overflow: hidden; }
+.wrap.collapsed { grid-template-rows: 0fr; margin-top: -8px; }
+/* Cleared cards, when shown: kept, but demoted. */
+.opportunity.cleared { opacity: .6; background: #fbfaf5; }
+.opportunity.cleared h3 { color: var(--muted); font-weight: 500; }
+.stamp { display: none; align-items: center; gap: 4px; border-radius: 5px; padding: 2px 6px; font: 800 8px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.opportunity.cleared .stamp { display: inline-flex; }
+.opportunity.cleared .acts { display: none; }
+.stamp.applied { background: var(--ink); color: white; }
+.stamp.skipped { background: #edeee8; color: var(--muted); }
+
+.detail { position: sticky; top: 18px; margin-top: 4px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper); padding: 18px; box-shadow: 0 4px 16px rgb(24 33 27 / 5%); }
+.detail-headline { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.detail-company { font-weight: 760; letter-spacing: -.01em; }
+.detail-sep { color: var(--line-strong); }
+.detail-place { color: var(--muted); font-size: 11px; display: inline-flex; align-items: center; gap: 5px; }
+.detail-place svg { width: 13px; height: 13px; stroke-width: 2; }
+.detail h2 { margin: 3px 0 0; font-size: 19px; line-height: 1.2; letter-spacing: -.028em; }
+.detail-posted { display: flex; gap: 6px; margin-top: 8px; font-size: 11px; }
+.posted-when { font-weight: 650; } .posted-checked { color: var(--faint); }
+/* Actions: the current two, plus Skip. Keys shown on all three. */
+.detail-actions { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin: 14px 0 4px; font-size: 11px; }
+.button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--paper); padding: 7px 11px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.button:hover { border-color: #8f968e; }
+.button.primary { border-color: var(--ink); background: var(--ink); color: white; }
+.button.primary kbd { border-color: #3e4a42; background: #2a352e; color: #cfd6d0; }
+.button.skip:hover { border-color: #d9b5b0; background: var(--red-soft); color: var(--red); }
+.button svg { width: 13px; height: 13px; stroke-width: 2; }
+.detail section { padding: 15px 0 0; margin-top: 15px; border-top: 1px solid var(--line); }
+.skill-list { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+.skill { display: inline-flex; border-radius: 5px; padding: 3px 7px; font: 600 10px/1.25 var(--mono); background: #edeee8; color: var(--muted); }
+.role-summary { max-width: 55ch; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.hint { margin-top: 12px; color: var(--faint); font-size: 10.5px; display: flex; gap: 12px; flex-wrap: wrap; }
+.hint span { display: inline-flex; gap: 4px; align-items: center; }
+
+.flash { position: fixed; right: 20px; bottom: 20px; z-index: 20; display: flex; align-items: center; gap: 12px; border-radius: 9px; background: var(--ink); padding: 10px 13px; color: white; font-size: 12px; box-shadow: 0 8px 30px #0002; opacity: 0; transform: translateY(8px); transition: .2s; pointer-events: none; }
+.flash.show { opacity: 1; transform: none; pointer-events: auto; }
+.flash button { border: 0; border-bottom: 1px solid currentColor; background: transparent; padding: 0; color: #d9f36a; font-weight: 800; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8M10 6H6a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4"/></symbol>
+</svg>
+
+<div class="view">
+  <header class="page-head">
+    <div><div class="section-kicker">Discover</div><h1>Opportunities</h1></div>
+    <div class="tally" id="tally"></div>
+  </header>
+  <div class="controls">
+    <div class="filterbar">
+      <button class="filter active">All <span class="filter-count">908</span></button>
+      <button class="filter">Internships <span class="filter-count">564</span></button>
+      <button class="filter">Co-ops <span class="filter-count">64</span></button>
+      <button class="filter">Student Jobs <span class="filter-count">1</span></button>
+      <button class="filter">New Grad <span class="filter-count">250</span></button>
+    </div>
+    <div class="degree-filterbar">
+      <button class="degree-filter active">Software</button><button class="degree-filter">Finance</button><button class="degree-filter">MedTech</button><button class="degree-filter">BioTech</button><button class="degree-filter">Regulatory</button><button class="degree-filter">Unlabeled</button>
+    </div>
+  </div>
+  <div class="search-surface">
+    <label class="search"><svg><use href="#i-search"/></svg><input placeholder="Search roles, companies, or skills"><kbd>⌘ K</kbd></label>
+    <select class="sort"><option>Newest first</option></select>
+    <button class="toggle on" id="hide" aria-pressed="true"><i></i>Hide cleared</button>
+  </div>
+  <div class="grid">
+    <section class="list" id="feed"></section>
+    <aside class="detail" id="detail"></aside>
+  </div>
+</div>
+<div class="flash" id="flash"></div>
+
+<script>
+// Mock data. Postings are from today's feed; skills abbreviated.
+const LOGO = { "GE Aerospace":["#0b5fa5","GE"], Vanguard:["#b7141c","V"], "The Walt Disney Company":["#1b1b1b","D"], "Epic Games":["#1b1b1b","EG"], Stryker:["#f3b21b","SYK"], Intel:["#0068b5","in"], Garmin:["#0a2a5e","G"], Qualcomm:["#3253dc","Q"], "John Deere":["#367c2b","JD"] };
+const LANG = new Set(["C#","C++","Python","SQL","JavaScript","TypeScript","Go","Java","Rust"]);
+const JOBS = [
+  { id:1, co:"GE Aerospace", title:"Software Engineering Intern - Summer 2027", loc:"Evendale, OH · Atlanta, GA", skills:["C#","C++","Python","SQL"], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"Design, develop, and test embedded and enterprise software for jet engine control and monitoring systems." },
+  { id:2, co:"Vanguard", title:"College to Corporate IT Internship - Data Science (NC)", loc:"Charlotte, NC", skills:["Python","SQL"], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"Ten-week program working alongside data scientists on models that support investor outcomes." },
+  { id:3, co:"The Walt Disney Company", title:"WDI Figure Programming Intern, Spring 2027", loc:"Glendale, CA · Celebration, FL", skills:["C++","Python"], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"Program animated figure motion for attractions with Walt Disney Imagineering's show systems team." },
+  { id:4, co:"Epic Games", title:"Frontend Programmer Intern", loc:"Cary, NC", skills:["JavaScript","TypeScript","React"], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"Build web experiences for the Epic Games Store and Fortnite ecosystem." },
+  { id:5, co:"Stryker", title:"Summer 2027 Internship - Software Engineering - Florida", loc:"Fort Lauderdale, FL", skills:[], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"Contribute to software for surgical navigation and robotics platforms." },
+  { id:6, co:"Stryker", title:"Summer 2027 Internship - Software Engineering - Indiana", loc:"Fort Wayne, IN", skills:["Excel","LabVIEW"], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"As an intern, you won't just observe — you'll contribute to meaningful projects, gain exposure to leaders who will mentor you, and experience a culture of innovation and teamwork that is shaping the future of healthcare. Experience documenting complex processes and presenting them in a clear format." },
+  { id:7, co:"Intel", title:"AI Solutions Engineering Graduate Intern", loc:"Hillsboro, OR", skills:["C++","Python","PyTorch","TensorFlow"], ats:"Workday", posted:"9d ago", checked:"5m",
+    summary:"Optimize and deploy AI workloads on Intel accelerators for enterprise customers." },
+  { id:8, co:"Garmin", title:"Software Engineer Intern - Aviation", loc:"Olathe, KS", skills:["C","C++"], ats:"Workday", posted:"10d ago", checked:"7m",
+    summary:"Embedded software for avionics displays and flight management systems." },
+  { id:9, co:"Qualcomm", title:"Software Engineering Intern - Summer 2027", loc:"San Diego, CA", skills:["C++","Python","Linux"], ats:"Workday", posted:"10d ago", checked:"7m",
+    summary:"Work on modem, camera, or platform software for Snapdragon devices." },
+  { id:10, co:"John Deere", title:"Part-Time Student - Software Engineer", loc:"Urbandale, IA", skills:["Java","SQL"], ats:"Workday", posted:"10d ago", checked:"7m",
+    summary:"Year-round student role building precision agriculture applications." },
+];
+const state = { sel: 6, hide: true, status: {}, history: [], applied: 12, skipped: 31, left: 41 };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function card(j) {
+  const [bg, ini] = LOGO[j.co]; const st = state.status[j.id] || "";
+  return `<div class="wrap" data-wrap="${j.id}"><div><article class="opportunity ${state.sel === j.id ? "selected" : ""} ${st ? "cleared" : ""}" data-id="${j.id}" tabindex="0">
+    <span class="job-logo" style="background:${bg};color:white;border-color:${bg}">${ini}</span>
+    <div class="opportunity-main">
+      <div class="job-company">${esc(j.co)} <span class="stamp ${st}">${st}</span></div>
+      <h3>${esc(j.title)}</h3>
+      <div class="card-meta">${esc(j.loc)}</div>
+      ${j.skills.length ? `<div class="tags">${j.skills.map(s => `<span class="tag ${LANG.has(s) ? "lang" : ""}">${esc(s)}</span>`).join("")}</div>` : ""}
+    </div>
+    <div class="acts">
+      <button class="act apply" data-act="apply" title="Add to Applications and open ${j.ats}"><svg><use href="#i-check"/></svg>Apply<kbd>A</kbd></button>
+      <button class="act skip" data-act="skip" title="Skip"><svg><use href="#i-x"/></svg><kbd>X</kbd></button>
+    </div>
+  </article></div></div>`;
+}
+
+function renderFeed() {
+  const vis = JOBS.filter(j => !(state.hide && state.status[j.id]));
+  const cleared = JOBS.length - vis.length;
+  let html = "";
+  if (cleared) html += `<div class="fold"><span><b>${cleared}</b> cleared this session</span><span class="sp"></span>${state.history.length ? `<button class="undo" data-undo>Undo last <kbd>U</kbd></button>` : ""}<button data-show>Show</button></div>`;
+  html += `<div class="recency-bucket">Opened Aug 31</div>`;
+  html += vis.map(card).join("");
+  if (!vis.length) html += `<div class="fold" style="justify-content:center;padding:40px">Nothing left to review here. <button data-show>Show cleared</button></div>`;
+  document.getElementById("feed").innerHTML = html;
+}
+
+function renderDetail() {
+  const j = JOBS.find(j => j.id === state.sel); if (!j) return;
+  const st = state.status[j.id];
+  document.getElementById("detail").innerHTML = `
+    <div class="detail-headline"><span class="detail-company">${esc(j.co)}</span><span class="detail-sep">·</span><span class="detail-place"><svg><use href="#i-pin"/></svg>${esc(j.loc)}</span></div>
+    <h2>${esc(j.title)}</h2>
+    <div class="detail-posted"><span class="posted-when">Posted ${j.posted}</span><span class="detail-sep">·</span><span class="posted-checked">checked ${j.checked} ago</span></div>
+    <div class="detail-actions">
+      ${st === "applied" ? `<button class="button primary" data-act="undo-this">Applied · undo</button>` : `<button class="button primary" data-act="apply">Add to Applications<kbd>A</kbd></button>`}
+      <button class="button" data-act="open">Open on ${j.ats}<svg><use href="#i-ext"/></svg><kbd>O</kbd></button>
+      ${st === "skipped" ? `<button class="button" data-act="undo-this">Skipped · undo</button>` : `<button class="button skip" data-act="skip">Skip<kbd>X</kbd></button>`}
+    </div>
+    <div class="hint"><span><kbd>J</kbd><kbd>K</kbd> next / previous</span><span><kbd>A</kbd> apply, then advance</span><span><kbd>X</kbd> skip, then advance</span><span><kbd>U</kbd> undo</span><span><kbd>H</kbd> show cleared</span></div>
+    ${j.skills.length ? `<section><div class="section-kicker">Skills</div><div class="skill-list">${j.skills.map(s => `<span class="skill">${esc(s)}</span>`).join("")}</div></section>` : ""}
+    <section><div class="section-kicker">Role summary</div><p class="role-summary">${esc(j.summary)}</p></section>`;
+}
+
+function renderTally() {
+  document.getElementById("tally").innerHTML = `<div><small>Applied today</small><b>${state.applied}</b></div><div><small>Skipped</small><b>${state.skipped}</b></div><div class="left"><small>Left to review</small><b>${state.left}</b></div>`;
+}
+function render() { renderFeed(); renderDetail(); renderTally(); }
+
+let flashTimer;
+function flash(msg, undo) {
+  const f = document.getElementById("flash");
+  f.innerHTML = msg + (undo ? ` <button data-undo>Undo</button>` : "");
+  f.classList.add("show"); clearTimeout(flashTimer); flashTimer = setTimeout(() => f.classList.remove("show"), 3200);
+}
+const ids = () => [...document.querySelectorAll(".opportunity")].map(r => +r.dataset.id);
+function nextAfter(id) { const l = ids(), i = l.indexOf(id); return l[i + 1] ?? l[i - 1] ?? null; }
+function move(d) { const l = ids(), i = l.indexOf(state.sel), n = l[Math.min(l.length - 1, Math.max(0, i + d))]; if (n != null) { state.sel = n; renderFeed(); renderDetail(); document.querySelector(`.opportunity[data-id="${n}"]`)?.scrollIntoView({ block: "nearest" }); } }
+
+function clear(id, kind) {
+  const j = JOBS.find(j => j.id === id); if (!j || state.status[id]) return;
+  state.status[id] = kind; state.history.push(id);
+  if (kind === "applied") state.applied++; else state.skipped++;
+  state.left = Math.max(0, state.left - 1);
+  flash(kind === "applied" ? `Added to Applications · opening ${j.ats}` : `Skipped ${esc(j.co)}`, true);
+  const next = nextAfter(id);
+  const el = document.querySelector(`.opportunity[data-id="${id}"]`);
+  if (state.hide && el) {
+    el.classList.add("leaving", kind === "skipped" ? "skipping" : "");
+    el.closest(".wrap").classList.add("collapsed");
+    if (next != null) state.sel = next;
+    renderDetail(); renderTally();
+    setTimeout(renderFeed, 380);
+  } else { if (next != null) state.sel = next; render(); }
+}
+function undo(id) {
+  id = id ?? state.history.pop(); if (id == null) return;
+  state.history = state.history.filter(h => h !== id);
+  const kind = state.status[id]; delete state.status[id];
+  if (kind === "applied") state.applied--; else if (kind === "skipped") state.skipped--;
+  state.left++; state.sel = id; render();
+  flash(`Restored ${esc(JOBS.find(j => j.id === id).co)}`);
+}
+function setHide(v) { state.hide = v; document.getElementById("hide").classList.toggle("on", v); renderFeed(); }
+
+document.addEventListener("click", e => {
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const id = +(e.target.closest(".opportunity")?.dataset.id ?? state.sel);
+    if (act.dataset.act === "apply") clear(id, "applied");
+    else if (act.dataset.act === "skip") clear(id, "skipped");
+    else if (act.dataset.act === "undo-this") undo(id);
+    else if (act.dataset.act === "open") flash("Opening posting without tracking");
+    return;
+  }
+  if (e.target.closest("[data-undo]")) return undo();
+  if (e.target.closest("[data-show]")) return setHide(false);
+  if (e.target.closest("#hide")) return setHide(!state.hide);
+  const row = e.target.closest(".opportunity"); if (row) { state.sel = +row.dataset.id; renderFeed(); renderDetail(); }
+});
+document.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); return document.querySelector(".search input").focus(); }
+  if (/input|select|textarea/i.test(document.activeElement.tagName)) { if (e.key === "Escape") document.activeElement.blur(); return; }
+  const k = e.key.toLowerCase();
+  if (k === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
+  else if (k === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+  else if (k === "a") clear(state.sel, "applied");
+  else if (k === "x") clear(state.sel, "skipped");
+  else if (k === "u") undo();
+  else if (k === "o") flash("Opening posting without tracking");
+  else if (k === "h") setHide(!state.hide);
+});
+render();
+</script>
+</body>
+</html>

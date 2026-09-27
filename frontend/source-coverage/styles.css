@@ -18,6 +18,7 @@
   --red: #a33f35;
   --red-soft: #fae6e2;
   --cell-ok: #3d9367;
+  --cell-ok-alt: #4a9e73;
   --cell-degraded: #d19a2f;
   --cell-failing: #c05046;
   --cell-stale: #7dbb92;
@@ -79,21 +80,39 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-lineca
 .legend-row { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: flex-end; }
 .legend-key { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font: 600 11px var(--mono); white-space: nowrap; }
 .legend-key i { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 1px; }
-.legend-key.ok i, .cell.ok { background: var(--cell-ok); }
-.legend-key.degraded i, .cell.degraded { background: var(--cell-degraded); }
-.legend-key.failing i, .cell.failing { background: var(--cell-failing); }
-.legend-key.stale i, .cell.stale { background: var(--cell-stale); }
-.legend-key.paused i, .cell.paused { background: var(--line-strong); }
-.legend-key.never i, .cell.never, .cell.unknown { border: 1px solid var(--line-strong); background: var(--surface); }
+.legend-key b { color: var(--ink); font-weight: 700; }
+.legend-key.ok i { background: var(--cell-ok); }
+.legend-key.degraded i { background: var(--cell-degraded); }
+.legend-key.failing i { background: var(--cell-failing); }
+.legend-key.stale i { background: var(--cell-stale); }
+.legend-key.paused i { background: var(--line-strong); }
+.legend-key.never i { border: 1px solid var(--line-strong); background: var(--surface); }
 
-.fleet-row { display: grid; grid-template-columns: 158px minmax(0, 1fr); gap: 22px; align-items: start; border-bottom: 1px solid var(--line); padding: 15px 0; }
-.fleet-row:last-child { border-bottom: 0; }
-.fleet-label { min-width: 0; }
-.fleet-label strong { display: block; overflow: hidden; font-size: 14px; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
-.fleet-label small { display: block; margin-top: 2px; color: var(--subtle); font: 500 10px var(--mono); }
-.fleet-cells { display: flex; flex-wrap: wrap; gap: 3px; padding-top: 3px; }
-.cell { width: 11px; height: 11px; border-radius: 1px; }
-.cell:hover { border-radius: 0; outline: 2px solid var(--ink); outline-offset: 1px; }
+/* Providers sit above the strip: clicking one narrows the strip to that
+   vendor's boards, clicking it again (or "all providers") restores the fleet. */
+.provider-list { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 14px; }
+.provider { border: 1px solid transparent; border-radius: 6px; background: transparent; padding: 2px 7px; color: var(--muted); font: 500 12px var(--mono); }
+.provider b { color: var(--ink); font-weight: 700; }
+.provider.all { color: var(--ink); }
+.provider:hover { border-color: var(--line-strong); background: var(--surface); color: var(--ink); }
+.provider.has-failing b { color: var(--red); }
+.provider.has-degraded b { color: var(--amber); }
+.provider.active, .provider.active:hover { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+.provider.active b { color: var(--surface); }
+
+/* One canvas paints ~20k cells; a second one on top carries the hover ring so
+   moving the pointer never repaints the fleet. */
+.strip-wrap { position: relative; margin-top: 14px; }
+.strip { position: relative; display: block; width: 100%; cursor: crosshair; touch-action: none; }
+.strip canvas { display: block; }
+#fleet-overlay { position: absolute; inset: 0; pointer-events: none; }
+
+.probe { position: absolute; top: 0; left: 0; z-index: 5; display: none; min-width: 190px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); padding: 9px 12px; box-shadow: var(--shadow-small); pointer-events: none; }
+.probe.visible { display: block; }
+.tip-name { overflow: hidden; font-weight: 700; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.tip-source { color: var(--subtle); font: 500 11px var(--mono); }
+.tip-row { display: flex; justify-content: space-between; gap: 18px; margin-top: 4px; color: var(--muted); font: 500 12px var(--mono); }
+.tip-row span:last-child { color: var(--ink); }
 
 .state { min-height: 320px; display: grid; place-items: center; align-content: center; border: 1px dashed var(--line-strong); border-radius: 15px; background: var(--surface); margin-top: 14px; padding: 35px; text-align: center; }
 .state-icon { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 14px; background: var(--surface-muted); color: var(--muted); }
@@ -121,8 +140,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-lineca
   .side-nav a.active { order: -1; }
   .sample-toggle { display: none; }
   .workspace { padding: 27px 18px 45px; }
-  .fleet-row { grid-template-columns: 1fr; gap: 8px; padding: 13px 0; }
-  .cell, .legend-key i { width: 9px; height: 9px; }
+  .legend-key i { width: 9px; height: 9px; }
 }
 
 @media (max-width: 560px) {

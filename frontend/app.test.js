@@ -8,16 +8,16 @@ const { ROUTES, query } = require("./api-client.js");
 const { opportunityTotal } = require("./nav-count.js");
 
 test("visible filters map to PostgreSQL job types", () => {
-  const labels = ["All", "Internships", "Co-ops", "Student Jobs", "New Grad"];
-  const keys = ["all", "internships", "coops", "students", "new_grads"];
-  const types = ["intern", "coop", "student", "new_grad"];
+  const labels = ["Internships", "Co-ops", "Student Jobs", "New Grad", "Research"];
+  const keys = ["internships", "coops", "students", "new_grads", "research"];
+  const types = ["intern", "coop", "student", "new_grad", "research"];
 
   assert.deepEqual(FILTERS.map(filter => filter.label), labels);
   assert.deepEqual(jobTypes(keys), types);
   assert.deepEqual(opportunities.FILTERS.map(filter => filter.label), labels);
   assert.deepEqual(opportunities.jobTypes(keys), types);
-  assert.equal(FILTERS.some(filter => filter.types.includes("research")), false);
-  assert.equal(opportunities.FILTERS.some(filter => filter.types.includes("research")), false);
+  // Every tab names exactly one type, so no posting is reachable from two tabs or none.
+  assert.deepEqual(FILTERS.flatMap(filter => filter.types), types);
   assert.deepEqual(jobTypes([]), [], "no tab active defers to the API's default scope");
 });
 
@@ -72,6 +72,20 @@ test("sample job search uses title, company, and precomputed skills only", async
   assert.equal(byLocation.total, 0);
 });
 
+test("sample seasonal views search titles and descriptions", async () => {
+  const state = sampleData.createState();
+  state.applications = [];
+  const fall = state.jobs.find(job => job.id === "sample-software");
+  const winter = state.jobs.find(job => job.id === "sample-platform");
+  fall.title = "Software Engineering Intern";
+  fall.summary = "Join the Fall 2027 internship cohort.";
+  winter.title = "Winter 2027 Platform Intern";
+
+  const listing = await (await sampleData.handle("/jobs?season=fall&limit=100", {}, state)).json();
+  assert.equal(listing.jobs.some(job => job.id === fall.id), true);
+  assert.equal(listing.jobs.some(job => job.id === winter.id), false);
+});
+
 test("sample fresh order is day first, then US location bucket", async () => {
   const state = sampleData.createState();
   state.applications = [];
@@ -100,12 +114,22 @@ test("sample fresh order is day first, then US location bucket", async () => {
   ]);
 });
 
-test("Typst source export does not depend on PDF compiler availability", () => {
+test("resume PDF controls follow compiler availability", () => {
   const source = fs.readFileSync(require.resolve("./resume/app.js"), "utf8");
-  assert.match(source, /const canSource = sampleModeOn\(\) \|\| !state\.browserLocal;/);
-  assert.match(source, /const canPdf = sampleModeOn\(\) \|\| \(!state\.browserLocal && state\.typstAvailable\);/);
-  assert.match(source, /data-action="download-typ" \$\{canSource/);
-  assert.match(source, /data-action="open-pdf" \$\{canPdf/);
+  assert.match(source, /data-action="export-pdf" \$\{state\.typstAvailable/);
+  assert.match(source, /if \(!state\.typstAvailable\) throw new Error/);
+  assert.match(source, /async function loadPdfPreview\(\)/);
+});
+
+test("a browser-local resume renders through the public route, not a canned file", () => {
+  const source = fs.readFileSync(require.resolve("./resume/app.js"), "utf8");
+  // Export is real Typst in every mode now, so the pre-rendered sample files
+  // are gone and nothing about export keys off where the resume is stored.
+  assert.doesNotMatch(source, /SAMPLE_PDF_URL|SAMPLE_TYP_URL/);
+  assert.match(source, /const localMode = \(\) => state\.browserLocal;/);
+  assert.match(source, /fetch\(`\/api\/resume\/render\/\$\{kind\}`/);
+  // Typst availability is the server's answer, never the fixture's.
+  assert.match(source, /fetch\("\/api\/resume\/render\/status"\)/);
 });
 
 test("sample jobs honor limit and offset like the live API", async () => {
@@ -181,7 +205,9 @@ test("visitor workspace starts blank and stays separate from sample fixtures", a
   assert.deepEqual(visitor.applications, []);
   assert.deepEqual(visitor.resume.entries, []);
   assert.ok(sample.applications.length > 0);
-  assert.ok(sample.resume.entries.length > 0);
+  // The fixture persona is gone: sample state ships no resume content either.
+  assert.deepEqual(sample.resume.entries, []);
+  assert.equal(sample.resume.profile.full_name, "");
 
   const application = await (await sampleData.handle("/applications/external", {
     method: "POST",
@@ -202,7 +228,38 @@ test("visitor workspace starts blank and stays separate from sample fixtures", a
   const check = await (await sampleData.handle(`/resume/resumes/${resume.id}/check`, {}, visitor)).json();
   assert.equal((await (await sampleData.handle("/resume/profile", {}, visitor)).json()).full_name, "Local Visitor");
   assert.ok(check.problems.some(problem => problem.message === "No bullets selected."));
-  assert.equal(sample.resume.profile.full_name, "Wren Adeyemi");
+  assert.equal(sample.resume.profile.full_name, "");
+  assert.equal(sample.resume.resumes.length, 0);
+});
+
+test("the opt-in resume mockup is internally consistent sample data", () => {
+  const demo = sampleData.createResumeDemoState();
+  const variants = new Set(demo.variants.map(variant => variant.key));
+  const entries = new Map(demo.entries.map(entry => [entry.id, entry]));
+  const bullets = new Set(demo.entries.flatMap(entry => entry.bullets).map(bullet => bullet.id));
+  const skills = new Set(demo.skills.map(skill => skill.id));
+  const targets = new Set(demo.targetJobs.map(target => target.id));
+
+  assert.ok(demo.profile.full_name);
+  assert.ok(demo.entries.length >= 4);
+  assert.ok(demo.resumes.length >= 2);
+  for (const entry of demo.entries) {
+    for (const bullet of entry.bullets) {
+      assert.ok(bullet.audience === "all" || variants.has(bullet.audience));
+    }
+  }
+  for (const skill of demo.skills) {
+    assert.ok(skill.audience === "all" || variants.has(skill.audience));
+  }
+  for (const resume of demo.resumes) {
+    assert.ok(variants.has(resume.variant));
+    assert.ok(targets.has(resume.target_job_id));
+    for (const pick of resume.selection.entries) {
+      assert.ok(entries.has(pick.entry_id));
+      assert.ok(pick.bullets.every(item => bullets.has(item.bullet_id)));
+    }
+    assert.ok(resume.selection.skills.every(id => skills.has(id)));
+  }
 });
 
 test("frontend client builds current API routes", () => {
@@ -242,26 +299,26 @@ test("Opportunities exposes its action and workspace navigation", () => {
   assert.match(html, /src=\"\/static\/opportunities\/app\.js\?v=skill-bundles-/);
   // The versioned directories are gone; no shell may still point at them.
   assert.doesNotMatch(html, /opportunities-v[23]/);
-  assert.match(html, /href=\"\/static\/navigation\.css\?v=stable-nav-/);
+  assert.match(html, /href="\/static\/navigation\.css\?v=[\w-]+"/);
 });
 
-test("the sample switch is per page, guest-only, and present only on Applications and Resume", () => {
-  assert.deepEqual(sampleData.PAGES, { "/application/": "application", "/resume/": "resume" });
+test("production pages never enable fixture mode", () => {
+  assert.deepEqual(sampleData.PAGES, {});
 
   const shellFor = page => fs.readFileSync(require.resolve(page), "utf8");
-  const sidebarOf = shell => shell.slice(shell.indexOf("<aside"), shell.indexOf("</aside>"));
 
-  // Applications and Resume write the button into a static header.
-  for (const page of ["./application/index.html", "./resume/index.html"]) {
-    const shell = shellFor(page);
-    assert.match(shell, /sample-data\.js/);
-    // In the page it applies to, not in the navigation menu — the sidebar is
-    // for moving between pages, and this changes what one page is showing.
-    assert.doesNotMatch(sidebarOf(shell), /sample-toggle/);
-    const header = shell.slice(shell.indexOf('<header class="workspace-header"'), shell.indexOf("</header>"));
-    assert.match(header, /class="workspace-actions"/);
-    assert.match(header, /data-action="sample-toggle"/);
-  }
+  // Resume serves guests from the browser-local workspace; it still loads
+  // sample-data.js, but only for the OneShotVisitorData export.
+  const resume = shellFor("./resume/index.html");
+  assert.match(resume, /sample-data\.js/);
+  assert.doesNotMatch(resume, /sample-toggle/);
+  const resumeApp = fs.readFileSync(require.resolve("./resume/app.js"), "utf8");
+  assert.doesNotMatch(resumeApp, /sample-toggle|sampleModeOn|OneShotSampleData/);
+
+  // Applications uses the browser-local visitor workspace while signed out.
+  const applications = shellFor("./application/index.html");
+  assert.match(applications, /sample-data\.js/);
+  assert.doesNotMatch(applications, /sample-toggle/);
 
   // Opportunities has no fixture mode: it always talks to the real API. It
   // still loads sample-data.js, but only for the OneShotVisitorData export
@@ -272,20 +329,17 @@ test("the sample switch is per page, guest-only, and present only on Application
   const page = fs.readFileSync(require.resolve("./opportunities/app.js"), "utf8");
   assert.doesNotMatch(page, /sample-toggle|sampleToggle|OneShotSampleData/);
 
-  // Source coverage is a read-only report on the harvest, so a demo mode there
+  // Feed Status is a read-only report on the harvest, so a demo mode there
   // would only hide what the page exists to show.
   assert.doesNotMatch(shellFor("./source-coverage/index.html"), /sample-toggle/);
   assert.doesNotMatch(shellFor("./source-coverage/index.html"), /sample-data\.js/);
 
-  // Hidden until nav-count.js confirms nobody is signed in.
+  // With no switch anywhere, the guest-gating rules are gone too.
   const navigation = fs.readFileSync(require.resolve("./navigation.css"), "utf8");
-  assert.match(navigation, /\.workspace-header \.sample-toggle \{\s*display: none/);
-  assert.match(navigation, /body\.is-guest \.workspace-header \.sample-toggle \{\s*display: inline-flex/);
-  assert.doesNotMatch(navigation, /\.sidebar \.sample-toggle/);
-  assert.doesNotMatch(navigation, /\.discover-page-head \.sample-toggle/);
+  assert.doesNotMatch(navigation, /sample-toggle/);
   const helper = fs.readFileSync(require.resolve("./nav-count.js"), "utf8");
   assert.match(helper, /classList\.add\("is-guest"\)/);
-  // A session clears any switch left on from browsing as a guest.
+  // A session still clears any legacy fixture flag.
   assert.match(helper, /OneShotSampleData\?\.disableAll\?\.\(\)/);
 });
 
@@ -293,17 +347,27 @@ test("shared navigation keeps active states from changing geometry", () => {
   const navigation = fs.readFileSync(require.resolve("./navigation.css"), "utf8");
   assert.match(navigation, /min-height: 38px/);
   assert.match(navigation, /font: 400 14px\/20px/);
-  assert.match(navigation, /width: 24px/);
+  // min-width, so a four-digit count widens the pill instead of overflowing it.
+  assert.match(navigation, /min-width: 24px/);
+  assert.doesNotMatch(navigation, /\n  width: 24px;/);
+  assert.match(navigation, /a\.active \{\s*font-weight: 650;/);
   assert.match(navigation, /a\.active \{[\s\S]*?order: initial/);
   assert.doesNotMatch(navigation, /a\.active \{\s*order: -1/);
   assert.match(navigation, /\.side-nav \.nav-icon \{[\s\S]*?fill: none;[\s\S]*?stroke: currentColor;/);
+  assert.match(navigation, /\.side-nav p:first-child \{\s*margin-top: 0;/);
 
   for (const page of ["./index.html", "./application/index.html", "./resume/index.html", "./source-coverage/index.html"]) {
     const html = fs.readFileSync(require.resolve(page), "utf8");
     assert.match(html, /class="icon-sprite"/);
-    for (const icon of ["compass", "pipeline", "doc", "radar"]) {
+    assert.doesNotMatch(html, /icon-(?:compass|pipeline|radar)\b/);
+    for (const icon of ["opportunities", "applications", "resume", "feed-status"]) {
       assert.match(html, new RegExp(`href="#icon-${icon}"`));
     }
+    // Four hand-copied sidebars, so the section labels are asserted on each:
+    // Discover over Opportunities, Track over Applications, System over Feed Status.
+    assert.match(html, /<p>Discover<\/p>\s*<a[^>]*href="\/"/);
+    assert.match(html, /<p>Track<\/p>\s*<a[^>]*href="\/application\/"/);
+    assert.match(html, /<p>System<\/p>\s*<a[^>]*href="\/source-coverage\/"/);
   }
 });
 
@@ -325,4 +389,62 @@ test("Opportunities exposes only its canonical layout", () => {
   assert.match(styles, /\.filter\.active::after \{[^}]*background: var\(--ink\)/);
   assert.match(styles, /\.discover-sort select \{[^}]*width: 110px; height: 38px[^}]*font-size: 12px/);
   assert.match(styles, /grid-template-areas: "controls controls" "search \." "list detail"/);
+});
+
+test("the application drawer can hand a queued job to the resume studio", () => {
+  // The route the button calls, and the id-encoding that keeps a stray path
+  // separator from escaping the path segment.
+  assert.equal(
+    ROUTES.targetFromApplication("app 1"),
+    "/resume/jobs/from-application/app%201",
+  );
+
+  const client = fs.readFileSync(require.resolve("./api-client.js"), "utf8");
+  // It must go through the private transport, or a signed-out visitor writes
+  // this to the server instead of being sent to the login page.
+  assert.match(client, /targetFromApplication: id => request\([\s\S]*?, true,?\s*\)/);
+
+  const drawer = fs.readFileSync(require.resolve("./application/app.js"), "utf8");
+  assert.match(drawer, /data-action="tailor-resume"/);
+  assert.match(drawer, /resumes\.targetFromApplication\(application\.id\)/);
+  // The studio reads this hash to preselect the target it was handed.
+  assert.match(drawer, /\/resume\/#target=\$\{encodeURIComponent\(target\.id\)\}/);
+});
+
+test("resume variants are read from the account, never hardcoded", () => {
+  const studio = fs.readFileSync(require.resolve("./resume/app.js"), "utf8");
+  const shell = fs.readFileSync(require.resolve("./resume/index.html"), "utf8");
+  const styles = fs.readFileSync(`${__dirname}/resume/styles.css`, "utf8");
+
+  // The three places that used to spell the enum out.
+  for (const source of [studio, shell, styles]) {
+    assert.doesNotMatch(source, /"mlsys"|>ML Systems<|\.chip\.quant/);
+  }
+  assert.match(studio, /api\("\/variants"\)/);
+  // Resume creation and initial selection use the same account-owned list.
+  assert.match(studio, /function audienceOptions\(selected, \{ includeAll = true \} = \{\}\)/);
+  assert.match(studio, /audienceOptions\(values\.variant[\s\S]*?\{ includeAll: false \}\)/);
+  assert.match(studio, /function buildInitialSelection\(variant\)/);
+  assert.match(shell, /<select name="variant" data-variant-select><\/select>/);
+});
+
+test("the guest fake answers the same resume routes as the server", () => {
+  const fake = fs.readFileSync(require.resolve("./sample-data.js"), "utf8");
+  // loadAll() fans out to all of these; a missing route throws and the studio
+  // renders "Failed to load" for every signed-out visitor.
+  for (const route of ["/resume/variants", "/resume/vocabulary"]) {
+    assert.match(fake, new RegExp(`method === "GET" && path === "${route}"`));
+    assert.match(fake, new RegExp(`method === "PUT" && path === "${route}"`));
+  }
+  // And it mirrors the server's refusal to orphan a tag in use.
+  assert.match(fake, /variant still in use/);
+});
+
+test("an entry with no bullets survives a save", () => {
+  const studio = fs.readFileSync(require.resolve("./resume/app.js"), "utf8");
+  // Bulletless reusable entries have an explicit entry-level selection path.
+  assert.match(studio, /if \(!entry\.bullets\.length\)/);
+  assert.match(studio, /\{ entry_id: entryId, bullets: \[\] \}/);
+  // Education is intentionally fixed and is rendered independently of picks.
+  assert.match(studio, /educationSection\(true, resume\)/);
 });

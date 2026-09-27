@@ -2,11 +2,11 @@
   "use strict";
 
   const FILTERS = [
-    { key: "all", label: "All", types: [] },
     { key: "internships", label: "Internships", types: ["intern"] },
     { key: "coops", label: "Co-ops", types: ["coop"] },
     { key: "students", label: "Student Jobs", types: ["student"] },
     { key: "new_grads", label: "New Grad", types: ["new_grad"] },
+    { key: "research", label: "Research", types: ["research"] },
   ];
   const jobTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
   const relativeTime = (value, now = new Date()) => {
@@ -44,7 +44,7 @@
   const $ = selector => document.querySelector(selector);
   const view = $("#view"), flash = $("#flash");
   const PAGE_SIZE = 100;
-  const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: ["all"], sort: "fresh", query: "" };
+  const state = { jobs: null, total: 0, loadingMore: false, selected: null, filters: ["internships"], sort: "fresh", query: "" };
   const esc = value => String(value == null ? "" : value).replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
   const safeHref = value => /^https?:\/\//i.test(String(value || "")) ? String(value) : "";
   const attributes = job => job.attributes || {};
@@ -137,7 +137,7 @@
   function render() {
     const search = $("#discover-search"), restoreFocus = search && document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
     const jobs = state.jobs || [], selected = jobs.find(job => String(job.id) === String(state.selected));
-    paint(`<section class="discover-page"><header class="discover-page-head"><button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button><div><div class="section-kicker">Multi-source intelligence</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><div class="discover-search-surface"><label class="discover-search"><svg class="discover-search-icon" aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="discover-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div></section><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
+    paint(`<section class="discover-page"><header class="discover-page-head"><button class="menu-button" data-action="menu" aria-label="Open navigation">☰</button><div><div class="section-kicker">Multi-source intelligence</div><h1>Opportunities</h1></div>${sampleToggle()}</header><div class="discover-grid"><div class="discover-search-surface"><label class="discover-search"><svg class="discover-search-icon" aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="discover-search" data-search placeholder="Search roles, companies, skills, or ATS" autocomplete="off" value="${esc(state.query)}"><kbd>⌘K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div></section><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? jobs.map(opportunity).join("") : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
     if (restoreFocus) {
       const next = $("#discover-search");
       next.focus();

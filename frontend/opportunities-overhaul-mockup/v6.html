@@ -1,0 +1,245 @@
+<title>Card Rail Refinement</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<style>
+/* Candidate A, refined twice: workplace moves under the location, and the
+   location stops flying to the card edge. Tokens from opportunities/styles.css. */
+:root {
+  --paper: #fffefa; --ground: #f4f3ee; --ink: #18211b; --muted: #626b64; --faint: #7c847e;
+  --line: #dddfd6; --line-strong: #c7cbc0;
+  --green: #28704f; --green-soft: #e3f2e8; --green-deep: #1c5238;
+  --skill-bg: linear-gradient(180deg, #e3f2e8 0%, #d8eadf 100%); --skill-ink: #1f6848;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --shadow: 0 8px 28px rgb(24 33 27 / 7%);
+  --rail: 190px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { background: var(--ground); }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { margin: 0; }
+p { margin: 0; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+.page { max-width: 1660px; padding: 30px 32px 70px; }
+.kicker { color: var(--green); font: 750 9.5px/1.3 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+h1 { margin-top: 5px; font-size: 28px; line-height: 1.05; letter-spacing: -.045em; }
+.lede { max-width: 76ch; margin-top: 10px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.lede b { color: var(--ink); font-weight: 680; }
+
+.knobs { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.knob-group { display: flex; align-items: center; gap: 9px; }
+.knob-label { color: var(--faint); font: 700 8.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.seg { display: flex; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); padding: 3px; }
+.seg button { border: 0; border-radius: 7px; background: transparent; padding: 5px 12px; color: var(--muted); font: 640 11.5px var(--sans); font-variant-numeric: tabular-nums; cursor: pointer; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #fff; font-weight: 700; }
+
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 22px; align-items: start; }
+.col-head { position: sticky; top: 0; z-index: 4; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 0 10px; background: linear-gradient(var(--ground) 76%, rgb(244 243 238 / 0%)); }
+.col-head h2 { font-size: 14px; font-weight: 720; letter-spacing: -.02em; }
+.col-head h2 small { display: block; max-width: 48ch; margin-top: 3px; color: var(--faint); font: 500 11px/1.5 var(--sans); letter-spacing: 0; }
+.stat { flex: 0 0 auto; text-align: right; color: var(--faint); font: 650 9.5px/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+.stat b { display: block; color: var(--ink); font: 800 16px/1.1 var(--mono); letter-spacing: -.02em; }
+.col.cand .stat b { color: var(--green); }
+
+.recency-bucket { display: flex; align-items: center; gap: 11px; margin: 0 2px 8px; color: var(--faint); font: 700 10px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.recency-bucket::after { flex: 1; height: 1px; background: var(--line); content: ""; }
+.list { display: grid; align-content: start; gap: 8px; }
+
+.op { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); padding: 12px 14px; box-shadow: 0 1px 2px rgb(24 33 27 / 3%); cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.op:hover { transform: translateY(-1px); border-color: #b9beb4; box-shadow: var(--shadow); }
+.job-logo { width: 40px; height: 40px; align-self: start; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; background: #f8f8f4; font: 800 11px var(--mono); }
+.op-main { min-width: 0; }
+.op-main h3 { font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -.015em; }
+.job-company { min-width: 0; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 760; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.tags { min-width: 0; display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.tag { display: inline-flex; align-items: center; border-radius: 5px; background: var(--skill-bg); padding: 3px 7px; color: var(--skill-ink); font: 700 10px/1.25 var(--mono); white-space: nowrap; }
+.tag.over { background: none; color: var(--faint); font-weight: 600; }
+.wp { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.wp svg { width: 11px; height: 11px; flex: 0 0 11px; stroke-width: 2; }
+.wp[data-wp="remote"] { color: var(--green); }
+.wp[data-wp="hybrid"] { color: var(--muted); font-weight: 640; }
+.wp[data-wp="onsite"] { color: var(--faint); font-weight: 640; }
+
+/* ---- BEFORE: candidate A as you saw it. Head is a flex row spanning the whole
+   card, so a short location like "Austin, TX" is thrown to the far edge and the
+   workplace shares its line. ---- */
+.v-a .head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.v-a .head .job-company { flex: 0 1 auto; }
+.v-a .head-loc { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.v-a .head-loc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.v-a .head-loc .more { flex: 0 0 auto; color: var(--faint); font: 650 10px var(--mono); }
+.v-a h3 { margin-top: 3px; }
+
+/* ---- AFTER: a real rail. Fixed width, so the location starts at the same x on
+   every card -- a column with a straight left edge, sitting a fixed distance from
+   the company rather than pinned to the card edge. It spans both text rows, so
+   the workplace sits under the location and costs no height. ---- */
+.v-b .op-main { display: grid; grid-template-columns: minmax(0, 1fr) var(--rail); column-gap: 20px; }
+.v-b .job-company { grid-column: 1; grid-row: 1; }
+.v-b h3 { grid-column: 1 / -1; grid-row: 2; margin-top: 3px; }
+.v-b .rail { grid-column: 2; grid-row: 1; align-self: start; min-width: 0; }
+/* Only a posting that actually has a workplace needs the rail to reach into the
+   second row. The other 93% hand the title back the full card width, which keeps
+   title wrapping at today's 7.7% instead of the 32% a full-height rail would cause. */
+.v-b .op.has-wp .rail { grid-row: 1 / span 2; }
+.v-b .op.has-wp h3 { grid-column: 1; }
+.v-b .rail-loc { display: flex; align-items: baseline; gap: 5px; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.5; white-space: nowrap; }
+.v-b .rail-loc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.v-b .rail-loc .more { flex: 0 0 auto; color: var(--faint); font: 650 10px var(--mono); }
+.v-b .rail .wp { margin-top: 3px; }
+.v-b .tags { grid-column: 1 / -1; grid-row: 3; }
+.v-b[data-align="right"] .rail { text-align: right; }
+.v-b[data-align="right"] .rail-loc { justify-content: flex-end; }
+
+.notes { display: grid; gap: 9px; margin-top: 30px; border-top: 1px solid var(--line); padding-top: 18px; max-width: 92ch; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.notes b { color: var(--ink); font-weight: 680; }
+.notes code { border-radius: 4px; background: #ecebe2; padding: 1px 5px; font: 600 11px var(--mono); }
+
+@media (max-width: 1180px) { .cols { grid-template-columns: 1fr; } .col-head { position: static; } }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } }
+</style>
+
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></symbol>
+<symbol id="i-hybrid" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-onsite" viewBox="0 0 24 24"><path d="M4 21V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v15M16 10h3a2 2 0 0 1 2 2v9M8 8h1M8 12h1M8 16h1M12 8h1M12 12h1M12 16h1M2 21h20"/></symbol>
+</defs></svg>
+
+<div class="page">
+  <div class="kicker">Card layout</div>
+  <h1>The rail, tightened</h1>
+  <p class="lede">Two changes. <b>The workplace moves under the location</b>, in a rail that spans both text rows — so it costs no height, and Remote keeps the only green. <b>The rail is now a fixed width instead of a flex edge</b>, which is what fixes the distance: before, a short location like “Austin, TX” was thrown to the far card edge, as far from the company name as the card allowed. Now every location starts at the same x, so it reads as a column with a straight left edge and sits a predictable distance away.</p>
+
+  <div class="knobs">
+    <div class="knob-group">
+      <span class="knob-label">Rail width</span>
+      <div class="seg" role="group" aria-label="Rail width">
+        <button data-w="150">150px</button>
+        <button data-w="190" aria-pressed="true">190px</button>
+        <button data-w="230">230px</button>
+      </div>
+    </div>
+    <div class="knob-group">
+      <span class="knob-label">Text</span>
+      <div class="seg" role="group" aria-label="Rail alignment">
+        <button data-a="left" aria-pressed="true">Left-aligned</button>
+        <button data-a="right">Right-aligned</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <section class="col">
+      <div class="col-head">
+        <h2>A, as you saw it<small>Flex edge. Workplace shares the location line.</small></h2>
+        <div class="stat"><b id="h-a">—</b>avg px</div>
+      </div>
+      <div class="recency-bucket">Opened today</div>
+      <div class="list v-a" id="list-a"></div>
+    </section>
+
+    <section class="col cand">
+      <div class="col-head">
+        <h2>A, refined<small>Fixed rail. Workplace under the location.</small></h2>
+        <div class="stat"><b id="h-b">—</b>avg px</div>
+      </div>
+      <div class="recency-bucket">Opened today</div>
+      <div class="list v-b" id="list-b" data-align="left"></div>
+    </section>
+  </div>
+
+  <div class="notes">
+    <p><b>Why 190px is the default.</b> Measured across all 4,534 visible postings with locations capped at two, the string runs 15 characters at the median and 34 at p95. A 190px rail holds <code>96%</code> of them without truncating; 150px holds about 84%, 230px effectively all of them. The wider you go, the further the location drifts from the company — that is the whole trade.</p>
+    <p><b>Left-aligned is the recommendation.</b> It gives the locations a straight left edge, so they form a column you can actually run your eye down — the thing right-alignment cost. Flip to right-aligned to compare; the ragged left edge is what you are looking for.</p>
+    <p><b>The rail only reaches into the title row when it has to.</b> Measured, titles run 47 characters at the median and 84 at p90 — so a rail that always spanned both rows would push <code>32%</code> of titles onto a second line, against 7.7% today. It now spans two rows only on the ~7% of postings that actually carry a workplace; every other card hands the title back the full width. Watch the Cigna title, which has no workplace and stays on one line.</p>
+    <p><b>Stress cases at the bottom</b> — a five-city Cigna programme and the Aston Martin posting whose British region resolved to a town in Arkansas. Watch those two when you change the rail width.</p>
+  </div>
+</div>
+
+<script>
+const WP = { remote: ["i-globe", "Remote"], hybrid: ["i-hybrid", "Hybrid"], onsite: ["i-onsite", "On-site"] };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const JOBS = [
+  { co: "PayPal", logo: "PP", tint: "#0070e0", title: "Software Engineer - Recent Graduate",
+    locs: ["San Jose, CA", "Chicago, IL", "Austin, TX"], skills: [] },
+  { co: "Saronic Technologies", logo: "SA", tint: "#7cc00a", title: "Enterprise Technology Intern (Summer 2027)",
+    locs: ["Austin, TX"], skills: [] },
+  { co: "Saronic Technologies", logo: "SA", tint: "#7cc00a", title: "Software Engineer Intern (Summer 2027)",
+    locs: ["Austin, TX"], skills: ["C++", "JavaScript", "Python", "Rust", "TypeScript"] },
+  { co: "DV Trading", logo: "DV", tint: "#2a2f6b", title: "AI Engineer Intern - Summer 2027",
+    locs: ["Chicago, IL"], skills: ["Python"] },
+  { co: "DV Trading", logo: "DV", tint: "#2a2f6b", title: "DevOps Engineer Intern - Summer 2027",
+    locs: ["Chicago, IL"], skills: ["Python"] },
+  { co: "Vercel", logo: "▲", tint: "#111", title: "Software Engineering Intern — Winter '27",
+    locs: ["San Francisco, CA"], wp: "remote", skills: ["TypeScript", "React", "Rust"] },
+  { co: "Coinbase", logo: "CB", tint: "#0052ff", title: "Machine Learning Engineer Intern",
+    locs: ["San Francisco, CA"], wp: "hybrid", skills: ["Python", "PyTorch", "Kubernetes", "Airflow", "SQL", "Go"] },
+  { co: "Moog", logo: "MO", tint: "#9b1b30", title: "Intern, Software Engineering",
+    locs: ["Mineral Wells, TX"], wp: "onsite", skills: ["C++", "Python"] },
+  { co: "Micron Technology", logo: "MU", tint: "#0057b8", title: "Software Engineering Intern",
+    locs: [], skills: ["C++"] },
+  { co: "Cigna / Evernorth", logo: "CG", tint: "#118a4e", title: "The Cigna Group's Technology Development Program - Software Engineering Track Summer Internship",
+    locs: ["St. Louis, MO", "Bloomington, MN", "Austin, TX", "Denver, CO", "Phoenix, AZ"],
+    skills: ["C#", "Java", "JavaScript", "Python", "TypeScript"] },
+  { co: "Aston Martin", logo: "AM", tint: "#00594f", title: "Graduate Software Engineer",
+    locs: ["Birmingham, United Kingdom", "Walsall, United Kingdom", "England, AR", "Coventry, United Kingdom"],
+    skills: ["C++"] },
+];
+
+const LIMIT = 2, TAG_CAP = 4;
+function place(locs) {
+  if (!locs.length) return { text: "Location not listed", more: "" };
+  const shown = locs.slice(0, LIMIT), rest = locs.length - shown.length;
+  return { text: shown.join(" · "), more: rest ? `+${rest}` : "" };
+}
+const wpMarkup = j => j.wp ? `<span class="wp" data-wp="${j.wp}"><svg aria-hidden="true"><use href="#${WP[j.wp][0]}"/></svg>${WP[j.wp][1]}</span>` : "";
+function tags(skills) {
+  const shown = skills.slice(0, TAG_CAP), rest = skills.length - shown.length;
+  if (!shown.length) return "";
+  return `<div class="tags">${shown.map(s => `<span class="tag">${esc(s)}</span>`).join("")}${rest ? `<span class="tag over">+${rest}</span>` : ""}</div>`;
+}
+const shell = (j, body, cls = "") => `<article class="op ${cls}"><div class="job-logo" style="color:${j.tint}">${esc(j.logo)}</div><div class="op-main">${body}</div></article>`;
+
+const cardA = j => {
+  const { text, more } = place(j.locs);
+  return shell(j, `<div class="head"><div class="job-company">${esc(j.co)}</div>
+    <div class="head-loc">${wpMarkup(j)}<span>${esc(text)}</span>${more ? `<span class="more">${esc(more)}</span>` : ""}</div></div>
+    <h3>${esc(j.title)}</h3>${tags(j.skills)}`);
+};
+const cardB = j => {
+  const { text, more } = place(j.locs);
+  return shell(j, `<div class="job-company">${esc(j.co)}</div><h3>${esc(j.title)}</h3>
+    <div class="rail"><div class="rail-loc"><span>${esc(text)}</span>${more ? `<span class="more">${esc(more)}</span>` : ""}</div>${wpMarkup(j)}</div>
+    ${tags(j.skills)}`, j.wp ? "has-wp" : "");
+};
+
+function render() {
+  const a = document.getElementById("list-a"), b = document.getElementById("list-b");
+  a.innerHTML = JOBS.map(cardA).join("");
+  b.innerHTML = JOBS.map(cardB).join("");
+  requestAnimationFrame(() => {
+    for (const [id, list] of [["h-a", a], ["h-b", b]]) {
+      const cards = [...list.children];
+      document.getElementById(id).textContent =
+        Math.round(cards.reduce((n, el) => n + el.offsetHeight, 0) / (cards.length || 1));
+    }
+  });
+}
+document.querySelectorAll("[data-w]").forEach(btn => btn.addEventListener("click", () => {
+  document.querySelectorAll("[data-w]").forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+  document.documentElement.style.setProperty("--rail", `${btn.dataset.w}px`);
+  render();
+}));
+document.querySelectorAll("[data-a]").forEach(btn => btn.addEventListener("click", () => {
+  document.querySelectorAll("[data-a]").forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+  document.getElementById("list-b").dataset.align = btn.dataset.a;
+  render();
+}));
+render();
+</script>

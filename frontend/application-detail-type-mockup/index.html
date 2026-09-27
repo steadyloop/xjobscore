@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Static application-detail typography mockup for OneShot.">
+  <title>Application detail · OneShot mockup</title>
+  <style>
+    :root {
+      --canvas: #f5f4ef;
+      --paper: #fffefa;
+      --paper-soft: #faf9f4;
+      --ink: #172119;
+      --muted: #606a62;
+      --faint: #7b847d;
+      --line: #dcded5;
+      --line-strong: #c8ccc1;
+      --green: #276c4c;
+      --green-soft: #e6f1e9;
+      --blue: #356c91;
+      --red: #a54036;
+      --red-soft: #fbebe8;
+      --shadow: 0 1px 2px rgb(20 32 24 / 4%), 0 14px 36px rgb(20 32 24 / 5%);
+      --radius: 16px;
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      min-width: 320px;
+      background: var(--canvas);
+      font-size: 17px;
+    }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font: 1rem/1.5 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      color: inherit;
+      font: inherit;
+    }
+
+    button,
+    select { cursor: pointer; }
+    button { border: 0; }
+
+    svg {
+      width: 1.15rem;
+      height: 1.15rem;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.8;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgb(53 108 145 / 24%);
+      outline-offset: 2px;
+    }
+
+    .screen {
+      min-height: 100dvh;
+      padding-bottom: 116px;
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 254 250 / 94%);
+    }
+
+    .topbar-inner,
+    .content,
+    .actionbar-inner {
+      width: min(1120px, calc(100% - 48px));
+      margin-inline: auto;
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      padding-block: 30px 28px;
+    }
+
+    .company-mark {
+      width: 64px;
+      height: 64px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border-radius: 18px;
+      background: #496a70;
+      color: white;
+      font-size: 1.25rem;
+      font-weight: 780;
+      letter-spacing: -.03em;
+    }
+
+    .title-block {
+      min-width: 0;
+      flex: 1;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 1px 0 5px;
+      font-size: clamp(1.75rem, 3vw, 2.125rem);
+      line-height: 1.16;
+      letter-spacing: -.042em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.0625rem;
+    }
+
+    .close-button {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .close-button:hover { background: var(--paper-soft); color: var(--ink); }
+
+    .content {
+      display: grid;
+      gap: 18px;
+      padding-block: 28px 42px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .section {
+      padding: 26px 28px 30px;
+    }
+
+    .section + .section { border-top: 1px solid var(--line); }
+
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      font-size: 1.18rem;
+      line-height: 1.25;
+      letter-spacing: -.02em;
+    }
+
+    .section-heading p {
+      margin: 0;
+      color: var(--faint);
+      font-size: .88rem;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px 22px;
+    }
+
+    .field {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+    }
+
+    .field.full { grid-column: 1 / -1; }
+
+    label {
+      color: #4f5a52;
+      font-size: .94rem;
+      font-weight: 720;
+      letter-spacing: .005em;
+    }
+
+    .optional {
+      color: var(--faint);
+      font-size: .78rem;
+      font-weight: 540;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--paper);
+      outline: none;
+      font-size: 1rem;
+      transition: border-color .16s ease, box-shadow .16s ease;
+    }
+
+    input,
+    select {
+      min-height: 56px;
+      padding: 13px 16px;
+    }
+
+    textarea {
+      min-height: 132px;
+      padding: 14px 16px;
+      line-height: 1.5;
+      resize: vertical;
+    }
+
+    input::placeholder,
+    textarea::placeholder { color: #929a93; opacity: 1; }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 4px rgb(53 108 145 / 11%);
+    }
+
+    .history {
+      display: grid;
+      grid-template-columns: 132px 22px minmax(0, 1fr);
+      align-items: center;
+      min-height: 54px;
+    }
+
+    .history time {
+      color: var(--faint);
+      font-size: .94rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .history-dot {
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--paper);
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 2px var(--green-soft);
+    }
+
+    .history strong { font-size: 1rem; }
+
+    .status-pill {
+      width: fit-content;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 999px;
+      background: var(--green-soft);
+      padding: 5px 10px;
+      color: var(--green);
+      font-size: .82rem;
+      font-weight: 720;
+    }
+
+    .status-pill::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      content: "";
+    }
+
+    .actionbar {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 10;
+      border-top: 1px solid var(--line);
+      background: rgb(255 254 250 / 94%);
+      box-shadow: 0 -10px 30px rgb(20 32 24 / 5%);
+      backdrop-filter: blur(14px);
+    }
+
+    .actionbar-inner {
+      min-height: 86px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .action-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .button {
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: transparent;
+      padding: 10px 16px;
+      color: var(--muted);
+      font-size: .96rem;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .button:hover { background: var(--paper-soft); color: var(--ink); }
+    .button.outline { border-color: var(--line-strong); background: var(--paper); color: var(--ink); }
+    .button.danger { color: var(--red); }
+    .button.danger:hover { background: var(--red-soft); }
+
+    .button.primary {
+      min-width: 142px;
+      border-color: var(--ink);
+      background: var(--ink);
+      color: white;
+    }
+
+    .button.primary:hover { background: #29342c; }
+
+    @media (max-width: 760px) {
+      .screen { padding-bottom: 164px; }
+
+      .topbar-inner,
+      .content,
+      .actionbar-inner { width: min(100% - 28px, 1120px); }
+
+      .topbar-inner { gap: 14px; padding-block: 20px; }
+      .company-mark { width: 50px; height: 50px; border-radius: 14px; }
+      h1 { font-size: 1.55rem; }
+      .subtitle { font-size: .94rem; }
+      .close-button { width: 40px; height: 40px; }
+      .content { padding-block: 16px 28px; }
+      .section { padding: 22px 18px 24px; }
+      .section-heading { display: grid; gap: 3px; margin-bottom: 17px; }
+      .form-grid { grid-template-columns: 1fr; gap: 17px; }
+      .field.full { grid-column: auto; }
+      .history { grid-template-columns: 104px 20px minmax(0, 1fr); }
+
+      .actionbar-inner {
+        min-height: 142px;
+        align-content: center;
+        align-items: stretch;
+        display: grid;
+        gap: 8px;
+        padding-block: 12px;
+      }
+
+      .action-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .button.danger { position: absolute; top: -46px; right: 14px; }
+      .button.primary { min-width: 0; }
+    }
+
+    @media (max-width: 480px) {
+      html { font-size: 16px; }
+      .company-mark { display: none; }
+      .history { grid-template-columns: 1fr; gap: 4px; }
+      .history-dot { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="screen">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="company-mark" aria-hidden="true">T</div>
+        <div class="title-block">
+          <h1>Summer 2027 SRE – Observability Engineering Internship</h1>
+          <p class="subtitle">Tradeweb · Jersey City, NJ</p>
+        </div>
+        <button class="close-button" type="button" aria-label="Close application">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="content">
+      <article class="panel">
+        <section class="section" aria-labelledby="application-heading">
+          <div class="section-heading">
+            <h2 id="application-heading">Application</h2>
+            <span class="status-pill">Considering</span>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="company">Company</label>
+              <input id="company" name="company" value="Tradeweb">
+            </div>
+
+            <div class="field">
+              <label for="role">Role</label>
+              <input id="role" name="role" value="Summer 2027 SRE – Observability Engineering Internship">
+            </div>
+
+            <div class="field">
+              <label for="stage">Stage</label>
+              <select id="stage" name="stage">
+                <option selected>Considering</option>
+                <option>Applied</option>
+                <option>Assessment</option>
+                <option>Interview</option>
+                <option>Offer</option>
+                <option>Closed</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="applied">Date applied <span class="optional">Optional</span></label>
+              <input id="applied" name="applied" type="date">
+            </div>
+
+            <div class="field">
+              <label for="location">Location</label>
+              <input id="location" name="location" value="Jersey City, NJ">
+            </div>
+
+            <div class="field">
+              <label for="resume">Resume sent <span class="optional">Optional</span></label>
+              <input id="resume" name="resume" placeholder="Choose a resume version">
+            </div>
+
+            <div class="field full">
+              <label for="url">Posting URL</label>
+              <input id="url" name="url" type="url" value="https://ecnf.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/cx/job/301917/">
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="follow-up-heading">
+          <div class="section-heading">
+            <h2 id="follow-up-heading">Follow-up</h2>
+            <p>Keep the next step specific and time-bound.</p>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="next-action">Next action <span class="optional">Optional</span></label>
+              <input id="next-action" name="next-action" placeholder="e.g. Tailor resume and apply">
+            </div>
+
+            <div class="field">
+              <label for="next-date">Due date <span class="optional">Optional</span></label>
+              <input id="next-date" name="next-date" type="date">
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="notes-heading">
+          <div class="section-heading">
+            <h2 id="notes-heading">Notes</h2>
+            <p>Interview context, contacts, or decision criteria.</p>
+          </div>
+          <div class="field">
+            <label for="notes">Application notes <span class="optional">Optional</span></label>
+            <textarea id="notes" name="notes" placeholder="Add anything you’ll want to remember later…"></textarea>
+          </div>
+        </section>
+      </article>
+
+      <section class="panel section" aria-labelledby="history-heading">
+        <div class="section-heading">
+          <h2 id="history-heading">History</h2>
+          <p>1 update</p>
+        </div>
+        <div class="history">
+          <time datetime="2026-09-09">Sep 9, 2026</time>
+          <span class="history-dot" aria-hidden="true"></span>
+          <strong>Added as Considering</strong>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="actionbar">
+    <div class="actionbar-inner">
+      <button class="button danger" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+        Delete
+      </button>
+
+      <div class="action-group">
+        <button class="button" type="button">
+          Open posting
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 13v6a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h6"/></svg>
+        </button>
+        <button class="button outline" type="button">Tailor resume</button>
+        <button class="button" type="button">Cancel</button>
+        <button class="button primary" type="button">Save changes</button>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

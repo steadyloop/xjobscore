@@ -1,13 +1,12 @@
 (function (root) {
   "use strict";
 
-  const STUDENT_JOB_TYPES = ["intern", "coop", "student", "new_grad", "research"];
   const FILTERS = [
-    { key: "all", label: "All", types: [] },
     { key: "internships", label: "Internships", types: ["intern"] },
     { key: "coops", label: "Co-ops", types: ["coop"] },
     { key: "students", label: "Student Jobs", types: ["student"] },
     { key: "new_grads", label: "New Grad", types: ["new_grad"] },
+    { key: "research", label: "Research", types: ["research"] },
   ];
   const DEGREE_FILTERS = [
     { key: "software", label: "Software" },
@@ -53,11 +52,17 @@
   const SKILL_CATEGORY_BY_KEY = new Map(
     SKILL_CATEGORIES.map((category, index) => [category.key, { ...category, index }]),
   );
+  const CONCRETE_SKILL_CATEGORIES = new Set([
+    "language", "framework", "library", "datastore", "platform", "tool", "protocol", "format", "hardware",
+  ]);
+  const EXPERTISE_SKILL_CATEGORIES = new Set(["method", "concept"]);
   const UNKNOWN_SKILL_CATEGORY = { key: "unknown", label: "Other", index: SKILL_CATEGORIES.length };
   const PAGE_SIZE = 100;
+  const seasonFilter = value => ["fall", "winter"].includes(value) ? value : "";
+  const sortOrder = value => seasonFilter(value) ? "fresh" : value;
   const jobTypes = filters => filters.flatMap(key => FILTERS.find(filter => filter.key === key)?.types || []);
   const degreeFields = filters => filters.filter(key => DEGREE_FILTERS.some(filter => filter.key === key));
-  const tabCount = (counts, filter) => (filter.types.length ? filter.types : STUDENT_JOB_TYPES).reduce(
+  const tabCount = (counts, filter) => filter.types.reduce(
     (total, type) => total + Math.max(0, Number(counts?.[type]) || 0), 0,
   );
   const esc = value => String(value == null ? "" : value).replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -107,31 +112,55 @@
     return ` title="${esc(`${skill.name} · ${category.label}`)}" aria-label="${esc(`${skill.name}, ${category.label}`)}"`;
   }
 
+  function skillDisplayLabel(skill) {
+    const compactCompound = /[a-z][A-Z]|^(?:API|DB|GPU)-(?:Dev|Design)$/;
+    return EXPERTISE_SKILL_CATEGORIES.has(skillCategory(skill).key) && compactCompound.test(skill.label)
+      ? skill.name
+      : skill.label;
+  }
+
   function skillChipMarkup(skill, className) {
     const category = skillCategory(skill);
-    return `<span class="${className}" data-skill-id="${esc(skill.id)}" data-skill-category="${category.key}"${skillTitleAttrs(skill)}>${esc(skill.label)}</span>`;
+    return `<span class="${className}" data-skill-id="${esc(skill.id)}" data-skill-category="${category.key}"${skillTitleAttrs(skill)}>${esc(skillDisplayLabel(skill))}</span>`;
   }
 
   function detailSkillsMarkup(job) {
     const values = orderedSkillDetails(job);
     if (!values.length) return "";
-    const groups = [];
+    const concrete = [];
+    const expertise = [];
+    const other = [];
     for (const skill of values) {
       const category = skillCategory(skill);
-      let group = groups.at(-1);
-      if (!group || group.category.key !== category.key) {
-        group = { category, skills: [] };
-        groups.push(group);
-      }
-      group.skills.push(skill);
+      if (CONCRETE_SKILL_CATEGORIES.has(category.key)) concrete.push(skill);
+      else if (EXPERTISE_SKILL_CATEGORIES.has(category.key)) expertise.push(skill);
+      else other.push(skill);
     }
-    const markup = groups.map(group => `<div class="skill-group" data-skill-group="${group.category.key}"><div class="skill-group-title">${group.category.label}</div><div class="skill-list">${group.skills.map(skill => skillChipMarkup(skill, "skill")).join("")}</div></div>`).join("");
-    return `<section><div class="section-kicker">Skills</div><div class="skill-groups">${markup}</div></section>`;
+    const concreteMarkup = concrete.length
+      ? `<section class="detail-skill-section" data-skill-section="skills"><div class="section-kicker">Skills</div><div class="skill-list">${concrete.map(skill => skillChipMarkup(skill, "skill")).join("")}</div></section>`
+      : "";
+    const expertiseMarkup = expertise.length
+      ? `<section class="detail-skill-section" data-skill-section="expertise"><div class="section-kicker">Expertise</div><div class="expertise-list" role="group" aria-label="Methods and concepts">${expertise.map(skill => skillChipMarkup(skill, "expertise-term")).join("")}</div></section>`
+      : "";
+    const otherMarkup = other.length
+      ? `<section class="detail-skill-section" data-skill-section="other"><div class="section-kicker">Other</div><div class="skill-list">${other.map(skill => skillChipMarkup(skill, "skill")).join("")}</div></section>`
+      : "";
+    return `${concreteMarkup}${expertiseMarkup}${otherMarkup}`;
   }
   function initials(job) {
     const words = String(job?.company || "").split(/\s+/).filter(Boolean);
     if (!words.length) return "?";
     return (words.length > 1 ? words.slice(0, 2).map(word => word[0]).join("") : words[0].slice(0, 2)).toUpperCase();
+  }
+  // Same-origin path only. The mark is server-issued, so a value that does not
+  // look like the logo route is dropped rather than rendered as a remote src.
+  const logoSrc = value => /^\/api\/companies\/\d+\/logo$/.test(String(value || "")) ? String(value) : "";
+  // The logo or the initials, never both: a transparent PNG layered over the
+  // letters it replaces reads as a smudge.
+  function logoMarkup(job) {
+    const src = logoSrc(job?.logo);
+    if (!src) return esc(initials(job));
+    return `<img class="job-logo-mark" src="${esc(src)}" alt="" loading="lazy" decoding="async">`;
   }
   const workplaceLabel = value => ({ yes: "Remote", hybrid: "Hybrid" })[value] || "";
 
@@ -190,7 +219,7 @@
   }
 
   const freshness = (job, now = new Date()) => postedPresentation(job.posted_at, now, job.first_seen_at);
-  const RECENCY_TIME_ZONE = "America/Los_Angeles";
+  const RECENCY_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const recencyDayKey = value => {
     const date = new Date(value || "");
     if (Number.isNaN(date.getTime())) return "";
@@ -256,38 +285,34 @@
     return `<div class="card-meta">${items.join("")}</div>`;
   }
 
-  // Polling keeps every listing live, so liveness is a constant and says nothing.
-  // The card footline states the one date that separates one job from another.
-  const cardStatusLine = (job, now = new Date()) => freshness(job, now);
-
-  const openPostingLabel = job => String(job?.source || "").trim() ? `Open on ${sourceLabel(job.source)}` : "Open posting";
   const detailHeadMarkup = job => `<div class="detail-headline"><span class="detail-company">${esc(job.company)}</span><span class="detail-headline-sep" aria-hidden="true">·</span>${factMarkup(detailPlace(job), "detail-fact detail-place")}</div>`;
 
-  function sourceDisclosureMarkup(job, now = new Date()) {
+  // Keep the route to each original listing direct while retaining the useful
+  // check/posted context. Source-role badges and a heading only add noise here.
+  function postedOnMarkup(job, now = new Date()) {
     const choices = sourceChoices(job);
-    if (choices.length < 2) return { inline: "", panel: "" };
-    const panelId = `job-sources-${String(job.id).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-    const inline = `<span class="posted-sep" aria-hidden="true">·</span><button class="source-toggle" type="button" data-action="toggle-sources" data-source-count="${choices.length}" aria-expanded="false" aria-controls="${esc(panelId)}" aria-label="Show ${choices.length} posting sources">${choices.length} sources</button>`;
-    const links = choices.slice(1).map(choice => `<a class="source-option" href="${esc(choice.url)}" target="_blank" rel="noopener noreferrer"><span>${esc(choice.label)} ↗</span><small>${esc(freshness(choice, now))}</small></a>`).join("");
-    return {
-      inline,
-      panel: `<div class="source-options" id="${esc(panelId)}" aria-label="Other posting sources" hidden><span class="source-options-label">Also available on</span>${links}</div>`,
-    };
+    if (!choices.length) return "";
+    const links = choices.map((choice, index) => {
+      const when = index === 0 && job.last_seen_at
+        ? `checked ${relativeTime(job.last_seen_at, now)}`
+        : freshness(choice, now);
+      return `<a class="posting-link" href="${esc(choice.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(choice.label)} posting in a new tab"><span class="posting-link-copy"><span class="posting-link-label">${esc(choice.label)}</span><small>${esc(when)}</small></span><span class="posting-link-arrow" aria-hidden="true">↗</span></a>`;
+    }).join("");
+    return `<nav class="posting-links" aria-label="Original job postings">${links}</nav>`;
   }
 
   function detailPostedMarkup(job, now = new Date()) {
-    const disclosure = sourceDisclosureMarkup(job, now);
-    return `<div class="detail-posted"><span class="posted-when">${esc(freshness(job, now))}</span>${job.last_seen_at ? `<span class="posted-sep" aria-hidden="true">·</span><span class="posted-checked">checked ${esc(relativeTime(job.last_seen_at, now))}</span>` : ""}${disclosure.inline}</div>${disclosure.panel}`;
+    return `<div class="detail-posted"><span class="posted-when">${esc(freshness(job, now))}</span>${job.last_seen_at ? `<span class="posted-sep" aria-hidden="true">·</span><span class="posted-checked">checked ${esc(relativeTime(job.last_seen_at, now))}</span>` : ""}</div>`;
   }
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { FILTERS, DEGREE_FILTERS, SKILL_CATEGORIES, SKILL_BUNDLES, jobTypes, degreeFields, tabCount, safeHref, sourceLabel, sourceChoices, sourceDisclosureMarkup, relativeTime, postedPresentation, recencyBucket, detailSkillsMarkup, skillDetails, orderedSkillDetails, skillBundles, listTags, workplaceLabel, freshness, listFacts, deadlineLabel, metaFacts, detailMetaMarkup, cardMetaMarkup, openPostingLabel, detailHeadMarkup, detailPostedMarkup, summaryMarkup, initials, cardStatusLine };
+    module.exports = { FILTERS, DEGREE_FILTERS, SKILL_CATEGORIES, SKILL_BUNDLES, jobTypes, degreeFields, tabCount, seasonFilter, sortOrder, safeHref, sourceLabel, sourceChoices, postedOnMarkup, relativeTime, postedPresentation, recencyBucket, detailSkillsMarkup, skillDetails, orderedSkillDetails, skillBundles, listTags, workplaceLabel, freshness, listFacts, deadlineLabel, metaFacts, detailMetaMarkup, cardMetaMarkup, detailHeadMarkup, detailPostedMarkup, summaryMarkup, initials, logoSrc, logoMarkup };
   }
   if (!root.document) return;
 
   const $ = selector => root.document.querySelector(selector);
   const view = $("#view"), flash = $("#flash");
-  const state = { jobs: null, total: 0, typeCounts: {}, loadingMore: false, selected: null, filters: ["all"], degreeFilters: ["software"], sort: "fresh", query: "" };
+  const state = { jobs: null, total: 0, typeCounts: {}, loadingMore: false, selected: null, filters: ["internships"], degreeFilters: ["software"], sort: "fresh", query: "" };
 
   const paint = html => {
     view.innerHTML = html;
@@ -315,7 +340,10 @@
   const errorState = (title, error) => `<div class="state"><h1>${esc(title)}</h1><p>${esc(error.message || error)}</p><button class="button primary" data-action="retry">Try again</button></div>`;
   const loading = () => paint('<div class="state loading"><i></i><h1>Loading Opportunities</h1><p>Reading the latest API data.</p></div>');
   function listTags(job) {
-    return skillBundles(job).map(bundle => `<div class="skill-bundle" data-skill-bundle="${bundle.key}"><div class="skill-bundle-title">${bundle.label}</div><div class="skill-bundle-list">${bundle.skills.map(skill => skillChipMarkup(skill, "tag")).join("")}</div></div>`).join("");
+    return skillBundles(job)
+      .filter(bundle => bundle.key === "languages" || bundle.key === "stack")
+      .map(bundle => bundle.skills.map(skill => skillChipMarkup(skill, `tag tag-${bundle.key}`)).join(""))
+      .join("");
   }
 
   function filtersMarkup() {
@@ -334,14 +362,13 @@
   }
 
   function opportunity(job) {
-    const recent = new Date(job.posted_at || job.first_seen_at).getTime() > Date.now() - 3 * 86400000;
     const selected = String(job.id) === String(state.selected);
     const tags = listTags(job);
-    return `<article class="opportunity ${selected ? "selected" : ""}" data-job="${esc(job.id)}" tabindex="0" role="button" aria-selected="${selected}"><div class="job-logo">${esc(initials(job))}</div><div class="opportunity-main"><div class="job-company-line"><div class="job-company">${esc(job.company)}</div>${recent ? '<span class="new-badge">New</span>' : ""}</div><h3>${esc(job.title)}</h3>${cardMetaMarkup(job)}${tags ? `<div class="tags">${tags}</div>` : ""}<div class="job-footline">${esc(cardStatusLine(job))}</div></div></article>`;
+    return `<article class="opportunity ${selected ? "selected" : ""}" data-job="${esc(job.id)}" tabindex="0" role="button" aria-selected="${selected}"><div class="job-logo">${logoMarkup(job)}</div><div class="opportunity-main"><div class="job-company">${esc(job.company)}</div><h3>${esc(job.title)}</h3>${cardMetaMarkup(job)}${tags ? `<div class="tags">${tags}</div>` : ""}</div></article>`;
   }
 
   function opportunitiesMarkup(jobs) {
-    if (state.sort !== "fresh") return jobs.map(opportunity).join("");
+    if (!["fresh", "oldest"].includes(sortOrder(state.sort))) return jobs.map(opportunity).join("");
     let previous = null;
     return jobs.map(job => {
       const bucket = recencyBucket(job);
@@ -359,8 +386,7 @@
 
   function detail(job) {
     if (!job) return '<aside class="detail"><div class="section-kicker">Selection</div><h2>Choose a job</h2><p>Select a role to review its details and add it to Applications.</p></aside>';
-    const postingSource = sourceChoices(job)[0];
-    return `<aside class="detail">${detailHeadMarkup(job)}<h2>${esc(job.title)}</h2>${detailMetaMarkup(job)}${detailPostedMarkup(job)}<div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(job.id)}">Add to Applications</button>${postingSource ? `<a class="button" href="${esc(postingSource.url)}" target="_blank" rel="noopener noreferrer">${esc(openPostingLabel(postingSource))} ↗</a>` : ""}</div>${detailSkillsMarkup(job)}<section><div class="section-kicker">Role summary</div>${summaryMarkup(job)}</section></aside>`;
+    return `<aside class="detail">${detailHeadMarkup(job)}<h2>${esc(job.title)}</h2>${detailMetaMarkup(job)}${detailPostedMarkup(job)}<div class="detail-actions"><button class="button primary" data-action="add-to-applications" data-id="${esc(job.id)}">Add to Applications</button></div>${detailSkillsMarkup(job)}<section><div class="section-kicker">Role summary</div>${summaryMarkup(job)}</section>${postedOnMarkup(job)}</aside>`;
   }
 
   function pagerMarkup(jobs) {
@@ -372,7 +398,7 @@
   function render() {
     const search = $("#opportunities-search"), restoreFocus = search && root.document.activeElement === search, selectionStart = restoreFocus ? search.selectionStart : null;
     const jobs = state.jobs || [], selected = jobs.find(job => String(job.id) === String(state.selected));
-    paint(`<section class="discover-page"><header class="discover-page-head"><div><div class="section-kicker">Discover</div><h1>Opportunities</h1></div></header><div class="discover-grid"><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div><div class="degree-filterbar" role="group" aria-label="Focus area mentioned"><span class="degree-filter-label">Focus area mentioned</span>${degreeFiltersMarkup()}</div></section><div class="discover-search-surface"><label class="discover-search"><svg aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="opportunities-search" data-search placeholder="Search roles, companies, or skills" autocomplete="off" value="${esc(state.query)}"><kbd>⌘ K</kbd></label><label class="discover-sort"><select data-sort aria-label="Sort opportunities"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="company" ${state.sort === "company" ? "selected" : ""}>Company A–Z</option><option value="title" ${state.sort === "title" ? "selected" : ""}>Role title A–Z</option></select></label></div><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? opportunitiesMarkup(jobs) : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
+    paint(`<section class="discover-page"><header class="discover-page-head"><div><div class="section-kicker">Discover</div><h1>Opportunities</h1></div></header><div class="discover-grid"><section class="discover-controls-pane" aria-label="Opportunity controls"><div class="discover-filterbar" role="tablist" aria-label="Job types">${filtersMarkup()}</div><div class="degree-filterbar" role="group" aria-label="Focus area mentioned"><span class="degree-filter-label">Focus area mentioned</span>${degreeFiltersMarkup()}</div></section><div class="discover-search-surface"><label class="discover-search"><svg aria-hidden="true"><use href="#icon-search"/></svg><span class="sr-only">Search opportunities</span><input id="opportunities-search" data-search placeholder="Search roles, companies, skills, or ATS" autocomplete="off" value="${esc(state.query)}"><kbd>⌘ K</kbd></label><label class="discover-sort"><select data-sort aria-label="Opportunity order or season"><option value="fresh" ${state.sort === "fresh" ? "selected" : ""}>Newest first</option><option value="oldest" ${state.sort === "oldest" ? "selected" : ""}>Oldest first</option><option value="fall" ${state.sort === "fall" ? "selected" : ""}>Fall Only</option><option value="winter" ${state.sort === "winter" ? "selected" : ""}>Winter Only</option></select></label></div><div class="opportunity-list" role="tabpanel" aria-label="Opportunity results">${jobs.length ? opportunitiesMarkup(jobs) : '<div class="empty"><h2>No matching jobs yet</h2><p>Try another search.</p></div>'}${pagerMarkup(jobs)}</div>${detail(selected)}</div></section>`);
     if (restoreFocus) {
       const next = $("#opportunities-search");
       next?.focus();
@@ -385,7 +411,7 @@
     else if (state.jobs === null) loading();
     try {
       const offset = append ? (state.jobs || []).length : 0;
-      const payload = await root.OneShotAPI.jobs.list({ q: state.query, sort: state.sort, job_type: jobTypes(state.filters), degree_field: degreeFields(state.degreeFilters), limit: PAGE_SIZE, offset });
+      const payload = await root.OneShotAPI.jobs.list({ q: state.query, season: seasonFilter(state.sort), sort: sortOrder(state.sort), job_type: jobTypes(state.filters), degree_field: degreeFields(state.degreeFilters), limit: PAGE_SIZE, offset });
       state.total = payload.total;
       state.typeCounts = payload.job_type_counts || {};
       state.jobs = append ? [...(state.jobs || []), ...payload.jobs] : payload.jobs;
@@ -424,16 +450,6 @@
         await loadJobs();
         await root.OneShotOpportunityCount.refresh();
         return announce("Addition undone.");
-      }
-      if (action === "toggle-sources") {
-        const button = event.target.closest("[aria-controls]");
-        const panel = root.document.getElementById(button.getAttribute("aria-controls"));
-        if (!panel) return;
-        const expanded = button.getAttribute("aria-expanded") !== "true";
-        button.setAttribute("aria-expanded", String(expanded));
-        button.setAttribute("aria-label", `${expanded ? "Hide" : "Show"} ${button.dataset.sourceCount} posting sources`);
-        panel.hidden = !expanded;
-        return;
       }
       const job = event.target.closest("[data-job]");
       if (job) { state.selected = job.dataset.job; render(); }

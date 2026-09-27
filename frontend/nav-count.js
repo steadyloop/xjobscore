@@ -147,6 +147,7 @@
     // with no backend at all. The identity probe below still runs, because a
     // switch left on from browsing as a guest has to be noticed — but nothing
     // on screen is waiting on it.
+    await root.OneShotSampleData?.ready?.();
     const sample = sampleModeOn();
     if (sample) asGuest();
 
