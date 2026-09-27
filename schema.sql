@@ -1,41 +1,45 @@
 -- xjobscore -- PostgreSQL 18
--- createdb xjobscore
--- psql -v ON_ERROR_STOP=1 --dbname=xjobscore --file=schema.sql
-
--- DO NOT EDIT, this is source of truth.
+-- DO NOT EDIT, this is source of truth. --
 
 BEGIN;
 
 -- USERS --
 CREATE TABLE account (
-    id          uuid PRIMARY KEY,   -- minted here, not by the provider: a Google
-                                    -- `sub` is a numeric string, not a uuid
+    id          uuid PRIMARY KEY,
     profile     jsonb NOT NULL DEFAULT '{}',
-    -- Identity, as returned by Google OIDC. NULL on the local sentinel account
-    -- below, which predates authentication and belongs to no person.
     email       text UNIQUE,
     google_sub  text UNIQUE,        -- OIDC subject; stable across email changes
     name        text NOT NULL DEFAULT '',
     picture_url text NOT NULL DEFAULT '',
     created_at  timestamptz NOT NULL DEFAULT now()
 );
--- Nobody's login: email and google_sub stay NULL, so no Google identity can ever
--- resolve to it. It survives as the default account_id of a PostgresRepository
--- or PostgresResumeStore constructed without one — a code path the API no longer
--- takes, but which tests use and which needs a real row to satisfy the foreign
--- keys. Nothing DEFAULTs to it any more: an unscoped write now fails outright.
 INSERT INTO account (id)
 VALUES ('00000000-0000-0000-0000-000000000001');
 
 -- COMPANIES --
 CREATE TABLE company (
     id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name               text NOT NULL,
+    name               text NOT NULL, -- the display name (canonical)
     domain             text UNIQUE,
-    domain_verified_at timestamptz, -- NULL if unverified
     description        text,        -- 6-8 words
-    labels             jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(labels) = 'object') -- ck_list, bio_eng
+    discovered_from    text,
+    created_at         timestamptz,
+    -- Review verdict. A column rather than a `tags` key because every company
+    -- has exactly one, drawn from a fixed set: `tags` cannot constrain that,
+    -- and "unreviewed" as a missing key conflated absent/null/empty-document.
+    -- Rejection is a label, never a DELETE -- job_posting_company_id_fkey is
+    -- NO ACTION, so a company carrying postings refuses to be removed.
+    reviewed           text NOT NULL DEFAULT 'pending'
+        CONSTRAINT company_reviewed_state
+        CHECK (reviewed IN ('pending', 'verified', 'rejected')),
+    reviewed_at        timestamptz,
+    reviewed_by        text,        -- 'human' | 'import'
+    tags               jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(tags) = 'object') -- ck_list, bio_eng, startup
 );
+
+-- Only the rare verdicts are indexed: `pending` is the bulk of the table, and
+-- the queue that reads it is already scanning for postings alongside.
+CREATE INDEX company_reviewed ON company (reviewed) WHERE reviewed <> 'pending';
 
 CREATE TABLE company_alias (
     alias_norm text PRIMARY KEY,
@@ -43,6 +47,12 @@ CREATE TABLE company_alias (
     alias      text NOT NULL
 );
 CREATE INDEX company_alias_company_idx ON company_alias (company_id);
+
+-- The 40px mark on an opportunity card, harvested from the company's own site.
+CREATE TABLE company_logo (
+    company_id bigint PRIMARY KEY REFERENCES company (id) ON DELETE CASCADE,
+    bytes      bytea -- NULL records a domain that refused to answer, so rerun skips.
+);
 
 -- FEEDS --
 CREATE TABLE token (
@@ -52,17 +62,11 @@ CREATE TABLE token (
     status     text NOT NULL DEFAULT 'unknown'
         CHECK (status IN ('unknown', 'live', 'dead')),
     muted      boolean NOT NULL DEFAULT false,
-    -- Endpoint-specific adapter values the URL templates and params in
-    -- sources/*-configs.py interpolate: a board hostname, an API token, a
-    -- career-section URL. Operator-entered -- no code path writes it -- and
-    -- never loaded from a checked-in catalog, because the worker and the
-    -- inspector both read it and must agree. It rides with the token rather
-    -- than the feed so that `token` + `company` reproduces a feed completely.
     config     jsonb NOT NULL DEFAULT '{}'::jsonb
         CONSTRAINT token_config_object CHECK (jsonb_typeof(config) = 'object'),
     
     -- discovery --
-    source text,
+    source        text,
     checked_at    timestamptz,
     discovered_at timestamptz,
     imported_at   timestamptz, -- set when a row is bulk-loaded from an external resolution (e.g. keyscan)
@@ -83,9 +87,6 @@ CREATE TABLE feed (
     source   text NOT NULL, -- ashby, greenhouse, workable, etc.
     key      text NOT NULL, -- openai, anthropic, janestreet, etc.
     polling  boolean NOT NULL DEFAULT false,
-    -- Per-tenant adapter values live on `token.config`, not here: `feed` is
-    -- rebuilt from `token` by promotion, and config is the one input nothing
-    -- can re-derive. See migrations/20260827_token_config.sql.
     type         text NOT NULL DEFAULT 'ATS'
         CHECK (type IN ('ATS', 'Direct', 'Board')),
     -- Config
@@ -106,7 +107,10 @@ CREATE TABLE feed (
     -- Health
     strikes         smallint NOT NULL DEFAULT 0 CHECK (strikes >= 0), -- fail strike; drives retry backoff/disable
     last_poll_at    timestamptz,
-    paused_at       timestamptz, -- operator hold; the feed keeps polling=true and stays visible, but is never claimed
+    -- Vestigial: pause is `polling = false` now, and a held feed stays listed
+    -- because the Scheduler's membership test is the row's existence, not the
+    -- flag. Nothing writes this; see migrations/20260901_unify_pause_into_polling.sql.
+    paused_at       timestamptz,
 
     -- Potential fields
     -- feed.cursor — only needed for incremental pagination; skip until an adapter demands it.
@@ -119,21 +123,21 @@ CREATE TABLE feed (
     CONSTRAINT feed_workday_key_lower
         CHECK (source <> 'workday' OR key = lower(key))
 );
-CREATE INDEX feed_due_idx ON feed (due_at) WHERE paused_at IS NULL;
+CREATE INDEX feed_due_idx ON feed (due_at) WHERE polling;
+-- run.cycle's per-vendor worker pools each claim the oldest due feed *of one
+-- source*, so that claim walks the queue per source rather than globally.
+CREATE INDEX feed_source_due_idx ON feed (source, due_at) WHERE polling;
 
--- One row per poll, append-only during normal operation. Dropping a feed
--- removes its observations through the foreign-key cascade; otherwise this is
--- the history the arrival-rate estimator, replay simulator, and feed sparkline read.
-CREATE TABLE poll_observation (
+CREATE TABLE poll_log (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     feed_id      bigint NOT NULL REFERENCES feed (id) ON DELETE CASCADE,
     polled_at    timestamptz NOT NULL DEFAULT now(),
-    -- Matches work.Outcome. No 'rate_limited': net.py absorbs 429s internally.
     status       text NOT NULL
-        CHECK (status IN ('ok', 'not_modified', 'partial', 'error')),
-    new_postings integer NOT NULL DEFAULT 0 CHECK (new_postings >= 0)  -- postings not seen before this poll
+        CHECK (status IN ('ok', 'unchanged', 'partial', 'error')),
+    new_postings integer NOT NULL DEFAULT 0 CHECK (new_postings >= 0),  -- postings not seen before this poll
+    status_code  smallint CHECK (status_code BETWEEN 100 AND 599)
 );
-CREATE INDEX poll_observation_feed_idx ON poll_observation (feed_id, polled_at DESC);
+CREATE INDEX poll_log_feed_idx ON poll_log (feed_id, polled_at DESC);
 
 -- Global run/pause for the polling loop the inspector supervises in-process.
 -- Single row by construction: the CHECK keeps `id` true, so there is exactly
@@ -145,12 +149,14 @@ CREATE INDEX poll_observation_feed_idx ON poll_observation (feed_id, polled_at D
 -- nobody asked to stop. The flag outliving the process is what makes the
 -- restart a non-event.
 --
--- `running` defaults to false: a database brought up to this schema polls
--- nothing until an operator says so, which matters when `feed.polling` covers
--- thousands of rows.
+-- Fresh databases run immediately. Existing rows are never rewritten by
+-- startup or migrations, so an operator's explicit pause still survives every
+-- process restart.
 CREATE TABLE scheduler_control (
     id         boolean PRIMARY KEY DEFAULT true CHECK (id),
-    running    boolean NOT NULL DEFAULT false,
+    -- A fresh installation is live. An operator pause is stored here and is
+    -- deliberately never overwritten by process startup or a migration.
+    running    boolean NOT NULL DEFAULT true,
     changed_at timestamptz NOT NULL DEFAULT now(),
     note       text
 );
@@ -159,8 +165,8 @@ INSERT INTO scheduler_control (id) VALUES (true) ON CONFLICT DO NOTHING;
 CREATE TABLE token_heartbeat (
     id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
     -- The operator's runtime switch, driven from the Tokens page. Persistent
-    -- so a process restart cannot silently undo a deliberate pause, and false
-    -- by default because the heartbeat is on by default (unlike the poller).
+    -- so a process restart cannot silently undo a deliberate pause. Both the
+    -- heartbeat and source scheduler start live on a fresh database.
     paused             boolean NOT NULL DEFAULT false,
     paused_changed_at  timestamptz,
     due_at             timestamptz NOT NULL DEFAULT now(),
@@ -178,21 +184,73 @@ CREATE TABLE token_heartbeat (
 );
 INSERT INTO token_heartbeat (id) VALUES (true) ON CONFLICT DO NOTHING;
 
--- Append-only: one row per liveness probe, written beside the token UPDATE
--- that records the same result. token.checked_at/status only ever hold the
--- latest answer, so this is the only place a token's history exists -- a
--- live -> dead -> live flip leaves three rows here and no trace there.
+-- Durable coordination for the Gold work that cannot be scoped to one
+-- posting. `generation` advances in the same transaction as changed Silver
+-- rows; a dedup pass records the generation it actually observed, so changes
+-- arriving during a rebuild cannot be mistaken for completed work.
+CREATE TABLE gold_control (
+    id                   boolean PRIMARY KEY DEFAULT true CHECK (id),
+    generation           bigint NOT NULL DEFAULT 0 CHECK (generation >= 0),
+    processed_generation bigint NOT NULL DEFAULT 0
+        CHECK (processed_generation >= 0 AND processed_generation <= generation),
+    dirty_at             timestamptz,
+    not_before           timestamptz,
+    hold_until           timestamptz,
+    last_started_at      timestamptz,
+    last_completed_at    timestamptz,
+    last_outcome         text NOT NULL DEFAULT 'never'
+        CHECK (last_outcome IN ('never', 'running', 'success', 'error')),
+    last_error           text
+);
+INSERT INTO gold_control (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+-- Bounded operational history for the unified runtime. Source-health history
+-- remains in poll_log; this records the larger job and its stage-level detail.
+CREATE TABLE system_run (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_type    text NOT NULL
+        CHECK (job_type IN ('feed', 'gold_catchup', 'dedup', 'token_heartbeat')),
+    identity    text,
+    state       text NOT NULL DEFAULT 'running'
+        CHECK (state IN ('running', 'complete', 'degraded', 'failed', 'interrupted')),
+    started_at  timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz,
+    detail      jsonb NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(detail) = 'object'),
+    error       text,
+    CHECK ((state = 'running') = (finished_at IS NULL))
+);
+CREATE INDEX system_run_started_idx ON system_run (started_at DESC);
+
+-- Append-only: one row per thing that happened to a token, written beside the
+-- statement that made it happen. Two kinds of verb share the column:
+--   unknown/live/dead   -- a liveness probe, beside the token UPDATE
+--   feed_entered        -- a `feed` row was created for this identity
+--   feed_exited         -- that row was deleted
+-- token.checked_at/status only ever hold the latest answer, and `feed` records
+-- neither birth nor death, so this is the only place either history exists --
+-- a live -> dead -> live flip leaves three rows here and no trace there.
+--
+-- One verb column rather than status + event: a feed_entered row would have to
+-- put something in a separate status, and whatever it put would either
+-- duplicate the preceding probe row or make status mean two different things
+-- depending on the row. The cost is that liveness at the moment of entry is not
+-- on the event row; read it off that token's preceding probe row.
+--
 -- Deliberately five columns: when, which, what, and a stable tail order.
--- No FK: a log that a delete could cascade away is not a log.
+-- Ordered by id, never checked_at: a promote logs live and feed_entered in the
+-- same statement, so their timestamps tie.
+-- No FK: a log that a delete could cascade away is not a log, and feed_exited
+-- exists precisely to outlive the row it describes.
 CREATE TABLE token_log (
     id         bigserial PRIMARY KEY,
     checked_at timestamptz NOT NULL,
     ats        text NOT NULL,
     token      text NOT NULL,
-    status     text NOT NULL CHECK (status IN ('unknown', 'live', 'dead'))
+    status     text NOT NULL CHECK (status IN ('unknown', 'live', 'dead', 'feed_entered', 'feed_exited'))
 );
 
--- Deferred: adaptive polling. Intervals stay operator-set until poll_observation
+-- Deferred: adaptive polling. Intervals stay operator-set until poll_log
 -- holds enough history to estimate an arrival rate from.
 --
 -- feed.interval_auto        boolean          -- false = operator pinned interval_s; scheduler leaves it alone
@@ -211,7 +269,7 @@ CREATE TABLE fetched_feed (
     feed_key    text NOT NULL,
     -- Written for every attempt; an error or 304 stages no items. 'partial' = fetch did not finish.
     status      text NOT NULL
-        CHECK (status IN ('ok', 'not_modified', 'partial', 'error')),
+        CHECK (status IN ('ok', 'unchanged', 'partial', 'error')),
     http_status integer,
     -- Response-root facts no item carries (Workable's company name); parse() takes it as an argument.
     envelope    jsonb NOT NULL DEFAULT '{}',
@@ -223,7 +281,7 @@ CREATE TABLE fetched_feed (
     res_hash    text,
 
     -- NEW: what the inspector UI reads off a staged fetch, stored rather than derived.
-    result_id      text NOT NULL UNIQUE,  -- keys /api/postings/{result_id}/items/{i}
+    result_id      text NOT NULL UNIQUE,  -- keys /api/results/{feed_ref}/items/{i}
     feed_id        bigint NOT NULL,
     run_trigger    text NOT NULL DEFAULT 'manual',
     started_at     timestamptz NOT NULL,
@@ -344,6 +402,10 @@ CREATE TABLE job_posting (
                 )
             )
         )
+        CHECK (
+            NOT attributes ? 'degree_meta'
+            OR jsonb_typeof(attributes -> 'degree_meta') = 'object'
+        )
         CONSTRAINT job_posting_summary_type CHECK (
             NOT attributes ? 'summary'
             OR jsonb_typeof(attributes -> 'summary') IN ('string', 'null')
@@ -358,6 +420,14 @@ CREATE TABLE job_posting (
     -- attributes: the enrichment loop scans it on every pass to find stale rows,
     -- and that predicate must stay indexable rather than digging through JSONB.
     degree_version           smallint,
+    -- Gold title-domain classification populated by `--enrich job_type`.
+    job_domain               text
+        CHECK (job_domain IS NULL OR job_domain IN (
+            'software',
+            'finance',
+            'unlabeled'
+        )),
+    job_domain_version       smallint,
     -- Traceability to the unmodified input
     raw_id                   bigint NOT NULL REFERENCES raw_posting(id),  -- raw version it produced current row
     dup_group_id             uuid,              -- groups suspected duplicates together
@@ -369,9 +439,13 @@ CREATE TABLE job_posting (
         CHECK (source NOT LIKE 'workday:%' OR source = lower(source))
 );
 COMMENT ON COLUMN job_posting.attributes IS
-    'OneShot enrichment v1: version, term, remote, skills/meta, degree, summary/meta, deadline_at';
+    'OneShot enrichment v1: version, term, remote, skills/meta, degree/meta, summary/meta, deadline_at';
 COMMENT ON COLUMN job_posting.degree_version IS
     'Taxonomy revision behind attributes.degree; NULL means unenriched or invalidated by an input change.';
+COMMENT ON COLUMN job_posting.job_domain IS
+    'Gold title domain populated by --enrich job_type: software, finance, or unlabeled.';
+COMMENT ON COLUMN job_posting.job_domain_version IS
+    'Classifier revision behind job_domain; NULL means not yet enriched.';
 COMMENT ON COLUMN job_posting.removal_marked_at IS
     'When a human marked this posting for removal; NULL means not marked. Never written by ingest.';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
@@ -386,6 +460,9 @@ CREATE INDEX job_posting_degree_version_idx ON job_posting (degree_version, id);
 CREATE INDEX job_posting_job_type_active_idx
     ON job_posting (job_type)
     WHERE status = 'active' AND job_type IS NOT NULL;
+CREATE INDEX job_posting_domain_active_idx
+    ON job_posting (job_domain, job_type)
+    WHERE status = 'active' AND job_domain IS NOT NULL;
 -- Supports the default "Newest first" page without sorting the entire active
 -- opportunity pool before applying LIMIT.
 CREATE INDEX job_posting_fresh_active_idx
@@ -408,6 +485,21 @@ ALTER TABLE job_posting
     ADD FOREIGN KEY (dup_group_id)
     REFERENCES job_posting_dup_group(id);
 CREATE INDEX job_posting_dup_group_id_idx ON job_posting (dup_group_id);
+
+-- CURRENT SOURCE COVERAGE --
+-- One replaceable document, produced by the poller and read by OneShot. The
+-- pipeline tables remain authoritative; this row carries no snapshot history.
+CREATE TABLE coverage_snapshot (
+    id          boolean PRIMARY KEY DEFAULT true CHECK (id),
+    payload     jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
+    computed_at timestamptz NOT NULL
+);
+INSERT INTO coverage_snapshot (id, payload, computed_at)
+VALUES (
+    true,
+    '{"source_coverage":{"sources":[],"source_count":0,"total_coverage":0,"total_added_today":0},"board_map":{"providers":[],"totals":{"boards":0,"providers":0,"ok":0,"erroring":0,"stale":0,"paused":0,"never":0,"added_today":0}}}'::jsonb,
+    now()
+);
 
 -- APPLICATION TRACKER
 CREATE TABLE job_application (
@@ -473,10 +565,6 @@ CREATE INDEX job_application_event_application_idx
     ON job_application_event (job_application_id, occurred_at DESC);
 
 -- RESUME STUDIO
--- The small, account-owned content bank is loaded and saved as one workspace.
--- Entries contain their bullets; every entry, bullet, and skill carries a stable
--- integer `id` allocated from next_item_id so existing API selections remain
--- valid without a table for each content type.
 CREATE TABLE resume_workspace (
     account_id   uuid PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
     profile      jsonb NOT NULL DEFAULT '{}'
@@ -485,6 +573,15 @@ CREATE TABLE resume_workspace (
         CHECK (jsonb_typeof(entries) = 'array'),
     skills       jsonb NOT NULL DEFAULT '[]'
         CHECK (jsonb_typeof(skills) = 'array'),
+    variants     jsonb NOT NULL DEFAULT '[]'
+        CHECK (jsonb_typeof(variants) = 'array'),
+    -- Terms coverage analysis flags as "named in the JD, absent from the bank".
+    -- Seeded from resume_workspace.DEFAULT_VOCABULARY, then owned by the user.
+    -- NULL means "never customized" and is what makes that seeding happen; an
+    -- empty array is a user who deliberately cleared the list. A NOT NULL
+    -- DEFAULT '[]' could not tell those apart.
+    vocabulary   jsonb
+        CHECK (vocabulary IS NULL OR jsonb_typeof(vocabulary) = 'array'),
     next_item_id bigint NOT NULL DEFAULT 1 CHECK (next_item_id > 0),
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -499,19 +596,31 @@ CREATE TABLE resume_target (
     date_posted text NOT NULL DEFAULT '',
     note        text NOT NULL DEFAULT '',
     created_at  timestamptz NOT NULL DEFAULT now(),
+    -- The queued application this target was built from, so tailoring a resume
+    -- for a tracked job is a link rather than a retype. NULL for a target typed
+    -- in by hand. ON DELETE SET NULL: dropping an application must not discard
+    -- the resume work done for it.
+    job_application_id bigint REFERENCES job_application(id) ON DELETE SET NULL,
 
     UNIQUE (account_id, id)
 );
 CREATE INDEX resume_target_account_idx
     ON resume_target (account_id, created_at DESC, id DESC);
+-- Makes "tailor a resume for this application" idempotent: the second click
+-- finds this row instead of creating a near-duplicate target.
+CREATE UNIQUE INDEX resume_target_account_application_key
+    ON resume_target (account_id, job_application_id)
+    WHERE job_application_id IS NOT NULL;
 
 CREATE TABLE resume_document (
     id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     account_id        uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
     target_job_id     bigint,
     name              text NOT NULL,
-    variant           text NOT NULL DEFAULT 'swe'
-        CHECK (variant IN ('mlsys', 'swe', 'quant')),
+    -- No CHECK: valid values are the keys in resume_workspace.variants, which
+    -- each account defines for itself. Validated in the store, where that list
+    -- is readable; '' means no variant selected.
+    variant           text NOT NULL DEFAULT '',
     availability_line text NOT NULL DEFAULT '',
     education_note    text NOT NULL DEFAULT '',
     selection         jsonb NOT NULL DEFAULT '{}'
