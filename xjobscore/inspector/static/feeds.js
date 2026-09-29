@@ -85,7 +85,7 @@ async function selectFeed(ref) {
   paneEl.hidden = false;
   handleEl.hidden = false;
   masterEl.classList.add("split-open");
-  history.replaceState(null, "", `/?ref=${ref}`);
+  history.replaceState(null, "", `/feeds?ref=${ref}`);
   render();
   await (alreadyOpen ? inspector.refresh() : inspector.show(ref));
 }
@@ -95,7 +95,7 @@ function closeDetail() {
   paneEl.hidden = true;
   handleEl.hidden = true;
   masterEl.classList.remove("split-open");
-  history.replaceState(null, "", "/");
+  history.replaceState(null, "", "/feeds");
   render();
 }
 

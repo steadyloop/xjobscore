@@ -4,10 +4,16 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from xjobscore import gold, router, run, silver, store
+from xjobscore import gold, publish, router, run, silver, store
 from xjobscore.pipeline import GoldCoordinator, GoldResult
 from xjobscore.records import Feed, Item, Record
-from xjobscore.runtime import GoldWorker, RuntimeSettings, SystemScheduler, UnifiedRuntime
+from xjobscore.runtime import (
+    GoldWorker,
+    NeonPublisher,
+    RuntimeSettings,
+    SystemScheduler,
+    UnifiedRuntime,
+)
 
 pytestmark = pytest.mark.asyncio
 NOW = datetime(2026, 9, 23, tzinfo=timezone.utc)
@@ -99,6 +105,11 @@ async def test_gold_failure_degrades_pipeline_without_failing_source(monkeypatch
     monkeypatch.setattr(store, "finish_schedule_success", success)
     monkeypatch.setattr(store, "finish_schedule_failure", failure)
     monkeypatch.setattr(store, "append_poll_log", observe)
+
+    async def mark_missing(conn, source, polled_at):
+        return 0
+
+    monkeypatch.setattr(store, "mark_missing_postings", mark_missing)
 
     outcome = await run.poll(
         pool, object(), feed, NOW, coordinator=coordinator
@@ -428,6 +439,50 @@ async def test_dedup_checkpoint_records_only_the_claimed_generation(monkeypatch)
     assert runs.finished[0][1]["detail"]["generation"] == 5
 
 
+async def test_dedup_retries_when_postgres_picks_it_as_the_deadlock_victim(monkeypatch):
+    from asyncpg.exceptions import DeadlockDetectedError
+
+    pool = _DedupPool()
+    runs = _Runs()
+    coordinator = GoldCoordinator(runs)
+    attempts = []
+
+    async def rebuild(conn):
+        attempts.append(conn)
+        if len(attempts) == 1:
+            raise DeadlockDetectedError("deadlock detected")
+        return gold.Counts(groups=2, postings=4)
+
+    monkeypatch.setattr(gold, "steps", lambda only=None: _dedup_step(rebuild))
+
+    counts = await coordinator.dedup_once(pool, queue_drained=True, current=NOW)
+
+    assert len(attempts) == 2
+    assert counts == gold.Counts(groups=2, postings=4)
+    assert runs.finished[0][1]["state"] == "complete"
+
+
+async def test_dedup_gives_up_after_repeated_deadlocks(monkeypatch):
+    from asyncpg.exceptions import DeadlockDetectedError
+
+    from xjobscore import pipeline
+
+    pool = _DedupPool()
+    runs = _Runs()
+    coordinator = GoldCoordinator(runs)
+    attempts = []
+
+    async def rebuild(conn):
+        attempts.append(conn)
+        raise DeadlockDetectedError("deadlock detected")
+
+    monkeypatch.setattr(gold, "steps", lambda only=None: _dedup_step(rebuild))
+
+    assert await coordinator.dedup_once(pool, queue_drained=True, current=NOW) is None
+    assert len(attempts) == pipeline.DEDUP_ATTEMPTS
+    assert runs.finished[0][1]["state"] == "failed"
+
+
 class _StatefulDedupConnection:
     def __init__(
         self,
@@ -615,3 +670,84 @@ async def test_supervisor_waits_for_dedup_lease_or_error_retry():
     assert await coordinator.next_dedup_delay(
         failed, queue_drained=True, current=NOW
     ) == 60
+
+
+class _AcquirePool:
+    def __init__(self):
+        self.conn = object()
+
+    def acquire(self):
+        return _Context(self.conn)
+
+
+class _PublishPolicy:
+    def __init__(self, pool):
+        self.pool = pool
+
+    async def pool_or_none(self):
+        return self.pool
+
+
+async def test_neon_publisher_is_off_without_a_target():
+    publisher = NeonPublisher(
+        _PublishPolicy(_AcquirePool()),
+        target_dsn=None,
+        interval_s=3600,
+        seen_drift_s=60,
+        shutdown_grace_s=1,
+    )
+
+    await publisher.start()
+
+    assert publisher.status()["enabled"] is False
+    assert publisher.status()["alive"] is False
+    assert UnifiedRuntime(_settings()).publisher.enabled is False
+
+
+async def test_neon_publisher_tick_publishes_from_a_pooled_connection(monkeypatch):
+    pool = _AcquirePool()
+    checks = []
+    seen = []
+
+    async def ownership_check():
+        checks.append(True)
+
+    async def publish_to(source, target_dsn, *, seen_drift_s):
+        seen.append((source, target_dsn, seen_drift_s))
+        return publish.PublishCounts(10, 2, 1, 0, 3, False)
+
+    monkeypatch.setattr(publish, "publish_to", publish_to)
+    publisher = NeonPublisher(
+        _PublishPolicy(pool),
+        target_dsn="postgresql://neon/thin",
+        interval_s=3600,
+        seen_drift_s=60,
+        shutdown_grace_s=1,
+        ownership_check=ownership_check,
+    )
+
+    await publisher.tick()
+
+    assert checks == [True]
+    assert seen == [(pool.conn, "postgresql://neon/thin", 60)]
+    status = publisher.status()
+    assert status["last_counts"]["postings"] == 2
+    assert status["last_counts"]["closed"] == 3
+    assert status["last_published_at"] is not None
+
+
+async def test_runtime_settings_read_the_publish_target(monkeypatch):
+    monkeypatch.setattr("xjobscore.runtime.config.dsn", lambda: "postgresql://test/db")
+    monkeypatch.setattr(
+        "xjobscore.runtime.config.persistence_dsn", lambda: "postgresql://test/db"
+    )
+    monkeypatch.setattr("xjobscore.runtime.config.persistence_schema", lambda: "inspector")
+    monkeypatch.setenv("PUBLISH_DATABASE_URL", "postgresql://neon/thin")
+    monkeypatch.setenv("XJOBSCORE_PUBLISH_INTERVAL_S", "900")
+    monkeypatch.delenv("XJOBSCORE_PUBLISH_SEEN_DRIFT_S", raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.publish_dsn == "postgresql://neon/thin"
+    assert settings.publish_interval_s == 900
+    assert settings.publish_seen_drift_s == publish.DEFAULT_SEEN_DRIFT_S

@@ -12,7 +12,7 @@ from typing import Any
 
 import asyncpg
 
-from xjobscore import run
+from xjobscore import publish, run
 from xjobscore.inspector import config
 from xjobscore.inspector.cache import now_utc
 from xjobscore.inspector.db import CatalogDB
@@ -60,6 +60,10 @@ class RuntimeSettings:
     heartbeat_interval_s: int = 21_600
     heartbeat_retry_s: int = 900
     heartbeat_lease_s: int = 900
+    # Unset disables the Neon publisher; the harvest runs the same either way.
+    publish_dsn: str | None = None
+    publish_interval_s: float = 3600.0
+    publish_seen_drift_s: float = float(publish.DEFAULT_SEEN_DRIFT_S)
 
     def __post_init__(self) -> None:
         if not 1 <= self.port <= 65_535:
@@ -74,6 +78,8 @@ class RuntimeSettings:
             "XJOBSCORE_HEARTBEAT_INTERVAL_S": self.heartbeat_interval_s,
             "XJOBSCORE_HEARTBEAT_RETRY_S": self.heartbeat_retry_s,
             "XJOBSCORE_HEARTBEAT_LEASE_S": self.heartbeat_lease_s,
+            "XJOBSCORE_PUBLISH_INTERVAL_S": self.publish_interval_s,
+            "XJOBSCORE_PUBLISH_SEEN_DRIFT_S": self.publish_seen_drift_s,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -149,6 +155,17 @@ class RuntimeSettings:
                     "XJOBSCORE_HEARTBEAT_LEASE_S",
                     "XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_LEASE_S",
                     "900",
+                )
+            ),
+            publish_dsn=os.environ.get("PUBLISH_DATABASE_URL") or None,
+            publish_interval_s=float(
+                _env("XJOBSCORE_PUBLISH_INTERVAL_S", None, "3600")
+            ),
+            publish_seen_drift_s=float(
+                _env(
+                    "XJOBSCORE_PUBLISH_SEEN_DRIFT_S",
+                    None,
+                    str(publish.DEFAULT_SEEN_DRIFT_S),
                 )
             ),
         )
@@ -430,6 +447,135 @@ class GoldWorker:
             self._next_delay_s = 0.1
 
 
+class NeonPublisher:
+    """Push the serving cohort's changes to thin Neon on a fixed interval."""
+
+    def __init__(
+        self,
+        policy: PolicyStore,
+        *,
+        target_dsn: str | None,
+        interval_s: float,
+        seen_drift_s: float,
+        shutdown_grace_s: float,
+        ownership_check: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        self._policy = policy
+        self._target_dsn = target_dsn
+        self._interval_s = interval_s
+        self._seen_drift_s = seen_drift_s
+        self._shutdown_grace_s = shutdown_grace_s
+        self._ownership_check = ownership_check
+        self._wake = asyncio.Event()
+        self._task: asyncio.Task[None] | None = None
+        self._stopping = False
+        self._last_published_at: datetime | None = None
+        self._last_counts: publish.PublishCounts | None = None
+        self._last_duration_s: float | None = None
+        self._consecutive_errors = 0
+        self._last_error: str | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._target_dsn)
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "alive": self._task is not None and not self._task.done(),
+            "interval_seconds": self._interval_s,
+            "last_published_at": self._last_published_at.isoformat()
+            if self._last_published_at
+            else None,
+            "last_counts": {
+                field: getattr(self._last_counts, field)
+                for field in publish.PublishCounts.__slots__
+            }
+            if self._last_counts
+            else None,
+            "last_duration_s": self._last_duration_s,
+            "consecutive_errors": self._consecutive_errors,
+            "last_error": self._last_error,
+        }
+
+    def nudge(self) -> None:
+        if not self._stopping:
+            self._wake.set()
+
+    async def start(self) -> None:
+        if self._task is not None or not self.enabled:
+            return
+        self._stopping = False
+        self._task = asyncio.create_task(self._loop(), name="xjobscore-publish")
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._stopping = True
+        self._wake.set()
+        try:
+            await asyncio.wait_for(self._task, timeout=self._shutdown_grace_s)
+        except asyncio.TimeoutError:
+            # Cancelling mid-write rolls the Neon transaction back; the next
+            # run resends whatever this one did not commit.
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        finally:
+            self._task = None
+
+    async def _loop(self) -> None:
+        while not self._stopping:
+            try:
+                await self.tick()
+                self._consecutive_errors = 0
+                self._last_error = None
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._consecutive_errors += 1
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                logger.exception("Neon publish failed")
+
+            if self._stopping:
+                break
+            # A failed run (Neon waking, network blip) retries well before the
+            # next scheduled one, backing off up to the interval itself.
+            delay = (
+                min(self._interval_s, 60.0 * (2 ** (self._consecutive_errors - 1)))
+                if self._consecutive_errors
+                else self._interval_s
+            )
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                pass
+            self._wake.clear()
+
+    async def tick(self) -> None:
+        if self._ownership_check is not None:
+            await self._ownership_check()
+        pool = await self._policy.pool_or_none()
+        if pool is None or not self._target_dsn:
+            raise RuntimeError("PostgreSQL unavailable")
+
+        started = asyncio.get_running_loop().time()
+        async with pool.acquire() as source:
+            counts = await publish.publish_to(
+                source, self._target_dsn, seen_drift_s=self._seen_drift_s
+            )
+        self._last_duration_s = round(asyncio.get_running_loop().time() - started, 2)
+        self._last_counts = counts
+        self._last_published_at = now_utc()
+        logger.info(
+            "Neon publish %s in %.1fs",
+            publish.format_counts(counts),
+            self._last_duration_s,
+        )
+
+
 class UnifiedRuntime:
     """Composition root shared by Uvicorn's lifespan and Inspector routes."""
 
@@ -477,7 +623,17 @@ class UnifiedRuntime:
             run_store=self.runs,
             ownership_check=self._assert_system_lock,
         )
+        self.publisher = NeonPublisher(
+            self.policy,
+            target_dsn=settings.publish_dsn,
+            interval_s=settings.publish_interval_s,
+            seen_drift_s=settings.publish_seen_drift_s,
+            shutdown_grace_s=settings.shutdown_grace_s,
+            ownership_check=self._assert_system_lock,
+        )
         self._lock_conn: asyncpg.Connection | None = None
+        # One asyncpg connection runs one query at a time; workers ping it concurrently.
+        self._lock_conn_guard = asyncio.Lock()
         self.started = False
 
     async def _claim_process_lock(self) -> None:
@@ -505,11 +661,12 @@ class UnifiedRuntime:
         self._lock_conn = conn
 
     async def _assert_system_lock(self) -> None:
-        if self._lock_conn is None or self._lock_conn.is_closed():
-            raise RuntimeError("xjobscore system advisory lock connection was lost")
-        # Advisory locks are session-scoped. A successful ping proves the
-        # session that owns it is still the one supervising workers.
-        await self._lock_conn.fetchval("SELECT 1")
+        async with self._lock_conn_guard:
+            if self._lock_conn is None or self._lock_conn.is_closed():
+                raise RuntimeError("xjobscore system advisory lock connection was lost")
+            # Advisory locks are session-scoped. A successful ping proves the
+            # session that owns it is still the one supervising workers.
+            await self._lock_conn.fetchval("SELECT 1")
 
     async def start(self) -> None:
         if self.started:
@@ -526,6 +683,7 @@ class UnifiedRuntime:
             await self.scheduler.start()
             await self.gold_worker.start()
             await self.heartbeat.start()
+            await self.publisher.start()
             self.started = True
         except Exception:
             await self.stop()
@@ -536,6 +694,7 @@ class UnifiedRuntime:
             self.heartbeat.stop(grace_s=self.settings.shutdown_grace_s),
             self.scheduler.stop(),
             self.gold_worker.stop(),
+            self.publisher.stop(),
         )
         await self.catalog.disconnect()
         await self.result_store.close()
@@ -613,6 +772,7 @@ class UnifiedRuntime:
             scheduler["alive"]
             and self.gold_worker.status()["alive"]
             and self.heartbeat.alive
+            and (not self.publisher.enabled or self.publisher.status()["alive"])
         )
         return {
             "ready": self.started
@@ -624,6 +784,7 @@ class UnifiedRuntime:
             "scheduler": scheduler,
             "pipeline": pipeline,
             "heartbeat": heartbeat,
+            "publish": self.publisher.status(),
             "status_error": status_error,
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }

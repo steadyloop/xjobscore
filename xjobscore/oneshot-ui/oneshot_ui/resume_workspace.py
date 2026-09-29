@@ -16,7 +16,6 @@ caller can never hold a reference into stored state.
 from __future__ import annotations
 
 from copy import deepcopy
-import re
 from typing import Any
 
 PROFILE_FIELDS = ("full_name", "email", "phone", "location", "links")
@@ -43,10 +42,6 @@ def blank_workspace() -> dict[str, Any]:
         # declares its own variants; until it does, every bullet is "all" and
         # the studio simply offers no variant filter.
         "variants": [],
-        # Seeded, because an empty vocabulary silently turns the "missing from
-        # bank" half of coverage analysis off with no way to tell that from a
-        # JD that genuinely named nothing.
-        "vocabulary": list(DEFAULT_VOCABULARY),
         "next_item_id": 1,
     }
 
@@ -66,13 +61,6 @@ def normalize(workspace: dict[str, Any] | None) -> dict[str, Any]:
     state["entries"] = list(state.get("entries") or [])
     state["skills"] = list(state.get("skills") or [])
     state["variants"] = normalize_variants(state.get("variants"))
-    # A row written before this column existed decodes as None, not as a
-    # deliberate empty list, so it inherits the default rather than losing
-    # coverage analysis on the next save.
-    raw_vocabulary = state.get("vocabulary")
-    state["vocabulary"] = (
-        list(DEFAULT_VOCABULARY) if raw_vocabulary is None else _clean_terms(raw_vocabulary)
-    )
 
     highest = 0
     for entry in state["entries"]:
@@ -93,19 +81,6 @@ def allocate(workspace: dict[str, Any]) -> int:
 
 
 # -- variants ------------------------------------------------------------
-
-
-def _clean_terms(raw: Any) -> list[str]:
-    """A deduplicated, order-preserving list of non-empty strings."""
-    seen: set[str] = set()
-    terms: list[str] = []
-    for value in raw or []:
-        term = str(value).strip()
-        folded = term.lower()
-        if term and folded not in seen:
-            seen.add(folded)
-            terms.append(term)
-    return terms
 
 
 def normalize_variants(raw: Any) -> list[dict[str, str]]:
@@ -203,21 +178,10 @@ def set_variants(workspace: dict[str, Any], raw: Any) -> list[dict[str, str]]:
     return list_variants(workspace)
 
 
-def list_vocabulary(workspace: dict[str, Any]) -> list[str]:
-    return list(workspace["vocabulary"])
-
-
-def set_vocabulary(workspace: dict[str, Any], raw: Any) -> list[str]:
-    workspace["vocabulary"] = _clean_terms(raw)
-    return list_vocabulary(workspace)
-
-
 # -- profile -------------------------------------------------------------
 
 
 def public_profile(workspace: dict[str, Any]) -> dict[str, Any]:
-    # No "id": the SQLite table needed a singleton primary key, the jsonb column
-    # does not, and the client never read it.
     return deepcopy(workspace["profile"])
 
 
@@ -233,7 +197,7 @@ def apply_profile(workspace: dict[str, Any], fields: dict[str, Any]) -> dict[str
 
 def _public_bullet(bullet: dict[str, Any], entry_id: int) -> dict[str, Any]:
     # entry_id is derived from the nesting rather than stored, so the two can
-    # never disagree. It is emitted because the SQLite shape carried it.
+    # never disagree.
     return deepcopy(bullet) | {"entry_id": entry_id}
 
 
@@ -303,8 +267,7 @@ def edit_entry(
 
 def remove_entry(workspace: dict[str, Any], entry_id: int) -> bool:
     before = len(workspace["entries"])
-    # Bullets are nested, so they go with the entry — SQLite got this from
-    # ON DELETE CASCADE.
+    # Bullets are nested, so they go with the entry.
     workspace["entries"] = [e for e in workspace["entries"] if e["id"] != entry_id]
     return len(workspace["entries"]) != before
 
@@ -354,15 +317,15 @@ def remove_bullet(workspace: dict[str, Any], bullet_id: int) -> bool:
 
 
 def list_skills(workspace: dict[str, Any]) -> list[dict[str, Any]]:
-    # SQLite's BINARY collation is byte order, which matches Python's default
-    # string comparison. Do not casefold: that would reorder mixed-case names.
+    # Byte order, as Python compares strings. Do not casefold: that would
+    # reorder mixed-case names.
     return deepcopy(sorted(workspace["skills"], key=lambda s: (s["category"], s["name"])))
 
 
 def add_skill(workspace: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any] | None:
     category, name = fields["category"], fields["name"]
-    # UNIQUE (category, name) under BINARY collation is an exact match, so this
-    # check is case-sensitive too. Returning None becomes a 409.
+    # (category, name) is unique, compared exactly: case-sensitive. Returning
+    # None becomes a 409.
     if any(s["category"] == category and s["name"] == name for s in workspace["skills"]):
         return None
     skill = {
@@ -400,94 +363,3 @@ def remove_skill(workspace: dict[str, Any], skill_id: int) -> bool:
     before = len(workspace["skills"])
     workspace["skills"] = [s for s in workspace["skills"] if s["id"] != skill_id]
     return len(workspace["skills"]) != before
-
-
-# -- keyword coverage ----------------------------------------------------
-
-
-def compute_coverage(
-    job: dict[str, Any],
-    skills: list[dict[str, Any]],
-    shown_ids: set[int],
-    vocabulary: list[str] | None = None,
-) -> dict[str, Any]:
-    """Compare a JD against the skill bank and (optionally) one resume.
-
-    matched: bank skills named in the JD and shown on the resume.
-    have_not_shown: bank skills named in the JD but not on the resume —
-      candidates to mirror in the JD's own words.
-    missing: JD vocabulary with no bank skill at all. Never faked in;
-      surfaced so the gap is a conscious decision.
-
-    ``vocabulary`` is the account's own term list. It falls back to the seed list
-    only so the pure-function tests and any caller predating per-account
-    vocabularies keep working; the store always passes the workspace's own,
-    because a term list is a statement about one person's field.
-    """
-    jd = (job.get("jd_text") or "").lower()
-
-    # `+`, `#` and `&` count as part of the surrounding word, not as boundaries:
-    # without them a bank skill named "C" matched the C in "C++" and "C#", and
-    # "R" matched the R in "R&D". `.` is deliberately NOT in the set — it ends
-    # sentences far more often than it joins a name, and excluding it would stop
-    # "Backend in Go." from matching Go at all.
-    boundary = "[a-z0-9+#&]"
-
-    def mentioned(name: str) -> bool:
-        pattern = rf"(?<!{boundary}){re.escape(name.lower())}(?!{boundary})"
-        return re.search(pattern, jd) is not None
-
-    in_jd = [skill for skill in skills if skill["name"] and mentioned(skill["name"])]
-    bank_names = {skill["name"].lower() for skill in skills}
-    terms = DEFAULT_VOCABULARY if vocabulary is None else vocabulary
-    vocabulary_hits = sorted(
-        term for term in terms
-        if term.lower() not in bank_names and mentioned(term)
-    )
-    return {
-        "job_id": job["id"],
-        "matched": [s for s in in_jd if s["id"] in shown_ids],
-        "have_not_shown": [s for s in in_jd if s["id"] not in shown_ids],
-        "missing": vocabulary_hits,
-    }
-
-
-# The seed vocabulary a *new* workspace starts with: terms a JD may name that
-# deserve a "missing from bank" flag. Curated, not exhaustive — coverage of
-# arbitrary vocabulary would need NLP and would invite keyword-stuffing, which
-# the strategy doc explicitly rejects.
-#
-# This list is software/GPU/quant shaped. It is a starting point, not the
-# vocabulary: each account owns an editable copy in `resume_workspace.vocabulary`,
-# so a user in another field replaces it rather than working around it.
-DEFAULT_VOCABULARY = [
-    "Python", "C", "C++", "C#", "Java", "JavaScript", "TypeScript", "Go", "Rust",
-    "Kotlin", "Swift", "Scala", "R", "Julia", "MATLAB", "SQL", "Bash", "OCaml",
-    "Haskell", "React", "Vue", "Angular", "Node.js", "Django", "Flask", "FastAPI",
-    "Spring", "NumPy", "pandas", "SciPy", "scikit-learn", "PyTorch", "TensorFlow",
-    "JAX", "Keras", "XGBoost", "Spark", "Hadoop", "Kafka", "Airflow", "dbt",
-    "PostgreSQL", "MySQL", "SQLite", "MongoDB", "Redis", "DuckDB", "Snowflake",
-    "Docker", "Kubernetes", "Terraform", "AWS", "GCP", "Azure", "Linux", "Git",
-    "CI/CD", "GraphQL", "gRPC", "REST", "WebSocket", "CUDA", "OpenMP", "MPI",
-    "machine learning", "deep learning", "reinforcement learning", "NLP",
-    "computer vision", "linear algebra", "probability", "statistics",
-    "stochastic processes", "optimization", "numerical methods", "PDE",
-    "Monte Carlo", "time series", "regression", "A/B testing", "data structures",
-    "algorithms", "distributed systems", "operating systems", "networking",
-    "concurrency", "functional programming", "object-oriented",
-    # GPU / ML systems
-    "Triton", "CUTLASS", "cuBLAS", "NCCL", "TensorRT", "vLLM", "SGLang", "PTX",
-    "ROCm", "HIP", "MLIR", "LLVM", "XLA", "TVM", "Nsight", "GPU", "tensor cores",
-    "kernel optimization", "quantization", "mixed precision", "FP8", "FP4", "GEMM",
-    "attention", "transformers", "KV cache", "inference", "model serving",
-    "batching", "roofline", "memory bandwidth", "SIMD", "vectorization", "HPC",
-    "parallel computing", "RDMA", "InfiniBand", "profiling", "compilers",
-    "computer architecture",
-    # Low latency / trading systems
-    "low latency", "lock-free", "kernel bypass", "DPDK", "io_uring", "NUMA",
-    "cache optimization", "market data", "order book", "market microstructure",
-    "FIX protocol", "ITCH", "floating point", "numerical linear algebra",
-    "queueing theory",
-    # Infrastructure
-    "eBPF", "CMake", "Bazel", "gdb", "Raft", "consensus", "Prometheus", "Grafana",
-]

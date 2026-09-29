@@ -4,137 +4,134 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>System · xJobscore</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/system/styles.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
 </head>
-<body>
-  <main class="system-shell">
-    <header class="page-head">
-      <div>
-        <span class="brand">xJobscore</span>
-        <h1>System</h1>
-        <p>Three clocks. One living pipeline.</p>
+<body class="scheduler-page">
+  <header id="topnav"></header>
+
+  <main class="ops-shell" id="ops-shell">
+    <header class="ops-header sys-page-head" aria-labelledby="page-title">
+      <div class="ops-header-title">
+        <h1 id="page-title">Activity</h1>
+        <span class="sys-spinner" id="activity-spinner" data-state="loading" role="img" aria-label="Loading"></span>
       </div>
-      <div class="sample-note"><span>Live telemetry</span></div>
+      <div class="ops-header-right">
+        <button class="btn small ops-run-toggle" type="button" id="run-toggle">Loading…</button>
+        <span class="ops-clock" id="local-clock" aria-hidden="true"></span>
+      </div>
     </header>
 
-    <section class="system-board" aria-label="System activity">
-      <article class="unit pipeline-unit" id="pipeline-unit" data-live="false" data-active="false">
-        <header class="unit-head">
-          <div>
-            <span class="unit-index">01 · FLOW</span>
-            <h2>Pipeline</h2>
-          </div>
-          <div class="state-label">
-            <span class="state-beacon" aria-hidden="true"></span>
-            <span id="pipeline-state">Reading state</span>
-          </div>
-        </header>
+    <div class="ops-alert" id="system-alert" role="status" hidden></div>
 
-        <div class="pipeline-map" aria-label="Current posting pipeline">
-          <div class="pipeline-line" aria-hidden="true">
-            <span class="pipeline-packet packet-one"></span>
-            <span class="pipeline-packet packet-two"></span>
-          </div>
-          <div class="pipeline-stage">
-            <span class="stage-node"></span>
-            <strong>Claim</strong>
-            <small>due feeds</small>
-          </div>
-          <div class="pipeline-stage">
-            <span class="stage-node"></span>
-            <strong>Harvest</strong>
-            <small>source payloads</small>
-          </div>
-          <div class="pipeline-stage">
-            <span class="stage-node"></span>
-            <strong>Normalize</strong>
-            <small>job postings</small>
-          </div>
-          <div class="pipeline-stage">
-            <span class="stage-node"></span>
-            <strong>Persist</strong>
-            <small>PostgreSQL</small>
-          </div>
-        </div>
+    <section class="sys-strip" aria-label="System status">
+      <div class="sys-strip-row">
+        <span class="sys-strip-k">gold</span>
+        <span class="sys-strip-v" id="strip-gold"><span class="wk-dim">reading…</span></span>
+      </div>
+      <div class="sys-strip-row sys-slog" title="Server log since start; httpx requests and the access log are hidden">
+        <span class="sys-strip-k">log</span>
+        <div class="sys-strip-v ops-log-lines" id="server-log-lines" aria-live="off"></div>
+      </div>
+    </section>
 
-        <footer class="fact-row">
-          <div><span>Current work</span><strong id="pipeline-work">—</strong></div>
-          <div><span>Last write</span><strong id="pipeline-last">—</strong></div>
-          <div><span>Output today</span><strong id="pipeline-output">—</strong></div>
-        </footer>
-      </article>
+    <header class="ops-header sys-section-head" id="scheduler-head" data-live="off">
+      <div class="ops-header-title"><h2>Scheduler</h2><span class="sys-spinner" id="scheduler-spinner" data-state="off" aria-hidden="true"></span></div>
+    </header>
 
-      <div class="cadence-grid">
-        <article class="unit cadence-unit" id="scheduler-unit" data-live="false">
-          <header class="unit-head">
-            <div>
-              <span class="unit-index">02 · FAST CLOCK</span>
-              <h2>Scheduler</h2>
-            </div>
-            <div class="state-label">
-              <span class="state-beacon" aria-hidden="true"></span>
-              <span id="scheduler-state">Reading state</span>
-            </div>
-          </header>
+    <!-- The feeds this board schedules: their status, then what the last 15m of polling did. -->
+    <section class="sys-strip sys-sched-strip" aria-label="Feed status and recent polling">
+      <div class="sys-strip-row">
+        <span class="sys-strip-k">feeds</span>
+        <div class="sys-strip-v ops-summary-line" id="summary-line" aria-live="polite">Loading scheduler state…</div>
+      </div>
+      <div class="sys-strip-row">
+        <span class="sys-strip-k" id="strip-feeds-window">last 15m</span>
+        <span class="sys-strip-v" id="strip-feeds"><span class="wk-dim">reading…</span></span>
+      </div>
+    </section>
 
-          <div class="clock-layout">
-            <div class="cadence-clock scheduler-clock" id="scheduler-clock" aria-label="Scheduler cadence">
-              <div class="clock-ticks" id="scheduler-ticks" aria-hidden="true"></div>
-              <span class="clock-progress"></span>
-              <span class="clock-hand"></span>
-              <span class="clock-pin"></span>
-              <div class="clock-copy">
-                <strong id="scheduler-countdown">—</strong>
-                <span>next check</span>
-              </div>
-            </div>
-            <div class="clock-facts">
-              <div><span>Cadence</span><strong id="scheduler-cadence">—</strong></div>
-              <div><span>Due now</span><strong id="scheduler-due">—</strong></div>
-              <div><span>Runner seen</span><strong id="scheduler-seen">—</strong></div>
-            </div>
-          </div>
-        </article>
+    <div class="ops-filterbar">
+      <label class="ops-search">
+        <span class="sr-only">Filter feeds</span>
+        <input type="search" id="search" placeholder="filter…" autocomplete="off">
+        <kbd>/</kbd>
+      </label>
 
-        <article class="unit cadence-unit" id="heartbeat-unit" data-live="false" data-running="false">
-          <header class="unit-head">
-            <div>
-              <span class="unit-index">03 · SLOW CLOCK</span>
-              <h2>Token heartbeat</h2>
-            </div>
-            <div class="state-label">
-              <span class="state-beacon" aria-hidden="true"></span>
-              <span id="heartbeat-state">Reading state</span>
-            </div>
-          </header>
-
-          <div class="clock-layout">
-            <div class="cadence-clock heartbeat-clock" id="heartbeat-clock" aria-label="Token heartbeat cadence">
-              <span class="heartbeat-arc"></span>
-              <span class="heartbeat-progress"></span>
-              <span class="heartbeat-position"></span>
-              <span class="heartbeat-origin"></span>
-              <div class="clock-copy">
-                <strong id="heartbeat-countdown">—</strong>
-                <span>until next beat</span>
-              </div>
-            </div>
-            <div class="clock-facts">
-              <div><span>Cadence</span><strong id="heartbeat-cadence">—</strong></div>
-              <div><span>Last beat</span><strong id="heartbeat-last">—</strong></div>
-              <div><span>Runner seen</span><strong id="heartbeat-seen">—</strong></div>
-            </div>
-          </div>
-        </article>
+      <div class="ops-view-pills" role="group" aria-label="Feed view">
+        <button type="button" data-view="all" aria-pressed="true">all <span></span></button>
+        <button type="button" data-view="issues" aria-pressed="false">issues <span></span></button>
+        <button type="button" data-view="failing" aria-pressed="false">failing <span></span></button>
+        <button type="button" data-view="paused" aria-pressed="false">paused <span></span></button>
       </div>
 
-      <footer class="motion-contract">
-        <span class="contract-mark" aria-hidden="true"></span>
-        <p><strong>Motion is evidence.</strong> Flow requires active work. Clock movement requires a fresh runner signal. Stale, paused, or offline systems freeze.</p>
-      </footer>
-    </section>
+      <div class="ops-expand-links">
+        <button class="ops-linkish" type="button" id="expand-all">expand all</button>
+        <span aria-hidden="true">·</span>
+        <button class="ops-linkish" type="button" id="collapse-all">collapse all</button>
+      </div>
+
+      <span class="ops-shown" id="row-count"></span>
+      <button class="btn small" type="button" id="refresh">Refresh</button>
+      <button class="btn small" type="button" id="fetch-matching">Fetch matching</button>
+    </div>
+
+    <div class="table-wrap ops-table-wrap">
+      <table class="data ops-table" id="sched-table">
+        <thead>
+          <tr>
+            <th data-sort="status"><button type="button">st</button></th>
+            <th data-sort="name"><button type="button">source</button></th>
+            <th class="sys-workers-col" title="One tick per worker slot: polling, over 60s, over 3m, idle">workers</th>
+            <th class="num" data-sort="interval"><button type="button">ivl</button></th>
+            <th class="num" data-sort="due"><button type="button">next</button></th>
+            <th class="num" data-sort="last_poll"><button type="button">last</button></th>
+            <th class="num" data-sort="jobs"><button type="button">new·1d</button></th>
+            <th class="num" data-sort="errors"><button type="button">err·7d</button></th>
+            <th class="ops-actions-col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+      </table>
+      <div class="empty-state" id="sched-empty" hidden></div>
+    </div>
+
+    <header class="ops-header sys-section-head">
+      <div class="ops-header-title"><h2>Logs</h2></div>
+    </header>
+
+    <div class="sys-band">
+      <section class="ops-livelog" aria-label="Live fetch log">
+        <header class="ops-livelog-header">
+          <span>live fetch log</span>
+          <span class="ops-log-dot" id="live-log-dot"></span>
+          <span class="ops-livelog-tail">tail -f</span>
+        </header>
+        <div class="ops-log-lines" id="live-log-lines" aria-live="off"></div>
+      </section>
+      <section class="ops-livelog sys-events" aria-label="System events">
+        <header class="ops-livelog-header">
+          <span>system events</span>
+          <span class="ops-livelog-tail">non-feed runs + failed feeds</span>
+        </header>
+        <div class="ops-log-lines" id="system-events-lines" aria-live="off"></div>
+      </section>
+    </div>
   </main>
 
-  <script type="module" src="app.js"></script>
+  <aside class="ops-detail-panel" id="detail-panel" aria-labelledby="panel-title" hidden></aside>
+
+  <dialog class="ops-dialog" id="bulk-dialog" aria-labelledby="bulk-title"></dialog>
+  <dialog class="ops-dialog" id="remove-dialog" aria-labelledby="remove-title"></dialog>
+  <div class="ops-toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="/static/system/app.js"></script>
 </body>
 </html>

@@ -15,10 +15,10 @@ if (!ref) {
   await createInspector(root, {
     standalone: true,
     onMute: () => {
-      location.href = "/";
+      location.href = "/feeds";
     },
     onDrop: () => {
-      location.href = "/";
+      location.href = "/feeds";
     },
   }).show(ref);
 }

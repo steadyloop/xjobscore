@@ -1,3 +1,4 @@
+import asyncio
 import re
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from fake_resume_store import InMemoryResumeStore
 from oneshot_ui.app import create_app
 from oneshot_ui.auth import session_account
 from oneshot_ui.config import Settings
-from oneshot_ui.resume_render import typst_available
+from oneshot_ui.resume_render import build_typst_source
 
 TEST_ACCOUNT_ID = UUID("00000000-0000-0000-0000-0000000000aa")
 
@@ -32,6 +33,12 @@ def make_client() -> TestClient:
     )
     application.dependency_overrides[session_account] = lambda: TEST_ACCOUNT_ID
     return TestClient(application)
+
+
+def typst_source(client: TestClient, resume_id: int) -> str:
+    """The Typst source a stored resume compiles from."""
+    store = client.app.state.resume_store.for_account(TEST_ACCOUNT_ID)
+    return build_typst_source(*asyncio.run(store.render_inputs(resume_id)))
 
 
 def seed_bank(client: TestClient) -> tuple[int, int, int]:
@@ -93,34 +100,7 @@ def test_bank_crud_and_duplicate_skill():
         assert client.get("/api/resume/entries").json()["entries"] == []
 
 
-def test_coverage_flags_matched_gap_and_missing():
-    with make_client() as client:
-        _, _, skill_id = seed_bank(client)
-        job = client.post("/api/resume/jobs", json={
-            "company": "Example Labs",
-            "title": "SWE Intern",
-            "jd_text": "We want Python and Rust experience, plus Monte Carlo methods.",
-        }).json()
-
-        coverage = client.get(f"/api/resume/jobs/{job['id']}/coverage").json()
-        assert [s["name"] for s in coverage["have_not_shown"]] == ["Python"]
-        assert "Rust" in coverage["missing"]
-        assert "Monte Carlo" in coverage["missing"]
-
-        resume = client.post("/api/resume/resumes", json={
-            "name": "SWE",
-            "target_job_id": job["id"],
-            "selection": {"entries": [], "skills": [skill_id]},
-        }).json()
-        coverage = client.get(
-            f"/api/resume/jobs/{job['id']}/coverage",
-            params={"resume_id": resume["id"]},
-        ).json()
-        assert [s["name"] for s in coverage["matched"]] == ["Python"]
-        assert coverage["have_not_shown"] == []
-
-
-def test_resume_source_and_checks():
+def test_resume_source():
     with make_client() as client:
         entry_id, bullet_id, skill_id = seed_bank(client)
         resume = client.post("/api/resume/resumes", json={
@@ -133,16 +113,10 @@ def test_resume_source_and_checks():
             },
         }).json()
 
-        source = client.get(f"/api/resume/resumes/{resume['id']}/source").text
+        source = typst_source(client, resume["id"])
         assert "Ada Lovelace" in source
         assert "2,600+ feeds" in source
         assert "*Languages:* Python" in source
-
-        check = client.get(f"/api/resume/resumes/{resume['id']}/check").json()
-        levels = {problem["level"] for problem in check["problems"]}
-        assert "error" not in levels
-        if check["typst_available"]:
-            assert check["page_count"] == 1
 
 
 def test_education_is_fixed_and_selected_coursework_renders_beneath_it():
@@ -162,7 +136,7 @@ def test_education_is_fixed_and_selected_coursework_renders_beneath_it():
             "selection": {"entries": [], "skills": [course["id"]]},
         }).json()
 
-        source = client.get(f"/api/resume/resumes/{resume['id']}/source").text
+        source = typst_source(client, resume["id"])
         assert education["org"] in source
         assert "*Relevant Coursework:* Operating Systems" in source
 
@@ -179,7 +153,7 @@ def test_a_resume_can_leave_the_gpa_off():
         }).json()
         assert resume["selection"]["entries"][0]["show_detail"] is False
 
-        source = client.get(f"/api/resume/resumes/{resume['id']}/source").text
+        source = typst_source(client, resume["id"])
         assert education["org"] in source
         assert "3.82" not in source
         assert "Available Spring 2027" in source
@@ -188,30 +162,34 @@ def test_a_resume_can_leave_the_gpa_off():
             "selection": {"entries": [{"entry_id": education["id"]}], "skills": []},
         }).json()
         assert shown["selection"]["entries"][0].get("show_detail", True) is True  # absent means shown
-        assert "3.82" in client.get(f"/api/resume/resumes/{resume['id']}/source").text
+        assert "3.82" in typst_source(client, resume["id"])
 
 
-def test_lint_catches_filler_and_missing_bullets():
+def test_barlow_rewords_headers_per_resume_and_keeps_picked_skill_order():
     with make_client() as client:
-        entry_id, _, _ = seed_bank(client)
-        weak = client.post(f"/api/resume/entries/{entry_id}/bullets", json={
-            "text": "Responsible for various tasks on the team",
+        entry = client.post("/api/resume/entries", json={
+            "kind": "project", "org": "Bank Title", "role": "Bank Role", "start_date": "Apr 2026",
         }).json()
+        bullet = client.post(f"/api/resume/entries/{entry['id']}/bullets", json={"text": "Shipped it"}).json()
+        go = client.post("/api/resume/skills", json={"category": "language", "name": "Go"}).json()
+        c = client.post("/api/resume/skills", json={"category": "language", "name": "C"}).json()
+        pick = {"entry_id": entry["id"], "org": "Resume Title", "start_date": "",
+                "bullets": [{"bullet_id": bullet["id"]}]}
         resume = client.post("/api/resume/resumes", json={
-            "name": "Weak",
-            "selection": {"entries": [{"entry_id": entry_id,
-                                       "bullets": [{"bullet_id": weak["id"]}]}]},
+            "name": "Sans", "template": "barlow",
+            "selection": {"entries": [pick], "skills": [go["id"], c["id"]]},
         }).json()
-        messages = [
-            problem["message"]
-            for problem in client.get(f"/api/resume/resumes/{resume['id']}/check").json()["problems"]
-        ]
-        assert any("responsible for" in message for message in messages)
-        assert any("availability" in message.lower() for message in messages)
+        assert resume["template"] == "barlow"
 
-        empty = client.post("/api/resume/resumes", json={"name": "Empty"}).json()
-        problems = client.get(f"/api/resume/resumes/{empty['id']}/check").json()["problems"]
-        assert any(problem["message"] == "No bullets selected." for problem in problems)
+        source = typst_source(client, resume["id"])
+        assert 'font: "Barlow"' in source
+        assert "Resume Title" in source and "Bank Title" not in source
+        assert "Bank Role" in source      # no override: the bank's value
+        assert "Apr 2026" not in source   # "" override: blank on this resume
+        assert "Go, C" in source          # picked order, not alphabetical
+
+        client.patch(f"/api/resume/resumes/{resume['id']}", json={"template": "main"})
+        assert 'font: "Barlow"' not in typst_source(client, resume["id"])
 
 
 def test_a_url_cannot_break_out_of_its_typst_string():
@@ -236,7 +214,7 @@ def test_a_url_cannot_break_out_of_its_typst_string():
                                        "bullets": [{"bullet_id": bullet_id}]}]},
         }).json()
 
-        source = client.get(f"/api/resume/resumes/{resume['id']}/source").text
+        source = typst_source(client, resume["id"])
         # Both call sites: the profile link in the header and the entry's link.
         assert source.count('\\") + text') == 2
         assert re.search(r'(?<!\\)"\) \+ text', source) is None
@@ -258,13 +236,10 @@ def test_pdf_export():
             },
         }).json()
         response = client.get(f"/api/resume/resumes/{resume['id']}/pdf")
-        if typst_available():
-            assert response.status_code == 200
-            assert response.headers["content-type"] == "application/pdf"
-            assert response.headers["x-page-count"] == "1"
-            assert response.content.startswith(b"%PDF")
-        else:
-            assert response.status_code == 503
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["x-page-count"] == "1"
+        assert response.content.startswith(b"%PDF")
 
 
 def public_client() -> TestClient:
@@ -300,36 +275,19 @@ def test_rendering_a_resume_needs_no_session() -> None:
         assert client.get("/api/resume/profile").status_code == 401
         assert client.get("/api/resume/resumes").status_code == 401
 
-        assert client.get("/api/resume/render/status").status_code == 200
-        source = client.post("/api/resume/render/source", json=RENDER_PAYLOAD)
-        assert source.status_code == 200
-        assert "Ada Lovelace" in source.text
-        assert "2,600+ feeds" in source.text
-
-        check = client.post("/api/resume/render/check", json=RENDER_PAYLOAD)
-        assert check.status_code == 200
-        assert isinstance(check.json()["problems"], list)
-        assert check.json()["typst_available"] == typst_available()
+        response = client.post("/api/resume/render/pdf", json=RENDER_PAYLOAD)
+        assert response.status_code == 200
+        assert response.content[:4] == b"%PDF"
+        assert response.headers["X-Page-Count"] == "1"
 
 
 def test_rendering_refuses_an_oversized_resume() -> None:
     with public_client() as client:
-        response = client.post("/api/resume/render/source", json={
+        response = client.post("/api/resume/render/pdf", json={
             **RENDER_PAYLOAD,
             "profile": {"full_name": "x" * 300_000, "email": "ada@example.test"},
         })
         assert response.status_code == 413
-
-
-def test_the_public_pdf_route_compiles_when_typst_is_installed() -> None:
-    with public_client() as client:
-        response = client.post("/api/resume/render/pdf", json=RENDER_PAYLOAD)
-        if typst_available():
-            assert response.status_code == 200
-            assert response.content[:4] == b"%PDF"
-            assert int(response.headers["X-Page-Count"]) >= 1
-        else:
-            assert response.status_code == 503
 
 
 # -- user-defined variants -----------------------------------------------
@@ -401,22 +359,6 @@ def test_removing_a_variant_still_in_use_is_refused() -> None:
         assert "biotech (1)" in response.json()["detail"]
         # The refusal must not have partially applied.
         assert [v["key"] for v in client.get("/api/resume/variants").json()["variants"]] == ["biotech"]
-
-
-def test_coverage_uses_the_accounts_own_vocabulary() -> None:
-    with make_client() as client:
-        client.put("/api/resume/vocabulary", json={"terms": ["GMP", "ISO 13485"]})
-        assert client.get("/api/resume/vocabulary").json() == {
-            "terms": ["GMP", "ISO 13485"],
-        }
-        job = client.post("/api/resume/jobs", json={
-            "company": "Medtronic", "title": "Quality Engineer",
-            "jd_text": "GMP experience required. Python is a plus.",
-        }).json()
-        missing = client.get(f"/api/resume/jobs/{job['id']}/coverage").json()["missing"]
-        # Python is in the seed list but not in this account's, so it must not
-        # be reported; GMP, which the user added, must be.
-        assert missing == ["GMP"]
 
 
 # -- the application handoff ---------------------------------------------

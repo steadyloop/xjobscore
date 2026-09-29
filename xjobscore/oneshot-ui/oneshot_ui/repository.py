@@ -29,7 +29,6 @@ from xjobscore.job_domain import (
     SOFTWARE_FILTER,
     UNLABELED_FILTER,
 )
-from xjobscore.coverage_snapshot import board_state as _board_state
 from xjobscore.coverage_snapshot import empty_snapshot
 from xjobscore.degrees import canon as degree_canon
 from xjobscore.skill_labels import labels as skill_labels
@@ -37,15 +36,10 @@ from xjobscore.skills import canon
 
 from .location_policy import (
     RECENCY_TIME_ZONE,
-    US_HUB_CITIES,
     US_HUB_KEYS,
-    US_NORCAL_CITIES,
     US_NORCAL_KEYS,
-    US_SEATTLE_CITIES,
     US_SEATTLE_KEYS,
-    US_SOCAL_CITIES,
     US_SOCAL_KEYS,
-    US_SUBURB_CITIES,
     US_SUBURB_KEYS,
 )
 
@@ -95,6 +89,25 @@ _LOCATION_DISPLAY_LIMIT = 3
 _BIO_COMPANY_CACHE_SECONDS = 300
 _JOB_COUNTS_CACHE_SECONDS = 30
 _JOB_COUNTS_CACHE_MAX_ENTRIES = 128
+
+
+_APPLICATION_SELECT = """
+    SELECT
+        a.id, a.job_posting_id, a.company_snapshot, a.title_snapshot,
+        a.location_snapshot, a.stage, a.closed_reason,
+        a.apply_url_snapshot, a.resume_variant, a.submitted_at,
+        a.next_action, a.next_due_at, a.note, a.updated_at,
+        COALESCE(moved.at, a.updated_at) AS stage_changed_at
+    FROM job_application a
+    -- Every stage change writes a stage_changed event, so the board can
+    -- order by "most recently moved" without a column of its own. The
+    -- fallback keeps rows that predate the event log orderable.
+    LEFT JOIN LATERAL (
+        SELECT max(e.occurred_at) AS at
+        FROM job_application_event e
+        WHERE e.job_application_id = a.id AND e.to_stage IS NOT NULL
+    ) moved ON true
+"""
 
 
 class _CompanyCohortCache:
@@ -225,38 +238,6 @@ def _locations(value: Any) -> list[dict[str, str | None]]:
         seen.add(key)
         result.append(row)
     return result
-
-
-def _us_location_bucket(value: Any) -> int | None:
-    """Return the transient UI bucket, or ``None`` for a foreign-only job."""
-    locations = _locations(value)
-    if not locations:
-        return 4
-    us = [location for location in locations if location["country"] == "US"]
-    if not us:
-        return None
-    keys = {(location["state"], location["city"]) for location in us}
-    if keys & US_HUB_CITIES:
-        return 1
-    if keys & US_SUBURB_CITIES:
-        return 2
-    return 3
-
-
-def _us_proximity_priority(value: Any) -> int:
-    """Rank represented US regions: NorCal, SoCal, Seattle, then elsewhere."""
-    keys = {
-        (location["state"], location["city"])
-        for location in _locations(value)
-        if location["country"] == "US"
-    }
-    if keys & US_NORCAL_CITIES:
-        return 1
-    if keys & US_SOCAL_CITIES:
-        return 2
-    if keys & US_SEATTLE_CITIES:
-        return 3
-    return 4
 
 
 def _location_label(value: Any) -> str | None:
@@ -523,6 +504,10 @@ class PostgresRepository:
             # Schedule, orthogonal to job_type: a part-time internship reads
             # job_type "intern" and part_time "yes".
             "part_time": row.get("part_time") or "unknown",
+            # Gold title domain (software, finance, unlabeled) or null when not
+            # yet classified. The triage pane shows it as the Focus label that a
+            # Mislabeled report can dispute.
+            "job_domain": row.get("job_domain"),
             "attributes": attributes,
             # Derived API presentation; attributes.skills remains the durable
             # JSONB array of canonical ids.
@@ -622,6 +607,17 @@ class PostgresRepository:
                 f"WHERE a.account_id = {account_marker} AND ("
                 "a.job_posting_id = j.id OR ("
                 f"{collapsible} AND tracked.dup_group_id = j.dup_group_id"
+                ")))"
+            )
+            # Skipped and mislabeled postings leave the feed the same way,
+            # duplicate group included, until the account restores them.
+            clauses.append(
+                "NOT EXISTS ("
+                "SELECT 1 FROM job_feedback f "
+                "JOIN job_posting hidden ON hidden.id = f.job_posting_id "
+                f"WHERE f.account_id = {account_marker} AND ("
+                "f.job_posting_id = j.id OR ("
+                f"{collapsible} AND hidden.dup_group_id = j.dup_group_id"
                 ")))"
             )
         if fields:
@@ -821,7 +817,7 @@ class PostgresRepository:
                 j.id, j.source, c.name AS company_name, j.title,
                 j.locations, j.source_url, j.apply_url, j.posted_at,
                 j.first_seen_at, j.last_seen_at, j.status, j.attributes,
-                j.job_type, j.remote, j.part_time,
+                j.job_type, j.remote, j.part_time, j.job_domain,
                 j.company_id, (logo.bytes IS NOT NULL) AS has_logo,
                 COALESCE(alternates.other_sources, '[]'::jsonb) AS other_sources
             FROM job_posting j
@@ -902,21 +898,19 @@ class PostgresRepository:
             return empty_snapshot(), None
         return _json_object(row["payload"]), _iso(row["computed_at"])
 
-    async def source_coverage(self) -> dict[str, Any]:
+    async def _coverage_section(self, key: str) -> dict[str, Any]:
         snapshot, computed_at = await self._coverage_snapshot()
-        fallback = empty_snapshot()["source_coverage"]
-        payload = snapshot.get("source_coverage", fallback)
+        fallback = empty_snapshot()[key]
+        payload = snapshot.get(key, fallback)
         result = dict(payload) if isinstance(payload, dict) else dict(fallback)
         result["computed_at"] = computed_at
         return result
 
+    async def source_coverage(self) -> dict[str, Any]:
+        return await self._coverage_section("source_coverage")
+
     async def board_map(self) -> dict[str, Any]:
-        snapshot, computed_at = await self._coverage_snapshot()
-        fallback = empty_snapshot()["board_map"]
-        payload = snapshot.get("board_map", fallback)
-        result = dict(payload) if isinstance(payload, dict) else dict(fallback)
-        result["computed_at"] = computed_at
-        return result
+        return await self._coverage_section("board_map")
 
     @staticmethod
     def _application(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
@@ -944,22 +938,8 @@ class PostgresRepository:
         self, connection: asyncpg.Connection, application_id: int
     ) -> dict[str, Any] | None:
         row = await connection.fetchrow(
-            """
-            SELECT
-                a.id, a.job_posting_id, a.company_snapshot, a.title_snapshot,
-                a.location_snapshot, a.stage, a.closed_reason,
-                a.apply_url_snapshot, a.resume_variant, a.submitted_at,
-                a.next_action, a.next_due_at, a.note, a.updated_at,
-                COALESCE(moved.at, a.updated_at) AS stage_changed_at
-            FROM job_application a
-            -- Every stage change writes a stage_changed event, so the board can
-            -- order by "most recently moved" without a column of its own. The
-            -- fallback keeps rows that predate the event log orderable.
-            LEFT JOIN LATERAL (
-                SELECT max(e.occurred_at) AS at
-                FROM job_application_event e
-                WHERE e.job_application_id = a.id AND e.to_stage IS NOT NULL
-            ) moved ON true
+            f"""
+            {_APPLICATION_SELECT}
             WHERE a.id = $1 AND a.account_id = $2
             """,
             application_id,
@@ -991,22 +971,8 @@ class PostgresRepository:
 
     async def list_applications(self) -> dict[str, Any]:
         rows = await self._ready().fetch(
-            """
-            SELECT
-                a.id, a.job_posting_id, a.company_snapshot, a.title_snapshot,
-                a.location_snapshot, a.stage, a.closed_reason,
-                a.apply_url_snapshot, a.resume_variant, a.submitted_at,
-                a.next_action, a.next_due_at, a.note, a.updated_at,
-                COALESCE(moved.at, a.updated_at) AS stage_changed_at
-            FROM job_application a
-            -- Every stage change writes a stage_changed event, so the board can
-            -- order by "most recently moved" without a column of its own. The
-            -- fallback keeps rows that predate the event log orderable.
-            LEFT JOIN LATERAL (
-                SELECT max(e.occurred_at) AS at
-                FROM job_application_event e
-                WHERE e.job_application_id = a.id AND e.to_stage IS NOT NULL
-            ) moved ON true
+            f"""
+            {_APPLICATION_SELECT}
             WHERE a.account_id = $1
             ORDER BY
                 CASE a.stage
@@ -1328,3 +1294,109 @@ class PostgresRepository:
         if deleted:
             self._job_counts_cache.invalidate_account(self.account_id)
         return deleted
+
+    @staticmethod
+    def _feedback(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
+        corrections = row.get("corrections")
+        if isinstance(corrections, str):
+            corrections = json.loads(corrections)
+        return {
+            "job_id": row["job_posting_id"],
+            "kind": row["kind"],
+            "skip_reason": row.get("skip_reason"),
+            "corrections": corrections if isinstance(corrections, list) else [],
+            "created_at": _iso(row.get("created_at")),
+            "updated_at": _iso(row.get("updated_at")),
+        }
+
+    async def set_feedback(
+        self,
+        job_id: int,
+        *,
+        kind: str,
+        skip_reason: str | None = None,
+        corrections: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Hide a posting from this account's feed, or replace why it is hidden.
+
+        Upsert, so a skip can gain its reason after the fact. ``created_at`` is
+        kept on update: it orders the Hidden list by when the posting left the
+        feed. Returns None when the posting does not exist.
+        """
+        row = await self._ready().fetchrow(
+            """
+            INSERT INTO job_feedback (
+                account_id, job_posting_id, kind, skip_reason, corrections
+            )
+            SELECT $1, j.id, $3, $4, $5::jsonb
+            FROM job_posting j
+            WHERE j.id = $2
+            ON CONFLICT (account_id, job_posting_id) DO UPDATE SET
+                kind = EXCLUDED.kind,
+                skip_reason = EXCLUDED.skip_reason,
+                corrections = EXCLUDED.corrections,
+                updated_at = now()
+            RETURNING job_posting_id, kind, skip_reason, corrections,
+                      created_at, updated_at
+            """,
+            self.account_id,
+            job_id,
+            kind,
+            skip_reason,
+            json.dumps(corrections or []),
+        )
+        if row is None:
+            return None
+        self._job_counts_cache.invalidate_account(self.account_id)
+        return self._feedback(row)
+
+    async def delete_feedback(self, job_id: int) -> bool:
+        result = await self._ready().execute(
+            "DELETE FROM job_feedback WHERE account_id = $1 AND job_posting_id = $2",
+            self.account_id,
+            job_id,
+        )
+        deleted = result == "DELETE 1"
+        if deleted:
+            self._job_counts_cache.invalidate_account(self.account_id)
+        return deleted
+
+    async def list_feedback(
+        self, *, limit: int = 100, offset: int = 0
+    ) -> dict[str, Any]:
+        """The account's Hidden list, most recently hidden first."""
+        pool = self._ready()
+        rows, total = await asyncio.gather(
+            pool.fetch(
+                """
+                SELECT
+                    f.job_posting_id, f.kind, f.skip_reason, f.corrections,
+                    f.created_at, f.updated_at,
+                    j.id, j.source, c.name AS company_name, j.title,
+                    j.locations, j.source_url, j.apply_url, j.posted_at,
+                    j.first_seen_at, j.last_seen_at, j.status, j.attributes,
+                    j.job_type, j.remote, j.part_time, j.job_domain,
+                    j.company_id, (logo.bytes IS NOT NULL) AS has_logo
+                FROM job_feedback f
+                JOIN job_posting j ON j.id = f.job_posting_id
+                JOIN company c ON c.id = j.company_id
+                LEFT JOIN company_logo logo ON logo.company_id = j.company_id
+                WHERE f.account_id = $1
+                ORDER BY f.created_at DESC, f.job_posting_id DESC
+                LIMIT $2 OFFSET $3
+                """,
+                self.account_id,
+                max(1, min(limit, 500)),
+                max(0, offset),
+            ),
+            pool.fetchval(
+                "SELECT COUNT(*) FROM job_feedback WHERE account_id = $1",
+                self.account_id,
+            ),
+        )
+        return {
+            "total": total,
+            "hidden": [
+                {**self._feedback(row), "job": self._job(row)} for row in rows
+            ],
+        }

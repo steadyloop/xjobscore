@@ -341,3 +341,146 @@ async def test_prior_items_round_trips_the_newest_bronze_revision_per_posting(co
     assert prior["1"].external_id == "1"
     assert prior["1"].payload["body"] == "second"
     assert prior["2"].payload["body"] == "untouched"
+
+
+@pytest.mark.asyncio
+async def test_replace_dup_groups_writes_only_what_changed(core_schema):
+    """Dedup runs while feed workers write job_posting, so a rebuild must not
+    lock rows it does not change: an identical rebuild writes nothing, and a
+    changed one touches only the postings and groups that moved."""
+    pool = core_schema.pool
+    async with pool.acquire() as conn:
+        company = await conn.fetchval("INSERT INTO company(name) VALUES ('Acme') RETURNING id")
+        ids = []
+        for n in range(4):
+            raw = await conn.fetchval(
+                """INSERT INTO raw_posting(source, source_key, data, data_hash)
+                   VALUES ('greenhouse:acme', $1, '{}', $1) RETURNING id""",
+                f"k{n}",
+            )
+            ids.append(await conn.fetchval(
+                """INSERT INTO job_posting(source, source_key, company_id, title, content_hash, raw_id)
+                   VALUES ('greenhouse:acme', $1, $2, 'Engineer', $1, $3) RETURNING id""",
+                f"k{n}", company, raw,
+            ))
+        g1, g2 = str(uuid4()), str(uuid4())
+
+        def group(gid, primary):
+            return {"id": gid, "primary_posting_id": primary, "state": "pending",
+                    "evidence": {"key": gid}}
+
+        async def memberships():
+            rows = await conn.fetch("SELECT id, dup_group_id::text AS g FROM job_posting ORDER BY id")
+            return {row["id"]: row["g"] for row in rows}
+
+        async def versions():
+            postings = await conn.fetch("SELECT id, xmin::text AS v FROM job_posting")
+            groups = await conn.fetch("SELECT id::text, xmin::text AS v FROM job_posting_dup_group")
+            return {("p", r["id"]): r["v"] for r in postings} | {("g", r["id"]): r["v"] for r in groups}
+
+        plan_a = (
+            [group(g1, ids[0]), group(g2, ids[2])],
+            [{"posting_id": ids[0], "group_id": g1}, {"posting_id": ids[1], "group_id": g1},
+             {"posting_id": ids[2], "group_id": g2}, {"posting_id": ids[3], "group_id": g2}],
+        )
+        async with conn.transaction():
+            assert await store.replace_dup_groups(conn, groups=plan_a[0], members=plan_a[1]) == 2
+        assert await memberships() == {ids[0]: g1, ids[1]: g1, ids[2]: g2, ids[3]: g2}
+
+        # Identical rebuild: no row gets a new version.
+        before = await versions()
+        async with conn.transaction():
+            await store.replace_dup_groups(conn, groups=plan_a[0], members=plan_a[1])
+        assert await versions() == before
+
+        # p2 moves into g1, p3 falls out of every group, g2 disappears.
+        plan_b = (
+            [group(g1, ids[0])],
+            [{"posting_id": ids[0], "group_id": g1}, {"posting_id": ids[1], "group_id": g1},
+             {"posting_id": ids[2], "group_id": g1}],
+        )
+        async with conn.transaction():
+            assert await store.replace_dup_groups(conn, groups=plan_b[0], members=plan_b[1]) == 1
+        assert await memberships() == {ids[0]: g1, ids[1]: g1, ids[2]: g1, ids[3]: None}
+        after = await versions()
+        assert after[("p", ids[0])] == before[("p", ids[0])]   # untouched
+        assert after[("p", ids[1])] == before[("p", ids[1])]   # untouched
+        assert after[("g", g1)] == before[("g", g1)]           # same content, not rewritten
+        assert ("g", g2) not in after
+
+        # An empty plan clears everything.
+        async with conn.transaction():
+            assert await store.replace_dup_groups(conn, groups=[], members=[]) == 0
+        assert set((await memberships()).values()) == {None}
+        assert await conn.fetchval("SELECT count(*) FROM job_posting_dup_group") == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_since_marks_first_absence_and_clears_on_return(core_schema):
+    """A complete poll stamps postings it no longer lists -- once, at the first
+    such poll -- and listing them again clears the stamp. Status is untouched."""
+    pool = core_schema.pool
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    t1, t2, t3 = (t0 + timedelta(minutes=15 * n) for n in (1, 2, 3))
+    async with pool.acquire() as conn:
+        company = await conn.fetchval("INSERT INTO company(name) VALUES ('Acme') RETURNING id")
+        ids = {}
+        for key, seen in (("listed", t1), ("gone", t0)):
+            raw = await conn.fetchval(
+                """INSERT INTO raw_posting(source, source_key, data, data_hash)
+                   VALUES ('greenhouse:acme', $1, '{}', $1) RETURNING id""", key)
+            ids[key] = await conn.fetchval(
+                """INSERT INTO job_posting(source, source_key, company_id, title, content_hash,
+                                           raw_id, last_seen_at)
+                   VALUES ('greenhouse:acme', $1, $2, 'Engineer', $1, $3, $4) RETURNING id""",
+                key, company, raw, seen)
+
+        async def state():
+            rows = await conn.fetch("SELECT source_key, missing_since, status FROM job_posting")
+            return {r["source_key"]: (r["missing_since"], r["status"]) for r in rows}
+
+        # Poll at t1 listed only "listed" (silver stamped it t1): "gone" is missing.
+        assert await store.mark_missing_postings(conn, "greenhouse:acme", t1) == 1
+        assert await state() == {"listed": (None, "active"), "gone": (t1, "active")}
+
+        # A later complete poll keeps the first stamp.
+        await conn.execute("UPDATE job_posting SET last_seen_at = $1 WHERE source_key = 'listed'", t2)
+        assert await store.mark_missing_postings(conn, "greenhouse:acme", t2) == 0
+        assert (await state())["gone"] == (t1, "active")
+
+        # Listed again: the touch clears it.
+        await store.touch_source_postings(conn, "greenhouse:acme", t3)
+        assert await state() == {"listed": (None, "active"), "gone": (None, "active")}
+
+
+@pytest.mark.asyncio
+async def test_missing_since_migration_backfills_from_the_first_complete_poll(core_schema):
+    pool = core_schema.pool
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    async with pool.acquire() as conn:
+        company = await conn.fetchval("INSERT INTO company(name) VALUES ('Acme') RETURNING id")
+        await conn.execute(
+            "INSERT INTO token(ats, token, company_id, status) VALUES ('greenhouse', 'acme', $1, 'live')",
+            company)
+        feed_id = await conn.fetchval(
+            "INSERT INTO feed(source, key) VALUES ('greenhouse', 'acme') RETURNING id")
+        raw = await conn.fetchval(
+            """INSERT INTO raw_posting(source, source_key, data, data_hash)
+               VALUES ('greenhouse:acme', 'gone', '{}', 'h') RETURNING id""")
+        await conn.execute(
+            """INSERT INTO job_posting(source, source_key, company_id, title, content_hash,
+                                       raw_id, last_seen_at)
+               VALUES ('greenhouse:acme', 'gone', $1, 'Engineer', 'h', $2, $3)""",
+            company, raw, t0)
+        # After it was last seen: a partial and an error (not complete), then
+        # the first complete poll, then another.
+        for minutes, status in ((15, "partial"), (30, "error"), (45, "ok"), (60, "ok")):
+            await conn.execute(
+                "INSERT INTO poll_log(feed_id, polled_at, status) VALUES ($1, $2, $3)",
+                feed_id, t0 + timedelta(minutes=minutes), status)
+        await conn.execute("UPDATE job_posting SET missing_since = NULL")
+
+        migration = Path(__file__).resolve().parents[1] / "migrations" / "20260929_job_posting_missing_since.sql"
+        await conn.execute(migration.read_text())
+
+        assert await conn.fetchval("SELECT missing_since FROM job_posting") == t0 + timedelta(minutes=45)

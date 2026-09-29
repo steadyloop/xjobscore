@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from xjobscore import coverage_snapshot, run, store
+from xjobscore import activity, coverage_snapshot, run, store
 from xjobscore.records import Feed
 
 pytestmark = pytest.mark.asyncio
@@ -152,6 +152,39 @@ async def test_the_budget_stops_claiming_and_reports_undrained(monkeypatch):
     # it does not abandon a poll already in flight.
     assert len(harness.polls) == result.polled
     assert harness.active == {"greenhouse": 0}
+
+
+async def test_in_flight_map_shows_each_poll_while_it_runs(monkeypatch):
+    """The System page's worker bars read this map: a feed is in it for exactly
+    as long as its poll runs, and it is gone afterwards even when the poll fails."""
+    feeds = [_feed("greenhouse", 1), _feed("greenhouse", 2), _feed("lever", 3)]
+    harness = _Harness(
+        monkeypatch,
+        {"greenhouse": feeds[:2], "lever": feeds[2:]},
+        {"greenhouse": 2, "lever": 1},
+    )
+    seen: dict[str, dict[str, list[dict]]] = {}
+
+    async def poll(pool, net, feed, now):
+        await asyncio.sleep(0.01)  # let the sibling worker claim too
+        seen[feed.key] = activity.INFLIGHT.snapshot()
+        if feed.key == "lever-3":
+            raise RuntimeError("poll blew up")
+        return "ok"
+
+    monkeypatch.setattr(run, "poll", poll)
+    with pytest.raises(RuntimeError):
+        await run.cycle(_Pool(), object(), _cfg(), run.datetime.now(run.timezone.utc))
+
+    for feed in feeds:
+        running = seen[feed.key][feed.source]
+        assert feed.key in {row["key"] for row in running}
+    assert {row["key"] for row in seen["greenhouse-1"]["greenhouse"]} == {
+        "greenhouse-1", "greenhouse-2",
+    }
+    # Let the remaining workers unwind, then the map must be empty.
+    await asyncio.sleep(0.05)
+    assert activity.INFLIGHT.snapshot() == {}
 
 
 async def test_shutdown_signal_stops_claiming_new_feeds(monkeypatch):

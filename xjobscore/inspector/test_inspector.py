@@ -351,7 +351,8 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
         static / "feeds.js",
         static / "feed" / "app.js",
         static / "shared" / "inspect.js",
-        static / "scheduler" / "app.js",
+        static / "system" / "app.js",
+        static / "system" / "live.js",
     ]
     for script in scripts:
         assert "feed.id" not in script.read_text(), script.name
@@ -368,10 +369,11 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
 
 
 def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
-    scheduler = Path(__file__).with_name("static") / "scheduler"
+    # The scheduler board lives on the System page.
+    scheduler = Path(__file__).with_name("static") / "system"
     source = "\n".join(
         (scheduler / name).read_text()
-        for name in ("index.html", "app.js", "model.mjs")
+        for name in ("index.html", "app.js", "live.js", "model.mjs")
     )
     for removed in (
         "ewma_" + "lambda",
@@ -386,7 +388,7 @@ def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
     html = (scheduler / "index.html").read_text()
     app = (scheduler / "app.js").read_text()
     css = (scheduler / "styles.css").read_text()
-    assert '/static/scheduler/styles.css' in html
+    assert '/static/system/styles.css' in html
     assert 'id="detail-panel"' in html
     assert 'id="bulk-dialog"' in html
     assert 'id="vendor-panel"' not in html

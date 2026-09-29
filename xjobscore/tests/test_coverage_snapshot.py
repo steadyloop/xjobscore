@@ -142,6 +142,22 @@ async def test_poll_cycle_refreshes_snapshot_once(monkeypatch):
     assert refreshed == [pool]
 
 
+def test_board_state_ranks_deliberate_holds_above_derived_signals():
+    now = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+    fresh = now - timedelta(minutes=5)
+    ancient = now - timedelta(days=2)
+    board_state = coverage_snapshot.board_state
+    # An operator hold outranks strikes; repeated failures outrank staleness.
+    assert board_state(5, ancient, now, 900, now) == "paused"
+    assert board_state(3, ancient, None, 900, now) == "failing"
+    assert board_state(1, fresh, None, 900, now) == "degraded"
+    assert board_state(0, None, None, 900, now) == "never"
+    assert board_state(0, ancient, None, 900, now) == "stale"
+    assert board_state(0, fresh, None, 900, now) == "ok"
+    # No cadence configured: staleness cannot be judged, so a polled feed is ok.
+    assert board_state(0, ancient, None, 0, now) == "ok"
+
+
 def test_both_schemas_define_the_singleton_snapshot():
     root = Path(__file__).parent.parent.parent
 

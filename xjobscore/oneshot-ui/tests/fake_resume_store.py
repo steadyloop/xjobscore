@@ -16,9 +16,8 @@ from oneshot_ui import resume_workspace as workspace
 from oneshot_ui.repository import LOCAL_ACCOUNT_ID
 
 RESUME_FIELDS = (
-    "name", "target_job_id", "variant", "availability_line", "education_note", "selection",
+    "name", "target_job_id", "variant", "template", "availability_line", "education_note", "selection",
 )
-TARGET_FIELDS = ("company", "title", "url", "jd_text", "date_posted", "note")
 
 
 class _Account:
@@ -70,19 +69,13 @@ class InMemoryResumeStore:
             "date_posted": snapshot.get("date_posted", ""),
         }
 
-    # -- variants and vocabulary -----------------------------------------
+    # -- variants --------------------------------------------------------
 
     async def list_variants(self):
         return workspace.list_variants(self._state.workspace)
 
     async def set_variants(self, raw):
         return workspace.set_variants(self._state.workspace, raw)
-
-    async def list_vocabulary(self):
-        return workspace.list_vocabulary(self._state.workspace)
-
-    async def set_vocabulary(self, raw):
-        return workspace.set_vocabulary(self._state.workspace, raw)
 
     # -- profile ---------------------------------------------------------
 
@@ -144,21 +137,6 @@ class InMemoryResumeStore:
     async def list_target_jobs(self):
         return deepcopy(sorted(self._state.targets, key=lambda t: -t["id"]))
 
-    async def create_target_job(self, fields):
-        target = {
-            "id": self._state.allocate(),
-            "company": fields["company"],
-            "title": fields["title"],
-            "url": fields.get("url", ""),
-            "jd_text": fields.get("jd_text", ""),
-            "date_posted": fields.get("date_posted", ""),
-            "note": fields.get("note", ""),
-            "job_application_id": fields.get("job_application_id"),
-            "created_at": "2026-01-01T00:00:00+00:00",
-        }
-        self._state.targets.append(target)
-        return deepcopy(target)
-
     async def create_target_from_application(self, application_id):
         snapshot = self._state.applications.get(application_id)
         if snapshot is None:
@@ -169,32 +147,15 @@ class InMemoryResumeStore:
         )
         if existing is not None:
             return deepcopy(existing)
-        return await self.create_target_job(
-            dict(snapshot, job_application_id=application_id)
-        )
-
-    def _target(self, job_id):
-        return next((t for t in self._state.targets if t["id"] == job_id), None)
-
-    async def update_target_job(self, job_id, fields):
-        target = self._target(job_id)
-        if target is None:
-            return None
-        for key, value in fields.items():
-            if key in TARGET_FIELDS and value is not None:
-                target[key] = value
+        target = {
+            "id": self._state.allocate(),
+            **snapshot,
+            "note": "",
+            "job_application_id": application_id,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        self._state.targets.append(target)
         return deepcopy(target)
-
-    async def delete_target_job(self, job_id):
-        target = self._target(job_id)
-        if target is None:
-            return False
-        self._state.targets.remove(target)
-        # Mirrors ON DELETE SET NULL (target_job_id) on resume_document.
-        for document in self._state.documents:
-            if document["target_job_id"] == job_id:
-                document["target_job_id"] = None
-        return True
 
     # -- resumes ---------------------------------------------------------
 
@@ -218,6 +179,7 @@ class InMemoryResumeStore:
             "name": fields["name"],
             "target_job_id": fields.get("target_job_id"),
             "variant": fields.get("variant", ""),
+            "template": fields.get("template", "main"),
             "availability_line": fields.get("availability_line", ""),
             "education_note": fields.get("education_note", ""),
             "selection": fields.get("selection", {}),
@@ -250,24 +212,6 @@ class InMemoryResumeStore:
             return False
         self._state.documents.remove(document)
         return True
-
-    # -- derived ---------------------------------------------------------
-
-    async def coverage(self, job_id, resume_id=None):
-        job = self._target(job_id)
-        if job is None:
-            return None
-        shown_ids = set()
-        if resume_id is not None:
-            document = self._document(resume_id)
-            if document is not None:
-                shown_ids = set(document["selection"].get("skills", []))
-        return workspace.compute_coverage(
-            job,
-            workspace.list_skills(self._state.workspace),
-            shown_ids,
-            workspace.list_vocabulary(self._state.workspace),
-        )
 
     async def render_inputs(self, resume_id):
         document = self._document(resume_id)

@@ -15,6 +15,9 @@ Variant = VariantKey
 ALL_AUDIENCES = "all"
 EntryKind = Literal["education", "experience", "research", "project", "leadership"]
 SkillCategory = Literal["language", "framework", "tool", "coursework", "math"]
+# The typeset design. "main" is the original serif layout; "barlow" is the
+# sans layout built on the vendored Barlow faces.
+Template = Literal["main", "barlow"]
 
 
 class ProfileLink(BaseModel):
@@ -44,11 +47,6 @@ class VariantDefinition(BaseModel):
 
 class VariantsUpdate(BaseModel):
     variants: list[VariantDefinition] = Field(default_factory=list)
-
-
-class VocabularyUpdate(BaseModel):
-    # The coverage term list. Generous cap: the seed list alone is ~150 terms.
-    terms: list[str] = Field(default_factory=list, max_length=2000)
 
 
 class EntryCreate(BaseModel):
@@ -101,24 +99,6 @@ class SkillUpdate(BaseModel):
     audience: Audience | None = None
 
 
-class TargetJobCreate(BaseModel):
-    company: str = Field(min_length=1, max_length=300)
-    title: str = Field(min_length=1, max_length=500)
-    url: str = Field(default="", max_length=2000)
-    jd_text: str = Field(default="", max_length=100_000)
-    date_posted: str = Field(default="", max_length=40)
-    note: str = Field(default="", max_length=4000)
-
-
-class TargetJobUpdate(BaseModel):
-    company: str | None = Field(default=None, min_length=1, max_length=300)
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-    url: str | None = Field(default=None, max_length=2000)
-    jd_text: str | None = Field(default=None, max_length=100_000)
-    date_posted: str | None = Field(default=None, max_length=40)
-    note: str | None = Field(default=None, max_length=4000)
-
-
 class BulletPick(BaseModel):
     bullet_id: int
     text_override: str | None = Field(default=None, max_length=600)
@@ -131,6 +111,14 @@ class EntryPick(BaseModel):
     # default; a resume opts out per entry, so a pick with no bullets can
     # still carry a choice.
     show_detail: bool = True
+    # Per-resume wording of the entry's header, as `text_override` is for a
+    # bullet: None keeps the bank's value, "" blanks it on this resume only.
+    org: str | None = Field(default=None, max_length=300)
+    role: str | None = Field(default=None, max_length=300)
+    location: str | None = Field(default=None, max_length=200)
+    start_date: str | None = Field(default=None, max_length=40)
+    end_date: str | None = Field(default=None, max_length=40)
+    detail: str | None = Field(default=None, max_length=500)
 
 
 class Selection(BaseModel):
@@ -142,6 +130,7 @@ class ResumeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=300)
     target_job_id: int | None = None
     variant: Variant = ""
+    template: Template = "main"
     availability_line: str = Field(default="", max_length=300)
     education_note: str = Field(default="", max_length=300)
     selection: Selection = Field(default_factory=Selection)
@@ -151,6 +140,7 @@ class ResumeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=300)
     target_job_id: int | None = None
     variant: Variant | None = None
+    template: Template | None = None
     availability_line: str | None = Field(default=None, max_length=300)
     education_note: str | None = Field(default=None, max_length=300)
     selection: Selection | None = None

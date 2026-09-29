@@ -7,8 +7,7 @@ const LINKS = [
   ["System", "/system"],
   ["Keyscan", "/keyscan"],
   ["Tokens", "/tokens"],
-  ["Scheduler", "/scheduler"],
-  ["Feeds", "/"],
+  ["Feeds", "/feeds"],
   ["Companies", "/companies"],
 ];
 

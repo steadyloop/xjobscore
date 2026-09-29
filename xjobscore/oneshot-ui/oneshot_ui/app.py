@@ -14,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .api_models import (
     ApplicationUpdate,
     ExternalApplicationCreate,
+    JobFeedbackCommand,
 )
 from .apply_api import GreenhouseClient, router as apply_router
 from .auth import AuthStore, current_account, session_account
@@ -260,6 +261,44 @@ def create_app(
             raise HTTPException(status_code=404, detail="Job not found")
         return result
 
+    @application.put("/api/jobs/{job_id}/feedback")
+    async def set_job_feedback(
+        job_id: int,
+        command: JobFeedbackCommand,
+        store: Any = Depends(account_store),
+    ) -> dict[str, Any]:
+        # PUT, not POST: the row is the posting's hidden state for this
+        # account, so re-sending it (a skip gaining its reason) is a replace.
+        result = await store.set_feedback(
+            job_id,
+            kind=command.kind,
+            skip_reason=command.skip_reason,
+            corrections=[
+                correction.model_dump(by_alias=True)
+                for correction in command.corrections
+            ],
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return result
+
+    @application.delete("/api/jobs/{job_id}/feedback", status_code=204)
+    async def delete_job_feedback(
+        job_id: int,
+        store: Any = Depends(account_store),
+    ) -> Response:
+        if not await store.delete_feedback(job_id):
+            raise HTTPException(status_code=404, detail="Posting is not hidden")
+        return Response(status_code=204)
+
+    @application.get("/api/feedback")
+    async def job_feedback(
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+        store: Any = Depends(account_store),
+    ) -> dict[str, Any]:
+        return await store.list_feedback(limit=limit, offset=offset)
+
     @application.post("/api/applications/external")
     async def create_external_application_record(
         command: ExternalApplicationCreate,
@@ -357,7 +396,7 @@ def create_app(
         # Every page shell above is also reachable under /static/<dir>/index.html,
         # because the mount serves the same directory. The clean URLs are the
         # canonical ones the nav links to; a page shell must therefore reference
-        # its assets by absolute /static/ path, since a relative "../app.css"
+        # its assets by absolute /static/ path, since a relative "../navigation.css"
         # resolves differently under /application/ than under /static/application/.
         application.mount("/static", StaticFiles(directory=static_dir), name="static")
     return application

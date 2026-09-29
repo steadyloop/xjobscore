@@ -60,6 +60,18 @@ async def store():
         await base.close()
 
 
+async def _insert_target(store_, company: str = "Acme") -> int:
+    """A resume target row. The API only makes them from applications."""
+    return await store_._ready().fetchval(
+        """
+        INSERT INTO resume_target (account_id, company, title)
+        VALUES ($1, $2, 'Intern') RETURNING id
+        """,
+        store_.account_id,
+        company,
+    )
+
+
 async def test_jsonb_fields_round_trip_as_python_objects(store) -> None:
     """The port's highest-risk failure: asyncpg hands back jsonb as a str.
 
@@ -117,7 +129,7 @@ async def test_accounts_cannot_see_or_touch_each_others_data(store) -> None:
     mine, theirs = store
     entry = await mine.create_entry({"kind": "project", "org": "Mine"})
     await mine.create_skill({"category": "language", "name": "Python"})
-    job = await mine.create_target_job({"company": "Acme", "title": "Intern"})
+    await _insert_target(mine)
     resume = await mine.create_resume({"name": "Mine"})
 
     # Invisible.
@@ -132,8 +144,6 @@ async def test_accounts_cannot_see_or_touch_each_others_data(store) -> None:
     assert await theirs.delete_entry(entry["id"]) is False
     assert await theirs.update_resume(resume["id"], {"name": "Stolen"}) is None
     assert await theirs.delete_resume(resume["id"]) is False
-    assert await theirs.update_target_job(job["id"], {"company": "Stolen"}) is None
-    assert await theirs.delete_target_job(job["id"]) is False
 
     # And nothing changed.
     assert (await mine.list_entries())[0]["org"] == "Mine"
@@ -141,21 +151,10 @@ async def test_accounts_cannot_see_or_touch_each_others_data(store) -> None:
     assert (await mine.list_target_jobs())[0]["company"] == "Acme"
 
 
-async def test_deleting_a_target_unlinks_the_resume_that_pointed_at_it(store) -> None:
-    mine, _ = store
-    job = await mine.create_target_job({"company": "Acme", "title": "Intern"})
-    resume = await mine.create_resume({"name": "SWE", "target_job_id": job["id"]})
-    assert (await mine.get_resume(resume["id"]))["target_job_id"] == job["id"]
-
-    assert await mine.delete_target_job(job["id"]) is True
-    # ON DELETE SET NULL (target_job_id) — the resume survives, unlinked.
-    assert (await mine.get_resume(resume["id"]))["target_job_id"] is None
-
-
 async def test_target_job_link_can_be_cleared_explicitly(store) -> None:
     mine, _ = store
-    job = await mine.create_target_job({"company": "Acme", "title": "Intern"})
-    resume = await mine.create_resume({"name": "SWE", "target_job_id": job["id"]})
+    job_id = await _insert_target(mine)
+    resume = await mine.create_resume({"name": "SWE", "target_job_id": job_id})
 
     cleared = await mine.update_resume(resume["id"], {"target_job_id": None})
     assert cleared["target_job_id"] is None
@@ -213,28 +212,15 @@ async def test_entries_interleave_by_position_across_kinds(store) -> None:
     assert project_two["position"] == 2
 
 
-async def test_variants_and_vocabulary_round_trip_through_jsonb(store) -> None:
-    """Both new columns decode as Python lists, not as strings.
-
-    `vocabulary` is the subtle one: it is nullable so that "never customized"
-    stays distinguishable from "deliberately emptied". A fresh workspace must
-    therefore report the seed list, and an explicit clear must stick.
-    """
+async def test_variants_round_trip_through_jsonb(store) -> None:
+    """The column decodes as a Python list, not as a string."""
     mine, _ = store
     assert await mine.list_variants() == []
-    assert len(await mine.list_vocabulary()) > 100  # the seed list
 
     await mine.set_variants([{"key": "Regulatory", "label": "Regulatory Affairs"}])
     assert await mine.list_variants() == [
         {"key": "regulatory", "label": "Regulatory Affairs"}
     ]
-
-    assert await mine.set_vocabulary(["GMP", "ISO 13485"]) == ["GMP", "ISO 13485"]
-    assert await mine.list_vocabulary() == ["GMP", "ISO 13485"]
-    # An empty list is a real state and must survive a round trip rather than
-    # decoding back into the seed.
-    await mine.set_vocabulary([])
-    assert await mine.list_vocabulary() == []
 
 
 async def test_variants_are_per_account(store) -> None:
@@ -333,7 +319,7 @@ async def test_deleting_an_application_keeps_the_resume_work(store) -> None:
     application_id = await _queue_application(mine, mine.account_id)
     target = await mine.create_target_from_application(application_id)
     await mine._ready().execute("DELETE FROM job_application WHERE id = $1", application_id)
-    survivor = await mine._get_target(target["id"])
-    assert survivor is not None
+    [survivor] = await mine.list_target_jobs()
+    assert survivor["id"] == target["id"]
     assert survivor["job_application_id"] is None
     assert survivor["jd_text"] == "GMP required."

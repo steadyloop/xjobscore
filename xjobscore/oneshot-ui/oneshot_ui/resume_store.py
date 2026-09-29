@@ -1,8 +1,9 @@
 """PostgreSQL store for the resume workspace.
 
 Three tables, all keyed by account: ``resume_workspace`` holds the whole content
-bank as one jsonb row, ``resume_target`` the pasted job descriptions, and
-``resume_document`` the assembled resumes.
+bank as one jsonb row, ``resume_target`` the jobs a resume is tailored for
+(each made from a tracked application), and ``resume_document`` the assembled
+resumes.
 
 The bank is one row rather than a table per content type because the atomic unit
 is the bullet, not the resume: a resume is a *selection* of bullet and skill ids
@@ -31,9 +32,9 @@ from . import resume_workspace as workspace
 from .repository import LOCAL_ACCOUNT_ID
 
 RESUME_FIELDS = (
-    "name", "target_job_id", "variant", "availability_line", "education_note", "selection",
+    "name", "target_job_id", "variant", "template", "availability_line", "education_note",
+    "selection",
 )
-TARGET_FIELDS = ("company", "title", "url", "jd_text", "date_posted", "note")
 
 
 def _iso(value: Any) -> Any:
@@ -69,6 +70,7 @@ def _document(row: asyncpg.Record) -> dict[str, Any]:
         "name": row["name"],
         "target_job_id": row["target_job_id"],
         "variant": row["variant"],
+        "template": row["template"],
         "availability_line": row["availability_line"],
         "education_note": row["education_note"],
         "selection": _json_value(row["selection"], {}),
@@ -127,10 +129,6 @@ class PostgresResumeStore:
                 "entries": _json_value(row["entries"], []),
                 "skills": _json_value(row["skills"], []),
                 "variants": _json_value(row["variants"], []),
-                # `None` -- not `[]` -- so a row written before this column
-                # existed inherits the seed vocabulary instead of decoding as a
-                # deliberate empty list and silently disabling coverage.
-                "vocabulary": _json_value(row["vocabulary"], None),
                 "next_item_id": row["next_item_id"],
             }
         )
@@ -139,7 +137,7 @@ class PostgresResumeStore:
         """Read-only view. Creates no row: a GET must not write."""
         row = await self._ready().fetchrow(
             """
-            SELECT profile, entries, skills, variants, vocabulary, next_item_id
+            SELECT profile, entries, skills, variants, next_item_id
             FROM resume_workspace WHERE account_id = $1
             """,
             self.account_id,
@@ -164,7 +162,7 @@ class PostgresResumeStore:
                 INSERT INTO resume_workspace (account_id) VALUES ($1)
                 ON CONFLICT (account_id) DO UPDATE
                     SET updated_at = resume_workspace.updated_at
-                RETURNING profile, entries, skills, variants, vocabulary, next_item_id
+                RETURNING profile, entries, skills, variants, next_item_id
                 """,
                 self.account_id,
             )
@@ -177,8 +175,7 @@ class PostgresResumeStore:
                     entries      = $3::jsonb,
                     skills       = $4::jsonb,
                     variants     = $5::jsonb,
-                    vocabulary   = $6::jsonb,
-                    next_item_id = $7,
+                    next_item_id = $6,
                     updated_at   = now()
                 WHERE account_id = $1
                 """,
@@ -187,7 +184,6 @@ class PostgresResumeStore:
                 json.dumps(state["entries"]),
                 json.dumps(state["skills"]),
                 json.dumps(state["variants"]),
-                json.dumps(state["vocabulary"]),
                 state["next_item_id"],
             )
 
@@ -200,7 +196,7 @@ class PostgresResumeStore:
         async with self._edit() as state:
             return workspace.apply_profile(state, fields)
 
-    # -- variants and vocabulary -----------------------------------------
+    # -- variants --------------------------------------------------------
 
     async def list_variants(self) -> list[dict[str, str]]:
         return workspace.list_variants(await self._read())
@@ -209,13 +205,6 @@ class PostgresResumeStore:
         """Replace the variant list. Raises ValueError if it would orphan tags."""
         async with self._edit() as state:
             return workspace.set_variants(state, raw)
-
-    async def list_vocabulary(self) -> list[str]:
-        return workspace.list_vocabulary(await self._read())
-
-    async def set_vocabulary(self, raw: Any) -> list[str]:
-        async with self._edit() as state:
-            return workspace.set_vocabulary(state, raw)
 
     # -- entries and bullets ---------------------------------------------
 
@@ -283,24 +272,6 @@ class PostgresResumeStore:
             self.account_id,
         )
         return [_target(row) for row in rows]
-
-    async def create_target_job(self, fields: dict[str, Any]) -> dict[str, Any]:
-        row = await self._ready().fetchrow(
-            """
-            INSERT INTO resume_target
-                (account_id, company, title, url, jd_text, date_posted, note)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING *
-            """,
-            self.account_id,
-            fields["company"],
-            fields["title"],
-            fields.get("url", ""),
-            fields.get("jd_text", ""),
-            fields.get("date_posted", ""),
-            fields.get("note", ""),
-        )
-        return _target(row)
 
     async def create_target_from_application(
         self, application_id: int
@@ -370,42 +341,6 @@ class PostgresResumeStore:
             )
         return _target(row)
 
-    async def _get_target(self, job_id: int) -> dict[str, Any] | None:
-        row = await self._ready().fetchrow(
-            "SELECT * FROM resume_target WHERE id = $1 AND account_id = $2",
-            job_id,
-            self.account_id,
-        )
-        return _target(row) if row is not None else None
-
-    async def update_target_job(
-        self, job_id: int, fields: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        updates = {k: v for k, v in fields.items() if k in TARGET_FIELDS and v is not None}
-        if not updates:
-            return await self._get_target(job_id)
-        columns = list(updates)
-        assignments = ", ".join(f"{name} = ${i + 3}" for i, name in enumerate(columns))
-        row = await self._ready().fetchrow(
-            f"""
-            UPDATE resume_target SET {assignments}
-            WHERE id = $1 AND account_id = $2
-            RETURNING *
-            """,
-            job_id,
-            self.account_id,
-            *(updates[name] for name in columns),
-        )
-        return _target(row) if row is not None else None
-
-    async def delete_target_job(self, job_id: int) -> bool:
-        result = await self._ready().execute(
-            "DELETE FROM resume_target WHERE id = $1 AND account_id = $2",
-            job_id,
-            self.account_id,
-        )
-        return result != "DELETE 0"
-
     # -- resumes ---------------------------------------------------------
 
     async def list_resumes(self) -> list[dict[str, Any]]:
@@ -439,15 +374,16 @@ class PostgresResumeStore:
         row = await self._ready().fetchrow(
             """
             INSERT INTO resume_document
-                (account_id, name, target_job_id, variant, availability_line,
-                 education_note, selection)
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                (account_id, name, target_job_id, variant, template,
+                 availability_line, education_note, selection)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
             RETURNING *
             """,
             self.account_id,
             fields["name"],
             fields.get("target_job_id"),
             fields.get("variant", ""),
+            fields.get("template", "main"),
             fields.get("availability_line", ""),
             fields.get("education_note", ""),
             json.dumps(fields.get("selection", {})),
@@ -499,27 +435,6 @@ class PostgresResumeStore:
             self.account_id,
         )
         return result != "DELETE 0"
-
-    # -- derived ---------------------------------------------------------
-
-    async def coverage(
-        self, job_id: int, resume_id: int | None = None
-    ) -> dict[str, Any] | None:
-        job = await self._get_target(job_id)
-        if job is None:
-            return None
-        # One read for both: the skill bank and the term list are the same row,
-        # so re-reading for the vocabulary could straddle an edit.
-        state = await self._read()
-        skills = workspace.list_skills(state)
-        shown_ids: set[int] = set()
-        if resume_id is not None:
-            resume = await self.get_resume(resume_id)
-            if resume is not None:
-                shown_ids = set(resume["selection"].get("skills", []))
-        return workspace.compute_coverage(
-            job, skills, shown_ids, workspace.list_vocabulary(state)
-        )
 
     async def render_inputs(
         self, resume_id: int

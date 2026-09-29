@@ -40,6 +40,40 @@ class ApplicationUpdate(BaseModel):
         return self
 
 
+FeedbackKind = Literal["skip", "mislabeled"]
+SkipReason = Literal["level", "location", "field", "company"]
+CorrectionField = Literal["type", "focus", "company", "location", "skills"]
+
+
+class FeedbackCorrection(BaseModel):
+    """One disputed label: what the posting says, and optionally what it should."""
+
+    model_config = {"populate_by_name": True}
+
+    field: CorrectionField
+    # ``from`` is a Python keyword, so the attribute carries a suffix while the
+    # wire name stays the natural one.
+    from_: str = Field(alias="from", max_length=300)
+    to: str | None = Field(default=None, max_length=300)
+
+
+class JobFeedbackCommand(BaseModel):
+    kind: FeedbackKind
+    skip_reason: SkipReason | None = None
+    corrections: list[FeedbackCorrection] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="after")
+    def reason_matches_kind(self) -> "JobFeedbackCommand":
+        if self.kind == "skip" and self.corrections:
+            raise ValueError("a skip carries no corrections")
+        if self.kind == "mislabeled":
+            if self.skip_reason is not None:
+                raise ValueError("skip_reason is only valid for a skip")
+            if not self.corrections:
+                raise ValueError("a mislabeled report needs at least one correction")
+        return self
+
+
 class ExternalApplicationCreate(BaseModel):
     company: str = Field(min_length=1, max_length=500)
     title: str = Field(min_length=1, max_length=1000)

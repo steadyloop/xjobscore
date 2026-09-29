@@ -736,12 +736,14 @@ async def touch_source_postings(
     """
     if feed_id is None:
         result = await conn.execute(
-            "UPDATE job_posting SET last_seen_at = $2 WHERE source = $1", source, now
+            "UPDATE job_posting SET last_seen_at = $2, missing_since = NULL WHERE source = $1",
+            source,
+            now,
         )
     else:
         result = await conn.execute(
             """
-            UPDATE job_posting SET last_seen_at = $2
+            UPDATE job_posting SET last_seen_at = $2, missing_since = NULL
             WHERE source = $1
               AND last_seen_at >= COALESCE(
                   (SELECT last_change_at FROM feed WHERE id = $3), last_seen_at
@@ -873,6 +875,11 @@ async def upsert_job_posting(
                     WHEN $18 THEN EXCLUDED.last_seen_at
                     ELSE job_posting.last_seen_at
                 END,
+                -- Listed again: no longer missing. Replay observed nothing.
+                missing_since = CASE
+                    WHEN $18 THEN NULL
+                    ELSE job_posting.missing_since
+                END,
                 -- First statement wins: the earliest poll that saw the vendor's
                 -- own flag flip is the tightest bound we have on when it did.
                 vendor_closed_at = COALESCE(
@@ -945,6 +952,31 @@ async def absent_postings(
         source,
         feed.id,
     )
+
+
+async def mark_missing_postings(conn: Connection, source: str, polled_at: datetime) -> int:
+    """Stamp active postings the complete poll at ``polled_at`` did not list.
+
+    Called only after a whole, non-truncated fetch was projected: silver has
+    just set ``last_seen_at = polled_at`` on every posting the board listed, so
+    anything older is absent from this listing. The first poll to find a
+    posting absent is the one recorded; later polls leave the stamp alone, and
+    a posting listed again is cleared by the upsert or the touch.
+
+    A signal only -- ``status`` is not changed.
+    """
+    result = await conn.execute(
+        """
+        UPDATE job_posting SET missing_since = $2
+        WHERE source = $1
+          AND status = 'active'
+          AND missing_since IS NULL
+          AND last_seen_at < $2
+        """,
+        source,
+        polled_at,
+    )
+    return int(result.rsplit(" ", 1)[-1])
 
 
 async def close_posting_by_key(
@@ -1041,36 +1073,59 @@ async def dedup_descriptions(
 async def replace_dup_groups(
     conn: Connection, *, groups: list[dict[str, Any]], members: list[dict[str, Any]]
 ) -> int:
-    """Rebuild every derived duplicate group and return how many were written.
+    """Bring every derived duplicate group in line with the plan; return how
+    many groups the plan holds.
 
-    Destructive by design: gold groups are a pure function of ``job_posting``.
-    Human judgements must never live here -- a rebuild erases them.
+    Gold groups are a pure function of ``job_posting``, and the result is the
+    same as clearing and rewriting everything. Human judgements must never live
+    here -- a rebuild overwrites them.
 
-    ``job_posting.dup_group_id`` carries no ``ON DELETE`` action, so membership
-    is cleared before the groups it references are removed.
+    Only differences are written. Group ids are derived from the dedup key, so
+    a rebuild over mostly unchanged data touches almost no rows. Rewriting all
+    of them (~270k postings) locked the whole table against the feed workers'
+    posting writes and deadlocked most runs once dedup became automatic.
+
+    Order follows the foreign key ``job_posting.dup_group_id`` -> group (no
+    ``ON DELETE`` action): groups exist before members point at them, and
+    members leave a group before it is deleted.
     """
-    await conn.execute(
-        "UPDATE job_posting SET dup_group_id = NULL WHERE dup_group_id IS NOT NULL"
-    )
-    await conn.execute("DELETE FROM job_posting_dup_group")
-    if not groups:
-        return 0
+    group_ids = [group["id"] for group in groups]
+    member_ids = [int(member["posting_id"]) for member in members]
+    if groups:
+        await conn.execute(
+            """
+            INSERT INTO job_posting_dup_group AS d (id, primary_posting_id, state, evidence)
+            SELECT g.id, g.primary_posting_id, g.state, g.evidence
+            FROM jsonb_to_recordset($1::jsonb)
+                AS g(id uuid, primary_posting_id bigint, state text, evidence jsonb)
+            ON CONFLICT (id) DO UPDATE SET
+                primary_posting_id = EXCLUDED.primary_posting_id,
+                state = EXCLUDED.state,
+                evidence = EXCLUDED.evidence
+            WHERE (d.primary_posting_id, d.state, d.evidence)
+                IS DISTINCT FROM (EXCLUDED.primary_posting_id, EXCLUDED.state, EXCLUDED.evidence)
+            """,
+            groups,
+        )
+        await conn.execute(
+            """
+            UPDATE job_posting p SET dup_group_id = m.group_id
+            FROM jsonb_to_recordset($1::jsonb) AS m(posting_id bigint, group_id uuid)
+            WHERE p.id = m.posting_id
+              AND p.dup_group_id IS DISTINCT FROM m.group_id
+            """,
+            members,
+        )
     await conn.execute(
         """
-        INSERT INTO job_posting_dup_group(id, primary_posting_id, state, evidence)
-        SELECT g.id, g.primary_posting_id, g.state, g.evidence
-        FROM jsonb_to_recordset($1::jsonb)
-            AS g(id uuid, primary_posting_id bigint, state text, evidence jsonb)
+        UPDATE job_posting SET dup_group_id = NULL
+        WHERE dup_group_id IS NOT NULL AND NOT (id = ANY($1::bigint[]))
         """,
-        groups,
+        member_ids,
     )
     await conn.execute(
-        """
-        UPDATE job_posting p SET dup_group_id = m.group_id
-        FROM jsonb_to_recordset($1::jsonb) AS m(posting_id bigint, group_id uuid)
-        WHERE p.id = m.posting_id
-        """,
-        members,
+        "DELETE FROM job_posting_dup_group WHERE NOT (id = ANY($1::uuid[]))",
+        group_ids,
     )
     return len(groups)
 

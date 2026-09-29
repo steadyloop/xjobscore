@@ -20,6 +20,7 @@ statement than "nobody is recording."
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -159,20 +160,27 @@ async def global_tiles(pool: Any, *, now: datetime) -> dict[str, Any] | None:
     """The page-header numbers. ``None`` when poll_log does not exist."""
     today = _day_start(now)
     day_ago = now - timedelta(hours=24)
-    rows = await _fetch(
-        pool,
-        """
-        SELECT count(*)::bigint AS observations_total,
-               count(*) FILTER (WHERE polled_at >= $1)::bigint AS requests_today,
-               coalesce(sum(new_postings) FILTER (WHERE polled_at >= $1), 0)::bigint
-                   AS new_postings_today,
-               count(*) FILTER (WHERE polled_at >= $2)::bigint AS polls_24h,
-               count(*) FILTER (WHERE polled_at >= $2 AND status = 'error')::bigint
-                   AS errors_24h
-        FROM poll_log
-        """,
-        today,
-        day_ago,
+    # Independent reads: run them side by side rather than back to back.
+    rows, current, previous, by_hour, errors = await asyncio.gather(
+        _fetch(
+            pool,
+            """
+            SELECT count(*)::bigint AS observations_total,
+                   count(*) FILTER (WHERE polled_at >= $1)::bigint AS requests_today,
+                   coalesce(sum(new_postings) FILTER (WHERE polled_at >= $1), 0)::bigint
+                       AS new_postings_today,
+                   count(*) FILTER (WHERE polled_at >= $2)::bigint AS polls_24h,
+                   count(*) FILTER (WHERE polled_at >= $2 AND status = 'error')::bigint
+                       AS errors_24h
+            FROM poll_log
+            """,
+            today,
+            day_ago,
+        ),
+        discovery_latency_p95_s(pool, now=now),
+        discovery_latency_p95_s(pool, now=now, offset_days=TILE_LATENCY_WINDOW_DAYS),
+        polls_by_hour(pool, now=now),
+        error_sources(pool, now=now),
     )
     # An ungrouped aggregate always returns one row, so an empty result means
     # the read did not happen at all -- same story as a missing table.
@@ -180,10 +188,6 @@ async def global_tiles(pool: Any, *, now: datetime) -> dict[str, Any] | None:
         return None
     row = rows[0]
 
-    current = await discovery_latency_p95_s(pool, now=now)
-    previous = await discovery_latency_p95_s(
-        pool, now=now, offset_days=TILE_LATENCY_WINDOW_DAYS
-    )
     return {
         "observations_total": int(row["observations_total"]),
         "requests_today": int(row["requests_today"]),
@@ -193,8 +197,8 @@ async def global_tiles(pool: Any, *, now: datetime) -> dict[str, Any] | None:
         "discovery_latency_p95_s": current,
         "discovery_latency_p95_prev_s": previous,
         "latency_window_days": TILE_LATENCY_WINDOW_DAYS,
-        "polls_by_hour": await polls_by_hour(pool, now=now),
-        "error_sources": await error_sources(pool, now=now),
+        "polls_by_hour": by_hour,
+        "error_sources": errors,
     }
 
 
@@ -310,33 +314,34 @@ async def posting_stats_by_source(
     latency predicate into a shared WHERE would silently drop feeds whose
     postings all lack ``posted_at`` from the open-count as well.
     """
-    open_rows = await _fetch(
-        pool,
-        """
-        SELECT source, count(*)::bigint AS open_postings
-        FROM job_posting
-        WHERE status = 'active'
-        GROUP BY source
-        """,
+    open_rows, latency_rows = await asyncio.gather(
+        _fetch(
+            pool,
+            """
+            SELECT source, count(*)::bigint AS open_postings
+            FROM job_posting
+            WHERE status = 'active'
+            GROUP BY source
+            """,
+        ),
+        _fetch(
+            pool,
+            """
+            SELECT source,
+                   percentile_cont(0.95) WITHIN GROUP (
+                       ORDER BY EXTRACT(EPOCH FROM (first_seen_at - posted_at))
+                   ) AS p95
+            FROM job_posting
+            WHERE posted_at IS NOT NULL
+              AND first_seen_at >= $1
+              AND first_seen_at >= posted_at
+            GROUP BY source
+            """,
+            now - timedelta(days=LATENCY_WINDOW_DAYS),
+        ),
     )
     if open_rows is None:
         return None
-
-    latency_rows = await _fetch(
-        pool,
-        """
-        SELECT source,
-               percentile_cont(0.95) WITHIN GROUP (
-                   ORDER BY EXTRACT(EPOCH FROM (first_seen_at - posted_at))
-               ) AS p95
-        FROM job_posting
-        WHERE posted_at IS NOT NULL
-          AND first_seen_at >= $1
-          AND first_seen_at >= posted_at
-        GROUP BY source
-        """,
-        now - timedelta(days=LATENCY_WINDOW_DAYS),
-    )
 
     stats: dict[str, dict[str, Any]] = {
         row["source"]: {"open_postings": int(row["open_postings"]), "p95_latency_s": None}

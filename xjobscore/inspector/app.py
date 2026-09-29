@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sqlite3
@@ -10,7 +11,7 @@ from uuid import UUID
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -53,6 +54,8 @@ from xjobscore.inspector import keyscan_control
 from xjobscore.inspector import keyscan_view
 from xjobscore.inspector import validator
 from xjobscore.sources import UnknownSource
+from xjobscore import activity
+from xjobscore import sources as source_registry
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -346,6 +349,73 @@ def create_app(
             "mode": "legacy",
         }
 
+    # ---- System page: live state from process memory, history from PostgreSQL.
+
+    @application.get("/api/system/live")
+    async def system_live() -> dict[str, Any]:
+        """What the workers are doing right now. Memory only; polled every 2s."""
+        busy = activity.INFLIGHT.snapshot()
+        names = set(source_registry.SOURCES) | set(busy)
+        return {
+            "observed_at": now_utc().isoformat(),
+            "workers": {
+                name: {"width": source_registry.width(name), "busy": busy.get(name, [])}
+                for name in sorted(names)
+            },
+            "feeds": activity.POLLS.summary(15),
+            "polls_total": activity.POLLS.total,
+        }
+
+    @application.get("/api/system/events")
+    async def system_events(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+        """Recent non-feed runs and failed feeds, plus the last finished Gold
+        catch-up. Both walk system_run_started_idx newest-first and stop early."""
+        pool = await policy_store.pool_or_none()
+        if pool is None:
+            return {"events": [], "gold_last": None}
+        try:
+            async with pool.acquire() as conn:
+                events = await conn.fetch(
+                    """
+                    SELECT id, job_type, identity, state, started_at, finished_at,
+                           detail, error
+                    FROM system_run
+                    WHERE job_type <> 'feed' OR state = 'failed'
+                    ORDER BY started_at DESC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+                gold_last = await conn.fetchrow(
+                    """
+                    SELECT id, job_type, identity, state, started_at, finished_at,
+                           detail, error
+                    FROM system_run
+                    WHERE job_type = 'gold_catchup' AND state <> 'running'
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """
+                )
+        except asyncpg.UndefinedTableError:
+            return {"events": [], "gold_last": None}
+
+        def run_row(row: Any) -> dict[str, Any]:
+            return {
+                **dict(row),
+                "started_at": row["started_at"].isoformat(),
+                "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+            }
+
+        return {
+            "events": [run_row(row) for row in events],
+            "gold_last": run_row(gold_last) if gold_last else None,
+        }
+
+    @application.get("/api/system/logs")
+    async def system_logs(after: int = Query(0, ge=0)) -> dict[str, Any]:
+        """Server log lines newer than ``after`` (a sequence number)."""
+        return activity.LOGS.since(after)
+
     @application.get("/api/feeds")
     async def feeds() -> dict[str, Any]:
         return {
@@ -573,13 +643,18 @@ def create_app(
 
     async def scheduler_rows(current) -> tuple[list[dict[str, Any]], bool]:
         """Imported feeds enriched with production telemetry and status."""
-        rows = scheduled_rows(await merged_feed_rows())
         pool = await policy_store.pool_or_none()
         daily = rollups = postings = None
         if pool is not None:
-            daily = await telemetry.feed_daily_counts(pool, now=current)
-            rollups = await telemetry.feed_rollups(pool, now=current)
-            postings = await telemetry.posting_stats_by_source(pool, now=current)
+            merged, daily, rollups, postings = await asyncio.gather(
+                merged_feed_rows(),
+                telemetry.feed_daily_counts(pool, now=current),
+                telemetry.feed_rollups(pool, now=current),
+                telemetry.posting_stats_by_source(pool, now=current),
+            )
+        else:
+            merged = await merged_feed_rows()
+        rows = scheduled_rows(merged)
         available = daily is not None and rollups is not None
 
         for row in rows:
@@ -630,13 +705,15 @@ def create_app(
     @application.get("/api/scheduler/overview")
     async def scheduler_overview() -> dict[str, Any]:
         current = now_utc()
-        rows = scheduled_rows(await merged_feed_rows())
         pool = await policy_store.pool_or_none()
-        tiles = (
-            await telemetry.global_tiles(pool, now=current)
-            if pool is not None
-            else None
-        )
+        tiles = None
+        if pool is not None:
+            merged, tiles = await asyncio.gather(
+                merged_feed_rows(), telemetry.global_tiles(pool, now=current)
+            )
+        else:
+            merged = await merged_feed_rows()
+        rows = scheduled_rows(merged)
         counts: dict[str, int] = {}
         for row in rows:
             state = scheduling.feed_status(row.get("policy"), current)["state"]
@@ -1378,17 +1455,23 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"no company {company_id}")
         return row
 
+    # The System page is the landing page; the Feeds list moved to /feeds.
     @application.get("/")
     async def index():
+        return RedirectResponse("/system", status_code=307)
+
+    @application.get("/feeds")
+    async def feeds_page():
         return FileResponse(STATIC_DIR / "index.html")
 
     @application.get("/feed")
     async def feed_page():
         return FileResponse(STATIC_DIR / "feed" / "index.html")
 
+    # The Scheduler board now lives on the System page.
     @application.get("/scheduler")
     async def scheduler_page():
-        return FileResponse(STATIC_DIR / "scheduler" / "index.html")
+        return RedirectResponse("/system", status_code=307)
 
     @application.get("/system")
     async def system_page():

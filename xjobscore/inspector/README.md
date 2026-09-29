@@ -21,7 +21,25 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
 
 ## Pages
 
-- **Feeds** (`/`) — every PostgreSQL feed, grouped by source with
+- **System** (`/system`; `/` and `/scheduler` redirect here) — the landing
+  page and production operations console, in three sections:
+  - **Activity**: the last Gold catch-up run (when, how long, postings
+    enriched, errors) and the server log — the process's own log lines at
+    INFO and above, minus `httpx` requests and the access log. The terminal
+    only prints warnings and errors.
+  - **Scheduler**: feed status (ok / erroring / paused), the last 15 minutes
+    of polling (polled, feeds with new jobs, new postings, partial, errors),
+    then the scheduler board described under **Scheduler**, with a *workers*
+    column: one tick per worker slot for each vendor, green while polling,
+    amber past 60 s, red past 3 min.
+  - **Logs**: the live fetch log and system events (non-feed runs and failed
+    feeds from `system_run`).
+
+  Worker slots, the 15-minute counts, and the server log live in process
+  memory (`xjobscore/activity.py`) and reset on restart; everything else is
+  read from PostgreSQL. Selecting a feed opens its detail as a drawer from
+  the right.
+- **Feeds** (`/feeds`) — every PostgreSQL feed, grouped by source with
   category/enabled/error filters and search.
   Per feed: the `feed.polling` switch and the last run's harvest
   status/items/elapsed; `feed.interval_s` and pause live in the detail
@@ -53,7 +71,8 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
     status and duration, click it for the full detail), the
     allowlisted response headers with `*ratelimit*`/`Retry-After` highlighted,
     and an elapsed-time sparkline over the retained run history.
-- **Scheduler** (`/scheduler`) — the production polling operations console.
+- **Scheduler** (now the board on the System page; `/scheduler` redirects
+  to `/system`) — the production polling operations console.
   Its header reports the persisted run switch and whether a runner is actually
   listening. Four summary cards cover scheduled feeds, polls today, errors in
   24 h, and p95 discovery latency. A quiet vendor summary reports configured

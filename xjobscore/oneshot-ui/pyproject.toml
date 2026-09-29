@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-xjobscore = { path = "../..", editable = true }
+xjobscore = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -41,3 +41,8 @@ pythonpath = [".", "../.."]
 
 [tool.setuptools]
 packages = ["oneshot_ui"]
+
+# The resume fonts ride inside the package so the container typesets with the
+# same faces as a laptop; without this the wheel ships the .py files only.
+[tool.setuptools.package-data]
+oneshot_ui = ["fonts/*.ttf", "fonts/OFL.txt"]

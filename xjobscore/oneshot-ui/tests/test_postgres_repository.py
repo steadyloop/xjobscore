@@ -249,6 +249,28 @@ async def test_duplicate_groups_are_one_trackable_opportunity_with_active_fallba
         )
         assert tracked_hidden["total"] == 4
 
+        # Skipping one member hides the whole group, like tracking does, and
+        # restoring it brings the group back.
+        skipped = await repository.set_feedback(pending_a, kind="skip")
+        assert skipped is not None and skipped["kind"] == "skip"
+        assert (await repository.list_jobs(
+            job_types=["intern"], q="Duplicate Repository Test"
+        ))["total"] == 3
+        reasoned = await repository.set_feedback(
+            pending_a, kind="skip", skip_reason="location"
+        )
+        assert reasoned["skip_reason"] == "location"
+        assert reasoned["created_at"] == skipped["created_at"]
+        hidden = await repository.list_feedback()
+        assert [row["job_id"] for row in hidden["hidden"]][:1] == [pending_a]
+        assert hidden["hidden"][0]["job"]["title"] == "Duplicate-aware Intern"
+        assert await repository.delete_feedback(pending_a) is True
+        assert await repository.delete_feedback(pending_a) is False
+        assert (await repository.list_jobs(
+            job_types=["intern"], q="Duplicate Repository Test"
+        ))["total"] == 4
+        assert await repository.set_feedback(-1, kind="skip") is None
+
         await pool.execute("UPDATE job_posting SET status = 'closed' WHERE id = $1", primary)
         fallback = await repository.list_jobs(
             job_types=["intern"],
@@ -263,6 +285,10 @@ async def test_duplicate_groups_are_one_trackable_opportunity_with_active_fallba
             await pool.execute(
                 "DELETE FROM job_application WHERE account_id = $1 AND job_posting_id = ANY($2::bigint[])",
                 LOCAL_ACCOUNT_ID,
+                job_ids,
+            )
+            await pool.execute(
+                "DELETE FROM job_feedback WHERE job_posting_id = ANY($1::bigint[])",
                 job_ids,
             )
             await pool.execute(

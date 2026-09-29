@@ -17,7 +17,7 @@ One profile for all resumes. Studio tab: **Content bank → Profile**.
 | Field | Limit | Your value |
 |---|---|---|
 | Full name | 200 chars | |
-| Email | 320 chars — **required**, lint errors without it | |
+| Email | 320 chars | |
 | Phone | 50 chars | |
 | Location | 200 chars | |
 
@@ -106,20 +106,10 @@ and is the right default until you have a reason to split. Defense notes
 never print — they exist so you can't put a bullet on a resume you can't defend
 in an interview.
 
-**Write bullets to pass the linter.** It flags, at render time:
-
-- **error** — resume renders to more than 1 page
-- **error** — no bullets selected
-- **error** — profile has no email
-- **warn** — filler phrases: `responsible for`, `helped with`, `worked on`,
-  `assisted with`, `participated in`, `various`, `duties included`
-- **warn** — first person (`I`)
-- **warn** — bullet over 240 chars (wraps past two lines)
-- **warn** — some bullets end in a period and some don't
-- **info** — no digit anywhere in the bullet (quantify if honestly possible)
-
-Shape that survives all of it: **verb + what + how + number**, no `I`, under
-240 chars, consistent punctuation across every bullet you might select together.
+A shape that reads well: **verb + what + how + number**, no `I`, no filler
+("responsible for", "helped with", "worked on"), under 240 chars so it stays
+within two lines, and consistent punctuation across every bullet you might
+select together.
 
 ---
 
@@ -149,38 +139,17 @@ coursework:  (prints under Education, not in Skills)
 
 ## 5. Target postings
 
-One per job you're tailoring to. Paste the **full** JD text — coverage analysis
-reads it literally and reports matched / in-bank-but-not-shown / missing.
-Studio tab: **Targets**.
-
-You usually will not type this by hand. Open a queued job in **Applications**
-and press **Tailor resume**: it creates the target from the tracked posting,
-company, title and URL already filled and the job description pasted in for you,
-then drops you in the Builder. Pressing it twice reopens the same target. Type
-one in only for a job that is not in the queue — or when the posting's vendor
-supplies no description, which leaves `jd_text` empty for you to fill.
-
-```
-Company:      (required, ≤300)
-Role title:   (required, ≤500)
-Posting URL:  (≤2000)
-Date posted:  (≤40, YYYY-MM-DD)
-Job description: (≤100,000 — paste the whole thing, verbatim)
-Note:         (≤4000) referral contact, recruiter, deadline, …
-```
-
-Coverage never invents a skill for you. `missing` terms are surfaced so
-skipping them is a conscious decision, not an oversight.
-
-The term list behind `missing` is yours to edit (**Content bank → Vocabulary**).
-It ships seeded with software, GPU and quant terminology; if you work in another
-field, replace it, or `missing` will keep reporting nothing useful.
+A target is the job a resume is tailored for. Open a queued job in
+**Applications** and press **Tailor resume**: it creates the target from the
+tracked posting, with company, title, URL and job description filled in, then
+drops you in the Builder. Pressing it twice reopens the same target. There is
+nothing to type here.
 
 ---
 
 ## 6. The resume itself
 
-A resume is a name + template parameters + which bullets and skills to show.
+A resume is a name + a design + which bullets and skills to show.
 Studio tab: **Builder**.
 
 ```
@@ -191,8 +160,7 @@ Availability line:  (≤300)   e.g. "Available for Spring 2027 co-op"
 Education note:     (≤300)   e.g. "GPA: 3.8/4.0"
 ```
 
-Leave the availability line blank and the linter warns — recruiters filter on
-legible availability.
+Fill in the availability line — recruiters filter on legible availability.
 
 ### Selection
 
@@ -214,19 +182,17 @@ original.
 
 ---
 
-## 7. What is not yours to choose
+## 7. Design and export
 
-The template is fixed by design — single column, New Computer Modern, US Letter,
-0.55in × 0.5in margins, ATS-parseable. There is no template picker, and section
-order is always Education → Experience → Research → Projects → Leadership →
-Skills. That is how every export stays inside the format rules.
+Each resume picks a design next to Content / PDF: **Main** (serif, ruled
+sections) or **Barlow** (sans, no rules). Both are single column, US Letter and
+ATS-parseable, and section order is always Education → Experience → Research →
+Projects → Leadership → Skills.
 
-**One page is a hard error**, not a warning. If `/check` reports 2 pages, cut
-bullets — the builder will not export around it.
+Keep it to one page: check the page count in the PDF view and cut bullets if it
+spills over.
 
 PDF export needs nothing installed: the Typst compiler is a Python dependency
-(`typst` on PyPI), so `uv sync` is the whole setup and the page count always
-runs. `/pdf` returns 503 only when a document genuinely fails to compile, with
-the compiler's own message as the reason.
-`GET /api/resume/resumes/{id}/source` returns the raw `.typ` if you want to
-hand-tune outside the studio.
+(`typst` on PyPI), so `uv sync` is the whole setup. `/pdf` returns 503 only when
+a document genuinely fails to compile, with the compiler's own message as the
+reason.

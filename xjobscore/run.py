@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import asyncpg
 
-from xjobscore import coverage_snapshot, gold, probe, router, silver, sources, store, work
+from xjobscore import activity, coverage_snapshot, gold, probe, router, silver, sources, store, work
 from xjobscore.net import DEFAULT_USER_AGENT, Net
 from xjobscore.records import Feed
 from xjobscore.work import Outcome
@@ -209,6 +209,14 @@ def _status_of(exc: BaseException) -> int | None:
     return status if isinstance(status, int) else None
 
 
+async def _append_poll_log(conn: asyncpg.Connection, **row) -> None:
+    """Write the poll's ``poll_log`` row and count it in the live window, so
+    the System page's numbers match the table row for row. ``row`` is passed
+    through untouched: it is exactly ``store.append_poll_log``'s keywords."""
+    await store.append_poll_log(conn, **row)
+    activity.POLLS.record(row["feed_id"], row["status"], row.get("new_postings", 0))
+
+
 async def _finish_failure(
     pool: Pool,
     feed: Feed,
@@ -231,7 +239,7 @@ async def _finish_failure(
     due_at = work.next_due_at(feed.interval_s, feed.strikes, outcome, now)
     async with pool.acquire() as conn:
         if await store.finish_schedule_failure(conn, feed, now=now, due_at=due_at):
-            await store.append_poll_log(
+            await _append_poll_log(
                 conn,
                 feed_id=feed.id,
                 polled_at=now,
@@ -387,7 +395,7 @@ async def poll(
                 last_modified=record.last_modified if record.last_modified is not None else feed.last_modified,
             )
             if ok:
-                await store.append_poll_log(
+                await _append_poll_log(
                     conn,
                     feed_id=feed.id,
                     polled_at=now,
@@ -424,7 +432,7 @@ async def poll(
             # hash matched, so the fetch cost is the same as any "ok" poll.
             # Keep the status matching what poll() returns for this path.
             if ok:
-                await store.append_poll_log(
+                await _append_poll_log(
                     conn,
                     feed_id=feed.id,
                     polled_at=now,
@@ -534,13 +542,16 @@ async def poll(
         # Only when the lease held: a reclaimed worker polled this feed too and
         # records its own row, and two rows for one poll double-count lambda.
         if ok:
-            await store.append_poll_log(
+            await _append_poll_log(
                 conn,
                 feed_id=feed.id,
                 polled_at=now,
                 status="ok",
                 new_postings=counts.created,
             )
+            # A whole listing was just projected (truncated fetches took the
+            # partial branch above), so anything it did not list is missing.
+            await store.mark_missing_postings(conn, source, now)
     if not ok:
         logger.warning("lost schedule lease after success source=%s", source)
     gold_result = await enrich_changed()
@@ -631,12 +642,16 @@ async def cycle(
                         "dry-run harvest failed source=%s", store.source_instance(feed)
                     )
             else:
-                if coordinator is None:
-                    await poll(pool, net, feed, claimed_at)
-                else:
-                    await poll(
-                        pool, net, feed, claimed_at, coordinator=coordinator
-                    )
+                activity.INFLIGHT.start(feed)
+                try:
+                    if coordinator is None:
+                        await poll(pool, net, feed, claimed_at)
+                    else:
+                        await poll(
+                            pool, net, feed, claimed_at, coordinator=coordinator
+                        )
+                finally:
+                    activity.INFLIGHT.finish(feed)
 
     await asyncio.gather(
         *(worker(source) for source in due for _ in range(sources.width(source)))

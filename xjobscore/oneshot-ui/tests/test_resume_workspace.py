@@ -60,7 +60,7 @@ def test_ids_come_from_one_counter_shared_by_entries_bullets_and_skills():
 def test_duplicate_skill_is_case_sensitive():
     state = bank()
     assert workspace.add_skill(state, {"category": "language", "name": "Python"})
-    # Exact match is a duplicate (SQLite's UNIQUE under BINARY collation).
+    # An exact match is a duplicate; matching is case-sensitive.
     assert workspace.add_skill(state, {"category": "language", "name": "Python"}) is None
     # Different case is a different skill, and a different category is too.
     assert workspace.add_skill(state, {"category": "language", "name": "python"})
@@ -150,55 +150,3 @@ def test_normalize_fills_a_missing_profile_and_empty_collections():
     assert state["profile"]["links"] == []
     assert state["entries"] == [] and state["skills"] == []
     assert state["next_item_id"] == 1
-
-
-def test_coverage_splits_matched_from_gap_and_flags_unbanked_vocabulary():
-    state = bank()
-    python = workspace.add_skill(state, {"category": "language", "name": "Python"})
-    workspace.add_skill(state, {"category": "language", "name": "Go"})
-    job = {"id": 1, "jd_text": "We use Python and Go, plus Rust and Monte Carlo methods."}
-
-    result = workspace.compute_coverage(job, workspace.list_skills(state), {python["id"]})
-
-    assert [s["name"] for s in result["matched"]] == ["Python"]
-    assert [s["name"] for s in result["have_not_shown"]] == ["Go"]
-    assert "Rust" in result["missing"]
-    assert "Monte Carlo" in result["missing"]
-    # Banked skills are never reported as missing.
-    assert "Python" not in result["missing"]
-
-
-def test_coverage_matches_whole_words_only():
-    state = bank()
-    workspace.add_skill(state, {"category": "language", "name": "R"})
-    job = {"id": 1, "jd_text": "Strong Rust and React experience required."}
-
-    result = workspace.compute_coverage(job, workspace.list_skills(state), set())
-
-    # "R" must not match inside "Rust" or "React".
-    assert result["matched"] == [] and result["have_not_shown"] == []
-
-
-def test_coverage_treats_plus_hash_and_ampersand_as_part_of_a_word():
-    """"C" must not match the C in "C++" or "C#", nor "R" the R in "R&D"."""
-    state = bank()
-    for name in ("C", "R", "C++", "C#"):
-        workspace.add_skill(state, {"category": "language", "name": name})
-    skills = workspace.list_skills(state)
-    jd = "Experience with C++, C#, and an R&D background."
-
-    result = workspace.compute_coverage({"id": 1, "jd_text": jd}, skills, set())
-
-    assert sorted(s["name"] for s in result["have_not_shown"]) == ["C#", "C++"]
-
-
-def test_coverage_still_matches_a_name_that_ends_a_sentence():
-    """`.` stays a boundary: excluding it would lose "Backend in Go." entirely."""
-    state = bank()
-    workspace.add_skill(state, {"category": "language", "name": "Go"})
-
-    result = workspace.compute_coverage(
-        {"id": 1, "jd_text": "Backend in Go."}, workspace.list_skills(state), set()
-    )
-
-    assert [s["name"] for s in result["have_not_shown"]] == ["Go"]

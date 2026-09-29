@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from asyncpg.exceptions import DeadlockDetectedError
+
 from xjobscore import gold
 from xjobscore.records import Feed
 from xjobscore.silver import ChangeSet
@@ -18,6 +20,10 @@ INCREMENTAL_STEPS = ("job_type", "skills", "degrees", "summaries")
 DEDUP_DEBOUNCE_S = 30
 DEDUP_MAX_DELAY_S = 5 * 60
 DEDUP_LEASE_S = 60 * 60
+# Feed workers write job_posting while dedup runs. Dedup only writes what
+# changed, so a collision is rare; when Postgres picks dedup as the deadlock
+# victim, the whole (atomic) rebuild is simply run again.
+DEDUP_ATTEMPTS = 3
 DEDUP_RETRY_S = 60
 RUN_RETENTION_DAYS = 30
 
@@ -303,8 +309,19 @@ class GoldCoordinator:
         run_id = await self.runs.begin(pool, "dedup", str(generation))
         try:
             (step,) = gold.steps("dedup")
-            async with pool.acquire() as conn, conn.transaction():
-                counts = await step.rebuild(conn)
+            for attempt in range(1, DEDUP_ATTEMPTS + 1):
+                try:
+                    async with pool.acquire() as conn, conn.transaction():
+                        counts = await step.rebuild(conn)
+                    break
+                except DeadlockDetectedError:
+                    if attempt == DEDUP_ATTEMPTS:
+                        raise
+                    logger.warning(
+                        "dedup deadlocked with a posting write; retrying attempt=%d generation=%d",
+                        attempt + 1,
+                        generation,
+                    )
             finished = datetime.now(timezone.utc)
             async with pool.acquire() as conn:
                 await conn.execute(

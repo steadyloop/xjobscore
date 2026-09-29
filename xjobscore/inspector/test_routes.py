@@ -803,12 +803,59 @@ def test_scheduler_fetch_never_runs_or_reports_a_worker_outcome(monkeypatch, app
     assert runner.polls == []
 
 
-def test_scheduler_page_is_served(client):
-    assert client.get("/scheduler").status_code == 200
-
-
 def test_system_page_is_served(client):
-    assert client.get("/system").status_code == 200
+    response = client.get("/system")
+    assert response.status_code == 200
+    assert 'id="sched-table"' in response.text
+
+
+def test_landing_and_old_scheduler_urls_redirect_to_system(client):
+    for path in ("/", "/scheduler"):
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code == 307, path
+        assert response.headers["location"] == "/system", path
+
+
+def test_feeds_page_moved_to_feeds(client):
+    response = client.get("/feeds")
+    assert response.status_code == 200
+    assert "/static/feeds.js" in response.text
+
+
+def test_system_live_reports_workers_and_the_feed_window(client):
+    body = client.get("/api/system/live").json()
+    assert set(body) == {"observed_at", "workers", "feeds", "polls_total"}
+    assert isinstance(body["polls_total"], int)
+    assert body["workers"]["greenhouse"]["width"] >= 1
+    assert body["workers"]["greenhouse"]["busy"] == []
+    assert set(body["feeds"]) == {
+        "window_s", "since_start", "polled", "with_new", "new_postings", "partial", "errors",
+    }
+
+
+def test_system_events_without_postgres_are_empty_not_an_error(client):
+    response = client.get("/api/system/events")
+    assert response.status_code == 200
+    assert response.json() == {"events": [], "gold_last": None}
+
+
+def test_system_logs_return_lines_after_a_cursor(client):
+    import logging
+
+    from xjobscore import activity
+
+    # `uv run xjobscore` attaches the buffer in system.cli; the test app does not.
+    probe = logging.getLogger("xjobscore.test")
+    probe.addHandler(activity.LOGS)
+    try:
+        probe.warning("system log probe")
+    finally:
+        probe.removeHandler(activity.LOGS)
+    first = client.get("/api/system/logs").json()
+    assert set(first) == {"boot", "lines", "last_seq"}
+    assert any(line["msg"] == "system log probe" for line in first["lines"])
+    again = client.get(f"/api/system/logs?after={first['last_seq']}").json()
+    assert again["lines"] == []
 
 
 def test_keyscan_reads_report_a_missing_database_as_404(client, tmp_path, monkeypatch):

@@ -54,6 +54,23 @@ psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
   --file=xjobscore/migrations/20260902_coverage_snapshot.sql
 ```
 
+An existing database, and the Neon serving database, needs the resume design
+column before running the updated OneShot server:
+
+```bash
+psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
+  --file=xjobscore/migrations/20260928_resume_template.sql
+```
+
+An existing database, and the Neon serving database, needs the triage feedback
+table before running the updated OneShot server. The jobs list reads it, so
+apply it before deploying:
+
+```bash
+psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
+  --file=xjobscore/migrations/20260929_job_feedback.sql
+```
+
 Configure the database URL:
 
 ```bash
@@ -75,7 +92,7 @@ Public discovery stays open; persisted personal workspaces require a session:
 | | |
 |---|---|
 | **Open** | jobs, Feed Status, health, and every page shell |
-| **Session required** | `/api/auth/me`, `/api/applications/*`, job-to-application writes, and all of `/api/resume/*` |
+| **Session required** | `/api/auth/me`, `/api/applications/*`, job-to-application writes, and `/api/resume/*` except `POST /api/resume/render/pdf` |
 
 Signed-out application and resume CRUD is implemented by the browser in a blank
 `localStorage` workspace. It never reaches PostgreSQL. `session_account` rejects
@@ -120,7 +137,7 @@ signature verification, and the profile is read from the userinfo endpoint.
 ## Run
 
 ```bash
-uv run --directory xjobscore/oneshot-ui python -m oneshot_ui
+uv run -m oneshot_ui
 ```
 
 The server starts at <http://127.0.0.1:8766>. Opportunities, Applications,
@@ -141,8 +158,8 @@ process runs as a pure JSON API.
 
 <http://127.0.0.1:8766/resume/> is a resume workspace, account-scoped and stored
 in PostgreSQL alongside everything else: `resume_workspace` holds the whole
-content bank as one jsonb row, `resume_target` the pasted postings, and
-`resume_document` the assembled resumes.
+content bank as one jsonb row, `resume_target` the jobs a resume is tailored
+for, and `resume_document` the assembled resumes.
 
 One row for the bank, rather than a table per content type, is what keeps
 `resume_document.selection` valid: entries, bullets, and skills all draw ids from
@@ -151,19 +168,18 @@ logic lives in [`oneshot_ui/resume_workspace.py`](oneshot_ui/resume_workspace.py
 with no I/O, so the store and the test fake share one set of rules.
 
 The flow: maintain a **content bank** (profile, entries, bullets with audience
-tags and defense notes, skills), add **target postings** with pasted job
-descriptions, then in the **builder** assemble a named resume as a selection of
-bullets/skills. The server renders a fixed single-column, ATS-safe template via
+tags and defense notes, skills), then in the **builder** assemble a named resume
+as a selection of bullets/skills. **Tailor resume** on a tracked application
+creates a target from it and opens a resume for that job. Each resume picks a
+design (`main` or `barlow`), and the server renders it via
 [Typst](https://typst.app) — the compiler ships as the `typst` wheel, so there
-is no system binary to install — and enforces render-time
-checks: one page hard limit, filler phrases, first person, missing metrics,
-missing availability line. JD coverage compares the posting's tech vocabulary
-against the skill bank three ways — matched, in-bank-but-not-shown, and
-missing (surfaced, never faked in).
+is no system binary to install. The Barlow design's fonts are vendored in
+`oneshot_ui/fonts/` (SIL Open Font License).
 
 Endpoints live under `/api/resume/*`; `GET /api/resume/resumes/{id}/pdf`
-returns the compiled PDF (503 with the compiler's message if it fails), and
-`/source` returns the generated `.typ` for hand-tuning.
+returns the compiled PDF (503 with the compiler's message if it fails).
+Signed out, `POST /api/resume/render/pdf` renders a document sent in the
+request body.
 
 ## Data contract
 

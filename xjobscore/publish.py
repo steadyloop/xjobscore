@@ -13,6 +13,8 @@ from typing import Any
 
 import asyncpg
 
+from xjobscore import store
+
 
 JOB_COLUMNS = (
     "id",
@@ -53,13 +55,31 @@ COMPANY_COLUMNS = (
     "tags",
 )
 
+# last_seen_at moves on nearly every cohort row every hour, while real content
+# changes number in the dozens. Fingerprinting it would resend the whole cohort
+# each run, so it is left out and refreshed only once it drifts (see
+# changed_job_ids).
+FINGERPRINT_COLUMNS = tuple(column for column in JOB_COLUMNS if column != "last_seen_at")
+
+# The UI renders last_seen_at as "checked N ago"; this bounds how stale that can
+# read on Neon, and how often an otherwise unchanged row is rewritten.
+DEFAULT_SEEN_DRIFT_S = 21_600
+
+
+def _fingerprint(alias: str, columns: Sequence[str]) -> str:
+    # ROW(...)::text renders timestamptz in the session time zone, so every
+    # fingerprint read runs under SET LOCAL TIME ZONE 'UTC' (_fetch_utc).
+    return f"md5(ROW({', '.join(f'{alias}.{column}' for column in columns)})::text)"
+
+
 # This is the broad serving cohort, not merely the default Software view. The
 # frontend can therefore apply every focus-area filter without needing the home
 # database. Eligible duplicate groups publish one active representative; a
 # rejected group is deliberately not collapsed because Gold decided its members
 # are separate jobs.
-OPPORTUNITY_SQL = f"""
-    SELECT {', '.join(f'j.{column}' for column in JOB_COLUMNS)}
+COHORT_SQL = f"""
+    SELECT j.id, j.company_id, j.last_seen_at,
+           {_fingerprint('j', FINGERPRINT_COLUMNS)} AS fingerprint
     FROM job_posting j
     LEFT JOIN job_posting_dup_group g ON g.id = j.dup_group_id
     WHERE j.status = 'active'
@@ -99,7 +119,64 @@ OPPORTUNITY_SQL = f"""
     ORDER BY j.id
 """
 
-UPSERT_COMPANY_SQL = """
+# Only active rows: a soft-closed row that re-enters the cohort is then absent
+# here and is resent, which reopens it.
+PUBLISHED_JOBS_SQL = f"""
+    SELECT id, last_seen_at,
+           {_fingerprint('job_posting', FINGERPRINT_COLUMNS)} AS fingerprint
+    FROM job_posting
+    WHERE status = 'active'
+"""
+
+JOB_ROWS_SQL = f"""
+    SELECT {', '.join(JOB_COLUMNS)}
+    FROM job_posting
+    WHERE id = ANY($1::bigint[])
+    ORDER BY id
+"""
+
+COMPANY_FINGERPRINT_SQL = f"""
+    SELECT id, {_fingerprint('company', COMPANY_COLUMNS)} AS fingerprint
+    FROM company
+    WHERE id = ANY($1::bigint[])
+"""
+
+COMPANY_ROWS_SQL = f"""
+    SELECT {', '.join(COMPANY_COLUMNS)}
+    FROM company
+    WHERE id = ANY($1::bigint[])
+    ORDER BY id
+"""
+
+LOGO_FINGERPRINT_SQL = """
+    SELECT company_id AS id, md5(bytes) AS fingerprint
+    FROM company_logo
+    WHERE company_id = ANY($1::bigint[])
+"""
+
+LOGO_ROWS_SQL = """
+    SELECT company_id, bytes
+    FROM company_logo
+    WHERE company_id = ANY($1::bigint[])
+    ORDER BY company_id
+"""
+
+COVERAGE_STAMP_SQL = "SELECT computed_at FROM coverage_snapshot WHERE id"
+
+COVERAGE_ROW_SQL = "SELECT id, payload, computed_at FROM coverage_snapshot WHERE id"
+
+
+def _distinct_guard(table: str, columns: Sequence[str]) -> str:
+    # ON CONFLICT DO UPDATE writes a new row version even when nothing changed;
+    # the guard skips identical rows so a resend never churns Neon storage.
+    return (
+        f"WHERE ROW({', '.join(f'{table}.{column}' for column in columns)}) "
+        f"IS DISTINCT FROM ROW({', '.join(f'EXCLUDED.{column}' for column in columns)})"
+    )
+
+
+_COMPANY_UPDATE_COLUMNS = ("name", "domain", "description", "tags")
+UPSERT_COMPANY_SQL = f"""
     INSERT INTO company(
         id, name, domain, description, tags
     ) OVERRIDING SYSTEM VALUE
@@ -109,12 +186,14 @@ UPSERT_COMPANY_SQL = """
         domain = EXCLUDED.domain,
         description = EXCLUDED.description,
         tags = EXCLUDED.tags
+    {_distinct_guard('company', _COMPANY_UPDATE_COLUMNS)}
 """
 
-UPSERT_LOGO_SQL = """
+UPSERT_LOGO_SQL = f"""
     INSERT INTO company_logo(company_id, bytes)
     VALUES($1, $2)
     ON CONFLICT (company_id) DO UPDATE SET bytes = EXCLUDED.bytes
+    {_distinct_guard('company_logo', ('bytes',))}
 """
 
 _JOB_PARAMETERS = ", ".join(f"${index}" for index in range(1, len(JOB_COLUMNS) + 1))
@@ -128,6 +207,7 @@ UPSERT_JOB_SQL = f"""
         {', '.join(f'{column} = EXCLUDED.{column}' for column in _JOB_UPDATE_COLUMNS)},
         source = EXCLUDED.source,
         source_key = EXCLUDED.source_key
+    {_distinct_guard('job_posting', (*_JOB_UPDATE_COLUMNS, 'source', 'source_key'))}
 """
 
 # No target row is deleted. A posting that closed, moved out of the supported
@@ -148,20 +228,15 @@ UPSERT_COVERAGE_SQL = """
         computed_at = EXCLUDED.computed_at
 """
 
-@dataclass(frozen=True, slots=True)
-class Snapshot:
-    jobs: tuple[Any, ...]
-    companies: tuple[Any, ...]
-    logos: tuple[Any, ...]
-    coverage: Any | None
-
 
 @dataclass(frozen=True, slots=True)
 class PublishCounts:
+    cohort: int
     postings: int
     companies: int
     logos: int
     closed: int
+    coverage: bool
 
 
 def _values(row: Any, columns: Sequence[str]) -> tuple[Any, ...]:
@@ -175,40 +250,49 @@ def _command_count(result: str) -> int:
         return 0
 
 
-async def read_snapshot(source: Any) -> Snapshot:
-    jobs = tuple(await source.fetch(OPPORTUNITY_SQL))
-    if not jobs:
+async def _fetch_utc(conn: Any, query: str, *args: Any) -> list[Any]:
+    async with conn.transaction():
+        await conn.execute("SET LOCAL TIME ZONE 'UTC'")
+        return await conn.fetch(query, *args)
+
+
+def _fingerprints(rows: Sequence[Any]) -> dict[int, str]:
+    return {int(row["id"]): row["fingerprint"] for row in rows}
+
+
+def _differing(source: dict[int, str], target: dict[int, str]) -> list[int]:
+    return sorted(key for key, value in source.items() if target.get(key) != value)
+
+
+def changed_job_ids(
+    cohort: Sequence[Any],
+    published: Sequence[Any],
+    *,
+    seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
+) -> list[int]:
+    """Cohort ids Neon lacks, holds different content for, or shows stale."""
+    target = {int(row["id"]): row for row in published}
+    changed = []
+    for row in cohort:
+        current = target.get(int(row["id"]))
+        if current is None or current["fingerprint"] != row["fingerprint"]:
+            changed.append(int(row["id"]))
+            continue
+        seen, shown = row["last_seen_at"], current["last_seen_at"]
+        if seen is not None and (
+            shown is None or (seen - shown).total_seconds() > seen_drift_s
+        ):
+            changed.append(int(row["id"]))
+    return changed
+
+
+async def read_cohort(source: Any) -> list[Any]:
+    cohort = await _fetch_utc(source, COHORT_SQL)
+    if not cohort:
         raise RuntimeError(
             "publisher selected zero postings; refusing to soft-close the Neon feed"
         )
-
-    company_ids = sorted({int(row["company_id"]) for row in jobs})
-    companies = tuple(
-        await source.fetch(
-            f"""
-            SELECT {', '.join(COMPANY_COLUMNS)}
-            FROM company
-            WHERE id = ANY($1::bigint[])
-            ORDER BY id
-            """,
-            company_ids,
-        )
-    )
-    logos = tuple(
-        await source.fetch(
-            """
-            SELECT company_id, bytes
-            FROM company_logo
-            WHERE company_id = ANY($1::bigint[])
-            ORDER BY company_id
-            """,
-            company_ids,
-        )
-    )
-    coverage = await source.fetchrow(
-        "SELECT id, payload, computed_at FROM coverage_snapshot WHERE id"
-    )
-    return Snapshot(jobs, companies, logos, coverage)
+    return cohort
 
 
 async def _assert_thin_target(target: Any) -> None:
@@ -262,34 +346,79 @@ async def _ensure_coverage_schema(target: Any) -> None:
     )
 
 
-async def write_snapshot(
-    target: Any, snapshot: Snapshot, *, dry_run: bool = False
+async def publish(
+    source: Any,
+    target: Any,
+    *,
+    dry_run: bool = False,
+    seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
 ) -> PublishCounts:
+    """Send Neon only what differs from the home cohort.
+
+    Both sides are fingerprinted in SQL, so an unchanged row costs one md5 on
+    each end rather than a full transfer and a rewrite.
+    """
+    cohort = await read_cohort(source)
+    cohort_ids = [int(row["id"]) for row in cohort]
+    company_ids = sorted({int(row["company_id"]) for row in cohort})
+
     await _assert_thin_target(target)
     transaction = target.transaction()
     await transaction.start()
     try:
         await _ensure_coverage_schema(target)
-        await target.executemany(
-            UPSERT_COMPANY_SQL,
-            [_values(row, COMPANY_COLUMNS) for row in snapshot.companies],
+        await target.execute("SET LOCAL TIME ZONE 'UTC'")
+
+        job_ids = changed_job_ids(
+            cohort,
+            await target.fetch(PUBLISHED_JOBS_SQL),
+            seen_drift_s=seen_drift_s,
         )
-        await target.executemany(
-            UPSERT_LOGO_SQL,
-            [(row["company_id"], row["bytes"]) for row in snapshot.logos],
+        changed_companies = _differing(
+            _fingerprints(await _fetch_utc(source, COMPANY_FINGERPRINT_SQL, company_ids)),
+            _fingerprints(await target.fetch(COMPANY_FINGERPRINT_SQL, company_ids)),
         )
-        await target.executemany(
-            UPSERT_JOB_SQL,
-            [_values(row, JOB_COLUMNS) for row in snapshot.jobs],
+        changed_logos = _differing(
+            _fingerprints(await source.fetch(LOGO_FINGERPRINT_SQL, company_ids)),
+            _fingerprints(await target.fetch(LOGO_FINGERPRINT_SQL, company_ids)),
         )
-        current_ids = [int(row["id"]) for row in snapshot.jobs]
-        closed = _command_count(await target.execute(SOFT_CLOSE_SQL, current_ids))
-        if snapshot.coverage is not None:
+        source_stamp = await source.fetchval(COVERAGE_STAMP_SQL)
+        coverage_changed = source_stamp is not None and source_stamp != (
+            await target.fetchval(COVERAGE_STAMP_SQL)
+        )
+
+        if changed_companies:
+            await target.executemany(
+                UPSERT_COMPANY_SQL,
+                [
+                    _values(row, COMPANY_COLUMNS)
+                    for row in await source.fetch(COMPANY_ROWS_SQL, changed_companies)
+                ],
+            )
+        if changed_logos:
+            await target.executemany(
+                UPSERT_LOGO_SQL,
+                [
+                    (row["company_id"], row["bytes"])
+                    for row in await source.fetch(LOGO_ROWS_SQL, changed_logos)
+                ],
+            )
+        if job_ids:
+            await target.executemany(
+                UPSERT_JOB_SQL,
+                [
+                    _values(row, JOB_COLUMNS)
+                    for row in await source.fetch(JOB_ROWS_SQL, job_ids)
+                ],
+            )
+        closed = _command_count(await target.execute(SOFT_CLOSE_SQL, cohort_ids))
+        if coverage_changed:
+            coverage = await source.fetchrow(COVERAGE_ROW_SQL)
             await target.execute(
                 UPSERT_COVERAGE_SQL,
-                snapshot.coverage["id"],
-                snapshot.coverage["payload"],
-                snapshot.coverage["computed_at"],
+                coverage["id"],
+                coverage["payload"],
+                coverage["computed_at"],
             )
         if dry_run:
             await transaction.rollback()
@@ -300,18 +429,13 @@ async def write_snapshot(
         raise
 
     return PublishCounts(
-        postings=len(snapshot.jobs),
-        companies=len(snapshot.companies),
-        logos=len(snapshot.logos),
+        cohort=len(cohort),
+        postings=len(job_ids),
+        companies=len(changed_companies),
+        logos=len(changed_logos),
         closed=closed,
+        coverage=coverage_changed,
     )
-
-
-async def publish(
-    source: Any, target: Any, *, dry_run: bool = False
-) -> PublishCounts:
-    snapshot = await read_snapshot(source)
-    return await write_snapshot(target, snapshot, dry_run=dry_run)
 
 
 def _load_dotenv() -> None:
@@ -332,6 +456,44 @@ def _load_dotenv() -> None:
                 os.environ.setdefault(key, value)
 
 
+async def connect_target(dsn: str, **connect_kwargs: Any) -> asyncpg.Connection:
+    # Rows read from a store pool carry jsonb as Python objects; the target
+    # must encode them the same way or asyncpg rejects a dict where it
+    # expects JSON text.
+    target = await asyncpg.connect(dsn, **connect_kwargs)
+    try:
+        await store._install_jsonb_codec(target)
+    except BaseException:
+        await target.close()
+        raise
+    return target
+
+
+async def publish_to(
+    source: Any,
+    target_dsn: str,
+    *,
+    dry_run: bool = False,
+    seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
+) -> PublishCounts:
+    # A fresh connection per run lets Neon's compute scale to zero in between.
+    target = await connect_target(target_dsn)
+    try:
+        return await publish(
+            source, target, dry_run=dry_run, seen_drift_s=seen_drift_s
+        )
+    finally:
+        await target.close()
+
+
+def format_counts(counts: PublishCounts) -> str:
+    return (
+        f"cohort={counts.cohort} postings={counts.postings} "
+        f"companies={counts.companies} logos={counts.logos} "
+        f"closed={counts.closed} coverage={'sent' if counts.coverage else 'unchanged'}"
+    )
+
+
 async def main(argv: Sequence[str] | None = None) -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -344,6 +506,12 @@ async def main(argv: Sequence[str] | None = None) -> int:
         help="thin Neon DSN; default: $PUBLISH_DATABASE_URL",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--seen-drift-s",
+        type=float,
+        default=DEFAULT_SEEN_DRIFT_S,
+        help="resend an unchanged posting once Neon's last_seen_at lags by this much",
+    )
     args = parser.parse_args(argv)
 
     source_dsn = args.source_dsn or os.environ.get("DATABASE_URL")
@@ -359,18 +527,21 @@ async def main(argv: Sequence[str] | None = None) -> int:
 
     source = await asyncpg.connect(source_dsn)
     try:
-        target = await asyncpg.connect(target_dsn)
-        try:
-            counts = await publish(source, target, dry_run=args.dry_run)
-        finally:
-            await target.close()
+        # Same codec as the runtime's store pool, so both entry points hand
+        # publish() identical row values.
+        await store._install_jsonb_codec(source)
+        counts = await publish_to(
+            source,
+            target_dsn,
+            dry_run=args.dry_run,
+            seen_drift_s=args.seen_drift_s,
+        )
     finally:
         await source.close()
 
     print(
-        f"postings={counts.postings} companies={counts.companies} "
-        f"logos={counts.logos} closed={counts.closed}"
-        f"{' (dry run, rolled back)' if args.dry_run else ''}"
+        format_counts(counts)
+        + (" (dry run, rolled back)" if args.dry_run else "")
     )
     return 0
 

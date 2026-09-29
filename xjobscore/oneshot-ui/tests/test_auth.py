@@ -133,6 +133,9 @@ def test_public_reads_and_pages_stay_open_but_workspace_apis_require_sign_in() -
             json={"company": "Local", "title": "Intern", "url": "https://example.test/job"},
         ).status_code == 401
         assert client.post("/api/jobs/1/applications").status_code == 401
+        assert client.put("/api/jobs/1/feedback", json={"kind": "skip"}).status_code == 401
+        assert client.delete("/api/jobs/1/feedback").status_code == 401
+        assert client.get("/api/feedback").status_code == 401
         assert client.get("/api/resume/profile").status_code == 401
         assert client.put("/api/resume/profile", json={"full_name": "Private"}).status_code == 401
         assert client.get("/api/resume/resumes").status_code == 401

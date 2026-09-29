@@ -11,12 +11,16 @@ from oneshot_ui.config import Settings
 from oneshot_ui.repository import (
     PostgresRepository,
     UNCLASSIFIED,
-    _board_state,
     _ilike_pattern,
     _location_label,
     _skill_search_ids,
-    _us_location_bucket,
-    _us_proximity_priority,
+)
+from oneshot_ui.location_policy import (
+    US_HUB_KEYS,
+    US_NORCAL_KEYS,
+    US_SEATTLE_KEYS,
+    US_SOCAL_KEYS,
+    US_SUBURB_KEYS,
 )
 
 TEST_ACCOUNT_ID = UUID("00000000-0000-0000-0000-0000000000aa")
@@ -77,6 +81,7 @@ class FakeRepository:
             }
         ]
         self.applications: list[dict] = []
+        self.feedback: dict[int, dict] = {}
         self.next_id = 1
 
     async def connect(self) -> None:
@@ -93,7 +98,8 @@ class FakeRepository:
 
     async def list_jobs(self, **options):
         application_job_ids = {row["job_id"] for row in self.applications if row["job_id"]}
-        rows = [row for row in self.jobs if row["id"] not in application_job_ids]
+        hidden = application_job_ids | set(self.feedback)
+        rows = [row for row in self.jobs if row["id"] not in hidden]
         degree_fields = set(options["degree_fields"])
         domains = degree_fields.intersection({"software", "finance", "unlabeled"})
         if domains:
@@ -212,6 +218,29 @@ class FakeRepository:
         self.applications = [row for row in self.applications if row["id"] != application_id]
         return len(self.applications) != before
 
+    async def set_feedback(self, job_id, *, kind, skip_reason=None, corrections=None):
+        if not any(row["id"] == job_id for row in self.jobs):
+            return None
+        row = {
+            "job_id": job_id,
+            "kind": kind,
+            "skip_reason": skip_reason,
+            "corrections": deepcopy(corrections or []),
+        }
+        self.feedback[job_id] = row
+        return deepcopy(row)
+
+    async def delete_feedback(self, job_id):
+        return self.feedback.pop(job_id, None) is not None
+
+    async def list_feedback(self, *, limit, offset):
+        jobs = {row["id"]: row for row in self.jobs}
+        hidden = [
+            {**deepcopy(row), "job": deepcopy(jobs[job_id])}
+            for job_id, row in reversed(self.feedback.items())
+        ]
+        return {"total": len(hidden), "hidden": hidden[offset:offset + limit]}
+
 
 def test_job_response_exposes_provenance_without_internal_trace_fields() -> None:
     result = PostgresRepository._job({
@@ -315,36 +344,19 @@ def test_location_label_is_compact_and_uses_only_normalized_locations() -> None:
     assert _location_label([]) is None
 
 
-def test_us_location_policy_has_four_read_time_buckets() -> None:
-    assert _us_location_bucket([
-        {"country": "US", "state": "CA", "city": "San Francisco"}
-    ]) == 1
-    assert _us_location_bucket([
-        {"country": "US", "state": "CA", "city": "Palo Alto"}
-    ]) == 2
-    assert _us_location_bucket([
-        {"country": "US", "state": "MN", "city": "Rochester"}
-    ]) == 3
-    assert _us_proximity_priority([
-        {"country": "US", "state": "CA", "city": "San Francisco"}
-    ]) == 1
-    assert _us_proximity_priority([
-        {"country": "US", "state": "CA", "city": "Los Angeles"}
-    ]) == 2
-    assert _us_proximity_priority([
-        {"country": "US", "state": "WA", "city": "Seattle"}
-    ]) == 3
-    assert _us_proximity_priority([
-        {"country": "US", "state": "NY", "city": "New York City"}
-    ]) == 4
-    assert _us_location_bucket([]) == 4
-    assert _us_location_bucket([
-        {"country": "DE", "state": "16", "city": "Berlin"}
-    ]) is None
-    assert _us_location_bucket([
-        {"country": "DE", "state": "16", "city": "Berlin"},
-        {"country": "US", "state": "AZ", "city": "Tucson"},
-    ]) == 3
+def test_us_location_policy_keys_rank_hubs_suburbs_and_regions() -> None:
+    # These are the lists list_jobs binds into its ORDER BY, so the policy is
+    # asserted on the data the SQL actually reads.
+    assert "CA|San Francisco" in US_HUB_KEYS
+    assert "CA|Palo Alto" in US_SUBURB_KEYS
+    assert "CA|Palo Alto" not in US_HUB_KEYS
+    assert not {"MN|Rochester"} & {*US_HUB_KEYS, *US_SUBURB_KEYS}
+    assert "CA|San Francisco" in US_NORCAL_KEYS
+    assert "CA|Los Angeles" in US_SOCAL_KEYS
+    assert "WA|Seattle" in US_SEATTLE_KEYS
+    assert not {"NY|New York City"} & {
+        *US_NORCAL_KEYS, *US_SOCAL_KEYS, *US_SEATTLE_KEYS
+    }
 
 
 @pytest.mark.asyncio
@@ -835,8 +847,6 @@ def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
     application = create_app(Settings(dsn="injected"), repository=FakeRepository())
     paths = (
         "/",
-        "/static/app.css",
-        "/static/app.js",
         "/static/api-client.js",
         "/static/nav-count.js",
         "/static/sample-data.js",
@@ -866,23 +876,6 @@ def test_every_browser_entrypoint_and_referenced_asset_is_served() -> None:
         # `assert False` and names nothing.
         for path in paths:
             assert client.get(path).status_code == 200, f"{path} is not served"
-
-
-def test_board_state_ranks_deliberate_holds_above_derived_signals() -> None:
-    from datetime import datetime, timedelta, timezone
-
-    now = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
-    fresh = now - timedelta(minutes=5)
-    ancient = now - timedelta(days=2)
-    # An operator hold outranks strikes; repeated failures outrank staleness.
-    assert _board_state(5, ancient, now, 900, now) == "paused"
-    assert _board_state(3, ancient, None, 900, now) == "failing"
-    assert _board_state(1, fresh, None, 900, now) == "degraded"
-    assert _board_state(0, None, None, 900, now) == "never"
-    assert _board_state(0, ancient, None, 900, now) == "stale"
-    assert _board_state(0, fresh, None, 900, now) == "ok"
-    # No cadence configured: staleness cannot be judged, so a polled feed is ok.
-    assert _board_state(0, ancient, None, 0, now) == "ok"
 
 
 @pytest.mark.asyncio
@@ -1057,3 +1050,116 @@ def test_logo_media_type_names_every_format_a_favicon_arrives_as():
     # SVG is the only text format here, so it is the fallback rather than a
     # magic-number match.
     assert _logo_media_type(b'<svg xmlns="http://www.w3.org/2000/svg">') == "image/svg+xml"
+
+
+def test_job_response_carries_the_focus_label_the_triage_pane_disputes() -> None:
+    row = {
+        "id": 41,
+        "title": "Summer Software Engineering Intern",
+        "company_name": "Example Labs",
+        "locations": [],
+        "attributes": {},
+    }
+    assert PostgresRepository._job({**row, "job_domain": "software"})["job_domain"] == "software"
+    assert PostgresRepository._job(row)["job_domain"] is None
+
+
+def test_skip_hides_a_posting_until_it_is_restored() -> None:
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        assert client.get("/api/jobs").json()["total"] == 1
+
+        skipped = client.put("/api/jobs/41/feedback", json={"kind": "skip"})
+        assert skipped.status_code == 200
+        assert skipped.json()["skip_reason"] is None
+        assert client.get("/api/jobs").json()["total"] == 0
+
+        # The reason arrives after the fact, from the toast, as a replace.
+        reasoned = client.put(
+            "/api/jobs/41/feedback", json={"kind": "skip", "skip_reason": "location"}
+        ).json()
+        assert reasoned["skip_reason"] == "location"
+
+        hidden = client.get("/api/feedback").json()
+        assert hidden["total"] == 1
+        assert hidden["hidden"][0]["skip_reason"] == "location"
+        assert hidden["hidden"][0]["job"]["title"] == "Summer Software Engineering Intern"
+
+        assert client.delete("/api/jobs/41/feedback").status_code == 204
+        assert client.get("/api/jobs").json()["total"] == 1
+        assert client.delete("/api/jobs/41/feedback").status_code == 404
+        assert client.put("/api/jobs/999/feedback", json={"kind": "skip"}).status_code == 404
+
+
+def test_mislabeled_report_keeps_the_corrections_on_the_wire_names() -> None:
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        report = client.put(
+            "/api/jobs/41/feedback",
+            json={
+                "kind": "mislabeled",
+                "corrections": [
+                    {"field": "focus", "from": "Software", "to": "Finance"},
+                    {"field": "company", "from": "hctz.fa.us2"},
+                ],
+            },
+        )
+        assert report.status_code == 200
+        assert report.json()["corrections"] == [
+            {"field": "focus", "from": "Software", "to": "Finance"},
+            {"field": "company", "from": "hctz.fa.us2", "to": None},
+        ]
+        assert client.get("/api/jobs").json()["total"] == 0
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"kind": "hide"},
+        {"kind": "skip", "skip_reason": "salary"},
+        {"kind": "skip", "corrections": [{"field": "focus", "from": "Software"}]},
+        {"kind": "mislabeled"},
+        {"kind": "mislabeled", "skip_reason": "level", "corrections": [{"field": "focus", "from": "Software"}]},
+        {"kind": "mislabeled", "corrections": [{"field": "salary", "from": "x"}]},
+        {"kind": "mislabeled", "corrections": [{"field": "company", "from": "x" * 301}]},
+        {"kind": "mislabeled", "corrections": [{"field": "focus", "from": "x"}] * 6},
+    ],
+)
+def test_feedback_rejects_a_reason_that_does_not_match_its_kind(body) -> None:
+    repository = FakeRepository()
+    application = signed_in_app(repository=repository)
+    with TestClient(application) as client:
+        assert client.put("/api/jobs/41/feedback", json=body).status_code == 422
+        assert repository.feedback == {}
+
+
+@pytest.mark.asyncio
+async def test_hidden_feedback_leaves_the_feed_with_its_duplicate_group() -> None:
+    class QueryPool:
+        def __init__(self):
+            self.queries = []
+
+        async def fetchval(self, query, *args):
+            return 0
+
+        async def fetchrow(self, query, *args):
+            self.queries.append(query)
+            return {"intern": 0, "coop": 0, "student": 0, "new_grad": 0, "research": 0}
+
+        async def fetch(self, query, *args):
+            self.queries.append(query)
+            return []
+
+    pool = QueryPool()
+    repository = PostgresRepository("injected", pool=pool).for_account(TEST_ACCOUNT_ID)
+
+    await repository.list_jobs(job_types=["intern"], hide_tracked=True)
+    signed_in = "\n".join(pool.queries)
+    assert "FROM job_feedback f" in signed_in
+    assert "hidden.dup_group_id = j.dup_group_id" in signed_in
+
+    pool.queries.clear()
+    await repository.list_jobs(job_types=["intern"], hide_tracked=False)
+    assert "job_feedback" not in "\n".join(pool.queries)
