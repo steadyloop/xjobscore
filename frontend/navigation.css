@@ -177,7 +177,7 @@
   color: rgb(255 255 255 / 40%);
 }
 
-/* app.css and resume/styles.css both set `svg { fill: none; stroke: currentColor }`
+/* Every page stylesheet sets `svg { fill: none; stroke: currentColor }`
    globally. These two rules outrank a bare element selector, so the glyphs render
    the same on all four shells. */
 .account-avatar svg {
@@ -365,10 +365,6 @@
   .side-nav a.active {
     flex: 0 0 auto;
     order: initial;
-  }
-
-  .menu-button {
-    display: none;
   }
 
   /* The sidebar is a horizontal bar here, so the chip collapses to the avatar.

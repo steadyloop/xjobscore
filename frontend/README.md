@@ -31,15 +31,9 @@ cd frontend && node --test
 
 `sample-data.js` retains deterministic fixtures for tests, but production pages
 never enable them. Opportunities and Feed Status always use the live API.
-Applications and Resume load the file only for `OneShotVisitorData`, the
-separate browser-local guest workspace described below.
-
-The Resume page does have an explicit, browser-local **interactive mockup** for
-design review. An empty signed-out workspace offers “Load sample workspace,” and
-`/resume/?demo=1` performs the same opt-in load. It seeds fictional content into
-`OneShotVisitorData`; from that point every edit uses the normal guest CRUD
-routes. This is not fixture mode, never replaces a non-empty workspace, and is
-not available for a signed-in account.
+Opportunities, Applications, and Resume load the file only for
+`OneShotVisitorData`, the separate browser-local guest workspace described
+below.
 
 Signed-out Applications starts empty. Jobs added from Opportunities and manually
 created applications are persisted in the visitor workspace and appear there.
@@ -53,8 +47,8 @@ workspace, and it does not synchronize across browsers. Signing in swaps private
 CRUD to the account-scoped PostgreSQL API; the browser-local workspace is kept
 but is not merged automatically.
 
-Browser-local resumes can run content and coverage checks; export renders through
-the public `/api/resume/render/*` routes either way.
+A browser-local resume exports through the public `POST /api/resume/render/pdf`
+route, which takes the whole document in the request.
 
 The 401 → `/login/` handlers cover a signed-in session expiring between the
 shared identity probe and a private request. Anonymous private requests are

@@ -48,27 +48,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-lineca
 .side-nav a.active .nav-icon { color: var(--lime); }
 .side-nav b { margin-left: auto; border-radius: 20px; background: rgb(255 255 255 / 10%); padding: 1px 6px; font: 10px var(--mono); font-weight: 400; }
 .nav-icon { width: 18px; height: 18px; flex: 0 0 auto; }
-.sample-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; border: 1px solid rgb(255 255 255 / 16%); border-radius: 8px; background: rgb(255 255 255 / 6%); padding: 8px 10px; color: rgb(255 255 255 / 78%); text-align: left; }
-.sample-toggle:hover, .sample-toggle:focus-visible { border-color: var(--lime); color: white; outline: none; }
-.sample-toggle-copy { display: grid; gap: 1px; font-size: 11px; font-weight: 700; }
-.sample-toggle-copy small { color: rgb(255 255 255 / 42%); font: 9px var(--mono); text-transform: uppercase; }
-.sample-toggle > .sample-switch { position: relative; display: block; width: 30px; height: 17px; flex: 0 0 30px; border-radius: 99px; background: rgb(255 255 255 / 18%); }
-.sample-toggle .sample-switch i { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: rgb(255 255 255 / 72%); transition: transform .18s ease, background .18s ease; }
-.sample-toggle.active .sample-switch { background: var(--lime); }
-.sample-toggle.active .sample-switch i { transform: translateX(13px); background: #15251e; }
-.sample-toggle.active .sample-toggle-copy small { color: var(--lime); }
 
 .workspace { min-width: 0; width: 100%; max-width: 1660px; margin: 0 auto; padding: 30px 36px 60px; }
 .page-header { display: flex; align-items: baseline; justify-content: space-between; gap: 25px; }
 .page-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .page-header h1 { margin: 0; font-size: 24px; line-height: 1.15; letter-spacing: -.035em; }
-.page-tag { color: var(--subtle); font-size: 13px; white-space: nowrap; }
 .clock { color: var(--muted); font: 600 12px var(--mono); white-space: nowrap; }
 
 .fleet-stats { margin: 10px 0 0; color: var(--muted); font: 600 12px var(--mono); }
 .stat-sep { color: var(--line-strong); }
-.stat-err { color: var(--red); font-weight: 700; }
-.stat-add { color: var(--green); }
 
 .source-section { min-width: 0; margin-top: 26px; }
 .section-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 4px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
@@ -138,7 +126,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-lineca
   .side-nav p { display: none; }
   .side-nav a { flex: 0 0 auto; }
   .side-nav a.active { order: -1; }
-  .sample-toggle { display: none; }
   .workspace { padding: 27px 18px 45px; }
   .legend-key i { width: 9px; height: 9px; }
 }

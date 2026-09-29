@@ -7,12 +7,10 @@
     entries: [],
     skills: [],
     variants: [],
-    vocabulary: [],
     jobs: [],
     resumes: [],
     resumeId: null,
     browserLocal: false,
-    typstAvailable: false,
     tab: "profile",
     mode: "content",
     addingKind: null,
@@ -93,40 +91,18 @@
     return payload;
   }
 
-  const renderPayload = resume => ({ profile: state.profile, resume, entries: state.entries, skills: state.skills });
-
-  async function renderLocally(kind, resume, asJson = false) {
-    const response = await fetch(`/api/resume/render/${kind}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(renderPayload(resume)),
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.detail || `Export failed (${response.status})`);
-    }
-    return asJson ? response.json() : response.blob();
-  }
-
   async function loadAll() {
-    const [profile, entries, skills, variants, vocabulary, jobs, resumes] = await Promise.all([
+    const [profile, entries, skills, variants, jobs, resumes] = await Promise.all([
       api("/profile"), api("/entries"), api("/skills"), api("/variants"),
-      api("/vocabulary"), api("/jobs"), api("/resumes"),
+      api("/jobs"), api("/resumes"),
     ]);
     state.profile = profile;
     state.entries = entries.entries || [];
     state.skills = skills.skills || [];
     state.variants = variants.variants || [];
-    state.vocabulary = vocabulary.terms || [];
     state.jobs = jobs.jobs || [];
     state.resumes = resumes.resumes || [];
-    state.typstAvailable = Boolean(resumes.typst_available);
     state.browserLocal = Boolean(window.OneShotVisitorData && await window.OneShotVisitorData.isLocal());
-    if (localMode()) {
-      state.typstAvailable = await fetch("/api/resume/render/status")
-        .then(response => response.ok ? response.json() : { typst_available: false })
-        .then(payload => Boolean(payload.typst_available)).catch(() => false);
-    }
     if (!state.resumes.some(resume => resume.id === state.resumeId)) state.resumeId = state.resumes[0]?.id ?? null;
   }
 
@@ -288,7 +264,18 @@
       <div class="popover entry-menu" hidden><button class="danger" type="button" data-action="delete-entry" data-id="${entry.id}">Delete</button></div></div>`;
   }
 
+  // Header fields a resume may reword for itself (resume_models.EntryPick).
+  const ENTRY_OVERRIDES = ["org", "role", "location", "start_date", "end_date", "detail"];
+  const shownEntry = (entry, resume) => {
+    const pick = resume && selectedEntry(resume, entry.id);
+    if (!pick) return entry;
+    const shown = { ...entry };
+    ENTRY_OVERRIDES.forEach(field => { if (pick[field] != null) shown[field] = pick[field]; });
+    return shown;
+  };
+
   function entryBlock(entry, readOnly, resume) {
+    entry = shownEntry(entry, resume);
     const picked = !resume || Boolean(selectedEntry(resume, entry.id));
     const titleFields = entry.kind === "project" ? ["org", "role"] : ["role", "org"];
     const labels = entry.kind === "project" ? ["Project", "Description"] : ["Role", entry.kind === "experience" ? "Company" : "Organization"];
@@ -395,7 +382,7 @@
     ["experience", "project", "research", "leadership"].forEach(kind => content.push(resumeEntrySection(kind, resume)));
     view.innerHTML = `<article class="resume-document">
       <header class="document-head">${resumePicker(resume)}<div class="document-title"><span class="autosave">${icon("check")}Saved automatically</span><h2>${esc(resume.name)}</h2></div>
-        <div class="document-actions"><div class="mode-switch" aria-label="Resume display"><button type="button" data-action="show-content" aria-pressed="${state.mode === "content"}">${icon("edit")}Content</button><button type="button" data-action="show-pdf" aria-pressed="${state.mode === "pdf"}">${icon("eye")}PDF</button></div><button class="button primary small" type="button" data-action="export-pdf" ${state.typstAvailable ? "" : "disabled"}>${icon("download")}Export PDF</button></div>
+        <div class="document-actions"><select class="design-select" data-resume-template aria-label="Design">${[["main", "Main"], ["barlow", "Barlow"]].map(([value, label]) => `<option value="${value}" ${(resume.template || "main") === value ? "selected" : ""}>${label} design</option>`).join("")}</select><div class="mode-switch" aria-label="Resume display"><button type="button" data-action="show-content" aria-pressed="${state.mode === "content"}">${icon("edit")}Content</button><button type="button" data-action="show-pdf" aria-pressed="${state.mode === "pdf"}">${icon("eye")}PDF</button></div><button class="button primary small" type="button" data-action="export-pdf">${icon("download")}Export PDF</button></div>
       </header>
       ${target ? `<div class="target-line"><span>Target</span><strong>${esc(target.company)} · ${esc(target.title)}</strong>${target.url ? `<a href="${href(target.url)}" target="_blank" rel="noreferrer">View role ${icon("external")}</a>` : ""}</div>` : ""}
       ${state.mode === "content" ? `<div class="resume-content section-list">${content.join("")}</div>` : `<div class="pdf-stage"><p class="pdf-loading">Building preview…</p><iframe class="pdf-frame" title="Resume PDF preview" hidden></iframe></div>`}
@@ -481,7 +468,8 @@
       if (all) selection.entries = selection.entries.filter(item => item.entry_id !== entryId);
       else {
         const overrides = new Map((existing?.bullets || []).map(item => [item.bullet_id, item.text_override ?? null]));
-        const replacement = { entry_id: entryId, bullets: entry.bullets.map(bullet => ({ bullet_id: bullet.id, text_override: overrides.get(bullet.id) ?? null })) };
+        // Spread the old pick so its header overrides and show_detail survive.
+        const replacement = { ...existing, entry_id: entryId, bullets: entry.bullets.map(bullet => ({ bullet_id: bullet.id, text_override: overrides.get(bullet.id) ?? null })) };
         selection.entries = selection.entries.filter(item => item.entry_id !== entryId).concat(replacement);
       }
     }
@@ -606,9 +594,15 @@
   }
 
   async function loadPdfBlob(resume) {
-    if (!state.typstAvailable) throw new Error("PDF export is unavailable.");
-    if (localMode()) return renderLocally("pdf", resume);
-    const response = await fetch(`/api/resume/resumes/${resume.id}/pdf`);
+    // Signed out there is no stored resume to render, so the document travels
+    // with the request instead.
+    const response = localMode()
+      ? await fetch("/api/resume/render/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: state.profile, resume, entries: state.entries, skills: state.skills }),
+      })
+      : await fetch(`/api/resume/resumes/${resume.id}/pdf`);
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.detail || "Could not build PDF");
@@ -740,6 +734,11 @@
 
   view.addEventListener("input", event => {
     if (event.target instanceof HTMLTextAreaElement) grow(event.target);
+  });
+
+  view.addEventListener("change", async event => {
+    if (!event.target.matches("[data-resume-template]")) return;
+    try { await patchResume(currentResume(), { template: event.target.value }); renderResumes(); } catch (error) { say(error.message); }
   });
 
   view.addEventListener("click", async event => {

@@ -132,7 +132,7 @@ test("legacy fixture flags stay disabled", async () => {
   assert.equal(context.OneShotSampleData.isEnabled(), false);
 });
 
-test("signed-out resume CRUD and checks use the browser-local workspace", async () => {
+test("signed-out resume CRUD uses the browser-local workspace", async () => {
   const { context, fetches, values } = browserContext();
   assert.equal(await context.OneShotVisitorData.isLocal(), true);
 
@@ -156,23 +156,17 @@ test("signed-out resume CRUD and checks use the browser-local workspace", async 
       selection: { entries: [{ entry_id: entry.id, bullets: [{ bullet_id: bullet.id }] }], skills: [] },
     }),
   })).json();
-  const check = await (await context.OneShotVisitorData.request(`/resume/resumes/${resume.id}/check`)).json();
+  const stored = await (await context.OneShotVisitorData.request(`/resume/resumes/${resume.id}`)).json();
 
-  assert.equal(check.problems.some(problem => problem.level === "error"), false);
+  assert.deepEqual(stored.selection.entries[0].bullets, [{ bullet_id: bullet.id }]);
   assert.ok(values.has("oneshot.visitor-data.state.v1"));
   assert.deepEqual(fetches.map(call => call.url), ["/api/auth/me"]);
 });
 
-test("the resume mockup loads only when requested and remains fully editable", async () => {
+test("a guest resume workspace starts blank and stays editable", async () => {
   const { context, values } = browserContext(new Map(), { pathname: "/resume/" });
   const blank = await (await context.OneShotVisitorData.request("/resume/entries")).json();
   assert.equal(blank.entries.length, 0);
-
-  context.OneShotVisitorData.loadResumeDemo();
-  const populated = await (await context.OneShotVisitorData.request("/resume/entries")).json();
-  const resumes = await (await context.OneShotVisitorData.request("/resume/resumes")).json();
-  assert.ok(populated.entries.length >= 4);
-  assert.ok(resumes.resumes.length >= 2);
 
   const created = await (await context.OneShotVisitorData.request("/resume/skills", {
     method: "POST",
@@ -203,6 +197,47 @@ test("guest opportunity queries exclude locally tracked job ids", async () => {
   await context.OneShotAPI.jobs.list({ limit: 100, offset: 0 });
 
   assert.ok(fetches.at(-1).url.includes("exclude_job_id=41"));
+});
+
+test("a guest skip leaves the feed, keeps a Hidden entry, and Restore brings it back", async () => {
+  const values = new Map();
+  const { context, fetches } = browserContext(values, { pathname: "/" });
+  const job = { id: 52, company: "Example Labs", title: "Data Intern", apply_url: "https://example.test/52" };
+
+  const skipped = await context.OneShotAPI.jobs.setFeedback(job.id, { kind: "skip" }, job);
+  assert.equal(skipped.kind, "skip");
+  assert.equal(skipped.skip_reason, null);
+  // The reason arrives later, as a replace that keeps when it was hidden.
+  const reasoned = await context.OneShotAPI.jobs.setFeedback(job.id, { kind: "skip", skip_reason: "location" }, job);
+  assert.equal(reasoned.skip_reason, "location");
+  assert.equal(reasoned.created_at, skipped.created_at);
+
+  await context.OneShotAPI.jobs.list({ limit: 100, offset: 0 });
+  assert.ok(fetches.at(-1).url.includes("exclude_job_id=52"));
+  assert.equal(fetches.some(call => call.url.includes("/feedback")), false, "guest feedback never reaches the server");
+
+  // A second page load reads the same browser store.
+  const reopened = browserContext(values, { pathname: "/" }).context;
+  const hidden = await reopened.OneShotAPI.feedback.list({ limit: 100 });
+  assert.equal(hidden.total, 1);
+  assert.equal(hidden.hidden[0].job.title, "Data Intern");
+  assert.equal(hidden.hidden[0].skip_reason, "location");
+
+  assert.equal(await reopened.OneShotAPI.jobs.clearFeedback(job.id), null);
+  assert.deepEqual(Array.from(reopened.OneShotVisitorData.hiddenJobIds()), []);
+  await assert.rejects(reopened.OneShotAPI.jobs.clearFeedback(job.id), /not hidden/);
+});
+
+test("a guest mislabeled report is validated like the server's", async () => {
+  const { context } = browserContext(new Map(), { pathname: "/" });
+  const job = { id: 53, company: "hctz.fa.us2", title: "AI/ML Intern", apply_url: "https://example.test/53" };
+  await assert.rejects(context.OneShotAPI.jobs.setFeedback(job.id, { kind: "mislabeled" }, job), /at least one correction/);
+  await assert.rejects(context.OneShotAPI.jobs.setFeedback(job.id, { kind: "skip", skip_reason: "salary" }, job), /skip_reason/);
+  const report = await context.OneShotAPI.jobs.setFeedback(job.id, {
+    kind: "mislabeled",
+    corrections: [{ field: "company", from: "hctz.fa.us2", to: "Hitachi" }],
+  }, job);
+  assert.equal(JSON.stringify(report.corrections), JSON.stringify([{ field: "company", from: "hctz.fa.us2", to: "Hitachi" }]));
 });
 
 test("sample fixture ids never enter the live opportunity query", async () => {

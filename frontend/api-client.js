@@ -5,6 +5,8 @@
     health: "/health",
     jobs: "/jobs",
     addToApplications: id => `/jobs/${encodeURIComponent(id)}/applications`,
+    feedback: id => `/jobs/${encodeURIComponent(id)}/feedback`,
+    feedbackList: "/feedback",
     applications: "/applications",
     application: id => `/applications/${encodeURIComponent(id)}`,
     externalApplications: "/applications/external",
@@ -88,8 +90,11 @@
         const values = { ...(filters || {}) };
         const tracker = await applicationStore();
         if (tracker) {
-          const liveIds = tracker.applicationJobIds().filter(id =>
-            String(id).trim() !== "" && Number.isSafeInteger(Number(id)));
+          // Tracked and hidden (skipped or mislabeled) postings both leave a
+          // guest's feed; a signed-in feed is filtered in PostgreSQL instead.
+          const ids = [...tracker.applicationJobIds(), ...(tracker.hiddenJobIds?.() || [])];
+          const liveIds = [...new Set(ids.filter(id =>
+            String(id).trim() !== "" && Number.isSafeInteger(Number(id))).map(String))];
           if (liveIds.length) values.exclude_job_id = liveIds;
         }
         return request(`${ROUTES.jobs}${query(values)}`);
@@ -101,6 +106,17 @@
         tracker?.rememberJob(job);
         return request(ROUTES.addToApplications(id), { method: "POST" }, true);
       },
+      // Skip or Mislabeled. Like an add, the guest store snapshots the posting
+      // first so its Hidden list can still show it after it leaves the feed.
+      setFeedback: async (id, body, job) => {
+        const tracker = await applicationStore();
+        tracker?.rememberJob(job);
+        return request(ROUTES.feedback(id), { method: "PUT", body: JSON.stringify(body) }, true);
+      },
+      clearFeedback: id => request(ROUTES.feedback(id), { method: "DELETE" }, true),
+    },
+    feedback: {
+      list: filters => request(`${ROUTES.feedbackList}${query(filters)}`, {}, true),
     },
     applications: {
       list: () => request(ROUTES.applications, {}, true),

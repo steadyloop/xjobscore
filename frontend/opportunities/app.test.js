@@ -21,17 +21,17 @@ const {
   skillBundles,
   listTags,
   sourceLabel,
-  sourceChoices,
-  postedOnMarkup,
-  relativeTime,
+  linkChoices,
+  placeList,
+  commonTerms,
+  openMarkup,
+  detailPaneMarkup,
+  reportRows,
+  hiddenReason,
+  SKIP_REASONS,
   workplaceLabel,
-  listFacts,
-  deadlineLabel,
-  detailMetaMarkup,
   cardMetaMarkup,
-  detailHeadMarkup,
   detailPostedMarkup,
-  summaryMarkup,
   initials,
   logoSrc,
   logoMarkup,
@@ -199,9 +199,9 @@ test("V2 detail presents methods and concepts as one low-emphasis expertise flow
   assert.doesNotMatch(markup, /data-skill-(?:group|section)="(?:method|concept)"/);
 
   const styles = fs.readFileSync(require.resolve("./styles.css"), "utf8");
-  assert.match(styles, /\.detail-skill-section \.skill-list \{[^}]*display: flex[^}]*flex-wrap: wrap[^}]*margin-top: 9px/);
-  assert.match(styles, /\.expertise-list \{[^}]*display: flex[^}]*flex-wrap: wrap[^}]*gap: 5px[^}]*color: #667168[^}]*font: 500 10px\/1\.4 var\(--sans\)/);
-  assert.match(styles, /\.expertise-term \{[^}]*max-width: 100%[^}]*display: inline-flex[^}]*border-radius: 4px[^}]*background: #f1f3ef[^}]*padding: 2px 6px[^}]*white-space: normal/);
+  assert.match(styles, /\.detail-skill-section \.skill-list \{[^}]*display: flex[^}]*flex-wrap: wrap[^}]*margin-top: 8px/);
+  assert.match(styles, /\.expertise-list \{[^}]*display: flex[^}]*flex-wrap: wrap[^}]*gap: 5px[^}]*color: #667168[^}]*font: 500 12px\/1\.4 var\(--sans\)/);
+  assert.match(styles, /\.expertise-term \{[^}]*max-width: 100%[^}]*display: inline-flex[^}]*border-radius: 5px[^}]*background: #f1f3ef[^}]*padding: 2px 7px[^}]*white-space: normal/);
   assert.doesNotMatch(styles, /\.expertise-term[^}]*::(?:before|after)/);
   assert.doesNotMatch(styles, /\.expertise-term\[data-skill-category="method"\]/);
   assert.doesNotMatch(styles, /\.expertise-term(?:\[[^\]]+\])? \{[^}]*linear-gradient/);
@@ -296,58 +296,133 @@ test("V2 formats public job metadata into reader-facing labels", () => {
   assert.equal(workplaceLabel("unknown"), "");
 });
 
-test("V2 quietly reduces alternate postings to usable distinct providers", () => {
-  const choices = sourceChoices({
-    source: "greenhouse:acme",
-    apply_url: "https://greenhouse.example/job",
+test("every distinct posting URL is a way in, vendor repeats included", () => {
+  const choices = linkChoices({
+    source: "oracle:eevd.fa.us6/cx_14001",
+    apply_url: "https://eevd.example/cx_14001/job",
     posted_at: "2026-08-18T00:00:00Z",
     other_sources: [
-      { source: "greenhouse:mirror", url: "https://greenhouse.example/mirror" },
-      { source: "workday:acme", url: "https://workday.example/job", posted_at: "2026-08-17T00:00:00Z" },
+      { source: "oracle:eevd.fa.us6/cx_1", url: "https://eevd.example/cx_1/job" },
+      { source: "workday:acme", url: "https://workday.example/job" },
       { source: "lever:acme", url: "javascript:alert(1)" },
-      { source: "custom_board:acme", url: "https://custom.example/job" },
-      { source: "workday:older", url: "https://workday.example/older" },
+      { source: "workday:mirror", url: "https://workday.example/job" },
     ],
   });
-  assert.deepEqual(choices.map(choice => choice.label), ["Greenhouse", "Workday", "Custom Board"]);
   assert.deepEqual(choices.map(choice => choice.url), [
-    "https://greenhouse.example/job",
+    "https://eevd.example/cx_14001/job",
+    "https://eevd.example/cx_1/job",
     "https://workday.example/job",
-    "https://custom.example/job",
   ]);
+  // Two career sites of one tenant read the same by name, so the board says which.
+  assert.deepEqual(choices.map(choice => choice.board), ["cx_14001", "cx_1", ""]);
 });
 
-test("V2 presents every posting source as a clean direct link", () => {
+test("the posting link is one click, and a chevron appears only when it is listed twice", () => {
   const now = new Date("2026-08-18T12:00:00Z");
+  const single = openMarkup({ id: 1, source: "greenhouse:acme", apply_url: "https://greenhouse.example/job" }, {}, now);
+  assert.match(single, /^<a class="button open-link" href="https:\/\/greenhouse\.example\/job" target="_blank" rel="noopener noreferrer"[^>]*><span>Greenhouse<\/span>/);
+  assert.doesNotMatch(single, /open-more|open-split/);
 
-  const markup = postedOnMarkup({
-    id: 'unsafe"id',
+  const job = {
+    id: 2,
     source: "greenhouse:acme",
     apply_url: "https://greenhouse.example/job",
-    posted_at: "2026-08-18T00:00:00Z",
     last_seen_at: "2026-08-18T07:00:00Z",
-    other_sources: [
-      { source: "workday:acme", url: "https://workday.example/job", posted_at: "2026-08-17T00:00:00Z" },
-    ],
-  }, now);
-  assert.match(markup, /class="posting-links" aria-label="Original job postings"/);
-  assert.match(markup, /class="posting-link" href="https:\/\/greenhouse\.example\/job"[^>]*>[\s\S]*<span class="posting-link-label">Greenhouse<\/span><small>checked 5h ago<\/small>/);
-  assert.match(markup, /class="posting-link" href="https:\/\/workday\.example\/job"[^>]*>[\s\S]*<span class="posting-link-label">Workday<\/span><small>Posted yesterday<\/small>/);
-  assert.doesNotMatch(markup, /Posted on|Primary|Mirror/);
+    other_sources: [{ source: "lever:acme", url: "https://lever.example/job", posted_at: "2026-08-17T00:00:00Z" }],
+  };
+  const split = openMarkup(job, {}, now);
+  assert.match(split, /class="open-split"><a class="button open-link" href="https:\/\/greenhouse\.example\/job"/);
+  assert.match(split, /class="button open-more"[^>]*aria-haspopup="menu" aria-expanded="false" aria-label="1 other link"/);
+  // No count on the button itself: the chevron's presence says it all.
+  assert.doesNotMatch(split, /\+1|link-menu/);
 
-  // A single provider still gets a link: it is the way into the posting.
-  const alone = postedOnMarkup({ id: 1, source: "greenhouse:acme", apply_url: "https://greenhouse.example/job" }, now);
-  assert.match(alone, />Greenhouse<\/span>/);
-  assert.equal((alone.match(/class="posting-link"/g) || []).length, 1);
-
-  // Nothing linkable means no footer at all.
-  assert.equal(postedOnMarkup({ id: 1 }, now), "");
+  const open = openMarkup(job, { links: true }, now);
+  assert.match(open, /class="pop link-menu" role="menu"[^>]*><p>Listed 2 times<\/p>/);
+  assert.match(open, /<b>Greenhouse<\/b><small>checked 5h ago<\/small>/);
+  assert.match(open, /<b>Lever<\/b><small>Posted yesterday<\/small>/);
+  assert.equal(openMarkup({ id: 3 }, {}, now), "");
 });
 
-test("V2 keeps the posting link out of the primary action row", () => {
-  const design = fs.readFileSync(require.resolve("./app.js"), "utf8");
-  assert.doesNotMatch(design, /Open on \$\{/);
-  assert.match(design, /<div class="detail-actions"><button[^<]+Add to Applications<\/button><\/div>/);
+test("the action row reads Add, the posting link, then Skip, with the flag up in the header", () => {
+  const job = {
+    id: 7,
+    company: "Lyft",
+    title: "Applied Scientist Intern",
+    source: "greenhouse:lyft",
+    apply_url: "https://greenhouse.example/7",
+    locations: [{ country: "US", state: "CA", city: "San Francisco" }, { country: "US", state: "NY", city: "New York" }],
+    summary: "Build rider agents.",
+  };
+  const pane = detailPaneMarkup(job);
+  assert.match(pane, /<div class="detail-actions"><button class="button primary" type="button" data-action="add-to-applications" data-id="7"[^>]*>.*<span>Add to Applications<\/span><\/button><a class="button open-link"[^>]*>.*<\/a><button class="button skip" type="button" data-action="skip" data-id="7"/);
+  assert.match(pane, /class="detail-flag" type="button" data-action="report" aria-expanded="false" aria-label="Mislabeled"/);
+  assert.match(pane, /<div class="detail-company" title="Lyft">Lyft<\/div><div class="detail-place"><span>San Francisco, CA<\/span><button class="place-more"[^>]*aria-label="Show all 2 locations">\+1<\/button>/);
+  assert.match(pane, /class="section-kicker">Role summary<\/div><p class="role-summary">Build rider agents\.<\/p>/);
+  assert.doesNotMatch(pane, /data-key="[^"]*"[^>]*>[^<]*<kbd/, "key hints live in tooltips, never inside a button");
+
+  const places = detailPaneMarkup(job, { ui: { places: true } });
+  assert.match(places, /class="pop place-menu" role="dialog" aria-label="Locations"><p>2 locations<\/p>/);
+
+  const report = detailPaneMarkup(job, { ui: { report: { rows: { focus: { on: true, to: "Finance" } } } } });
+  assert.match(report, /<strong id="report-title">What's wrong\?<\/strong>/);
+  assert.match(report, /data-fix="focus" data-value="Finance" aria-pressed="true"/);
+  assert.match(report, /data-action="report-submit">/);
+  assert.match(detailPaneMarkup(job, { ui: { report: { rows: {} } } }), /data-action="report-submit" disabled>/);
+
+  const hidden = detailPaneMarkup(job, { hidden: { kind: "skip", skip_reason: "level" } });
+  assert.match(hidden, /class="hidden-banner"><p>Skipped · Level<\/p><button class="button" type="button" data-action="restore" data-id="7"/);
+  assert.doesNotMatch(hidden, /detail-actions|detail-flag/);
+});
+
+test("locations come from the full array, so every place can be listed", () => {
+  assert.deepEqual(placeList({ locations: [
+    { country: "US", state: "CA", city: "San Jose" },
+    { country: "US", state: "IA", city: null },
+    { country: "US", state: "CA", city: "San Jose" },
+    { country: "GB", state: null, city: "London" },
+    { country: "US", state: null, city: null },
+  ] }), ["San Jose, CA", "Iowa", "London, GB", "United States"]);
+  assert.deepEqual(placeList({ locations: [], location: "Remote" }), ["Remote"]);
+  assert.deepEqual(placeList({}), ["Location not listed"]);
+  const card = cardMetaMarkup({ locations: [
+    { country: "US", state: "VA", city: "Chantilly" },
+    { country: "US", state: "CA", city: "El Segundo" },
+  ] });
+  assert.match(card, /<span class="card-location">Chantilly, VA \+1<\/span>/);
+});
+
+test("expertise on a quarter of loaded postings folds behind +N common", () => {
+  const ai = { id: "ai", name: "Artificial intelligence (AI)", label: "AI", category: "concept" };
+  const causal = { id: "causal", name: "Causal inference", label: "CausalInference", category: "method" };
+  const python = { id: "python", name: "Python", label: "Python", category: "language" };
+  const jobs = Array.from({ length: 60 }, (_, index) => ({ skills: index < 20 ? [ai, python] : [python] }));
+  jobs[0].skills.push(causal);
+  const common = commonTerms(jobs);
+  assert.deepEqual([...common.keys()], ["ai"], "python is a skill, not expertise, and causal inference is rare");
+  assert.equal(Math.round(common.get("ai") * 100), 33);
+  assert.equal(commonTerms(jobs.slice(0, 49)).size, 0, "too few postings to call anything common");
+
+  const folded = detailSkillsMarkup(jobs[0], { common });
+  assert.match(folded, />Causal inference<\/span><button class="more-link" type="button" data-action="toggle-common" aria-expanded="false">\+1 common<\/button>/);
+  assert.doesNotMatch(folded, />AI</);
+  const expanded = detailSkillsMarkup(jobs[0], { common, expanded: true });
+  assert.match(expanded, /class="expertise-term common"[^>]*title="Artificial intelligence \(AI\) · on 33% of loaded postings"[^>]*>AI<\/span><button[^>]*>Hide common</);
+  assert.match(detailSkillsMarkup({ skills: [ai] }, { common }), />Show 1 common term</);
+});
+
+test("the Hidden list names why each posting left the feed", () => {
+  assert.deepEqual(SKIP_REASONS.map(reason => reason.key), ["level", "location", "field", "company"]);
+  assert.equal(hiddenReason({ kind: "skip" }), "Skipped");
+  assert.equal(hiddenReason({ kind: "skip", skip_reason: "location" }), "Skipped · Location");
+  assert.equal(hiddenReason({ kind: "mislabeled", corrections: [{ field: "focus", from: "Software", to: "Finance" }] }), "Mislabeled · Focus: Software → Finance");
+  assert.equal(hiddenReason({ kind: "mislabeled", corrections: [{ field: "company", from: "x", to: null }] }), "Mislabeled · Company");
+  assert.equal(hiddenReason({ kind: "mislabeled", corrections: [{ field: "type", from: "a" }, { field: "skills", from: "b" }] }), "Mislabeled · Job type, Skills");
+
+  const rows = reportRows({ job_type: "intern", job_domain: null, company: "Lyft", locations: [] , location: "Remote" });
+  assert.deepEqual(rows.map(row => [row.field, row.value]), [
+    ["type", "Internship"], ["focus", "Unlabeled"], ["company", "Lyft"], ["location", "Remote"], ["skills", "Skills and expertise list"],
+  ]);
+  assert.ok(!rows[0].options.includes("Internship"));
 });
 
 test("V2 posted row weights the date and trails the check only when last_seen_at is known", () => {
@@ -398,7 +473,8 @@ test("V2 is the main Opportunities design and links every posting source", () =>
   assert.doesNotMatch(main, /opportunities-v[23]|Opportunities \(v[23]\)/);
   assert.match(main, /class="active" href="\/" aria-current="page"/);
   assert.doesNotMatch(design, /Design preview|View current Opportunities/);
-  assert.match(design, /class="posting-links"/);
+  assert.match(design, /class="open-split"/);
+  assert.doesNotMatch(design, /class="posting-links"/);
   assert.doesNotMatch(design, /class="section-kicker">Posted on/);
   assert.doesNotMatch(design, /data-action="toggle-sources"/);
   assert.doesNotMatch(design, /Show full description|Show less/);

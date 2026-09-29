@@ -47,29 +47,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-lineca
 .side-nav a.active .nav-icon { color: var(--lime); }
 .side-nav b { margin-left: auto; border-radius: 20px; background: rgb(255 255 255 / 10%); padding: 1px 6px; font: 10px var(--mono); font-weight: 400; }
 .nav-icon { width: 18px; height: 18px; flex: 0 0 auto; }
-/* The sample-data switch sits in the page header now, beside the page's own
-   action, not in the sidebar. It takes .primary-action's height and radius so
-   the two read as one row of controls, and turns amber when on — this is the
-   page's "what you are looking at is not real" indicator as much as it is a
-   switch, and amber says that where the brand lime would just say "active".
-   The same rules live in resume/styles.css and app.css; the three sheets are
-   hand-copied, and app.css restates them in its own palette's token names. */
-.sample-toggle { min-height: 38px; display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); padding: 6px 12px; color: var(--ink); text-align: left; }
-.sample-toggle:hover, .sample-toggle:focus-visible { border-color: var(--ink); outline: none; }
-.sample-toggle-copy { display: grid; gap: 1px; font-size: 12px; font-weight: 700; line-height: 1.15; }
-.sample-toggle-copy small { color: var(--subtle); font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-.sample-switch { position: relative; width: 32px; height: 18px; flex: 0 0 32px; border-radius: 99px; background: var(--line-strong); transition: background .18s ease; }
-.sample-switch i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgb(24 33 27 / 25%); transition: transform .18s ease; }
-.sample-toggle.active { border-color: #e2c48a; background: var(--amber-soft); color: var(--amber); }
-.sample-toggle.active .sample-switch { background: var(--amber); }
-.sample-toggle.active .sample-switch i { transform: translateX(14px); }
-.sample-toggle.active .sample-toggle-copy small { color: var(--amber); }
 
 .workspace { min-width: 0; width: 100%; max-width: 1660px; margin: 0 auto; padding: 34px 36px 60px; }
 .workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-/* Holds the page's own action and the sample-data switch on one baseline. The
-   switch is display:none until nav-count.js confirms a guest, so this collapses
-   to a single button for a signed-in reader with no gap left behind. */
+/* Holds the page's header actions on one baseline, wrapping when narrow. */
 .workspace-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .eyebrow { margin: 0 0 6px; color: var(--green); font: 750 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .workspace-header h1 { margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: -.045em; }
@@ -225,7 +206,6 @@ dialog::backdrop { background: rgb(13 26 19 / 50%); backdrop-filter: blur(2px); 
 .form-grid .full { grid-column: 1 / -1; }
 .form-grid [hidden] { display: none; }
 .modal { width: min(610px, calc(100vw - 30px)); max-width: none; border: 0; border-radius: 15px; background: var(--surface); padding: 0; box-shadow: var(--shadow-lg); }
-.compact-modal { width: min(470px, calc(100vw - 30px)); }
 .modal form { margin: 0; }
 .dialog-header { display: flex; align-items: flex-start; gap: 15px; border-bottom: 1px solid var(--line); padding: 21px 22px 17px; }
 .dialog-header > div { flex: 1; }
@@ -233,8 +213,6 @@ dialog::backdrop { background: rgb(13 26 19 / 50%); backdrop-filter: blur(2px); 
 .dialog-header p:not(.eyebrow) { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 7px; border-top: 1px solid var(--line); padding: 14px 22px; }
 .danger-text { color: var(--red); }
-.button.solid-danger { border-color: var(--red); background: var(--red); color: white; }
-.button.solid-danger:hover { background: #8d342c; }
 .toast { position: fixed; z-index: 90; right: 22px; bottom: 22px; max-width: min(420px, calc(100vw - 30px)); display: flex; align-items: center; gap: 12px; transform: translateY(12px); border-radius: 10px; background: var(--ink); padding: 10px 13px; color: white; box-shadow: 0 14px 40px rgb(0 0 0 / 22%); opacity: 0; pointer-events: none; transition: .2s ease; }
 .toast.show { transform: none; opacity: 1; pointer-events: auto; }
 .toast button { border-bottom: 1px solid rgb(255 255 255 / 45%); background: transparent; padding: 0; color: var(--lime); font-weight: 750; }
