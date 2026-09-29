@@ -433,6 +433,10 @@ CREATE TABLE job_posting (
     dup_group_id             uuid,              -- groups suspected duplicates together
     -- Judgement, not a source fact: set by hand, never by the pipeline.
     removal_marked_at        timestamptz,       -- NULL = not marked for removal
+    -- Source fact: the first complete poll of the posting's board that no longer
+    -- listed it. last_seen_at is the last poll that did, so the disappearance
+    -- lies between the two. Cleared when the board lists the posting again.
+    missing_since            timestamptz,       -- NULL = still listed
 
     UNIQUE (source, source_key),
     CONSTRAINT job_posting_workday_source_lower
@@ -448,6 +452,8 @@ COMMENT ON COLUMN job_posting.job_domain_version IS
     'Classifier revision behind job_domain; NULL means not yet enriched.';
 COMMENT ON COLUMN job_posting.removal_marked_at IS
     'When a human marked this posting for removal; NULL means not marked. Never written by ingest.';
+COMMENT ON COLUMN job_posting.missing_since IS
+    'First complete board poll that no longer listed this posting; NULL while listed. A signal, not a closure: status is untouched.';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
 CREATE INDEX job_posting_degree_active_idx
     ON job_posting USING gin ((attributes -> 'degree'))
@@ -468,9 +474,16 @@ CREATE INDEX job_posting_domain_active_idx
 CREATE INDEX job_posting_fresh_active_idx
     ON job_posting ((COALESCE(posted_at, first_seen_at)) DESC, id DESC)
     WHERE status = 'active';
+CREATE INDEX job_posting_missing_since_idx
+    ON job_posting (missing_since DESC)
+    WHERE missing_since IS NOT NULL;
 CREATE INDEX job_posting_removal_marked_idx
     ON job_posting (removal_marked_at DESC)
     WHERE removal_marked_at IS NOT NULL;
+-- Scheduler telemetry (open counts, discovery p95) reads only these columns;
+-- an index-only scan of this avoids a full pass over the wide heap.
+CREATE INDEX job_posting_stats_idx
+    ON job_posting (source, status, first_seen_at, posted_at);
 
 -- DEDUP
 CREATE TABLE job_posting_dup_group (
@@ -564,6 +577,31 @@ CREATE TABLE job_application_event (
 CREATE INDEX job_application_event_application_idx
     ON job_application_event (job_application_id, occurred_at DESC);
 
+-- TRIAGE FEEDBACK
+-- A row hides the posting (and its duplicate group) from this account's
+-- Opportunities feed; deleting it restores the posting. `mislabeled` rows are
+-- also the account's label corrections, kept for the classifier eval.
+CREATE TABLE job_feedback (
+    account_id     uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    job_posting_id bigint NOT NULL REFERENCES job_posting(id),
+    kind           text NOT NULL
+        CHECK (kind IN ('skip', 'mislabeled')),
+    -- Optional, and only a skip carries one.
+    skip_reason    text
+        CHECK (skip_reason IN ('level', 'location', 'field', 'company')),
+    -- [{field, from, to}]: field is type | focus | company | location | skills,
+    -- `to` is null when the reporter didn't say what it should be.
+    corrections    jsonb NOT NULL DEFAULT '[]'
+        CHECK (jsonb_typeof(corrections) = 'array'),
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (account_id, job_posting_id),
+    CHECK (kind = 'skip' OR skip_reason IS NULL),
+    CHECK (kind = 'mislabeled' OR corrections = '[]'::jsonb)
+);
+CREATE INDEX job_feedback_recent_idx
+    ON job_feedback (account_id, created_at DESC);
+
 -- RESUME STUDIO
 CREATE TABLE resume_workspace (
     account_id   uuid PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
@@ -575,13 +613,6 @@ CREATE TABLE resume_workspace (
         CHECK (jsonb_typeof(skills) = 'array'),
     variants     jsonb NOT NULL DEFAULT '[]'
         CHECK (jsonb_typeof(variants) = 'array'),
-    -- Terms coverage analysis flags as "named in the JD, absent from the bank".
-    -- Seeded from resume_workspace.DEFAULT_VOCABULARY, then owned by the user.
-    -- NULL means "never customized" and is what makes that seeding happen; an
-    -- empty array is a user who deliberately cleared the list. A NOT NULL
-    -- DEFAULT '[]' could not tell those apart.
-    vocabulary   jsonb
-        CHECK (vocabulary IS NULL OR jsonb_typeof(vocabulary) = 'array'),
     next_item_id bigint NOT NULL DEFAULT 1 CHECK (next_item_id > 0),
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -621,6 +652,9 @@ CREATE TABLE resume_document (
     -- each account defines for itself. Validated in the store, where that list
     -- is readable; '' means no variant selected.
     variant           text NOT NULL DEFAULT '',
+    -- The typeset design; the list lives in resume_models.Template.
+    template          text NOT NULL DEFAULT 'main'
+        CHECK (template IN ('main', 'barlow')),
     availability_line text NOT NULL DEFAULT '',
     education_note    text NOT NULL DEFAULT '',
     selection         jsonb NOT NULL DEFAULT '{}'
