@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from xjobscore import sources
-from xjobscore.inspector.app import create_app
+from xjobscore.inspector.test_support import create_app
 from xjobscore.inspector.db import feed_ref
 from xjobscore.inspector.test_routes import FakeCatalog, FakePolicy
 from xjobscore.records import Feed

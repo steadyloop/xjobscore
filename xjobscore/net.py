@@ -42,7 +42,7 @@ __all__ = [
 # board endpoints this client calls are the same ones a careers page hits on
 # every page load, and a self-identifying UA is a single WAF rule away from
 # taking out every board under a vendor at once. Note what this does NOT fix:
-# the Eightfold 405 (see json-api-configs.py) hit our httpx client while curl
+# the Eightfold 405 (see json_api_configs.py) hit our httpx client while curl
 # from the same host and the same UA still got 200, so that edge was matching
 # on TLS/ALPN, below the HTTP layer. Changing the UA cannot reach that.
 #

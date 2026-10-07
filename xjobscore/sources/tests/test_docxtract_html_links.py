@@ -118,6 +118,6 @@ async def test_jazzhr_parse_keeps_the_vendor_supplied_url():
 
 async def test_vincere_and_jazzhr_are_registered_with_a_parser():
     for name in ("vincere", "jazzhr"):
-        assert name in docxtract.SPECS
+        assert name in docxtract.CONFIGS
         assert callable(docxtract.harvester(name))
         assert callable(docxtract.parser(name))

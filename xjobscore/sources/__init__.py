@@ -1,9 +1,8 @@
 """Source registration: one name, one function -- doubled, now, for
 `harvest` and its downstream `parse`.
 
-Registration is explicit. The two shared adapter modules use literal
-hyphenated filenames, so this module loads them once by name. JSON API
-sources bind to the plain config table in `json-api-configs.py`; genuinely
+Registration is explicit. JSON API
+sources bind to the plain config table in `json_api_configs.py`; genuinely
 bespoke transports bind to focused modules here. Both paths expose the same
 two call signatures, and nothing else in the tree names a source.
 
@@ -23,20 +22,16 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from functools import partial
-from importlib import import_module
 from urllib.parse import urlsplit
 
 from xjobscore import net as net_module
 from xjobscore.net import Net
 from xjobscore.records import Canonical, Feed, Item, Record
 from xjobscore.source_policy import require_source_allowed
-from xjobscore.sources import avature, dayforce, hn, join, taleo, zohorecruit
-from xjobscore.sources.planned import janestreet, workatastartup
-
-# A hyphenated filename cannot be imported with Python's ``import`` syntax.
-# Keep the public adapter labels literal while exposing ordinary local aliases.
-json_api = import_module(".json-api", __name__)
-docxtract = import_module(".docxtract", __name__)
+from xjobscore.sources import (
+    avature, dayforce, docxtract, hn, janestreet, join, json_api, taleo,
+    workatastartup, zohorecruit,
+)
 
 __all__ = [
     "PARSERS", "REVISION_FIELDS", "REVISION_REFRESH_WINDOWS", "SOURCES", "Harvest", "Parse",
@@ -57,15 +52,12 @@ class UnknownSource(KeyError):
     """
 
 
-# JSON API sources are bound from json-api-configs.py. Bespoke formats keep one
+# JSON API sources are bound from json_api_configs.py. Bespoke formats keep one
 # focused module exporting harvest and parse.
 #
-# Only implemented sources appear here. The rest of this package is still stubs
-# (`raise NotImplementedError`) and stays unregistered on purpose -- a
-# registered stub would raise from inside a poll instead of the clearer
-# UnknownSource an unregistered name raises here.
+# Only implemented sources appear here; unknown names raise UnknownSource.
 SOURCES: dict[str, Harvest] = {
-    **{name: json_api.harvester(name) for name in json_api.SPECS},
+    **{name: json_api.harvester(name) for name in json_api.CONFIGS},
     "avature": avature.harvest,
     "dayforce": dayforce.harvest,
     "hn": hn.harvest,
@@ -74,14 +66,14 @@ SOURCES: dict[str, Harvest] = {
     "taleo": taleo.harvest,
     "workatastartup": workatastartup.harvest,
     "zohorecruit": zohorecruit.harvest,
-    **{name: docxtract.harvester(name) for name in docxtract.SPECS},
+    **{name: docxtract.harvester(name) for name in docxtract.CONFIGS},
 }
 
 # Kept as a second dict, not folded into SOURCES, so a source can register a
 # harvest without a parser (silver.py's replay pass simply cannot run for it
 # yet) without every existing SOURCES lookup growing a tuple-unpack.
 PARSERS: dict[str, Parse] = {
-    **{name: json_api.parser(name) for name in json_api.SPECS},
+    **{name: json_api.parser(name) for name in json_api.CONFIGS},
     "avature": avature.parse,
     "dayforce": dayforce.parse,
     "hn": hn.parse,
@@ -89,13 +81,13 @@ PARSERS: dict[str, Parse] = {
     "janestreet": janestreet.parse,
     "taleo": taleo.parse,
     "zohorecruit": zohorecruit.parse,
-    **{name: docxtract.parser(name) for name in docxtract.SPECS},
+    **{name: docxtract.parser(name) for name in docxtract.CONFIGS},
 }
 
 
 # Sources whose list response omits the fields `parse` needs, so every posting
 # costs a second, per-item detail request. The tuple
-# is what `json-api.py`'s revision check compares between a live list row and
+# is what `json_api.py`'s revision check compares between a live list row and
 # a stored detail payload: an unchanged value on both sides skips the detail
 # request entirely. Opt-in and per-source on purpose -- these fields are
 # measured against one vendor's real payloads (see the config's `detail`
@@ -384,7 +376,7 @@ def reusing(
     """
     require_source_allowed(name)
     fields = REVISION_FIELDS.get(name)
-    if not fields or name not in json_api.SPECS:
+    if not fields or name not in json_api.CONFIGS:
         return get(name)
     refresh_window = REVISION_REFRESH_WINDOWS.get(name)
     if refresh_window is not None:

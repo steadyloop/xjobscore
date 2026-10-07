@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from xjobscore.inspector.app import create_app
@@ -21,7 +23,6 @@ class _Runtime:
         self.inspector = object()
         self.scheduler = _Scheduler()
         self.heartbeat = object()
-        self.gold_job = object()
         self.started = 0
         self.stopped = 0
 
@@ -52,3 +53,31 @@ def test_unified_runtime_owns_app_lifespan_and_status_routes():
 
     assert runtime.started == 1
     assert runtime.stopped == 1
+
+
+def test_dedup_routes_queue_work_on_the_unified_runtime():
+    calls = []
+    pool = object()
+
+    async def pool_or_none():
+        return pool
+
+    async def queue_dedup(actual_pool, *, current):
+        assert actual_pool is pool
+        calls.append("queue")
+        return {"state": "queued", "generation": len(calls)}
+
+    async def coordinator_status(actual_pool):
+        assert actual_pool is pool
+        return {"gold": {"state": "pending"}}
+
+    runtime = _Runtime()
+    runtime.policy = SimpleNamespace(pool_or_none=pool_or_none)
+    runtime.coordinator = SimpleNamespace(queue_dedup=queue_dedup, status=coordinator_status)
+    runtime.gold_worker = SimpleNamespace(nudge=lambda: calls.append("nudge"))
+
+    with TestClient(create_app(runtime=runtime)) as client:
+        assert client.post("/api/gold/dedup").json()["state"] == "queued"
+        assert client.get("/api/gold/dedup").json() == {"state": "pending"}
+
+    assert calls == ["queue", "nudge"]

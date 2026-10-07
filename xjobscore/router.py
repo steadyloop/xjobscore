@@ -210,7 +210,7 @@ def unwrap(data: Any) -> tuple[Item, dict]:
 async def prior_items(conn: Connection, source: str) -> dict[str, Item]:
     """The newest bronze payload per posting, keyed by source-local id.
 
-    Feeds `json-api.py`'s revision-checked detail reuse (`sources.reusing`): a
+    Feeds `json_api.py`'s revision-checked detail reuse (`sources.reusing`): a
     posting whose list row still carries the same revision fields as the
     payload found here skips its detail request entirely. `unwrap` reconstructs
     `external_id=""` by design (it only sees `raw_posting.data`, not the row),

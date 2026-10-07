@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from xjobscore.inspector.app import create_app
+from xjobscore.inspector.test_support import create_app
+from xjobscore.inspector.app import create_app as runtime_app
 
 
 class Policy:
@@ -64,7 +65,7 @@ def test_live_activity_exposes_worker_deadline_without_starting_or_changing_it()
         scheduler=SimpleNamespace(rate_groups=lambda: {}), heartbeat=object(),
         gold_worker=SimpleNamespace(status=lambda: status),
     )
-    client = TestClient(create_app(runtime=runtime))
+    client = TestClient(runtime_app(runtime=runtime))
     assert client.get("/api/system/live").json()["enrichment"] == status
 
 

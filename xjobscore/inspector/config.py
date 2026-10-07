@@ -1,4 +1,4 @@
-"""Inspector storage settings and one-release legacy environment aliases."""
+"""Inspector database and staging storage settings."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
-
-from xjobscore.net import DEFAULT_USER_AGENT
 
 
 def _load_dotenv(path: Path) -> None:
@@ -23,19 +21,11 @@ def _load_dotenv(path: Path) -> None:
 
 
 def _load_local_config() -> None:
-    """Honor the repository's existing local DB config when present.
-
-    Explicit environment variables still win. This keeps the inspector
-    independent of the viewer implementation while making it work out of the
-    box in this repository, whose local development DSN is commonly stored in
-    ``viewer/.env``.
-    """
+    """Load repository configuration, preserving explicit environment values."""
     repo_root = Path(__file__).resolve().parents[2]
     candidates = (
         Path.cwd() / ".env",
         repo_root / ".env",
-        repo_root / "viewer" / ".env",
-        repo_root / "postings" / ".env",
     )
     for candidate in candidates:
         _load_dotenv(candidate)
@@ -45,13 +35,9 @@ _load_local_config()
 
 
 def dsn() -> str:
-    value = (
-        os.environ.get("DATABASE_URL")
-    )
+    value = os.environ.get("DATABASE_URL")
     if not value:
-        raise RuntimeError(
-            "No database DSN. Set DATABASE_URL."
-        )
+        raise RuntimeError("No database DSN. Set DATABASE_URL.")
     _validate_dsn(value)
     return value
 
@@ -87,58 +73,6 @@ def _validate_dsn(value: str) -> None:
             )
 
 
-def user_agent() -> str:
-    return os.environ.get("XJOBSCORE_INSPECTOR_USER_AGENT", DEFAULT_USER_AGENT)
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
-    return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def runner_tick_s() -> float:
-    return float(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_TICK_S", "60"))
-
-
-def runner_budget_s() -> float:
-    return float(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_BUDGET_S", "30"))
-
-
-def runner_lease_s() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_RUNNER_LEASE_S", "3600"))
-
-
-def token_heartbeat_enabled() -> bool:
-    """Whether this process may run the token validation/promotion heartbeat.
-
-    One leased batch of liveness probes every six hours is the default, and the
-    operator's runtime pause lives in ``token_heartbeat.paused`` where the
-    Tokens page can reach it. Set the env var falsy for a process that must
-    never probe -- ``inspector/conftest.py`` pins it off for the test suite.
-    """
-    return _env_bool("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", True)
-
-
-def token_heartbeat_tick_s() -> float:
-    return float(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_TICK_S", "60"))
-
-
-def token_heartbeat_batch() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_BATCH", "20"))
-
-
-def token_heartbeat_interval_s() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_INTERVAL_S", "21600"))
-
-
-def token_heartbeat_retry_s() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_RETRY_S", "900"))
-
-
-def token_heartbeat_lease_s() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_LEASE_S", "900"))
-
-
 def persistence_dsn() -> str:
     """DSN for the inspector's own result store.
 
@@ -171,7 +105,3 @@ def persistence_schema() -> str:
             "company/alias mirror would overwrite the core pipeline's tables."
         )
     return name
-
-
-def port() -> int:
-    return int(os.environ.get("XJOBSCORE_INSPECTOR_PORT", "8765"))

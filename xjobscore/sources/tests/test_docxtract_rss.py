@@ -143,7 +143,7 @@ async def test_successfactors_drops_the_fields_that_would_lie():
 
 
 async def test_successfactors_is_registered_with_a_parser():
-    assert "successfactors" in docxtract.SPECS
+    assert "successfactors" in docxtract.CONFIGS
     assert callable(docxtract.harvester("successfactors"))
     assert callable(docxtract.parser("successfactors"))
 

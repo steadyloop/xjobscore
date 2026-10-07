@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from xjobscore import sources
 from xjobscore.inspector import validator
-from xjobscore.inspector.app import create_app
+from xjobscore.inspector.test_support import create_app
 from xjobscore.inspector.db import feed_ref
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
@@ -135,8 +135,7 @@ class FakePolicy:
 class FakeRunner:
     """A runner that is alive without a loop, so poll-now's happy path is testable.
 
-    The real SchedulerRunner is inert in every test process
-    (config.runner_enabled() defaults off), and "Poll now" now refuses when no
+    The default test scheduler is inert, and "Poll now" refuses when no
     runner is listening -- so reaching the 200 requires standing one in.
     """
 
@@ -176,24 +175,6 @@ class FakeRunner:
 
     async def stop(self) -> None:
         return None
-
-
-class FakeGoldJob:
-    """Recording double for GoldJob: lets a test drive state without a real DB."""
-
-    def __init__(self) -> None:
-        self.state = "idle"
-        self.starts = 0
-
-    def as_dict(self) -> dict:
-        return {"state": self.state, "started_at": None, "finished_at": None,
-                "counts": None, "error": None}
-
-    def start(self) -> None:
-        if self.state == "running":
-            raise RuntimeError("dedup rebuild already running")
-        self.starts += 1
-        self.state = "running"
 
 
 class FakeCatalog:
@@ -251,32 +232,6 @@ def client(monkeypatch, app_store):
     )
     with TestClient(app) as test_client:
         yield test_client
-
-
-@pytest.fixture
-def gold_client(app_store):
-    """A client whose GoldJob is a recording double, for single-flight semantics."""
-    app = create_app(
-        catalog=FakeCatalog(),
-        store=app_store,
-        user_agent="route-test",
-        policy=FakePolicy(),
-        gold_job=FakeGoldJob(),
-    )
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-def test_gold_dedup_single_flight(gold_client):
-    first = gold_client.post("/api/gold/dedup")
-    assert first.status_code == 200
-    assert first.json()["state"] == "running"
-
-    second = gold_client.post("/api/gold/dedup")
-    assert second.status_code == 409
-
-    assert gold_client.app.state.gold_job.starts == 1
-    assert gold_client.get("/api/gold/dedup").json()["state"] == "running"
 
 
 def test_health(client):
@@ -695,7 +650,7 @@ def test_scheduler_survives_degraded_postgres(client):
 def test_scheduler_control_round_trip(imported_client):
     body = imported_client.get("/api/scheduler/control").json()
     assert body["control"] == {"running": False, "changed_at": None, "note": None}
-    assert body["runner"]["alive"] is False  # config.runner_enabled() defaults off
+    assert body["runner"]["alive"] is False  # the test scheduler is inert
 
     set_body = imported_client.post("/api/scheduler/control", json={"running": True}).json()
     assert set_body["control"]["running"] is True
@@ -726,7 +681,7 @@ def test_scheduler_pause_and_resume_wake_the_runner(polling_client, running):
 
 
 def test_runner_does_not_start_under_default_config(client):
-    """The env-var gate (config.runner_enabled()) defaults off in every test process."""
+    """The env-var gate (the test scheduler) defaults off in every test process."""
     assert client.app.state.scheduler_runner.status()["alive"] is False
 
 
@@ -768,7 +723,7 @@ def test_poll_now_one_feed(polling_client):
 def test_poll_now_refuses_when_no_runner_is_listening(imported_client):
     """A 200 here would promise a poll that nothing in any process would claim.
 
-    config.runner_enabled() is off in every test process, which is also the
+    the test scheduler is off in every test process, which is also the
     default deployment -- so this is the state an operator hits first.
     """
     response = imported_client.post(f"/api/scheduler/feeds/{REF}/poll-now")

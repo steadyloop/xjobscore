@@ -90,7 +90,7 @@ async def test_peopleadmin_content_needs_no_extra_unescape():
 
 
 async def test_peopleadmin_is_registered_with_a_parser():
-    assert "peopleadmin" in docxtract.SPECS
+    assert "peopleadmin" in docxtract.CONFIGS
     assert callable(docxtract.harvester("peopleadmin"))
     assert callable(docxtract.parser("peopleadmin"))
 
@@ -162,7 +162,7 @@ async def test_oleeo_xhtml_content_remains_explicitly_unsupported():
 
 
 async def test_oleeo_is_registered_with_a_parser():
-    assert "oleeo" in docxtract.SPECS
+    assert "oleeo" in docxtract.CONFIGS
     assert callable(docxtract.harvester("oleeo"))
     assert callable(docxtract.parser("oleeo"))
 
@@ -216,6 +216,6 @@ async def test_flyio_harvest_on_the_currently_empty_live_envelope_returns_no_ite
 
 
 async def test_flyio_is_registered_with_a_parser():
-    assert "flyio" in docxtract.SPECS
+    assert "flyio" in docxtract.CONFIGS
     assert callable(docxtract.harvester("flyio"))
     assert callable(docxtract.parser("flyio"))

@@ -58,7 +58,7 @@ async def select_jobs(conn, args):
 async def fresh_listing(feed, net):
     feed = replace(feed, etag=None, last_modified=None, res_hash=None,
                    list_total=None, last_full_poll_at=None)
-    if feed.source in sources.json_api.SPECS:
+    if feed.source in sources.json_api.CONFIGS:
         return await sources.json_api.harvest(
             feed.source, feed, net,
             options=sources.json_api.JsonApiHarvestOptions(force_full=True),

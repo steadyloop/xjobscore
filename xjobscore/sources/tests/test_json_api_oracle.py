@@ -5,7 +5,7 @@ Oracle's Candidate Experience API caps `limit` at 200 and requires it (with
 uses the engine's generic `page` machinery same as any other paginated board.
 Its detail endpoint additionally batches: `Id="a,b,c"` returns several
 requisitions from one request, verified live up to ~360 ids. That is new
-engine behavior (`detail.batch` / `detail.match` in `json-api.py`), so this
+engine behavior (`detail.batch` / `detail.match` in `json_api.py`), so this
 file exercises it directly rather than through `SequencedFixtureNet`, which
 only knows a single list call followed by a single detail call.
 

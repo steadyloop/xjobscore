@@ -5,10 +5,8 @@ nothing is persisted. The ``json-api | docxtract | bespoke`` adapter axis says
 how a source is *implemented*, not what kind of board it is: the first two are
 config rows driven by a generic module, and ``bespoke`` means the transport
 needed its own hand-written adapter. Board kind is the PostgreSQL
-``feed.type`` field (ATS / Board / Direct). The remaining vocabulary
-reuses what the sources tree already names: the
-``json | html | jsonld | xml`` response formats of ``unified_v2.spec``, and the
-archetypes exercised by ``sources/tests/test_unified_v2_archetypes.py``.
+``feed.type`` field (ATS / Board / Direct). Response formats and request
+archetypes describe the active adapters' transport behavior.
 
 Each archetype names a request-count multiplier, which is why the inspector
 shows them next to elapsed time: ``paginated`` walks list pages, ``detail``
@@ -94,10 +92,10 @@ def _docxtract_profile(cfg: dict[str, Any]) -> dict[str, Any]:
 @lru_cache(maxsize=None)
 def source_profile(source: str) -> dict[str, Any]:
     """JSON-ready taxonomy for one source name; safe fallback for unknowns."""
-    if source in json_api.SPECS:
-        return _json_api_profile(json_api.SPECS[source])
-    if source in docxtract.SPECS:
-        return _docxtract_profile(docxtract.SPECS[source])
+    if source in json_api.CONFIGS:
+        return _json_api_profile(json_api.CONFIGS[source])
+    if source in docxtract.CONFIGS:
+        return _docxtract_profile(docxtract.CONFIGS[source])
     if source in _BESPOKE:
         return {"adapter": "bespoke", "flavor": None, **_BESPOKE[source]}
     return {"adapter": "bespoke", "formats": [], "flavor": None, "archetypes": []}

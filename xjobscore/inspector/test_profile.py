@@ -14,7 +14,7 @@ from xjobscore.sources import docxtract, json_api
 
 
 def test_bespoke_map_is_exactly_the_sources_outside_both_spec_tables():
-    bespoke = set(sources.SOURCES) - set(json_api.SPECS) - set(docxtract.SPECS)
+    bespoke = set(sources.SOURCES) - set(json_api.CONFIGS) - set(docxtract.CONFIGS)
 
     assert bespoke == {
         "avature",

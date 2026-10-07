@@ -170,7 +170,7 @@ async def test_window_expiry_forces_a_full_detail_pass():
 
 
 async def test_full_listing_carries_list_total_for_the_count_probe_baseline():
-    """Regression for the json-api.py fix: before it, a detail-leg source's
+    """Regression for the json_api.py fix: before it, a detail-leg source's
     `_finish()` never set `list_total`, so a forced full pass would persist
     `list_total=NULL` and `count_probe` could never find a baseline to
     compare against on the next poll."""

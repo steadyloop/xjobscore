@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 import sqlite3
 from typing import Any, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query
@@ -15,24 +17,18 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from xjobscore.inspector import config, scheduling, telemetry
+from xjobscore.inspector import closures, scheduling, telemetry
 from xjobscore.inspector.cache import now_utc
-from xjobscore.inspector.db import CatalogDB
-from xjobscore.inspector.persistence import ResultStore
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,
-    PolicyStore,
     PolicyUnavailable,
     PollNowRefused,
 )
 from xjobscore.inspector.profile import source_profile, wire_content_type
-from xjobscore.inspector.runner import GoldJob, SchedulerRunner
-from xjobscore.inspector.service import InspectorService
 from xjobscore.inspector.token_sweep import SweepAlreadyRunning, SweepRunner
 from xjobscore.inspector.token_heartbeat import (
     HeartbeatAlreadyRunning,
     HeartbeatPaused,
-    TokenHeartbeatRunner,
     enqueue_now as token_heartbeat_enqueue,
     heartbeat_snapshot as token_heartbeat_snapshot,
     set_paused as token_heartbeat_set_paused,
@@ -229,89 +225,27 @@ def _policy_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc))
 
 
-def create_app(
-    *,
-    runtime: Any | None = None,
-    catalog: Any | None = None,
-    store: Any | None = None,
-    user_agent: str | None = None,
-    policy: Any | None = None,
-    runner: Any | None = None,
-    token_runner: Any | None = None,
-    token_sweep: Any | None = None,
-    gold_job: Any | None = None,
-) -> FastAPI:
-    """Build an inspector app, optionally with injected test collaborators."""
-    if runtime is not None:
-        store = runtime.result_store
-        policy_store = runtime.policy
-        database = runtime.catalog
-        inspector = runtime.inspector
-        scheduler_runner = runtime.scheduler
-        heartbeat_runner = runtime.heartbeat
-        dedup_job = None
-    else:
-        store = store if store is not None else ResultStore(
-            config.persistence_dsn(), schema=config.persistence_schema()
-        )
-        policy_store = policy if policy is not None else PolicyStore(config.dsn_or_none())
-        # The catalog borrows the policy pool rather than opening its own. Feed
-        # inventory is PostgreSQL-only.
-        database = catalog if catalog is not None else CatalogDB(policy_store)
-        inspector = InspectorService(
-            database,
-            user_agent=user_agent or config.user_agent(),
-            result_store=store,
-            company_store=policy_store,
-        )
-        # Legacy construction exists for isolated tests and imports only. The
-        # normal process injects UnifiedRuntime and has no deploy-time gate.
-        scheduler_runner = runner if runner is not None else SchedulerRunner(
-            policy_store,
-            enabled=False,
-            user_agent=user_agent or config.user_agent(),
-            tick_s=config.runner_tick_s(),
-            cycle_budget_s=config.runner_budget_s(),
-            lease_seconds=config.runner_lease_s(),
-        )
-        heartbeat_runner = token_runner if token_runner is not None else TokenHeartbeatRunner(
-            policy_store,
-            enabled=False,
-            tick_s=config.token_heartbeat_tick_s(),
-            batch=config.token_heartbeat_batch(),
-            interval_seconds=config.token_heartbeat_interval_s(),
-            retry_seconds=config.token_heartbeat_retry_s(),
-            lease_seconds=config.token_heartbeat_lease_s(),
-        )
-        dedup_job = gold_job if gold_job is not None else GoldJob(policy_store)
+def create_app(*, runtime: Any, token_sweep: Any | None = None) -> FastAPI:
+    """Build Inspector around the unified runtime that owns its workers."""
+    store = runtime.result_store
+    policy_store = runtime.policy
+    database = runtime.catalog
+    inspector = runtime.inspector
+    scheduler_runner = runtime.scheduler
+    heartbeat_runner = runtime.heartbeat
+    closure_analytics = closures.Analytics()
     # In-process and in-memory by design: a restart just stops it, and the
     # token rows it already wrote are the progress the next Start resumes.
     sweep_runner = token_sweep if token_sweep is not None else SweepRunner(policy_store)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        if runtime is not None:
-            await runtime.start()
-            try:
-                yield
-            finally:
-                await sweep_runner.stop()
-                await runtime.stop()
-            return
-        await database.connect()
+        await runtime.start()
         try:
-            await store.initialize()
-            await policy_store.start()
-            await scheduler_runner.start()
-            await heartbeat_runner.start()
             yield
         finally:
             await sweep_runner.stop()
-            await heartbeat_runner.stop()
-            await scheduler_runner.stop()
-            await policy_store.close()
-            await store.close()
-            await database.disconnect()
+            await runtime.stop()
 
     application = FastAPI(title="xjobscore inspector", lifespan=lifespan)
     application.state.inspector_db = database
@@ -321,7 +255,6 @@ def create_app(
     application.state.scheduler_runner = scheduler_runner
     application.state.token_heartbeat_runner = heartbeat_runner
     application.state.token_sweep = sweep_runner
-    application.state.gold_job = dedup_job
     application.state.system_runtime = runtime
 
     async def merged_feed_rows() -> list[dict[str, Any]]:
@@ -382,27 +315,12 @@ def create_app(
 
     @application.get("/readyz")
     async def readyz() -> Response:
-        if runtime is None:
-            ready = bool(policy_store.status().get("connected"))
-            payload: dict[str, Any] = {"ready": ready, "mode": "legacy"}
-        else:
-            payload = await runtime.status()
-            ready = bool(payload["ready"])
-        return JSONResponse(payload, status_code=200 if ready else 503)
+        payload = await runtime.status()
+        return JSONResponse(payload, status_code=200 if payload["ready"] else 503)
 
     @application.get("/api/system")
     async def system_status() -> dict[str, Any]:
-        if runtime is not None:
-            return await runtime.status()
-        return {
-            "ready": False,
-            "lock_owned": False,
-            "postgres": policy_store.status(),
-            "scheduler": scheduler_runner.status(),
-            "pipeline": None,
-            "heartbeat": None,
-            "mode": "legacy",
-        }
+        return await runtime.status()
 
     # ---- System page: live state from process memory, history from PostgreSQL.
 
@@ -455,7 +373,7 @@ def create_app(
             "workers": {name: pool(name) for name in sorted(names)},
             "feeds": activity.POLLS.summary(15),
             "polls_total": activity.POLLS.total,
-            "enrichment": runtime.gold_worker.status() if runtime is not None else None,
+            "enrichment": runtime.gold_worker.status(),
         }
 
     @application.get("/api/system/events")
@@ -828,7 +746,7 @@ def create_app(
     async def reconcile_get() -> dict[str, Any]:
         pool = await _public_pool()
         try:
-            return await reconcile.snapshot(pool, runtime.reconciler if runtime else None)
+            return await reconcile.snapshot(pool, runtime.reconciler)
         except (asyncpg.PostgresError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -842,8 +760,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (asyncpg.PostgresError, RuntimeError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if runtime:
-            runtime.reconciler.nudge()
+        runtime.reconciler.nudge()
         return await reconcile_get()
 
     @application.get("/api/scheduler/control")
@@ -898,25 +815,15 @@ def create_app(
 
     @application.post("/api/gold/dedup")
     async def gold_dedup_start() -> dict[str, Any]:
-        if runtime is not None:
-            pool = await _public_pool()
-            queued = await runtime.coordinator.queue_dedup(
-                pool, current=now_utc()
-            )
-            runtime.gold_worker.nudge()
-            return queued
-        try:
-            dedup_job.start()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from None
-        return dedup_job.as_dict()
+        pool = await _public_pool()
+        queued = await runtime.coordinator.queue_dedup(pool, current=now_utc())
+        runtime.gold_worker.nudge()
+        return queued
 
     @application.get("/api/gold/dedup")
     async def gold_dedup_status() -> dict[str, Any]:
-        if runtime is not None:
-            pool = await _public_pool()
-            return (await runtime.coordinator.status(pool))["gold"]
-        return dedup_job.as_dict()
+        pool = await _public_pool()
+        return (await runtime.coordinator.status(pool))["gold"]
 
     @application.get("/api/scheduler/feeds")
     async def scheduler_feeds(source: str | None = None) -> dict[str, Any]:
@@ -1054,6 +961,43 @@ def create_app(
             )
         return pool
 
+
+    async def closure_snapshot(tz: str):
+        try:
+            ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Unknown timezone") from exc
+        pool = await _public_pool()
+        try:
+            return pool, await closure_analytics.snapshot(pool)
+        except asyncpg.UndefinedTableError as exc:
+            raise HTTPException(status_code=503, detail="Closure analytics needs the closure and link-check tables.") from exc
+        except (asyncpg.PostgresError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="Closure analytics is temporarily unavailable. Try again.") from exc
+
+    @application.get("/api/closures")
+    async def closure_summary(days: int = Query(7, ge=1, le=90), tz: str = "America/Los_Angeles"):
+        _, snapshot = await closure_snapshot(tz)
+        return closures.summary(snapshot, days, tz)
+
+    @application.get("/api/closures/postings")
+    async def closure_postings(
+        days: int = Query(7, ge=1, le=90), tz: str = "America/Los_Angeles",
+        view: Literal["closed", "unresolved", "review"] = "closed",
+        vendor: str | None = None,
+        reason: Literal["ats", "dead", "message", "redirect", "page_unknown", "unknown"] | None = None,
+        day: date | None = None, age: int | None = Query(None, ge=0, le=4),
+        outcome: Literal["unchecked", "live", "inconclusive", "no_url", "cancelled", "absent", "page_closed"] | None = None,
+        q: str = Query("", max_length=200), offset: int = Query(0, ge=0),
+        limit: int = Query(25, ge=1, le=100),
+    ):
+        pool, snapshot = await closure_snapshot(tz)
+        try:
+            return await closures.postings(pool, snapshot, days=days, tz=tz, view=view,
+                                           vendor=vendor, reason=reason, day=day.isoformat() if day else None,
+                                           age=age, outcome=outcome, q=q, offset=offset, limit=limit)
+        except (asyncpg.PostgresError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="Could not read postings. Try again.") from exc
 
     @application.get("/api/tokens")
     async def tokens(
@@ -1710,6 +1654,10 @@ def create_app(
     @application.get("/companies")
     async def companies_page():
         return FileResponse(STATIC_DIR / "companies" / "index.html")
+
+    @application.get("/closures")
+    async def closures_page():
+        return FileResponse(STATIC_DIR / "closures" / "index.html")
 
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return application

@@ -21,12 +21,6 @@ from xjobscore.inspector.persistence import ResultStore
 _schema_counter = itertools.count()
 
 
-@pytest.fixture(autouse=True)
-def _runner_stays_off(monkeypatch):
-    """The legacy app factory is inert; also pin its heartbeat off in tests."""
-    monkeypatch.setenv("XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT", "0")
-
-
 def _staging_ddl() -> str:
     """The fetched_feed / fetched_feed_posting DDL, read out of schema.sql.
 

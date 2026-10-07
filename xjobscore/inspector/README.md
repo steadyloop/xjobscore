@@ -21,6 +21,15 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
 
 ## Pages
 
+- **Closed jobs** (`/closures`) — interactive availability analytics: daily
+  closures stacked by their earliest evidence, closure evidence shares,
+  current missing postings by provider and age, and missing-to-confirmation
+  timing. Clicking a chart drills into its postings; Unresolved and Review
+  views expose verification gaps and closed postings listed again. Observation
+  dates use the browser timezone. Charts begin with the available history;
+  current backlog is independent of the selected closure period. Counts are
+  source postings and may include duplicates. Reads use a one-minute cache and
+  read-only transactions; opening the page never checks a link or changes a job.
 - **System** (`/system`; `/` and `/scheduler` redirect here) — the landing
   page and production operations console, in three sections:
   - **Activity**: the last Gold catch-up run (when, how long, postings
@@ -197,12 +206,9 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
   strip persists the last outcome and counts in `public.token_heartbeat`;
   **Run now** queues one batch without bypassing the lease.
 
-  Two switches gate it, mirroring the scheduler's pair. `XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT`
-  (on by default) is the deploy-time decision that this process may run the
-  loop at all. **Pause** / **Resume** writes `token_heartbeat.paused`, the
-  operator's runtime switch: persistent across restarts, shared by every
-  inspector pointed at the database, and readable by a process whose own loop
-  is off — so the button works even where nothing is listening. A paused
+  The unified runtime owns the heartbeat. **Pause** / **Resume** writes
+  `token_heartbeat.paused`, the operator's runtime switch: persistent across
+  restarts and shared by every Inspector pointed at the database. A paused
   heartbeat still stamps `runner_seen_at` every tick, which is how the strip
   tells *paused* apart from *offline*; it claims no lease, and **Run now**
   refuses with 409 rather than queueing a batch nothing would pick up.
@@ -373,10 +379,10 @@ they never perform it in an HTTP request.
 | `XJOBSCORE_HEARTBEAT_LEASE_S` | `900` | Exclusive cycle lease duration |
 
 `.env` files in the working directory or repo root are honored with
-`setdefault` semantics. The former `XJOBSCORE_INSPECTOR_PORT`, user-agent,
-runner-timing, and heartbeat-timing names remain deprecated aliases for one
-release. `XJOBSCORE_INSPECTOR_RUNNER` itself is removed; the persisted
-Scheduler control is the only polling switch.
+`setdefault` semantics. Runtime settings use the `XJOBSCORE_*` names above;
+Inspector storage settings use `XJOBSCORE_INSPECTOR_STORE_DSN` and
+`XJOBSCORE_INSPECTOR_SCHEMA`. The persisted Scheduler control is the polling
+switch.
 
 ## Tests
 
@@ -384,11 +390,10 @@ Scheduler control is the only polling switch.
 PYTHONPATH=. .venv/bin/pytest xjobscore/inspector/
 ```
 
-Route tests run over `create_app(...)` with injected fakes (catalog, policy,
-runner, gold job) and no network. The policy layer is unit-tested against
-recording fakes. `test_runner.py` retains coverage for the old isolated runner
-mechanics, while runtime tests cover the unified supervisor. `create_app()`
-without an injected runtime remains inert, so route tests cannot poll feeds.
+Route tests inject an inert runtime through `test_support.py`, so they cannot
+poll feeds. The policy layer uses recording fakes, and runtime tests cover the
+unified supervisor. Production `create_app(runtime=...)` always uses that
+supervisor; there is no standalone scheduler or in-process dedup runner.
 
 Store tests need a real PostgreSQL: each builds a throwaway `inspector_test_*`
 schema and drops it on teardown, so they never see the pipeline's tables.

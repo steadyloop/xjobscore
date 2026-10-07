@@ -1,0 +1,110 @@
+.closures-page { --ats: #5274b9; --dead: #cf6d59; --message: #448e81; --redirect: #c58a38; --page_unknown: #8a74aa; --unknown: #94958e; }
+.closures-page .page { max-width: 1600px; margin: auto; padding: 42px 48px 64px; }
+.closures-page .heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.closures-page .eyebrow { color: var(--text-muted); font-size: 10px; letter-spacing: .13em; margin-bottom: 7px; }
+.closures-page h1 { font-size: 29px; letter-spacing: -.035em; }
+.closures-page .heading p { color: var(--text-secondary); margin: 7px 0 0; }
+.closures-page .controls { display: flex; gap: 12px; align-items: center; }
+.closures-page label { color: var(--text-secondary); font-size: 12px; }
+.closures-page select, .closures-page input { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; color: var(--text); font: inherit; }
+.closures-page select { margin-left: 6px; }
+.closures-page .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); background: var(--surface); border-radius: 8px; margin-top: 24px; }
+.closures-page .metric { padding: 22px 24px; border: 0; border-right: 1px solid var(--border); text-align: left; background: none; cursor: pointer; }
+.closures-page .metric:last-child { border-right: 0; }
+.closures-page .metric:hover { background: var(--surface-2); }
+.closures-page .metric-label { display: block; font-size: 12px; color: var(--text-secondary); }
+.closures-page .metric-value { display: block; font-size: 31px; letter-spacing: -.04em; margin: 7px 0 4px; font-variant-numeric: tabular-nums; }
+.closures-page .metric-note { display: block; font-size: 11px; color: var(--text-muted); }
+.closures-page .coverage { font-size: 11px; color: var(--text-muted); margin: 12px 0 22px; }
+.closures-page .charts { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px; }
+.closures-page .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 22px; min-width: 0; }
+.closures-page .trend-panel { grid-column: span 8; }
+.closures-page .evidence-panel { grid-column: span 4; }
+.closures-page .backlog-panel { grid-column: span 7; }
+.closures-page .lag-panel { grid-column: span 5; }
+.closures-page .chart-head { display: flex; align-items: start; justify-content: space-between; gap: 15px; margin-bottom: 20px; }
+.closures-page h2 { text-transform: none; color: var(--text); font-size: 14px; letter-spacing: -.01em; }
+.closures-page .chart-head p { font-size: 11px; color: var(--text-muted); margin: 5px 0 0; }
+.closures-page .hint { font-size: 10px; color: var(--text-muted); white-space: nowrap; padding-top: 3px; }
+.closures-page .footnote { font-size: 11px; color: var(--text-muted); line-height: 1.6; margin: 16px 0 0; }
+.closures-page .trend { height: 216px; position: relative; padding-left: 48px; }
+.closures-page .gridlines { position: absolute; inset: 12px 0 26px 48px; pointer-events: none; }
+.closures-page .gridline { height: 25%; border-top: 1px solid var(--grid); position: relative; }
+.closures-page .gridline span { position: absolute; left: -46px; top: -7px; width: 38px; text-align: right; font-size: 10px; color: var(--text-muted); }
+.closures-page .columns { display: flex; height: 100%; gap: 12px; position: relative; align-items: end; }
+.closures-page .column { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: end; align-items: center; }
+.closures-page .stack { display: flex; flex-direction: column-reverse; width: min(100%, 64px); min-height: 1px; }
+.closures-page .segment { background: var(--series); border: 0; padding: 0; min-height: 0; width: 100%; cursor: pointer; }
+.closures-page .segment:hover { filter: brightness(1.18); }
+.closures-page .x-label { height: 26px; padding-top: 8px; white-space: nowrap; font-size: 10px; color: var(--text-muted); }
+.closures-page .legend { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 10px 0 0 48px; }
+.closures-page .legend button { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 3px 0; font-size: 10px; cursor: pointer; color: var(--text-secondary); }
+.closures-page .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--series); flex-shrink: 0; }
+.closures-page .evidence-row { width: 100%; background: none; border: 0; padding: 0; margin: 0 0 17px; cursor: pointer; text-align: left; }
+.closures-page .bar-caption { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; margin-bottom: 7px; }
+.closures-page .bar-caption .label { display: flex; gap: 6px; align-items: center; }
+.closures-page .bar-caption .count { font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+.closures-page .track { height: 7px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.closures-page .fill { height: 100%; width: var(--width); background: var(--series); border-radius: 2px; }
+.closures-page .outcomes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 17px; }
+.closures-page .outcome { border: 1px solid var(--border); background: none; border-radius: 5px; padding: 5px 8px; font-size: 10px; color: var(--text-secondary); cursor: pointer; }
+.closures-page .outcome strong { color: var(--text); margin-left: 5px; font-weight: 500; }
+.closures-page .heatmap-wrap { overflow-x: auto; }
+.closures-page .heatmap { width: 100%; border-collapse: separate; border-spacing: 4px; font-size: 11px; }
+.closures-page .heatmap th { font-weight: 400; color: var(--text-muted); text-align: center; padding-bottom: 7px; white-space: nowrap; }
+.closures-page .heatmap th:first-child { text-align: left; }
+.closures-page .heatmap td:first-child { width: 110px; }
+.closures-page .heatmap td button { width: 100%; min-width: 42px; padding: 9px 5px; border: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) var(--intensity), var(--surface-2)); color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.closures-page .heatmap td button:hover { outline: 1px solid var(--accent); }
+.closures-page .heatmap .vendor { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font-size: 11px; }
+.closures-page .heatmap .total { color: var(--text-muted); text-align: right; padding-left: 10px; font-variant-numeric: tabular-nums; }
+.closures-page .lag-bars { display: flex; align-items: end; height: 185px; gap: 14px; padding-top: 12px; border-bottom: 1px solid var(--grid); }
+.closures-page .lag-column { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: end; text-align: center; min-width: 0; }
+.closures-page .lag-count { font-size: 10px; color: var(--text-secondary); margin-bottom: 6px; }
+.closures-page .lag-bar { width: 100%; border: 0; background: var(--accent); opacity: .7; border-radius: 3px 3px 0 0; cursor: pointer; min-height: 1px; }
+.closures-page .lag-bar:hover { opacity: 1; }
+.closures-page .lag-labels { display: flex; gap: 14px; margin-top: 8px; }
+.closures-page .lag-labels span { flex: 1; text-align: center; color: var(--text-muted); font-size: 10px; }
+.closures-page .postings-panel { margin-top: 18px; }
+.closures-page .table-toolbar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 15px; }
+.closures-page .tabs { display: flex; gap: 4px; }
+.closures-page .tabs button { border: 0; border-radius: 5px; background: none; padding: 6px 10px; font-size: 12px; cursor: pointer; color: var(--text-secondary); }
+.closures-page .tabs button[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
+.closures-page #selection { font-size: 11px; color: var(--text-secondary); }
+.closures-page #selection button { margin-left: 10px; font-size: 11px; background: none; border: 0; color: var(--accent); cursor: pointer; }
+.closures-page .table-wrap { overflow: auto; }
+.closures-page table.data { min-width: 650px; }
+.closures-page td { font-size: 12px; vertical-align: top; }
+.closures-page .job-title { display: block; margin-top: 3px; color: var(--text-secondary); }
+.closures-page .sub { display: block; color: var(--text-muted); font-size: 10px; margin-top: 4px; }
+.closures-page .reason { display: inline-flex; gap: 6px; align-items: center; font-size: 11px; white-space: nowrap; }
+.closures-page details { max-width: 320px; font-size: 11px; margin-top: 7px; }
+.closures-page summary { color: var(--accent); cursor: pointer; }
+.closures-page details p { overflow-wrap: anywhere; margin: 8px 0; color: var(--text-secondary); }
+.closures-page .pagination { display: flex; gap: 7px; align-items: center; margin-top: 15px; }
+.closures-page #page-count { color: var(--text-muted); font-size: 11px; flex: 1; }
+.closures-page #table-status { color: var(--text-secondary); font-size: 12px; }
+.closures-page .methodology { max-width: 900px; }
+.closures-page button:focus-visible, .closures-page summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.closures-page [hidden] { display: none !important; }
+@media (max-width: 1000px) {
+  .closures-page .page { padding: 28px 24px; }
+  .closures-page .trend-panel, .closures-page .backlog-panel { grid-column: span 7; }
+  .closures-page .evidence-panel, .closures-page .lag-panel { grid-column: span 5; }
+  .closures-page .hint { display: none; }
+  .closures-page .topnav { overflow-x: auto; }
+  .closures-page .topnav nav a { white-space: nowrap; padding: 6px 8px; }
+}
+@media (max-width: 700px) {
+  .closures-page .page { padding: 24px 16px; }
+  .closures-page .heading { align-items: start; flex-direction: column; }
+  .closures-page .metrics { grid-template-columns: repeat(2, 1fr); }
+  .closures-page .metric { padding: 16px; border-bottom: 1px solid var(--border); }
+  .closures-page .metric:nth-child(2) { border-right: 0; }
+  .closures-page .metric:nth-child(n+3) { border-bottom: 0; }
+  .closures-page .charts > section { grid-column: span 12; }
+  .closures-page .chart-card { padding: 18px; }
+  .closures-page .chart-head { flex-wrap: wrap; }
+  .closures-page .columns { gap: 4px; }
+  .closures-page .topnav .health-chips, .closures-page .topnav .brand { display: none; }
+}

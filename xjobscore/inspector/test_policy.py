@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from xjobscore import store
-from xjobscore.inspector.app import create_app
+from xjobscore.inspector.test_support import create_app
 from xjobscore.inspector.db import feed_ref
 from xjobscore.inspector.policy import (
     FeedNotInPostgres,

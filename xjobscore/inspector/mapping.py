@@ -1,8 +1,8 @@
 """What an adapter's config reads, and what those reads collapse to.
 
 Pure and offline: no database, no network. Everything here is derived from
-the two declarative config tables (``json-api-configs.py``,
-``docxtract-configs.py``) plus the canons under ``registry/job-posting``, so
+the two declarative config tables (``json_api_configs.py``,
+``docxtract_configs.py``) plus the canons under ``registry/job-posting``, so
 it answers the Fields page's second question -- "what does this field
 collapse to?" -- without touching a row.
 

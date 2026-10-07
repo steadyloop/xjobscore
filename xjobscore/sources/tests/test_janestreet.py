@@ -5,7 +5,7 @@ from pathlib import Path
 
 from xjobscore.net import Response
 from xjobscore.records import Feed, Item
-from xjobscore.sources.planned import janestreet
+from xjobscore.sources import janestreet
 
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"

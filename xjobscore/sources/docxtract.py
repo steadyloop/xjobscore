@@ -16,16 +16,14 @@ from email.utils import parsedate_to_datetime
 from functools import partial
 from html import unescape
 from html.parser import HTMLParser
-from importlib import import_module
 from typing import Any
 from urllib.parse import urljoin
 import xml.etree.ElementTree as ET
 
 from xjobscore.net import Net, NetError, etag, last_modified
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
-CONFIGS = import_module(".docxtract-configs", __package__).CONFIGS
+from .docxtract_configs import CONFIGS
 
-SPECS = CONFIGS
 
 # Mirror the public Summer2027-Internships README selection.  The repository's
 # listings.json is a shared historical/off-season store despite living in the

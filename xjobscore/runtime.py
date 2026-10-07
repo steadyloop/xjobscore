@@ -37,16 +37,6 @@ REQUIRED_TABLES = ("scheduler_control", "gold_control", "system_run", "reconcile
 DEDUP_ENABLED = False
 
 
-def _env(name: str, legacy: str | None, default: str) -> str:
-    value = os.environ.get(name)
-    if value is not None:
-        return value
-    if legacy and legacy in os.environ:
-        logger.warning("%s is deprecated; use %s", legacy, name)
-        return os.environ[legacy]
-    return default
-
-
 @dataclass(frozen=True, slots=True)
 class RuntimeSettings:
     dsn: str
@@ -92,88 +82,27 @@ class RuntimeSettings:
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
-        if "XJOBSCORE_INSPECTOR_RUNNER" in os.environ:
-            logger.warning(
-                "XJOBSCORE_INSPECTOR_RUNNER was removed and is ignored; "
-                "use the persistent Inspector pause/resume control"
-            )
         dsn = config.dsn()
         return cls(
             dsn=dsn,
             inspector_store_dsn=config.persistence_dsn(),
             inspector_schema=config.persistence_schema(),
-            host=_env("XJOBSCORE_HOST", None, "127.0.0.1"),
-            port=int(_env("XJOBSCORE_PORT", "XJOBSCORE_INSPECTOR_PORT", "8765")),
-            user_agent=_env(
-                "XJOBSCORE_USER_AGENT",
-                "XJOBSCORE_INSPECTOR_USER_AGENT",
-                DEFAULT_USER_AGENT,
-            ),
-            tick_s=float(
-                _env("XJOBSCORE_TICK_S", "XJOBSCORE_INSPECTOR_RUNNER_TICK_S", "60")
-            ),
-            cycle_budget_s=float(
-                _env(
-                    "XJOBSCORE_CYCLE_BUDGET_S",
-                    "XJOBSCORE_INSPECTOR_RUNNER_BUDGET_S",
-                    "30",
-                )
-            ),
-            lease_seconds=int(
-                _env(
-                    "XJOBSCORE_LEASE_SECONDS",
-                    "XJOBSCORE_INSPECTOR_RUNNER_LEASE_S",
-                    "3600",
-                )
-            ),
-            shutdown_grace_s=float(_env("XJOBSCORE_SHUTDOWN_GRACE_S", None, "30")),
-            heartbeat_tick_s=float(
-                _env(
-                    "XJOBSCORE_HEARTBEAT_TICK_S",
-                    "XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_TICK_S",
-                    "60",
-                )
-            ),
-            heartbeat_batch=int(
-                _env(
-                    "XJOBSCORE_HEARTBEAT_BATCH",
-                    "XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_BATCH",
-                    "20",
-                )
-            ),
-            heartbeat_interval_s=int(
-                _env(
-                    "XJOBSCORE_HEARTBEAT_INTERVAL_S",
-                    "XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_INTERVAL_S",
-                    "21600",
-                )
-            ),
-            heartbeat_retry_s=int(
-                _env(
-                    "XJOBSCORE_HEARTBEAT_RETRY_S",
-                    "XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_RETRY_S",
-                    "900",
-                )
-            ),
-            heartbeat_lease_s=int(
-                _env(
-                    "XJOBSCORE_HEARTBEAT_LEASE_S",
-                    "XJOBSCORE_INSPECTOR_TOKEN_HEARTBEAT_LEASE_S",
-                    "900",
-                )
-            ),
+            host=os.environ.get("XJOBSCORE_HOST", "127.0.0.1"),
+            port=int(os.environ.get("XJOBSCORE_PORT", "8765")),
+            user_agent=os.environ.get("XJOBSCORE_USER_AGENT", DEFAULT_USER_AGENT),
+            tick_s=float(os.environ.get("XJOBSCORE_TICK_S", "60")),
+            cycle_budget_s=float(os.environ.get("XJOBSCORE_CYCLE_BUDGET_S", "30")),
+            lease_seconds=int(os.environ.get("XJOBSCORE_LEASE_SECONDS", "3600")),
+            shutdown_grace_s=float(os.environ.get("XJOBSCORE_SHUTDOWN_GRACE_S", "30")),
+            heartbeat_tick_s=float(os.environ.get("XJOBSCORE_HEARTBEAT_TICK_S", "60")),
+            heartbeat_batch=int(os.environ.get("XJOBSCORE_HEARTBEAT_BATCH", "20")),
+            heartbeat_interval_s=int(os.environ.get("XJOBSCORE_HEARTBEAT_INTERVAL_S", "21600")),
+            heartbeat_retry_s=int(os.environ.get("XJOBSCORE_HEARTBEAT_RETRY_S", "900")),
+            heartbeat_lease_s=int(os.environ.get("XJOBSCORE_HEARTBEAT_LEASE_S", "900")),
             publish_dsn=os.environ.get("PUBLISH_DATABASE_URL") or None,
             frontend_dsn=os.environ.get("FRONTEND_DATABASE_URL") or None,
-            publish_interval_s=float(
-                _env("XJOBSCORE_PUBLISH_INTERVAL_S", None, "3600")
-            ),
-            publish_seen_drift_s=float(
-                _env(
-                    "XJOBSCORE_PUBLISH_SEEN_DRIFT_S",
-                    None,
-                    str(publish.DEFAULT_SEEN_DRIFT_S),
-                )
-            ),
+            publish_interval_s=float(os.environ.get("XJOBSCORE_PUBLISH_INTERVAL_S", "3600")),
+            publish_seen_drift_s=float(os.environ.get("XJOBSCORE_PUBLISH_SEEN_DRIFT_S", str(publish.DEFAULT_SEEN_DRIFT_S))),
         )
 
 

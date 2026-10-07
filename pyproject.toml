@@ -21,12 +21,6 @@ location-normalizer = "xjobscore.location_normalizer:main"
 xjobscore = "xjobscore.system:cli"
 xjobscore-backup = "xjobscore.backup:cli"
 
-[tool.uv.sources]
-xjobscore-oneshot-ui = { workspace = true }
-
-[tool.uv.workspace]
-members = ["xjobscore/oneshot-ui"]
-
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
@@ -35,8 +29,6 @@ build-backend = "setuptools.build_meta"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    # Root tests import oneshot_ui, and `uv run -m oneshot_ui` needs it installed.
-    "xjobscore-oneshot-ui",
 ]
 
 # An application, not a library: seeds/, notebooks/ and friends are not packages,
@@ -47,8 +39,6 @@ packages = [
     "xjobscore",
     "xjobscore.inspector",
     "xjobscore.sources",
-    "xjobscore.sources.planned",
-    "xjobscore.sources.unified_v2",
 ]
 
 [tool.setuptools.package-data]
@@ -60,6 +50,7 @@ xjobscore = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["keyscan", "xjobscore"]
 # Live tests hit the real vendor APIs, so they are drift canaries, not part of
 # the default suite: a board going quiet must not read as a code defect.
 markers = ["live: hits a real vendor API; skipped unless XJOBSCORE_LIVE=1"]

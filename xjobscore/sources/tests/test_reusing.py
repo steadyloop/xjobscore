@@ -59,8 +59,8 @@ def fake_source(monkeypatch):
     """A throwaway JSON-API source opted into revision reuse, so the fallback
     branches (unopted source, no priors) have a real opted-in source to
     contrast against without touching the real smartrecruiters config."""
-    monkeypatch.setitem(json_api.SPECS, "reuse-test", CONFIG)
-    # `SOURCES` is built once at import time from `json_api.SPECS`, so
+    monkeypatch.setitem(json_api.CONFIGS, "reuse-test", CONFIG)
+    # `SOURCES` is built once at import time from `json_api.CONFIGS`, so
     # patching `SPECS` alone leaves the registry's own lookup (`get`, used by
     # `reusing`'s fallback) unaware of this source -- mirror the same binding
     # `sources/__init__.py` does for every real json-api entry.

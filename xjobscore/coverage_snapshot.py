@@ -65,6 +65,7 @@ def empty_snapshot() -> dict[str, Any]:
                 "stale": 0,
                 "paused": 0,
                 "never": 0,
+                "active_postings": 0,
                 "added_today": 0,
             },
         },
@@ -82,9 +83,11 @@ WITH posting_stats AS (
     FROM job_posting
     GROUP BY source
 ), global_stats AS (
-    SELECT COUNT(*) FILTER (
-        WHERE first_seen_at >= date_trunc('day', $1::timestamptz)
-    ) AS added_today
+    SELECT
+        COUNT(*) FILTER (WHERE status = 'active') AS active_postings,
+        COUNT(*) FILTER (
+            WHERE first_seen_at >= date_trunc('day', $1::timestamptz)
+        ) AS added_today
     FROM job_posting
 )
 SELECT
@@ -100,7 +103,8 @@ SELECT
     c.name AS company_name,
     COALESCE(p.coverage, 0) AS coverage,
     COALESCE(p.added_today, 0) AS added_today,
-    g.added_today AS global_added_today
+    g.added_today AS global_added_today,
+    g.active_postings AS global_active_postings
 FROM global_stats g
 LEFT JOIN feed f ON true
 LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
@@ -124,9 +128,11 @@ def build_snapshot(
         "never": 0,
     }
     global_added_today = 0
+    global_active_postings = 0
 
     for row in rows:
         global_added_today = int(row["global_added_today"] or 0)
+        global_active_postings = int(row["global_active_postings"] or 0)
         if row["source"] is None:
             continue
         source = str(row["source"])
@@ -229,6 +235,7 @@ def build_snapshot(
                 "boards": sum(item["board_count"] for item in ordered_providers),
                 "providers": len(ordered_providers),
                 **state_totals,
+                "active_postings": global_active_postings,
                 "added_today": global_added_today,
             },
         },

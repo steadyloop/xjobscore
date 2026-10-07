@@ -86,6 +86,6 @@ async def test_personio_empty_description_stays_none_not_empty_string():
 
 
 async def test_personio_is_registered_with_a_parser():
-    assert "personio" in docxtract.SPECS
+    assert "personio" in docxtract.CONFIGS
     assert callable(docxtract.harvester("personio"))
     assert callable(docxtract.parser("personio"))

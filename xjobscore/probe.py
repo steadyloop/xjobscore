@@ -11,7 +11,7 @@ Four outcomes preserve the closure channel: `absent` for dead links,
 `page_closed` for explicit page messages or redirects, `live`, and
 `inconclusive`. A refused request never supplies closure evidence.
 
-Deliberately not the harvest detail leg. `json-api.py` catches `NetError`
+Deliberately not the harvest detail leg. `json_api.py` catches `NetError`
 without reading `.status`, so a 404 and a timeout are indistinguishable there --
 correct for a harvest, which only wants to know it lost a row, and useless here.
 Deliberately not `keyscan.probe` either: that asks whether a *board* exists,

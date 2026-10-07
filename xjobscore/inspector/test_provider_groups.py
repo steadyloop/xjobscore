@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from xjobscore.inspector.app import create_app
+from xjobscore.inspector.test_support import create_app
 from xjobscore.inspector.policy import (
     MAX_GROUP_NAME,
     PolicyUnavailable,

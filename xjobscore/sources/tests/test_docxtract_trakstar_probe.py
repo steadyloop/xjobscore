@@ -6,7 +6,7 @@ always returns 200 with the full ~37KB body. It does support `HEAD` and
 returns a real `Last-Modified` there, day-granular and tied to the newest
 posting, so a cheap probe still catches a dormant board before paying for
 the body. `docxtract.harvest`'s `probe` branch is opt-in per source
-(`docxtract-configs.py`'s trakstar entry) and only engages once a feed has a
+(`docxtract_configs.py`'s trakstar entry) and only engages once a feed has a
 stored `last_modified` from a previous poll -- a cold feed always falls
 through to the real GET, exactly as it did before this existed.
 """

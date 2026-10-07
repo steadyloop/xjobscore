@@ -39,7 +39,6 @@ from pathlib import Path
 
 import yaml
 
-# Relative so the file vendors unchanged into oneshot_taxonomy.
 from .job_domain import PROGRAM_NOISE_PATTERN
 
 __all__ = [

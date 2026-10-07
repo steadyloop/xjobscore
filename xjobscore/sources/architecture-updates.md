@@ -2,7 +2,7 @@
 
 ## 1. Unify the field-mapping DSL across JSON and XML/RSS/JSON-LD
 
-`json-api-configs.py` uses the declarative `_value` vocabulary (`@path`, `fallback`,
+`json_api_configs.py` uses the declarative `_value` vocabulary (`@path`, `fallback`,
 `join`, `template`, `date`, `lookup`, `map`, ...). `docxtract.py` instead dispatches to
 hand-written Python parsers (`_rss`, `_schemaorg`, `_simplify`) selected by
 `config["parser"]`. `_rss` (docxtract.py:261-305) already carries per-vendor flags
@@ -19,14 +19,14 @@ a new flag per vendor.
 
 ## 2. Validate `CONFIGS` at load time
 
-`json-api-configs.py` / `docxtract-configs.py` are executable adapter data and
+`json_api_configs.py` / `docxtract_configs.py` are executable adapter data and
 need validation just as much as a database-backed feed configuration does.
 — have no schema validation. A misspelled key in a `fields` mapping silently resolves
 to `None` via `_dig`'s `.get()` chains, matching the exact silent-absence failure mode
 documented as a verified defect in CLAUDE.md (Oracle drops 100% of postings).
 
-Change: add a load-time schema check for `CONFIGS` (both `json-api-configs.py` and
-`docxtract-configs.py`) with strict validation — fail loud
+Change: add a load-time schema check for `CONFIGS` (both `json_api_configs.py` and
+`docxtract_configs.py`) with strict validation — fail loud
 on an unrecognized or malformed key instead of resolving to a missing field.
 
 ## 3. Give community/aggregator boards a real third contract
@@ -51,11 +51,11 @@ is deferred until a second community source demonstrates a reusable contract.
 
 ## 4. Remove duplicated tree-walk and dead aliasing
 
-- `_dig` is independently reimplemented in `json-api.py:28-42` and
+- `_dig` is independently reimplemented in `json_api.py:28-42` and
   `docxtract.py:135-142` — identical dict/list path walk, two copies.
-- `json-api.py:21-23` — `SPECS = REGISTRY = ADAPTERS = CONFIGS`, three names for one
+- `json_api.py:21-23` — `SPECS = REGISTRY = ADAPTERS = CONFIGS`, three names for one
   dict; only `SPECS` is referenced elsewhere.
-- `json-api.py:285-289` — `get` / `get_adapter`, same dead-alias pattern.
+- `json_api.py:285-289` — `get` / `get_adapter`, same dead-alias pattern.
 
 Change: one shared `_dig`; drop unused aliases, keep one canonical name each.
 
@@ -71,7 +71,7 @@ before a manifest entry may be marked `status = "implemented"`.
 ## 6. Confirm detail fan-out is batched, not serial
 
 `DETAIL_A`/`DETAIL_B` configs (smartrecruiters, oracle, workday, bamboohr, rippling)
-issue one request per item in `json-api.py`'s detail-fetch loop (lines 227-252), with
+issue one request per item in `json_api.py`'s detail-fetch loop (lines 227-252), with
 no visible batching/concurrency control in this file. For a board with thousands of
 postings this is thousands of serial requests per poll.
 

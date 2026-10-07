@@ -9,6 +9,7 @@ const LINKS = [
   ["Tokens", "/tokens"],
   ["Feeds", "/feeds"],
   ["Companies", "/companies"],
+  ["Closed jobs", "/closures"],
 ];
 
 const THEME_KEY = "inspector-theme";
