@@ -1,6 +1,14 @@
 # Architecture
 
-`schema.sql` is the storage contract. The implemented core path is:
+`schema.sql` is the pipeline storage contract. `frontend.sql` defines the
+OneShot database, including its accounts, applications, feedback, and resumes.
+Both define the five shared tables for companies, logos, postings, duplicate
+groups, and the coverage snapshot; the publisher copies job data between databases.
+The pipeline's `frontend_identity` table maps natural job/company identities to
+stable serving IDs seeded from Neon. A publication allocates IDs once, then sends
+the same cohort independently to the local frontend database and Neon. OneShot
+can read job data locally while keeping its personal data connection on Neon.
+The implemented core path is:
 
 ```text
 feed (PostgreSQL) → fetch → raw_posting → job_posting → Gold → OneShot
@@ -70,8 +78,19 @@ waits on a slower sibling, and a vendor that cannot keep up cannot crowd the
 others out by accumulating the oldest `due_at` values. Widths are derived, not
 declared: a shared-host vendor takes its list leg's concurrency, a per-tenant
 vendor takes its `net._VENDOR_CAPS` ceiling divided by one poll's own fan-out,
-and anything unmeasured is one. `feed_source_due_idx` serves the per-source
-claim. A cycle is bounded by `--cycle-budget-s` (default 30) rather than a feed
+and anything unmeasured is one. A vendor in `net._VENDOR_RATES` (Workday) also
+has a request-rate budget that every tenant host shares; it, not the width,
+sets that vendor's throughput, and it is spent below the vendor's limiter so
+the steady state has no 429s. Workday's limiter counts per data center
+(`wdN`), so each measured data center has its own budget and cap, the rest
+share one, and each tenant host also has its own budget (`net._HOST_RATES`).
+A vendor partitioned that way runs one pool per partition rather than per
+vendor (`sources.lanes`: `workday:wd1`, …, `workday:other`), each claiming
+only its own feeds, so one data center's backlog never parks the workers
+another data center's budget could use. Vendor slots and budget tokens are taken per
+attempt, around the wire call only, so a tenant waiting out its own 429
+cooldown or retry backoff holds nothing its siblings need.
+`feed_source_due_idx` serves the per-source claim. A cycle is bounded by `--cycle-budget-s` (default 30) rather than a feed
 count, since 20 feeds is minutes of Workday and seconds of Greenhouse; the
 budget stops claiming while polls in flight finish, and a cycle that ran out of
 time with feeds still due reports `drained=False` so the caller runs another
@@ -185,43 +204,53 @@ Replay never advances `last_seen_at`. `latest_raw` returns every `source_key` a
 feed has ever produced, not the ones it returns today, so a replay observes no
 listing and says nothing about what is still present.
 
-## Reconciliation by absence
+## Closure signals and reconciliation
 
-`--reconcile` closes postings that vanished without a stated closure. Absence is
-the trigger and a dead origin URL is the evidence, per `records.py`: a posting
-missing from a listing is not closed, it is unconfirmed.
+`job_posting` keeps four independent timestamps together in the schema's
+**Closure signals** section. Multiple signals may coexist on one posting:
 
-Per feed instance, `store.absent_postings` selects `active` postings whose
-`last_seen_at` predates that feed's most recent `poll_log` with
-`status = 'ok'`. Completeness comes from `poll_log` rather than
-`feed.last_poll_at`, which records no outcome and cannot distinguish a whole
-listing from a truncated one.
+| Signal | Column | Effect |
+|---|---|---|
+| Missing from a complete board listing | `missing_since` | Flag only; cleared if listed again |
+| Job link returns 404/410 | `linked_dead_at` | Close |
+| ATS explicitly reports inactive/closed | `ats_closed_at` | Close |
+| Page states closure or redirects | `paged_closed_at` | Close |
 
-Each candidate's origin URL is fetched by `probe.py`, which classifies the reply
-three ways over `net.py`'s existing retry boundary:
+Closure timestamps preserve the first detection in each channel. They are not
+part of the canonical content hash. `link_checked_at` records the latest check,
+including blocked or inconclusive requests; it is not a closure signal.
+Apply `20261006_job_posting_paged_closed.sql`, then
+`20261006_job_posting_closure_signal_names.sql`, to existing home and thin
+databases before running the updated publisher. The latter renames the two
+legacy columns in place; it preserves their values and can be rerun. The
+verification timestamp is not a closure signal. Apply
+`20261006_job_posting_remove_unused_review_columns.sql` to remove the unused
+`link_marked_at` and `removal_marked_at` columns. User Skip and Report actions
+are stored separately in `job_feedback`.
 
-| `NetError.status` | Outcome |
-|---|---|
-| 404, 410 | `absent` — closure evidence |
-| 2xx | `live` |
-| 429, 5xx, transport failure | `inconclusive` — records the check, nothing more |
+`python -m xjobscore.run --reconcile` queues missing jobs through the same durable queue.
+Polling enqueues each missing episode atomically. The independently controlled
+worker checks links, retries inconclusive results, and revisits live pages;
+System → Link checks controls its concurrency, pacing and timing.
+It selects active postings absent from their feed's latest complete `ok` poll.
+A failed or truncated poll does not establish disappearance. Reconciliation
+prefers each posting's stored source/apply URL and falls back to an adapter's
+probe API if there is no page URL. No fetch is added to normal board ingestion.
 
-The third outcome is load-bearing. A 429 misread as a 404 fabricates a closure,
-and because `status` is monotonic nothing downstream revisits it. Only `absent`
-may close a row.
+One page request can detect a dead link, a closed-page message, or a redirect.
+Per product policy, a changed page URL counts as page closure; URL fragments
+and a trailing slash alone do not. Explicit English closure messages are read
+from visible HTML text, excluding scripts, styles, and translation bundles.
+JavaScript-only pages remain inconclusive rather than being assumed open.
+HTTP 403/429, server errors, and transport failures are inconclusive even when
+they occur after a redirect.
 
-A confirmed dead link is written to `raw_posting` as a `_probe` tombstone before
-silver moves, so the closure stays replayable like every other fact: bronze is
-content-addressed, so re-probing inserts nothing, and `--parse` re-derives the
-closure through the adapter's `_probe` branch without re-fetching. The reconcile
-pass itself writes silver directly through `store.close_posting_by_key`, which
-sets `status`, `link_closed_at`, and `last_checked_at` and touches no canonical
-column — a tombstone carries no title or description to project.
-
-Probe URLs are declared per adapter (`probe.url` in `json-api-configs.py`),
-resolved against the same `key_parts` context as the detail leg. Only Greenhouse
-declares one today; feeds without a declaration are counted `unprobeable` and
-skipped.
+Confirmed observations are stored in bronze as `_probe` tombstones with the
+requested/final URLs, HTTP status, matched message or redirect reason, and
+original observation time. Silver replays these before vendor parsing and
+writes only the corresponding closure timestamp, status, and check time.
+A tombstone never overwrites the title, description, URLs, last-seen time, or
+ATS closure signal. CLI totals distinguish link and page closures.
 
 ## Modules
 
@@ -250,7 +279,10 @@ enriched and deduped.
 cannot be recovered from silver belongs here -- human judgements in particular.
 
 Changed Silver rows immediately run the posting-local Gold steps: job-domain
-classification, skills, degrees, and summaries. Each step commits independently;
+classification, skills, degrees, and summaries. They run beside polling, not
+inside the worker that polled: the poll hands its change set to
+`GoldCoordinator.defer` and claims its next feed, with at most four feeds'
+Gold running at once and the hand-off waiting once 64 are queued. Each step commits independently;
 a failure degrades the pipeline run without turning a successful source fetch
 into a source failure. Version stamps are the durable retry queue, and the
 catch-up worker processes stale rows in bounded batches after restarts.
