@@ -21,20 +21,24 @@ import subprocess
 import time
 from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import urlencode, urlsplit
-import uuid
 import xml.etree.ElementTree as ET
 
 import duckdb
 import httpx
 
-from xjobscore.net import DEFAULT_USER_AGENT
+from xjobscore import workable_policy
+from xjobscore.net import DEFAULT_USER_AGENT, _HostPace, _retry_after_seconds
 
-from .rules import BY_SOURCE, RULES, SAMPLES, STOP, TOKEN_RE, VALIDATED_SOURCES, Rule, expand_sources, extract, surt_range, token_sql
+from .rules import BY_SOURCE, RULES, SAMPLES, VALIDATED_SOURCES, Rule, expand_sources, extract, rule_fingerprint, surt_range, token_filter_sql, token_sql
 
 
 COLLINFO = "https://index.commoncrawl.org/collinfo.json"
 CC_CDN = "https://data.commoncrawl.org/"
 CC_PATHS = CC_CDN + "crawl-data/{crawl}/cc-index-table.paths.gz"
+# These collections predate the Parquet index. Their archived pages exist,
+# but neither footer harvesting nor the DuckDB scanner can read them.
+LEGACY_CRAWLS = frozenset({"CC-MAIN-2012", "CC-MAIN-2009-2010", "CC-MAIN-2008-2009"})
+LEGACY_INDEX_REASON = "Predates the Parquet index; footer harvesting and columnar scans support crawls from 2013 onward."
 # Imported, not declared: net.py argues the string must exist exactly once or
 # callers drift into presenting themselves differently, and that applies here
 # most of all -- keyscan probes the very same vendor hosts the crawl does, so a
@@ -49,8 +53,11 @@ WAF_MARKERS = ("cloudflare", "cf-ray", "access denied", "attention required", "r
 # DuckDB exposes no bandwidth limit, and even `threads=1` -- its floor -- pulls
 # the index far faster than a shared home connection should sustain.  The only
 # remaining lever is duty-cycling: scan a few files, measure what actually
-# crossed the link, then sleep long enough to hold this average.
-TARGET_MBPS = 60.0
+# crossed the link, then sleep long enough to hold this average. A ceiling,
+# not a goal: the pacer only ever slows a scan down. 300 is ~40% of the shared
+# home line (~790 Mbps measured 2026-10-04); Common Crawl's limiter counts
+# requests, not bytes, so this protects the household, not the far side.
+TARGET_MBPS = 300.0
 # DuckDB 1.5 expresses ``http_timeout`` in seconds.  This used to be set to
 # 120000 as though the value were milliseconds, which turns a two-minute
 # ceiling into 33 hours.  Keep the retry window bounded as well: DuckDB's
@@ -85,11 +92,32 @@ BATCH_FILES = 8
 # no candidates at all -- the entire backlog arrived at once, vendor-ordered,
 # with every worker parked on one host's lock.
 CHECKPOINT_FILES = BATCH_FILES
+# Common Crawl's only published figure for small or ranged requests is "stay
+# below 10 per second" (blog, 2023-11-15), but their CloudFront rule is
+# stricter and windowed: a sustained 8/s drew a 403 after ~2,100 requests in
+# ~4.5 minutes (2026-10-04), which fits a 2,000-per-5-minute rate rule. Six
+# a second is 1,800 per five minutes.
+HARVEST_RPS = 6.0
+# A footer read is one suffix-range GET. CC-MAIN footers run 16-50KB, so this
+# almost always lands the whole footer at once; a larger one costs a second,
+# exact GET. DuckDB's own read would add a HEAD per file, doubling the count.
+HARVEST_TAIL_BYTES = 128 * 1024
+# Their 403 is a CloudFront rate-limit rule, not a retryable fault: the
+# expected answer is to stop for a while and come back slower. Every pause is
+# long, and the request rate halves after each one.
+# Footers fetched at once. One at a time is latency-bound at ~2.5 requests a
+# second; eight in flight lets the pacer, not latency, set the rate.
+HARVEST_FILES = 8
+HARVEST_BACKOFF_SECONDS = (60.0, 120.0, 300.0, 600.0, 1200.0)
+# Every column a scan branch reads (`url_surtkey` range, `url`, and whatever a
+# rule's `where_sql` / `token_sql` touch), so `footers.bytes` is what a planned
+# scan of that row group would actually fetch.
+FOOTER_COLUMNS = ("url_surtkey", "url", "url_host_name", "url_path", "url_query")
 # A log line names the CLI verb that produced it. The run row keeps recording
 # the method (`commoncrawl`, `board`) -- the vocabulary its `phase` column and
 # `cc_done` markers already speak -- and this maps one to the other, so a
 # reader greps the log for the command they typed.
-FUNCTION_OF_PHASE = {"commoncrawl": "crawl", "board": "scan", "validate": "validate"}
+FUNCTION_OF_PHASE = {"commoncrawl": "crawl", "board": "scan", "validate": "validate", "wayback": "wayback"}
 # How many successful requests one `network summary` line stands for. Low
 # enough that a long phase still reports as it goes, high enough that the
 # summaries never become the noise they were introduced to replace.
@@ -108,11 +136,20 @@ BOARD_FEEDS: tuple[dict[str, Any], ...] = (
 BOARD_RAW = "https://raw.githubusercontent.com/{repo}/dev/{path}"
 # "validate" discovers nothing.  It exists so a backlog of already-discovered
 # tokens can be drained on its own, without waiting behind a fresh crawl.
-METHODS = frozenset({"commoncrawl", "board", "validate"})
+METHODS = frozenset({"commoncrawl", "board", "validate", "wayback"})
+# Wayback captures worth asking for start here: the vendors' URL schemes
+# barely predate it, and the archive's index slows sharply further back.
+WAYBACK_FIRST_YEAR = 2013
 # Probes run concurrently with discovery.  `_request` holds a global semaphore
 # of four, and discovery issues one request at a time, so three validators
 # saturate the budget without ever starving the crawl of its slot.
 VALIDATION_WORKERS = 3
+# Probe `reason`s that mean "a vendor refused us", not "the board is unclear":
+# a 429 rate limit (`http_429`) or a bot-wall 403 (`blocked`). A token left
+# `inconclusive` for one of these is never stamped `checked_at`, so streaming
+# validation reprobes it instead of freezing it at `unknown`. See
+# `keyscan.probe._refusal_reason`, which assigns these.
+_REFUSAL_REASONS = frozenset({"http_429", "blocked"})
 LIST_KEYS = ("jobs", "offers", "data", "content", "jobPostings", "results", "result", "positions", "items")
 TOTAL_KEYS = ("total", "totalFound", "totalCount", "count")
 NAME_KEYS = ("name", "companyName", "organizationName")
@@ -169,9 +206,29 @@ CASE_INSENSITIVE_SOURCES = frozenset({
 })
 # `lever` and `fountain` are verified case-SENSITIVE -- see feed_identity.
 
+_AVATURE_LOCALE = re.compile(r"[a-z]{2}_[a-z]{2}")
+
+
+def _avature_token(token: str) -> str:
+    """Kept in step with feed_identity's `_avature_key`, which says why:
+    company and board fold case, the `xx_YY` locale does not, and
+    `company/careers` is the bare `company`."""
+    parts = token.lower().split("/")
+    if len(parts) == 3 and _AVATURE_LOCALE.fullmatch(parts[1]):
+        parts[1] = parts[1][:3] + parts[1][3:].upper()
+    if parts[1:] == ["careers"]:
+        parts = parts[:1]
+    return "/".join(parts)
+
 
 def _canonical_token(source: str, token: str) -> str:
     """Return keyscan's one stored spelling for a vendor endpoint."""
+    if source == "avature":
+        return _avature_token(token)
+    if source == "ashby":
+        # Board names hold spaces; URLs carry them as `%20`. Stored decoded,
+        # as feed_identity's `canonical_feed_key` does.
+        token = token.replace("%20", " ")
     return token.lower() if source in CASE_INSENSITIVE_SOURCES else token
 
 
@@ -372,8 +429,8 @@ def _merged_query(
     compiling branches whose answer is already known to be empty.  Returns
     None when no branch survives, meaning `urls` holds nothing for `rules`.
     """
-    stop = ", ".join(_sql_str(value) for value in sorted(STOP))
     branches = []
+    branched: dict[str, Rule] = {}
     for rule in rules:
         for low, high in map(surt_range, rule.domains):
             branch_urls = urls if urls_for_range is None else [
@@ -382,6 +439,7 @@ def _merged_query(
             if not branch_urls:
                 continue
             files = "[" + ", ".join(_sql_str(url) for url in branch_urls) + "]"
+            branched[rule.source] = rule
             branches.append(f"""
             SELECT {_sql_str(rule.source)} AS source, {token_sql(rule)} AS token, url
             FROM read_parquet({files})
@@ -391,12 +449,15 @@ def _merged_query(
     if not branches:
         return None
     branches = " UNION ALL ".join(branches)
+    # Per-vendor, because some rules relax or extend the shared token checks;
+    # `token_filter_sql` is the same check `extract` applies in Python.
+    valid = " ".join(
+        f"WHEN {_sql_str(rule.source)} THEN {token_filter_sql(rule)}" for rule in branched.values()
+    )
     return f"""
         SELECT source, token, count(*) AS url_count, min(url, 5) AS urls
         FROM ({branches})
-        WHERE source IS NOT NULL AND token <> ''
-          AND lower(split_part(token, '/', 1)) NOT IN ({stop})
-          AND regexp_matches(token, '{TOKEN_RE.pattern}')
+        WHERE source IS NOT NULL AND CASE source {valid} ELSE false END
         GROUP BY source, token
     """
 
@@ -510,6 +571,15 @@ def _sleep(seconds: float, should_cancel: Callable[[], None] | None) -> None:
         time.sleep(min(0.5, remaining))
 
 
+def _in_scope(paths: Iterable[str]) -> list[str]:
+    """The manifest entries a scan reads -- and so the ones a harvest must cover."""
+    return [
+        path for path in paths
+        if path.endswith(".parquet")
+        and ("/subset=warc/" in path or "/subset=crawldiagnostics/" in path)
+    ]
+
+
 def _pace_seconds(sent: int | None, elapsed: float, target_bps: float) -> float:
     """How long to wait after a batch to hold `target_bps` on average.
 
@@ -561,7 +631,7 @@ def cc_scan_sources(
             # A summary every `checkpoint_files` files is the only visibility
             # into a merged scan from the outside: it runs as one blocking
             # DuckDB call handed to a worker thread, so nothing else surfaces
-            # until the whole thing returns -- which, at 60 Mbps over 600
+            # until the whole thing returns -- which, at the bandwidth cap over 600
             # files, can be well over an hour of silence otherwise.
             files_done = 0
             checkpoint_at = checkpoint_files
@@ -699,6 +769,7 @@ class Keyscan:
         target_mbps: float = TARGET_MBPS,
         checkpoint_files: int = CHECKPOINT_FILES,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        token_dsn: str | None = None,
     ) -> None:
         self.workdir = Path(workdir) if workdir else Path(__file__).with_name("work")
         self.db_path = self.workdir / "keyscan.sqlite"
@@ -715,10 +786,30 @@ class Keyscan:
         # this to show a deliberately small progress stream on stderr while
         # leaving stdout available for the final machine-readable result.
         self.progress = progress
+        # xjobscore's Postgres. When set, every candidate is also added to its
+        # `token` table as unvalidated the moment it is recorded here -- see
+        # `_flush_tokens`. Explicit rather than read from the environment so a
+        # test run can never write to a real database by accident.
+        self.token_dsn = token_dsn
+        self._token_outbox: list[tuple[str, str, str]] = []
+        self._token_lock = asyncio.Lock()
+        self._token_pool: Any = None
+        self._token_tasks: set[asyncio.Task[None]] = set()
         self._client: httpx.AsyncClient | None = None
         self._semaphore = asyncio.Semaphore(4)
         self._host_locks: dict[str, asyncio.Lock] = {}
         self._host_last: dict[str, float] = {}
+        # Adaptive politeness per host, reused from the ingest engine. A 429
+        # opens a cooldown and slows this one host's spacing; every other host
+        # keeps running. This is what replaces the old run-wide abort -- see
+        # `_note_refusal`. Keyed by host, so a per-tenant-host vendor (Workday)
+        # cools one tenant while its siblings proceed, and a shared-host vendor
+        # (greenhouse, lever) cools the one host they all share.
+        self._host_paces: dict[str, _HostPace] = {}
+        # Hosts that returned a WAF bot-wall (not a 429). Unlike a rate limit,
+        # that wall does not lift on its own, so we stop probing the host for
+        # the rest of the run rather than pacing into it forever.
+        self._blocked_hosts: set[str] = set()
         self._controls: dict[str, str | None] = {}
         self._run_id: str | None = None
         self._phase_started: tuple[str, float] | None = None
@@ -735,9 +826,11 @@ class Keyscan:
         self._validation_queue: asyncio.Queue[tuple[str, str]] | None = None
         self._validating: set[tuple[str, str]] = set()
         self._validated_count = 0
-        # Set once a vendor refuses us; stops validation for the rest of
-        # the run. Discovery is unaffected -- Common Crawl is not the
-        # party doing the refusing.
+        # The first refusal seen this run, kept for the run row and the page
+        # purely as a diagnostic. It no longer halts anything: a 429 paces its
+        # host (``_host_paces``) and a bot-wall skips its host
+        # (``_blocked_hosts``), so one touchy vendor can no longer stop the
+        # whole sweep.
         self._blocked: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
@@ -889,6 +982,14 @@ class Keyscan:
                     harvested_at TEXT    NOT NULL,
                     PRIMARY KEY (crawl, part, rg)
                 ) WITHOUT ROWID;
+                -- One row per crawl whose harvest finished: every in-scope part of its
+                -- manifest has rows in `footers`. A part count alone cannot say this, since
+                -- the number of in-scope parts differs between crawls.
+                CREATE TABLE IF NOT EXISTS footer_crawls (
+                    crawl        TEXT    PRIMARY KEY,
+                    parts        INTEGER NOT NULL,      -- in-scope manifest entries, all harvested
+                    completed_at TEXT    NOT NULL
+                ) WITHOUT ROWID;
                 -- One row per (vendor, crawl) already scanned. A published
                 -- snapshot never changes and extraction is deterministic, so
                 -- the pair recorded here can only reproduce tokens already in
@@ -904,6 +1005,10 @@ class Keyscan:
                     ats        TEXT NOT NULL,
                     crawl      TEXT NOT NULL,
                     scanned_at TEXT NOT NULL,
+                    -- `rule_fingerprint` of the vendor's rule when it was
+                    -- scanned. NULL (a row from before fingerprints) never
+                    -- matches, so such a pair is scanned once more.
+                    rule_hash  TEXT,
                     PRIMARY KEY (ats, crawl)
                 ) WITHOUT ROWID;
                 """
@@ -950,6 +1055,8 @@ class Keyscan:
                 END;
                 """
             )
+            if "rule_hash" not in {row["name"] for row in con.execute("PRAGMA table_info(scanned)")}:
+                con.execute("ALTER TABLE scanned ADD COLUMN rule_hash TEXT")
             run_columns = {row["name"] for row in con.execute("PRAGMA table_info(runs)")}
             if "blocked_json" not in run_columns:
                 con.execute("ALTER TABLE runs ADD COLUMN blocked_json TEXT")
@@ -1049,7 +1156,8 @@ class Keyscan:
         self, methods: Iterable[str], crawls: int | None = None,
         sources: Iterable[str] | None = None, archives: bool = False, *,
         date_from: str | None = None, date_to: str | None = None,
-        crawl_ids: Iterable[str] | None = None,
+        crawl_ids: Iterable[str] | None = None, rescan: bool = False,
+        years: Iterable[int] | None = None,
     ) -> str:
         selected = tuple(dict.fromkeys(methods))
         unknown = set(selected) - METHODS
@@ -1078,14 +1186,33 @@ class Keyscan:
         if unknown_sources:
             raise KeyscanError(f"unknown source(s): {', '.join(sorted(unknown_sources))}")
         self.initialize()
-        run_id = uuid.uuid4().hex
-        artifact = self.workdir / "runs" / run_id
-        artifact.mkdir(parents=True)
+        # The id is the UTC start second, so ids sort by time and say when a
+        # run began. Only one run is active at a time, but one can finish
+        # within its first second (every pair already scanned) and the next
+        # start straight after: claiming the artifact directory is the
+        # uniqueness check, and a taken second waits for the next one.
+        while True:
+            run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            artifact = self.workdir / "runs" / run_id
+            try:
+                artifact.mkdir(parents=True)
+                break
+            except FileExistsError:
+                time.sleep(1 - datetime.now(timezone.utc).microsecond / 1_000_000)
         checkpoint = {"board_index": 0, "cc_done": []}
         config: dict[str, Any] = {
             "sources": selected_sources,
             "archives": bool(archives),
         }
+        if rescan:
+            config["rescan"] = True
+        if "wayback" in selected:
+            wayback_years = sorted({int(year) for year in years}) if years else list(
+                range(WAYBACK_FIRST_YEAR, datetime.now(timezone.utc).year + 1)
+            )
+            if not wayback_years or wayback_years[0] < 1996:
+                raise KeyscanError("wayback years must be 1996 or later")
+            config["wayback_years"] = wayback_years
         if selected_crawl_ids is not None:
             config["crawl_ids"] = list(selected_crawl_ids)
         elif selected_range is not None:
@@ -1115,15 +1242,19 @@ class Keyscan:
         self, methods: Iterable[str], crawls: int | None = None,
         sources: Iterable[str] | None = None, archives: bool = False, *,
         date_from: str | None = None, date_to: str | None = None,
-        crawl_ids: Iterable[str] | None = None,
+        crawl_ids: Iterable[str] | None = None, rescan: bool = False,
+        years: Iterable[int] | None = None,
     ) -> str:
         return await self._run(self._new_run(
-            methods, crawls, sources, archives, date_from=date_from, date_to=date_to, crawl_ids=crawl_ids,
+            methods, crawls, sources, archives, date_from=date_from, date_to=date_to,
+            crawl_ids=crawl_ids, rescan=rescan, years=years,
         ))
 
     async def list_crawls(self) -> dict[str, Any]:
-        """Real Common Crawl snapshots, newest first -- or the last successful
-        listing if the collection API will not answer right now.
+        """Supported Parquet snapshots, newest first -- or the last successful
+        listing if the collection API will not answer right now. The UI and
+        CLI share this list; legacy ARC collections are excluded even when
+        reading a cache saved before that filtering was introduced.
 
         Each entry's ``from``/``to`` is the collection API's own coverage
         window when published, otherwise derived from the ID's ISO week --
@@ -1146,6 +1277,8 @@ class Keyscan:
                 raise KeyscanError(f"Common Crawl collection list returned HTTP {response.status_code}")
             crawls: list[dict[str, str]] = []
             for row in response.json():
+                if row.get("id") in LEGACY_CRAWLS:
+                    continue
                 window = _crawl_window(row)
                 if window is None:
                     continue
@@ -1177,7 +1310,7 @@ class Keyscan:
             raise KeyscanError(f"unable to retrieve Common Crawl collection list: {error}")
         cached = [
             {"id": row["id"], "name": row["name"], "from": row["from_date"], "to": row["to_date"]}
-            for row in rows
+            for row in rows if row["id"] not in LEGACY_CRAWLS
         ]
         return {"crawls": cached, "source": "cache", "fetched_at": rows[0]["fetched_at"], "error": error}
 
@@ -1224,15 +1357,21 @@ class Keyscan:
                 timeout=30, follow_redirects=True, headers={"User-Agent": USER_AGENT}, transport=self.transport
             ) as client:
                 self._client = client
+                # Probing is opt-in: it is the slow half of a run and the half
+                # that hits vendor hosts. Without "validate", discovery records
+                # tokens as `unknown` and a later `keyscan validate` sweeps them.
+                validating = "validate" in run["methods"]
                 queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-                self._validation_queue = queue
+                self._validation_queue = queue if validating else None
                 self._validating.clear()
                 self._controls.clear()
                 self._validated_count = 0
                 self._blocked = None
+                self._blocked_hosts.clear()
+                self._host_paces.clear()
                 workers = [
                     asyncio.create_task(self._validation_worker(run))
-                    for _ in range(VALIDATION_WORKERS)
+                    for _ in range(VALIDATION_WORKERS if validating else 0)
                 ]
                 try:
                     for method in run["methods"]:
@@ -1241,14 +1380,17 @@ class Keyscan:
                             await self._commoncrawl(run)
                         elif method == "board":
                             await self._boards(run)
+                        elif method == "wayback":
+                            await self._wayback(run)
                         # "validate" discovers nothing; the sweep below is it.
-                    await queue.join()
-                    self._check_cancelled()
-                    # Streaming leaves nothing for the sweep in a clean run; it
-                    # still drains a pre-existing backlog and anything a probe
-                    # dropped, through the same concurrent workers.
-                    await self._validate(run)
-                    await queue.join()
+                    if validating:
+                        await queue.join()
+                        self._check_cancelled()
+                        # Streaming leaves nothing for the sweep in a clean run; it
+                        # still drains a pre-existing backlog and anything a probe
+                        # dropped, through the same concurrent workers.
+                        await self._validate(run)
+                        await queue.join()
                 finally:
                     # Probes must not outlive the client they borrow, so the
                     # workers are torn down before anything else unwinds.
@@ -1256,6 +1398,10 @@ class Keyscan:
                     for worker in workers:
                         worker.cancel()
                     await asyncio.gather(*workers, return_exceptions=True)
+                    # Board discovery and the post-scan pass record through
+                    # `_record_candidate` without a checkpoint flush, and a
+                    # cancelled run still owes Postgres what it found.
+                    await self._close_tokens()
                 self._check_cancelled()
             self._finish("completed")
         except asyncio.CancelledError:
@@ -1301,19 +1447,30 @@ class Keyscan:
         with self._connect() as con:
             con.execute("UPDATE runs SET checkpoint_json = ? WHERE id = ?", (_json(checkpoint), self._run_id))
 
-    def _mark_scanned(self, source: str, crawl: str) -> None:
-        """Record that `source`'s scan of `crawl` ran to completion.
+    def _mark_scanned(self, rule: Rule, crawl: str) -> None:
+        """Record that `rule`'s scan of `crawl` ran to completion.
 
         Unlike the run checkpoint's `cc_done` marker -- which dies with its
         run -- this survives into every future run, and is what lets one skip
-        a (vendor, crawl) pair scanned weeks ago. OR IGNORE, so a resumed run
-        re-completing a pair keeps the original timestamp.
+        a (vendor, crawl) pair scanned weeks ago. Called only once the pair's
+        candidates are recorded, never before. REPLACE, so a deliberate
+        rescan (or one forced by a rule change) records the rule it ran with.
         """
         with self._connect() as con:
             con.execute(
-                "INSERT OR IGNORE INTO scanned(ats, crawl, scanned_at) VALUES (?, ?, ?)",
-                (source, crawl, utc_now()),
+                "INSERT OR REPLACE INTO scanned(ats, crawl, scanned_at, rule_hash) VALUES (?, ?, ?, ?)",
+                (rule.source, crawl, utc_now(), rule_fingerprint(rule)),
             )
+
+    def _scanned_pairs(self, rules: list[Rule]) -> set[str]:
+        """`crawl/source` markers already scanned with each rule as it is now."""
+        current = {rule.source: rule_fingerprint(rule) for rule in rules}
+        with self._connect() as con:
+            rows = con.execute("SELECT ats, crawl, rule_hash FROM scanned").fetchall()
+        return {
+            f"{row['crawl']}/{row['ats']}" for row in rows
+            if row["rule_hash"] is not None and current.get(row["ats"]) == row["rule_hash"]
+        }
 
     def _phase(self, phase: str) -> None:
         assert self._run_id
@@ -1436,6 +1593,164 @@ class Keyscan:
         )
         return wanted
 
+    def harvest_footers(
+        self, crawl_ids: list[str], *, target_rps: float = HARVEST_RPS,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Fill `footers` for `crawl_ids`: one footer read per in-scope file, ever.
+
+        What `_harvested_parts` plans from. Resumable at chunk granularity --
+        each chunk's row groups commit together, and a part already present is
+        skipped -- so an interrupted harvest loses at most the chunk in flight,
+        and re-running over finished crawls costs one manifest fetch each.
+
+        Each footer is one suffix-range GET, parsed locally by DuckDB from a
+        stub file (``PAR1`` + footer): the metadata never refers to the column
+        data it describes, so the stub reads exactly as the remote file would.
+
+        Paced on requests, not bytes: a footer moves almost nothing, so a
+        bandwidth ceiling never engages, and request rate is what Common
+        Crawl's limiter counts.
+
+        Known pre-2013 crawls are reported as unsupported without a request.
+        Other missing manifests are reported separately. A refusal that outlasts every backoff stops the
+        whole harvest rather than moving on, since the next crawl is the same
+        host and would only be refused too.
+        """
+        import struct
+        import tempfile
+        from concurrent.futures import ThreadPoolExecutor
+
+        self.initialize()
+        emit = on_event or (lambda event: None)
+        columns = ", ".join(_sql_str(column) for column in FOOTER_COLUMNS)
+        summary: dict[str, Any] = {"harvested": {}, "complete": [], "no_index": [], "skipped": {}}
+        rate = target_rps
+        clean = 0
+
+        def back_off(attempt: int, crawl: str, error: str) -> None:
+            nonlocal rate, clean
+            if attempt > len(HARVEST_BACKOFF_SECONDS):
+                raise KeyscanError(f"Common Crawl still refusing after {attempt - 1} backoffs ({crawl}): {error}")
+            pause = HARVEST_BACKOFF_SECONDS[attempt - 1]
+            rate, clean = max(1.0, rate / 2), 0
+            emit({"event": "backoff", "crawl": crawl, "attempt": attempt, "pause_s": pause, "rps": rate, "error": error[:200]})
+            time.sleep(pause)
+
+        def fetch_footer(client: httpx.Client, part: str) -> tuple[bytes | None, int, str | None]:
+            """(footer bytes ending in ``PAR1``, requests spent, error)."""
+            url = CC_CDN + part
+            try:
+                response = client.get(url, headers={"Range": f"bytes=-{HARVEST_TAIL_BYTES}"})
+                if response.status_code not in (200, 206):
+                    return None, 1, f"HTTP {response.status_code}"
+                tail = response.content
+                if tail[-4:] != b"PAR1":
+                    return None, 1, "not a parquet tail"
+                needed = struct.unpack("<I", tail[-8:-4])[0] + 8
+                if needed <= len(tail):
+                    return tail[-needed:], 1, None
+                response = client.get(url, headers={"Range": f"bytes=-{needed}"})
+                if response.status_code not in (200, 206):
+                    return None, 2, f"HTTP {response.status_code}"
+                return response.content[-needed:], 2, None
+            except httpx.HTTPError as exc:
+                return None, 1, f"{type(exc).__name__}: {exc}"
+
+        local = duckdb.connect()
+        with tempfile.TemporaryDirectory(prefix="keyscan-footers-") as scratch, \
+                httpx.Client(timeout=30, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client, \
+                ThreadPoolExecutor(max_workers=HARVEST_FILES) as pool:
+            try:
+                for crawl in crawl_ids:
+                    if crawl in LEGACY_CRAWLS:
+                        # Keep no_index for existing JSON consumers, and supply
+                        # the explanation in both stdout and the live stream.
+                        summary["no_index"].append(crawl)
+                        summary["skipped"][crawl] = LEGACY_INDEX_REASON
+                        emit({"event": "unsupported_index", "crawl": crawl, "reason": LEGACY_INDEX_REASON})
+                        continue
+                    attempt = 0
+                    while True:
+                        try:
+                            response = client.get(CC_PATHS.format(crawl=crawl))
+                            status, error = response.status_code, f"HTTP {response.status_code}"
+                        except httpx.HTTPError as exc:
+                            status, error = None, str(exc)
+                        if status in (200, 404):
+                            break
+                        attempt += 1
+                        back_off(attempt, crawl, f"manifest: {error}")
+                    if status == 404:
+                        summary["no_index"].append(crawl)
+                        reason = "Index manifest returned HTTP 404; this crawl was not checked for footers."
+                        summary["skipped"][crawl] = reason
+                        emit({"event": "no_index", "crawl": crawl, "reason": reason})
+                        continue
+                    in_scope = _in_scope(gzip.decompress(response.content).decode().splitlines())
+                    with self._connect() as db:
+                        done = {row["part"] for row in db.execute(
+                            "SELECT DISTINCT part FROM footers WHERE crawl = ?", (crawl,)
+                        )}
+                    todo = [part for part in in_scope if part not in done]
+                    emit({"event": "crawl", "crawl": crawl, "files": len(in_scope), "todo": len(todo)})
+                    done_files = 0
+                    for chunk in _chunks(todo, HARVEST_FILES):
+                        attempt = 0
+                        while True:
+                            started = time.monotonic()
+                            results = list(pool.map(lambda part: fetch_footer(client, part), chunk))
+                            requests = sum(spent for _, spent, _ in results)
+                            errors = [error for _, _, error in results if error]
+                            if not errors:
+                                break
+                            attempt += 1
+                            back_off(attempt, crawl, errors[0])
+                        stubs = []
+                        for index, (footer, _, _) in enumerate(results):
+                            stub = Path(scratch) / f"{index}.parquet"
+                            stub.write_bytes(b"PAR1" + footer)
+                            stubs.append(str(stub))
+                        rows = local.execute(f"""
+                            SELECT file_name, row_group_id,
+                                   min(stats_min_value) FILTER (WHERE path_in_schema = 'url_surtkey'),
+                                   max(stats_max_value) FILTER (WHERE path_in_schema = 'url_surtkey'),
+                                   coalesce(sum(total_compressed_size)
+                                            FILTER (WHERE path_in_schema IN ({columns})), 0)
+                            FROM parquet_metadata([{", ".join(_sql_str(stub) for stub in stubs)}])
+                            GROUP BY file_name, row_group_id
+                        """).fetchall()
+                        part_for = dict(zip(stubs, chunk))
+                        now = utc_now()
+                        with self._connect() as db:
+                            # A row group with no surtkey statistics cannot be
+                            # ruled out, so it spans everything and every
+                            # vendor's plan keeps it.
+                            db.executemany(
+                                "INSERT OR REPLACE INTO footers(crawl, part, rg, lo, hi, bytes, harvested_at)"
+                                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                [(crawl, part_for[name], rg, lo if lo is not None else "",
+                                  hi if hi is not None else "\U0010ffff", int(size), now)
+                                 for name, rg, lo, hi, size in rows],
+                            )
+                        done_files += len(chunk)
+                        clean += len(chunk)
+                        if clean >= 100 and rate < target_rps:
+                            rate, clean = min(target_rps, rate + 1.0), 0
+                        if done_files % 100 < HARVEST_FILES or done_files == len(todo):
+                            emit({"event": "progress", "crawl": crawl, "done": done_files, "todo": len(todo), "rps": rate})
+                        time.sleep(max(0.0, requests / rate - (time.monotonic() - started)))
+                    with self._connect() as db:
+                        db.execute(
+                            "INSERT OR REPLACE INTO footer_crawls(crawl, parts, completed_at) VALUES (?, ?, ?)",
+                            (crawl, len(in_scope), utc_now()),
+                        )
+                    summary["harvested"][crawl] = len(todo)
+                    summary["complete"].append(crawl)
+            finally:
+                local.close()
+        return summary
+
     def _log(self, level: str, function: str, message: str, **detail: Any) -> None:
         """Append one line to the run's log.
 
@@ -1490,13 +1805,17 @@ class Keyscan:
             return entries, handle.tell()
 
     def _counts(self, run_id: str) -> dict[str, int]:
+        """`found` is every token this run sighted, re-sightings included;
+        `added` is the subset it inserted, tallied by `_record_candidate`."""
         with self._connect() as con:
             rows = con.execute(
                 "SELECT status, count(*) AS n FROM tenants WHERE run_id = ? GROUP BY status",
                 (run_id,)
             ).fetchall()
+            checkpoint = con.execute("SELECT checkpoint_json FROM runs WHERE id = ?", (run_id,)).fetchone()
         counts = {row["status"]: row["n"] for row in rows}
-        return {"found": sum(counts.values()), **counts}
+        added = json.loads(checkpoint["checkpoint_json"] or "{}").get("added", 0) if checkpoint else 0
+        return {"found": sum(counts.values()), "added": added, **counts}
 
     def _check_cancelled(self) -> None:
         if self._cancelled:
@@ -1532,17 +1851,36 @@ class Keyscan:
         # about to issue a request.
         async with lock, self._semaphore:
             queue_ms = round(1000 * (time.monotonic() - started))
+            # A host behind a WAF bot-wall stays walled; do not keep sending into
+            # it. Reported as `blocked` so the caller treats it as inconclusive
+            # (the token stays unknown and a later run reprobes it), while every
+            # other host carries on.
+            if host in self._blocked_hosts:
+                return None
+            # Honor any configured minimum spacing first (0 by default), then
+            # hand the host to its adaptive pacer. The pacer is a no-op until a
+            # 429 opens a cooldown; from then on `reserve` waits out the cooldown
+            # and holds the host just under its sustained rate.
             last = self._host_last.get(host, 0.0)
             wait = self.request_delay - (time.monotonic() - last)
             if wait > 0:
-                throttle_delay_ms = round(1000 * wait)
+                throttle_delay_ms += round(1000 * wait)
                 self._log(
                     "info", self._function, "request delay", event="delay",
-                    cause="configured_host_delay", host=host, delay_ms=throttle_delay_ms,
+                    cause="configured_host_delay", host=host, delay_ms=round(1000 * wait),
                 )
                 await asyncio.sleep(wait)
             self._host_last[host] = time.monotonic()
+            pace = self._host_paces.setdefault(host, _HostPace())
             for attempt in range(3):
+                try:
+                    throttle_delay_ms += round(1000 * await workable_policy.before_request(url, validation=True))
+                except workable_policy.CoolingDown as exc:
+                    response = workable_policy.deferred_response(url, exc)
+                    outcome = "http_error"
+                    retry_causes.append("workable_cooldown")
+                    break
+                throttle_delay_ms += round(1000 * await pace.reserve())
                 try:
                     response = await self._client.request(method, url, json=json_body, headers=headers)
                 except asyncio.CancelledError:
@@ -1563,16 +1901,31 @@ class Keyscan:
                     outcome = "transport_error"
                     retry_causes.append("transport_error")
                 else:
-                    if self._note_refusal(host, url, response):
-                        # Retrying a refusal only deepens it, and every further
-                        # probe this run is now pointless.
+                    await workable_policy.note_response(response)
+                    refusal = self._note_refusal(host, url, response)
+                    if refusal == "rate_limited":
+                        # Open this host's cooldown and stop -- retrying now only
+                        # walks back into the same wall. The cooldown is waited
+                        # out by the *next* request to this host (``reserve``),
+                        # which spaces the host back under its limit. No global
+                        # stop: every other host keeps running.
+                        pace.throttled(_retry_after_seconds(response.headers.get("retry-after")))
+                        outcome = "http_error"
+                        retry_causes.append(f"http_{response.status_code}")
+                        break
+                    elif refusal == "blocked":
+                        # A bot-wall, not a rate limit: retrying only deepens it,
+                        # so stop sending to this one host for the run.
+                        self._blocked_hosts.add(host)
                         outcome = "blocked"
                         break
-                    if response.status_code not in {429, 500, 502, 503, 504}:
+                    elif response.status_code not in {429, 500, 502, 503, 504}:
+                        pace.succeeded()
                         outcome = "ok" if response.status_code < 400 else "http_error"
                         break
-                    outcome = "http_error"
-                    retry_causes.append(f"http_{response.status_code}")
+                    else:
+                        outcome = "http_error"
+                        retry_causes.append(f"http_{response.status_code}")
                 if attempt < 2:
                     backoff = 0 if self.transport else 2**attempt
                     retry_delay_ms += round(1000 * backoff)
@@ -1602,13 +1955,18 @@ class Keyscan:
             self._log("warning", self._function, "request failed", **details)
         return response
 
-    def _note_refusal(self, host: str, url: str, response: httpx.Response) -> bool:
-        """Record the first refusal of the run and return True if this is one.
+    def _note_refusal(self, host: str, url: str, response: httpx.Response) -> str | None:
+        """Classify a refusal: ``"rate_limited"``, ``"blocked"``, or ``None``.
 
-        A 429 (or any `Retry-After`) is unambiguous. A bare 403 is not: on
-        vendors that give every tenant its own host, a single company's WAF
-        says nothing about the vendor, so only a 403 that names a bot wall
-        counts -- the same distinction `keyscan verify` draws.
+        A 429 (or any `Retry-After`) is a rate limit: the caller cools that one
+        host and keeps going. A bare 403 is not: on vendors that give every
+        tenant its own host, a single company's WAF says nothing about the
+        vendor, so only a 403 that names a bot wall counts as ``"blocked"`` --
+        the same distinction `keyscan verify` draws.
+
+        The first refusal of either kind is recorded on the run row as a
+        diagnostic, but recording it no longer stops anything -- one host's
+        refusal leaves every other host running.
         """
         status = response.status_code
         retry_after = response.headers.get("retry-after")
@@ -1619,18 +1977,18 @@ class Keyscan:
         ):
             reason = "blocked"
         else:
-            return False
+            return None
         if self._blocked is None:
             self._blocked = {
                 "reason": reason, "host": host, "url": url,
                 "status_code": status, "retry_after": retry_after, "at": utc_now(),
             }
             self._log(
-                "warning", "validate", "vendor refused us; validation stops for this run",
+                "warning", "validate", "vendor refused us; pacing this host",
                 event="blocked", **self._blocked,
             )
             self._persist_blocked()
-        return True
+        return reason
 
     def _persist_blocked(self) -> None:
         if not self._run_id:
@@ -1658,12 +2016,12 @@ class Keyscan:
             # promotion, so it is the durable rediscovery key.
             existing = (
                 con.execute(
-                    "SELECT key, urls, details FROM tenants WHERE ats = ? AND canonical_url = ?",
+                    "SELECT key, urls, details, discovered_at FROM tenants WHERE ats = ? AND canonical_url = ?",
                     (source, canonical),
                 ).fetchone()
                 if source == "comeet" else
                 con.execute(
-                    "SELECT key, urls, details FROM tenants WHERE ats = ? AND key = ?",
+                    "SELECT key, urls, details, discovered_at FROM tenants WHERE ats = ? AND key = ?",
                     (source, token),
                 ).fetchone()
             )
@@ -1673,6 +2031,15 @@ class Keyscan:
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (source, token, canonical, _json(urls[:5]), method, self._run_id, _json(details), now),
                 )
+                # Counted in the insert's own transaction, so `added` stays
+                # exact across a crash and a resume. Timestamps cannot do it:
+                # they are whole seconds, and a re-sighting keeps its own.
+                if self._run_id:
+                    con.execute(
+                        "UPDATE runs SET checkpoint_json = json_set(checkpoint_json, '$.added',"
+                        " coalesce(json_extract(checkpoint_json, '$.added'), 0) + 1) WHERE id = ?",
+                        (self._run_id,),
+                    )
                 key_token = token
             else:
                 key_token = existing["key"]
@@ -1685,6 +2052,13 @@ class Keyscan:
                     (_json(merged_urls), method, self._run_id, _json(merged_details), source, key_token),
                 )
         key = (source, key_token)
+        if self.token_dsn:
+            # Re-sightings too, not just first sightings: the insert ignores a
+            # token Postgres already has, and this is what carries a token that
+            # predates `token_dsn` across on its next sighting.
+            self._token_outbox.append(
+                (source, key_token, existing["discovered_at"] if existing is not None else now)
+            )
         # One line the first time a token is seen, and only then. A crawl
         # re-records the same token at every checkpoint that touches it, so
         # logging re-sightings too put 30,589 lines in one run against 1,757
@@ -1697,6 +2071,14 @@ class Keyscan:
             )
         if self._validation_queue is not None:
             self._validation_queue.put_nowait(key)
+        if rule.tail_default and "/" in token:
+            # A company seen on any of its boards also gets its default board
+            # as a candidate: Avature's `/careers` is often the main board, and
+            # nothing guarantees a crawl saw a link into it. The old rule
+            # probed exactly this for every company, so it must not be lost.
+            self._record_candidate(
+                source, token.split("/", 1)[0], method, [], details={"inferred_from": token},
+            )
         return key
 
     def _set_validation(
@@ -1738,6 +2120,82 @@ class Keyscan:
     # ------------------------------------------------------------------
     # Secondary GitHub-hosted job boards
     # ------------------------------------------------------------------
+
+    async def _wayback(self, run: dict[str, Any]) -> None:
+        """Discover tokens from the Wayback Machine, one (vendor, year) at a time.
+
+        A pair is the unit of work, mirroring a crawl's (vendor, snapshot):
+        recorded in the checkpoint's `wayback_done` and in `scanned` as crawl
+        `wayback:<year>` -- only once every page of it has been read and its
+        tokens recorded, so a pair cut short is simply read again. A pair the
+        archive keeps refusing is listed and skipped; the run fails at the
+        end, after every other pair has had its turn, as a crawl does.
+        """
+        from .wayback import WaybackClient, WaybackRefused
+
+        self._phase("wayback")
+        selected_sources = self._selected_sources(run)
+        rules = [
+            rule for rule in RULES
+            if rule.domains and (selected_sources is None or rule.source in selected_sources)
+        ]
+        years = [int(year) for year in run["config"].get("wayback_years", [])]
+        done = set(run["checkpoint"].get("wayback_done", []))
+        previously = set() if run["config"].get("rescan") else self._scanned_pairs(rules)
+        pairs = [(year, rule) for year in sorted(years, reverse=True) for rule in rules]
+        self._log(
+            "info", "wayback", "wayback scan", event="wayback_plan",
+            pairs=len(pairs), years=years, sources=[rule.source for rule in rules],
+        )
+        client = WaybackClient(
+            user_agent=USER_AGENT, transport=self.transport,
+            on_event=lambda message, detail: self._log("warning", "wayback", message, **detail),
+        )
+        failed: list[str] = []
+        try:
+            for index, (year, rule) in enumerate(pairs, start=1):
+                self._check_cancelled()
+                marker = f"wayback:{year}/{rule.source}"
+                if marker in done:
+                    continue
+                if marker in previously:
+                    done.add(marker)
+                    self._checkpoint(wayback_done=sorted(done))
+                    self._log("info", "wayback", "already scanned", year=year, source=rule.source)
+                    continue
+                started, requests = time.monotonic(), client.requests
+                found: dict[str, Any] = {}
+                try:
+                    for domain in rule.domains:
+                        for token, entry in (await client.scan(rule, domain, year)).items():
+                            merged = found.setdefault(token, {"count": 0, "urls": []})
+                            merged["count"] += entry.count
+                            merged["urls"] = list(dict.fromkeys([*merged["urls"], *entry.urls]))[:5]
+                except WaybackRefused as exc:
+                    self._log(
+                        "warning", "wayback", "wayback pair failed",
+                        year=year, source=rule.source, error=str(exc),
+                    )
+                    failed.append(marker)
+                    continue
+                for token, entry in found.items():
+                    self._record_candidate(
+                        rule.source, token, "wayback", entry["urls"],
+                        details={"wayback_year": year, "url_count": entry["count"]},
+                    )
+                done.add(marker)
+                self._checkpoint(wayback_done=sorted(done))
+                self._mark_scanned(rule, f"wayback:{year}")
+                self._log(
+                    "info", "wayback", "wayback pair scanned", event="wayback_pair",
+                    year=year, source=rule.source, candidates=len(found), pair=index, pairs=len(pairs),
+                    requests=client.requests - requests,
+                    elapsed_ms=round(1000 * (time.monotonic() - started)),
+                )
+        finally:
+            await client.close()
+        if failed:
+            raise KeyscanError(f"{len(failed)} Wayback pair(s) failed: " + ", ".join(failed))
 
     async def _boards(self, run: dict[str, Any]) -> None:
         self._phase("board")
@@ -1798,16 +2256,34 @@ class Keyscan:
                     f"{run['config']['date_from']} through {run['config']['date_to']}"
                 )
             raise KeyscanError("no Common Crawl snapshots available")
+        for crawl in crawls:
+            if crawl in LEGACY_CRAWLS:
+                self._log(
+                    "info", "crawl", "unsupported crawl skipped", event="unsupported_index",
+                    crawl=crawl, reason=LEGACY_INDEX_REASON,
+                )
+        crawls = [crawl for crawl in crawls if crawl not in LEGACY_CRAWLS]
+        if not crawls:
+            raise KeyscanError("No selected crawl has a supported Parquet index. " + LEGACY_INDEX_REASON)
         done = set(run["checkpoint"].get("cc_done", []))
         selected_sources = self._selected_sources(run)
         rules = [rule for rule in RULES if selected_sources is None or rule.source in selected_sources]
+        # Pairs finished by any earlier run, with the vendor's rule unchanged
+        # since. `rescan` ignores them; the checkpoint's own `cc_done` still
+        # applies either way, so resuming a rescan does not start it over.
+        previously = set() if run["config"].get("rescan") else self._scanned_pairs(rules)
         failed_crawls: list[str] = []
         for crawl_index, crawl in enumerate(crawls, start=1):
             self._check_cancelled()
             pending: list[Rule] = []
+            skipped: list[str] = []
             for rule in rules:
                 marker = f"{crawl}/{rule.source}"
                 if marker in done:
+                    continue
+                if marker in previously:
+                    skipped.append(rule.source)
+                    done.add(marker)
                     continue
                 if not rule.domains:
                     self._log("info", "crawl", "vendor has no bounded crawl domain", crawl=crawl, source=rule.source)
@@ -1815,6 +2291,9 @@ class Keyscan:
                     self._checkpoint(cc_done=sorted(done))
                     continue
                 pending.append(rule)
+            if skipped:
+                self._log("info", "crawl", "already scanned", crawl=crawl, sources=skipped)
+                self._checkpoint(cc_done=sorted(done))
             if not pending:
                 continue
             manifest = await self._request("GET", CC_PATHS.format(crawl=crawl))
@@ -1828,11 +2307,7 @@ class Keyscan:
                 self._log("warning", "crawl", "invalid crawl manifest", crawl=crawl, error=str(exc))
                 failed_crawls.append(crawl)
                 continue
-            in_scope = [
-                path for path in paths
-                if path.endswith(".parquet")
-                and ("/subset=warc/" in path or "/subset=crawldiagnostics/" in path)
-            ]
+            in_scope = _in_scope(paths)
             # A harvested crawl narrows this to the handful of files whose key
             # ranges can hold one of these vendors; an unharvested one returns
             # None and every file is read, exactly as before.
@@ -1861,6 +2336,8 @@ class Keyscan:
                 for rule in pending:
                     done.add(f"{crawl}/{rule.source}")
                 self._checkpoint(cc_done=sorted(done))
+                for rule in pending:
+                    self._mark_scanned(rule, crawl)
                 continue
             self._log(
                 "info", "crawl", "crawl started", event="crawl_start",
@@ -1906,7 +2383,7 @@ class Keyscan:
                     self._record_candidate(rule.source, record["token"], "cc", record["urls"], details={"crawl": crawl, "url_count": record["url_count"]})
                 done.add(f"{crawl}/{rule.source}")
                 self._checkpoint(cc_done=sorted(done))
-                self._mark_scanned(rule.source, crawl)
+                self._mark_scanned(rule, crawl)
                 self._log("info", "crawl", "vendor scanned", crawl=crawl, source=rule.source, candidates=len(rows))
         if failed_crawls:
             raise KeyscanError(
@@ -1961,6 +2438,84 @@ class Keyscan:
         """
         for source, token, url_count, urls in rows:
             self._record_candidate(source, token, "cc", urls, details={"crawl": crawl, "url_count": url_count})
+        if self._token_outbox:
+            task = asyncio.get_running_loop().create_task(self._flush_tokens())
+            self._token_tasks.add(task)
+            task.add_done_callback(self._token_tasks.discard)
+
+    async def _flush_tokens(self) -> None:
+        """Add queued candidates to xjobscore's `token` table, unvalidated.
+
+        Insert-only (`store.insert_discovered_tokens`): a token Postgres
+        already has is left exactly as it is. A failure is logged and the
+        batch re-queued for the next flush -- discovery never stops because
+        Postgres is down, and `keyscan.sqlite` stays the record either way.
+        """
+        if not self.token_dsn:
+            return
+        async with self._token_lock:
+            batch, self._token_outbox = self._token_outbox, []
+            if not batch:
+                return
+            try:
+                import asyncpg
+
+                from xjobscore.store import insert_discovered_tokens
+
+                if self._token_pool is None:
+                    self._token_pool = await asyncpg.create_pool(self.token_dsn, min_size=1, max_size=1)
+                async with self._token_pool.acquire() as conn:
+                    added = await insert_discovered_tokens(
+                        conn, [(ats, key, datetime.fromisoformat(at)) for ats, key, at in batch],
+                    )
+            except Exception as exc:
+                self._token_outbox[:0] = batch
+                self._log(
+                    "warning", self._function, "token table write failed; will retry",
+                    event="token_publish_failed", queued=len(self._token_outbox),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                return
+        self._log(
+            "info", self._function, f"{added} of {len(batch)} tokens added to token table",
+            event="token_publish", sent=len(batch), added=added,
+        )
+
+    async def _close_tokens(self) -> None:
+        """Drain in-flight flushes, send whatever is left, release the pool."""
+        if self._token_tasks:
+            await asyncio.gather(*self._token_tasks, return_exceptions=True)
+        await self._flush_tokens()
+        if self._token_pool is not None:
+            await self._token_pool.close()
+            self._token_pool = None
+
+    async def push_tokens(self) -> dict[str, int]:
+        """Send every token keyscan holds to the `token` table, once.
+
+        For the backlog discovered before `token_dsn` existed; a run keeps the
+        table current from then on. Safe to repeat -- the insert only ever adds.
+        """
+        if not self.token_dsn:
+            raise KeyscanError("push-tokens needs DATABASE_URL")
+        self.initialize()
+        with self._connect() as con:
+            rows = con.execute("SELECT ats, key, discovered_at FROM tenants").fetchall()
+        self._token_outbox = [(row["ats"], row["key"], row["discovered_at"]) for row in rows]
+        import asyncpg
+
+        from xjobscore.store import insert_discovered_tokens
+
+        pool = await asyncpg.create_pool(self.token_dsn, min_size=1, max_size=1)
+        try:
+            async with pool.acquire() as conn:
+                added = await insert_discovered_tokens(
+                    conn, [(ats, key, datetime.fromisoformat(at)) for ats, key, at in self._token_outbox],
+                )
+        finally:
+            self._token_outbox = []
+            await pool.close()
+        return {"sent": len(rows), "added": added}
 
     # ------------------------------------------------------------------
     # Validation
@@ -1981,15 +2536,21 @@ class Keyscan:
             key = await self._validation_queue.get()
             try:
                 # A cancelled run still drains, so `queue.join()` cannot hang.
-                if self._cancelled or self._blocked or key in self._validating:
+                if self._cancelled or key in self._validating:
                     continue
                 candidate = self._pending_validation(key, selected_sources)
                 if candidate is None:
                     continue
+                # A host walled off earlier (a bot-wall, not a rate limit) will
+                # refuse this token too. Skip it rather than spend a doomed
+                # request, and leave it unchecked so a later run reprobes it.
+                host = (urlsplit(candidate.get("canonical_url", "")).hostname or "").lower()
+                if host in self._blocked_hosts:
+                    continue
                 self._validating.add(key)
                 try:
                     validation, job_count, details = await self._probe(candidate)
-                    if self._blocked:
+                    if validation == "inconclusive" and details.get("reason") in _REFUSAL_REASONS:
                         # Refused, not answered. Recording it would stamp
                         # `checked_at` and leave the token frozen at `unknown`
                         # -- streaming validation only ever picks up rows where
@@ -2080,13 +2641,6 @@ class Keyscan:
         # instead of queueing behind one per-host lock.
         for key in pending:
             self._check_cancelled()
-            if self._blocked:
-                self._log(
-                    "warning", "validate", "validation stopped; vendor refused us",
-                    event="blocked_skip", remaining=len(pending) - pending.index(key),
-                    **self._blocked,
-                )
-                return
             self._validation_queue.put_nowait(key)
 
     async def _probe(self, candidate: dict[str, Any]) -> tuple[str, int | None, dict[str, Any]]:
@@ -2308,13 +2862,22 @@ def selftest() -> list[str]:
             if actual != expected:
                 failures.append(f"python {url}: expected {expected}, got {actual}")
                 continue
-            if expected is None:
-                continue
-            rule = BY_SOURCE[expected[0]]
-            sql = "SELECT " + token_sql(rule) + " FROM (VALUES (?)) AS input(url)"
-            found = con.execute(sql, [url]).fetchone()[0] or None
-            if found != expected[1]:
-                failures.append(f"duckdb {url}: expected {expected[1]}, got {found}")
+            # The crawl applies extraction and then the token filter; check
+            # both, including that a rejected URL stays rejected in SQL.
+            host = (urlsplit(url).hostname or "").lower()
+            rules = [BY_SOURCE[expected[0]]] if expected else [
+                rule for rule in RULES
+                if any(host == domain or host.endswith("." + domain) for domain in rule.domains)
+            ]
+            for rule in rules:
+                sql = (
+                    f"SELECT CASE WHEN {token_filter_sql(rule)} THEN token END "
+                    f"FROM (SELECT {token_sql(rule)} AS token FROM (VALUES (?)) AS input(url))"
+                )
+                found = con.execute(sql, [url]).fetchone()[0]
+                want = expected[1] if expected else None
+                if found != want:
+                    failures.append(f"duckdb {url}: expected {want}, got {found}")
     finally:
         con.close()
     return failures

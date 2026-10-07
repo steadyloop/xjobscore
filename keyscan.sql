@@ -113,6 +113,15 @@ CREATE TABLE footers (
     PRIMARY KEY (crawl, part, rg)
 ) WITHOUT ROWID;
 
+-- One row per crawl whose harvest finished: every in-scope part of its
+-- manifest has rows in `footers`. A part count alone cannot say this, since
+-- the number of in-scope parts differs between crawls.
+CREATE TABLE footer_crawls (
+    crawl        TEXT    PRIMARY KEY,
+    parts        INTEGER NOT NULL,      -- in-scope manifest entries, all harvested
+    completed_at TEXT    NOT NULL
+) WITHOUT ROWID;
+
 -- One row per (vendor, crawl) already scanned. A published snapshot never
 -- changes and extraction is deterministic, so the pair recorded here can only
 -- reproduce tokens already in `tenants`; the row's existence is the whole fact.
@@ -127,6 +136,9 @@ CREATE TABLE scanned (
     ats        TEXT NOT NULL,
     crawl      TEXT NOT NULL,
     scanned_at TEXT NOT NULL,
+    -- `rule_fingerprint` of the vendor's rule when scanned. A run skips the
+    -- pair only while this matches the rule as it is now; NULL never matches.
+    rule_hash  TEXT,
     PRIMARY KEY (ats, crawl)
 ) WITHOUT ROWID;
 

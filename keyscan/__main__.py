@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 
-from .core import TARGET_MBPS, ActiveRunError, Keyscan, KeyscanError, selftest
+from .core import HARVEST_RPS, TARGET_MBPS, ActiveRunError, Keyscan, KeyscanError, selftest
 from .rules import SAMPLES
 from .enumerate import enumerate_tokens
 from .name_boards import SUPPORTED, name_boards
@@ -66,7 +68,7 @@ def _progress_line(entry: dict) -> str | None:
         return f"{prefix} run resumed"
     # `started` is now the message and the function says which one, so the
     # line reads "crawl started" rather than the old "phase commoncrawl".
-    if message == "started" and entry.get("function") in {"crawl", "scan", "validate"}:
+    if message == "started" and entry.get("function") in {"crawl", "scan", "validate", "wayback"}:
         return f"{prefix} {entry['function']} started"
     if event == "plan":
         return (
@@ -74,12 +76,26 @@ def _progress_line(entry: dict) -> str | None:
             f"{entry.get('files', '?')}/{entry.get('of', '?')} files | "
             f"{round((entry.get('bytes') or 0) / 1e6)}MB to read"
         )
+    if event == "unsupported_index":
+        return f"{prefix} {entry.get('crawl')} skipped | {entry.get('reason')}"
     if event == "network_summary":
         failed = entry.get("failed", 0)
         return (
             f"{prefix} {entry.get('requests', 0)} requests | {failed} failed | "
             f"median {entry.get('median_ms', '?')}ms"
         )
+    if event == "wayback_plan":
+        return f"{prefix} wayback | {entry.get('pairs', 0)} vendor/year pairs"
+    if event == "wayback_pair":
+        return (
+            f"{prefix} wayback {entry.get('year')} {entry.get('source')} | "
+            f"{entry.get('candidates', 0)} candidates | pair {entry.get('pair')}/{entry.get('pairs')} | "
+            f"{entry.get('requests', 0)} requests | {_elapsed(entry.get('elapsed_ms'))}"
+        )
+    if message == "wayback backoff":
+        return f"{prefix} wayback | {entry.get('cause')} | waiting {entry.get('pause_s', 0):g}s"
+    if message == "wayback pair failed":
+        return f"{prefix} wayback {entry.get('year')} {entry.get('source')} failed | {entry.get('error')} | continuing"
     if message == "scanning secondary job boards":
         return f"{prefix} board scan | {entry.get('start', 0)}/{entry.get('total', '?')} already complete"
     if event == "crawl_start":
@@ -184,6 +200,14 @@ def main() -> int:
         "--target-mbps", type=float, default=TARGET_MBPS,
         help=f"average Common Crawl transfer ceiling (default: {TARGET_MBPS:g}); 0 disables pacing",
     )
+    crawl.add_argument(
+        "--validate", action="store_true",
+        help="probe each discovered token against its vendor (slow; hits vendor hosts)",
+    )
+    crawl.add_argument(
+        "--rescan", action="store_true",
+        help="scan vendor/snapshot pairs again even if an earlier run finished them",
+    )
     crawl.add_argument("--quiet", action="store_true", help="suppress live progress on stderr")
     scan_cmd = sub.add_parser(
         "scan", help="scan public GitHub-hosted job board listings for one or more vendors"
@@ -196,7 +220,33 @@ def main() -> int:
         "--archives", action="store_true",
         help="also read the boards' frozen archived/*.json history",
     )
+    scan_cmd.add_argument(
+        "--validate", action="store_true",
+        help="probe each discovered token against its vendor (slow; hits vendor hosts)",
+    )
     scan_cmd.add_argument("--quiet", action="store_true", help="suppress live progress on stderr")
+    wayback_cmd = sub.add_parser(
+        "wayback", help="search the Internet Archive's Wayback Machine for one or more vendors"
+    )
+    wayback_cmd.add_argument(
+        "--vendor", metavar="ATS[,ATS,...]", default="tier1,tier2",
+        help="comma-separated ATS sources or group names (default: tier1,tier2)",
+    )
+    wayback_cmd.add_argument(
+        "--years", metavar="YYYY[,YYYY,...]",
+        help="capture years to search (default: every year from 2013 to now)",
+    )
+    wayback_cmd.add_argument("--from-year", type=int, metavar="YYYY", help="first capture year (inclusive)")
+    wayback_cmd.add_argument("--to-year", type=int, metavar="YYYY", help="last capture year (inclusive)")
+    wayback_cmd.add_argument(
+        "--validate", action="store_true",
+        help="probe each discovered token against its vendor (slow; hits vendor hosts)",
+    )
+    wayback_cmd.add_argument(
+        "--rescan", action="store_true",
+        help="search vendor/year pairs again even if an earlier run finished them",
+    )
+    wayback_cmd.add_argument("--quiet", action="store_true", help="suppress live progress on stderr")
     validate_cmd = sub.add_parser(
         "validate", help="re-probe discovered tokens for one or more vendors"
     )
@@ -213,9 +263,10 @@ def main() -> int:
     verify.add_argument("--max-probes", type=int, default=40, help="probe cap per vendor before giving up (default: 40)")
     verify.add_argument("--json", action="store_true", help="print raw JSON instead of a summary table")
     list_cmd = sub.add_parser(
-        "list", help="list Common Crawl snapshots available right now, newest first"
+        "list", help="list supported Common Crawl Parquet snapshots, newest first"
     )
     list_cmd.add_argument("--json", action="store_true", help="print raw JSON instead of a table")
+    sub.add_parser("push-tokens", help="add every keyscan token to xjobscore's token table (unvalidated, insert-only)")
     robots = sub.add_parser("robots", help="report shared ATS hosts that block CCBot")
     robots.add_argument("--sources", help="comma-separated ATS sources; default: all")
     resume = sub.add_parser("resume", help="resume an interrupted run")
@@ -277,6 +328,17 @@ def main() -> int:
     )
     enum_cmd.add_argument("--concurrency", type=int, default=16, help="probes in flight (default: 16)")
     enum_cmd.add_argument("--dry-run", action="store_true", help="probe and report without writing")
+    footers_cmd = sub.add_parser(
+        "footers", help="harvest Common Crawl parquet footers so later scans read only matching files"
+    )
+    footers_cmd.add_argument(
+        "crawl_ids", metavar="ID[,ID,...]", nargs="?",
+        help="snapshot ids to harvest (see `keyscan list`); omit for every supported snapshot; explicit pre-2013 ids are skipped",
+    )
+    footers_cmd.add_argument(
+        "--rps", type=float, default=HARVEST_RPS,
+        help=f"request-rate ceiling against Common Crawl (default: {HARVEST_RPS:g})",
+    )
     logs = sub.add_parser("logs", help="read a run's durable log")
     logs.add_argument("run_id")
     logs.add_argument("--offset", type=int, default=0)
@@ -293,27 +355,51 @@ def main() -> int:
 
     progress = (
         _print_progress
-        if args.command in {"crawl", "scan", "validate", "resume"} and not getattr(args, "quiet", False)
+        if args.command in {"crawl", "scan", "validate", "resume", "wayback"} and not getattr(args, "quiet", False)
         else None
     )
+    # Discoveries go straight into xjobscore's `token` table when its DSN is
+    # known -- the same `.env` the rest of the repo reads.
+    from xjobscore.run import _load_dotenv
+
+    _load_dotenv()
     scan = Keyscan(
         args.workdir,
         target_mbps=getattr(args, "target_mbps", TARGET_MBPS),
         progress=progress,
+        token_dsn=os.environ.get("DATABASE_URL"),
     )
     try:
         if args.command == "crawl":
             run_id = asyncio.run(
                 scan.run(
-                    ["commoncrawl"], sources=_methods(args.vendor) or None,
+                    ["commoncrawl", *(["validate"] if args.validate else [])], sources=_methods(args.vendor) or None,
                     crawl_ids=_methods(args.crawl_ids) or None,
                     date_from=args.date_from, date_to=args.date_to,
+                    rescan=args.rescan,
                 )
             )
             _print(scan.status(run_id))
         elif args.command == "scan":
             run_id = asyncio.run(
-                scan.run(["board"], sources=_methods(args.vendor) or None, archives=args.archives)
+                scan.run(["board", *(["validate"] if args.validate else [])], sources=_methods(args.vendor) or None, archives=args.archives)
+            )
+            _print(scan.status(run_id))
+        elif args.command == "wayback":
+            years = [int(year) for year in _methods(args.years)] if args.years else None
+            if years and (args.from_year or args.to_year):
+                parser.error("use --years or --from-year/--to-year, not both")
+            if args.from_year or args.to_year:
+                first = args.from_year or 2013
+                last = args.to_year or datetime.now(timezone.utc).year
+                if first > last:
+                    parser.error("--from-year is after --to-year")
+                years = list(range(first, last + 1))
+            run_id = asyncio.run(
+                scan.run(
+                    ["wayback", *(["validate"] if args.validate else [])],
+                    sources=_methods(args.vendor) or None, years=years, rescan=args.rescan,
+                )
             )
             _print(scan.status(run_id))
         elif args.command == "validate":
@@ -351,6 +437,17 @@ def main() -> int:
             else:
                 _print_verify_table(results)
             return 1 if any(r.get("discrimination") == "fail_synthetic_live" for r in results) else 0
+        elif args.command == "push-tokens":
+            _print(asyncio.run(scan.push_tokens()))
+        elif args.command == "footers":
+            crawl_ids = _methods(args.crawl_ids) or [
+                row["id"] for row in asyncio.run(scan.list_crawls())["crawls"]
+            ]
+
+            def on_event(event: dict) -> None:
+                print(f"[keyscan footers] {json.dumps(event, default=str)}", file=sys.stderr, flush=True)
+
+            _print(scan.harvest_footers(crawl_ids, target_rps=args.rps, on_event=on_event))
         elif args.command == "robots":
             _print(asyncio.run(scan.robots(_methods(args.sources) or None)))
         elif args.command == "resume":

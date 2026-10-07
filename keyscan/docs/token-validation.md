@@ -33,7 +33,7 @@ not the board.
 | breezy | board | 200, 1 | **403**, not 404 |
 | homerun | page | 200, 21 KB | 404 |
 | join | page | 200, 112 KB | 404 |
-| teamtailor | page | 200, 97 KB | 404 |
+| teamtailor | board (RSS) | 200, valid RSS including zero jobs | 404 |
 | trakstar | page | 200, 88 KB | 404 |
 | avature | page | 200, 95 KB | NXDOMAIN |
 | jobvite | page | 200, 13 KB | 200, redirects to `?invalid=1` |
@@ -45,7 +45,6 @@ not the board.
 
 | vendor | why |
 |---|---|
-| smartrecruiters | invalid token returns 200 + count 0 + no name; only the name check separates it |
 | dayforce | 417 KB vs 405 KB — same SPA shell either way |
 | taleo | page returns a 1,452 B `htmlredirection` JS shim, never the board |
 | comeet | 400 on both; needs the two-step board-id → api-token handshake |
@@ -55,34 +54,86 @@ not the board.
 
 ## Notes
 
-Checked against `_probe`. Two gaps; the rest is already handled.
+Observed behavior and follow-up fixes in the shared probe:
 
-- **Gap — workday 422 is not read as absence.** `_probe` treats only
-  `{404, 410}` as absent, so a bogus workday tenant lands on `inconclusive`
-  / `http_422`. Largest catalog in the registry at 87 feeds.
-- **Gap — taleo can return a false `live`.** Its rule declares no
-  `absent_markers`, no `html_required_markers`, no `html_any_markers`. The html
-  path therefore falls through to `_html_control`, whose control fetch NXDOMAINs
-  (an invalid taleo subdomain does not resolve), leaving `control = None` and
-  skipping the fingerprint comparison. The only surviving check is
-  `"<html" in body`, which the 1,452 B `htmlredirection` shim satisfies — so a
-  page that never reached a board reads as live.
+- **Closed 2026-10-06 — Paylocity sweep repeated and lost failed HTML controls.**
+  The inspector fetched its nonexistent-board control for every token, with
+  no shared cache. A control 429 went through HTTP retries and host cooldowns,
+  but its final failure was ignored: the candidate's HTTP 200 could still be
+  recorded as live without a successful comparison. A generic HTTP-200 error
+  page could also pass when no control fingerprint was available.
+  Paylocity now parses the embedded `window.pageData` JSON, requires a `Jobs`
+  array, and verifies `LeadJoinUrl` against the requested board ID. This takes
+  one GET, including a board with zero jobs, with no control fetch. The HTTP-200
+  `Job Not Found` title is absent; a page without valid board data remains
+  inconclusive. Other HTML probes now share one answered control per control
+  URL, including concurrent requests; failures are propagated and not cached.
+  After pausing a rate-limited sweep, three public boards
+  answered in 0.264–0.465s; malformed and nonexistent GUID controls both
+  redirected to the same 4,633-byte `Job Not Found` page. All three captured
+  real responses passed the corrected probe and the nonexistent one was
+  absent. This is a small correctness sample, not a sustainable-rate benchmark.
+- **Closed 2026-10-06 — Teamtailor's redirected careers pages stalled validation.**
+  `triggerfish.teamtailor.com/jobs` redirects through `jobb.triggerfish.se` to
+  `www.triggerfish.se/karriar/jobs`, whose nginx returns 429; CKW's jobs page
+  redirects to a Cloudflare challenge. Both tenants' `/jobs.rss?per_page=1`
+  answered 200 with valid RSS directly on Teamtailor. The shared probe now uses
+  `/jobs.rss`, with `per_page=1` for liveness-only checks. Valid empty feeds are
+  live; malformed XML and generic HTML stay inconclusive. This is the same
+  endpoint the harvesting adapter uses and is documented in
+  [Teamtailor's RSS guide](https://support.teamtailor.com/en/articles/11171756-rss-feed-how-to-guide).
+  A 429 or bot wall after redirecting outside the vendor's domains is also
+  scoped to that token: retry at the back, skip after two refusals, and keep
+  other tenants running. Direct vendor refusals retain their cooldown policy.
+- **Closed 2026-10-05 — workday 422.** Workday answers 422 both for a bogus
+  tenant and for a real one on the wrong `wdN` host (no redirect). The probe
+  now tries the rule's other `shards`: a 200 elsewhere is `absent` /
+  `wrong_shard` with `moved_to` naming the working token, which the inspector
+  adds as live; 422 on every shard is `absent` / `tenant_not_found`. A disabled
+  site's 403 `{"errorCode": "S22"}` is `absent` / `site_disabled`.
+- **Closed 2026-10-06 — a dead tenant host.** A transport failure now asks
+  DNS-over-HTTPS (Cloudflare and Google, A and AAAA) about the host the probe
+  requested. Only if every answer is NXDOMAIN, or NOERROR with no address, is
+  the token `absent` / `no_such_host`; anything else stays `transport`. The
+  OS resolver cannot decide this: macOS `getaddrinfo` gives EAI_NONAME
+  (errno 8) for NXDOMAIN, SERVFAIL and timeout alike (Libinfo
+  `mdns_module.c`; dnssec-failed.org, servfail.nl and brokendnssec.net all
+  measured errno 8), and Mullvad's local resolver rewrites NXDOMAIN to an empty
+  NOERROR. NOERROR-with-no-address must count as gone because DNSSEC zones that
+  use compact denial (RFC 9824) answer a missing name that way: dead avature
+  and eightfold tenants do, dead taleo ones answer NXDOMAIN. Measured: the
+  first 4 queued tokens each of avature, taleo and eightfold read `absent`; 0
+  of 243 `live` tokens across 9 vendors read as gone. A redirect target is
+  never resolved, so a teamtailor tenant whose own careers domain is dead stays
+  `transport`. A dead peopleadmin tenant also stays `transport`: its host
+  resolves (`wild.pacloud.net`) but never accepts a connection.
+- **Closed 2026-10-06 — smartrecruiters' bare zero.** After a 200 with count
+  0, the rule's `zero_check_url` asks
+  `/v1/companies/{id}/departments`: 404 `RESOURCE_NOT_FOUND` is `absent` /
+  `company_not_found`; 200 is `live` / `company_without_jobs`, with count 0.
+  It agreed with the careers page (a bogus id redirects to the bare
+  `jobs.smartrecruiters.com`) on 42/42 ids. Of 30 previously-unclear tokens,
+  20 were real companies with no jobs and 10 were gone. Ids are
+  case-insensitive.
+- **Gap — taleo's HTML shim does not prove a live board.** Its rule declares no
+  `absent_markers`, no `html_required_markers`, no `html_any_markers`. An invalid
+  control subdomain does not resolve, so the control now fails closed with
+  `transport` rather than letting the 1,452-byte `htmlredirection` shim read as
+  live. It still needs affirmative board evidence to settle liveness.
 
 Already considered, and deliberately:
 
-- **smartrecruiters' bare zero** is the exact case the `zero_count` guard plus
-  the `name_url` second probe exist for.
 - **personio at zero jobs** stays `live` because the xml path carries no
   zero-count guard — a valid root element proves the tenant. Correct as written.
-- **paylocity, successfactors, zohorecruit, jobvite** are covered by
+- **successfactors, zohorecruit, jobvite** are covered by
   `_html_control`: it fetches a known-invalid token's page, fingerprints it with
   digits and whitespace normalized, and calls a match `generic_html`. That is
-  the "size delta" and "redirect to `?invalid=1`" signals, handled properly.
+  the "size delta" and "redirect to `?invalid=1`" signals. A failed control now
+  stays inconclusive rather than disabling that comparison.
 - **dayforce** resolves to `inconclusive` both ways. Correct — the same SPA
   shell is served either way and it genuinely cannot be told apart.
-- **breezy 403, bamboohr's HTML, NXDOMAIN** all fall to `inconclusive`.
-  Defensible: `ConnectError` also covers SERVFAIL and DNS timeout, so absence
-  cannot be claimed without an explicit resolve.
+- **breezy 403 and bamboohr's HTML** fall to `inconclusive`. (A host with no
+  address is now `absent`; see the dead-tenant-host note above.)
 
 Context that is not a keyscan issue:
 

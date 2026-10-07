@@ -20,6 +20,16 @@ for every site including real ones, which marks the whole vendor absent.
 Open: a registered-but-`ORA_INACTIVE` site still reads live, though its public
 board redirects to the tenant default.
 
+**Follow-up 2026-10-05 — vanity site names read absent.** A board URL names its
+site by `SiteNumber` (`CX_4001`) or by its vanity `SiteURLName` (`Aerospace`);
+99 of 605 oracle tokens in `validated-live.toml` are the latter, and the
+SiteNumber-only check called all 30 sampled `absent`. Added
+`Rule.exists_fallbacks`: oracle now asks `SiteURLName='X'` when `SiteNumber='X'`
+answers zero. Re-run: 27 of 30 live; the other 3 are vanity names the tenant no
+longer has (the page redirects to its default `CX_*` site), so `absent` is right.
+Both fields match case-insensitively. A single `q` with `or` does not work —
+the endpoint answers 0 even when either half alone matches.
+
 ### successfactors marked every company slug as live
 Unknown companies answer 200 with a ~3KB stub (`An error occurred while
 processing your request.`, no `<title>`) instead of 404; real boards are ~190KB.
@@ -37,6 +47,23 @@ Manifest fetches now retry (`default_request`); an unread crawl reports
 
 Re-running the four afterwards: eightfold 58 tokens, smartrecruiters 676 tokens
 — the rules were never the problem.
+
+### workday, workable, smartrecruiters extracted junk tokens (2026-10-05)
+- **workday**: `STOP` was checked against the tenant, dropping real ones
+  (`academy`, 890 jobs), and never against the site, keeping files
+  (`robots.txt`, `llms.txt`, `*.html` — 98 tokens). Now `stop_words=False` and
+  a `token_rx` that rejects a dotted site.
+- **workable**: the bare root fell through to the subdomain pattern as
+  `apply`, and `/j/{code}` short links became `j`. Both now drop.
+- **smartrecruiters**: `ni/`, `my-applications/`, `oneclick-ui/company/` and
+  `external-referrals/company/` were stored as the company. The id after the
+  prefix is now the token; numeric ids (API answers 0), `oneclick/` and
+  `cdn-cgi/` drop. Short ids like `B6`/`PQ` are real and kept.
+
+Per-rule checks live in `valid_token` / `token_filter_sql`, so Python and the
+crawl's DuckDB filter stay identical; `selftest` now checks rejected URLs in
+SQL too. Re-extracting all 704,670 stored URLs changed only these tokens.
+Existing junk rows are not deleted.
 
 ## Open
 
@@ -74,8 +101,11 @@ Registry keys are Career Site Builder hosts (`jobs.sap.com`, RSS at
 No redirect links them (`jobs.sap.com` stays put). Zero overlap — not derivable.
 
 ### vendor probe blocks
-workday 403s on the first POST (`amplify.wd1.myworkdayjobs.com`); eightfold 403s
-from `netapp.` / `prudential.eightfold.ai`. Both surface as `blocked_suspected`.
+eightfold 403s from `netapp.` / `prudential.eightfold.ai`, surfacing as
+`blocked_suspected`. The workday 403 once listed here
+(`amplify.wd1.myworkdayjobs.com`) was not a block: it is Workday's answer for a
+disabled site, a JSON `{"errorCode": "S22"}` body, now read as `absent` /
+`site_disabled` (2026-10-05).
 
 ### smartrecruiters control is weak
 Synthetic returns `inconclusive`, not `absent` → `warn_inconclusive_control`.

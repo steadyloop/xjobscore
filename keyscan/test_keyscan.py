@@ -185,7 +185,7 @@ async def test_board_run_validates_and_logs(tmp_path: Path, monkeypatch):
         return httpx.Response(404)
 
     scan = Keyscan(tmp_path / "work", transport=transport(handler))
-    run_id = await scan.run(["board"])
+    run_id = await scan.run(["board", "validate"])
 
     assert scan.status(run_id)["status"] == "completed"
     live = {(row["ats"], row["key"]) for row in scan.list_candidates(status="live")}
@@ -202,6 +202,25 @@ async def test_board_run_validates_and_logs(tmp_path: Path, monkeypatch):
     assert summary["failed"] == len(failures)
     assert summary["median_ms"] is not None
     assert any(entry.get("event") == "phase_timing" for entry in entries)
+
+
+def test_avature_board_sighting_also_queues_the_companys_careers_board(tmp_path: Path):
+    """Seeing `bupaanz/careersau` must not drop `bupaanz` (= /careers): the old
+    rule probed it for every company, and it is often the main board."""
+    scan = Keyscan(tmp_path / "work", transport=transport(lambda request: httpx.Response(404)))
+    scan._new_run(["commoncrawl"], 1, ["avature"])
+    scan._record_candidate(
+        "avature", "Bupaanz/CareersAU", "cc", ["https://bupaanz.avature.net/careersau/JobDetail/1"],
+    )
+    scan._record_candidate("avature", "deloitteus/careers", "cc", ["https://deloitteus.avature.net/careers"])
+    scan._finish("cancelled")
+
+    found = {row["key"]: row["canonical_url"] for row in scan.list_candidates(source="avature")}
+    assert found == {
+        "bupaanz/careersau": "https://bupaanz.avature.net/careersau/SearchJobs",
+        "bupaanz": "https://bupaanz.avature.net/careers/SearchJobs",
+        "deloitteus": "https://deloitteus.avature.net/careers/SearchJobs",
+    }
 
 
 @pytest.mark.asyncio
@@ -494,7 +513,7 @@ async def test_board_run_resumes_from_its_checkpoint(tmp_path: Path):
         return httpx.Response(404)
 
     scan = InterruptOnce(tmp_path / "work", transport=transport(handler))
-    run_id = await scan.run(["board"])
+    run_id = await scan.run(["board", "validate"])
     assert scan.status(run_id)["status"] == "cancelled"
     assert scan.status(run_id)["checkpoint"]["board_index"] == 1
     await scan.resume(run_id)
@@ -723,7 +742,7 @@ async def test_commoncrawl_checkpoint_can_resume_without_network_parquet(tmp_pat
         return httpx.Response(404)
 
     scan = CrawlFixture(tmp_path / "work", transport=transport(handler))
-    run_id = await scan.run(["commoncrawl"], crawls=1)
+    run_id = await scan.run(["commoncrawl", "validate"], crawls=1)
     status = scan.status(run_id)
     assert "CC-MAIN-TEST/greenhouse" in status["checkpoint"]["cc_done"]
     assert scan.list_candidates(source="greenhouse")[0]["status"] == "live"
@@ -1174,7 +1193,7 @@ async def test_candidates_validate_during_discovery_not_only_after(tmp_path: Pat
         return httpx.Response(404)
 
     scan = SlowCrawl(tmp_path / "work", transport=transport(handler))
-    run_id = await scan.run(["board"])
+    run_id = await scan.run(["board", "validate"])
 
     assert any(live_while_crawling), "no candidate was live before discovery ended"
     assert scan.status(run_id)["status"] == "completed"
@@ -1202,7 +1221,7 @@ async def test_streaming_validation_leaves_nothing_for_the_final_sweep(tmp_path:
         return httpx.Response(404)
 
     scan = CountingSweep(tmp_path / "work", transport=transport(handler))
-    await scan.run(["board"])
+    await scan.run(["board", "validate"])
 
     assert swept == [0]
     assert scan.list_candidates(status="live")[0]["key"] == "acme"
@@ -1221,7 +1240,7 @@ async def test_probe_failure_is_logged_without_aborting_the_run(tmp_path: Path):
         return httpx.Response(404)
 
     scan = BrokenProbe(tmp_path / "work", transport=transport(handler))
-    run_id = await scan.run(["board"])
+    run_id = await scan.run(["board", "validate"])
 
     # One unprobeable token is a logged fact, not a failed scan.  It stays
     # unprobed, so the next run retries it.
@@ -1421,6 +1440,84 @@ def _probe(rule, token, handler):
 
 
 @pytest.mark.asyncio
+async def test_workday_disabled_site_is_absent_but_a_waf_403_is_not():
+    """Workday answers a disabled site with a JSON 403 (S22). That is the board
+    being gone, not us being refused -- unlike a WAF's HTML 403."""
+    async def disabled(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"errorCode": "S22", "httpStatus": 403, "message": "permission denied"})
+
+    async def waf(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="<html>cloudflare</html>")
+
+    status, count, details = await _probe(BY_SOURCE["workday"], "acme/wd1/old", disabled)
+    assert (status, count, details["reason"]) == ("absent", None, "site_disabled")
+
+    status, _, details = await _probe(BY_SOURCE["workday"], "acme/wd1/old", waf)
+    assert (status, details["reason"]) == ("inconclusive", "blocked")
+
+    async def private(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"errorCode": "S99"})
+
+    status, _, details = await _probe(BY_SOURCE["workday"], "acme/wd1/old", private)
+    assert (status, details["reason"]) == ("inconclusive", "http_403")
+
+
+@pytest.mark.asyncio
+async def test_workday_empty_site_is_live_but_smartrecruiters_zero_is_not():
+    async def empty(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"total": 0, "jobPostings": [], "facets": [], "userAuthenticated": False})
+
+    assert (await _probe(BY_SOURCE["workday"], "acme/wd1/site", empty))[:2] == ("live", 0)
+
+    async def sr_empty(request: httpx.Request) -> httpx.Response:
+        # The departments check that would settle it answers neither way;
+        # test_probe_dns covers the cases where it does.
+        if request.url.path.endswith("/departments"):
+            return httpx.Response(500)
+        return httpx.Response(200, json={"totalFound": 0, "content": []})
+
+    status, _, details = await _probe(BY_SOURCE["smartrecruiters"], "nobody", sr_empty)
+    assert (status, details["reason"]) == ("inconclusive", "zero_count")
+
+
+@pytest.mark.asyncio
+async def test_workday_422_finds_the_tenant_on_another_shard():
+    """A wrong `wdN` host answers 422 and does not redirect; the probe asks the
+    other shards and names the token that works."""
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "acme.wd3.myworkdayjobs.com":
+            return httpx.Response(200, json={"total": 4, "jobPostings": []})
+        return httpx.Response(422, json={"errorCode": "S1"})
+
+    status, _, details = await _probe(BY_SOURCE["workday"], "acme/wd5/site", handler)
+    assert (status, details["reason"], details["moved_to"]) == ("absent", "wrong_shard", "acme/wd3/site")
+    hosts = [url.split("/")[2] for url, _ in details["responses"]]
+    assert hosts == ["acme.wd5.myworkdayjobs.com", "acme.wd1.myworkdayjobs.com", "acme.wd3.myworkdayjobs.com"]
+
+
+@pytest.mark.asyncio
+async def test_workday_422_on_every_shard_is_a_missing_tenant():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422)
+
+    status, _, details = await _probe(BY_SOURCE["workday"], "gone/wd1/site", handler)
+    assert (status, details["reason"]) == ("absent", "tenant_not_found")
+    assert "moved_to" not in details
+    assert len(details["responses"]) == len(BY_SOURCE["workday"].shards)
+
+
+@pytest.mark.asyncio
+async def test_workday_shard_search_stops_on_a_refusal():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host.startswith("acme.wd1."):
+            return httpx.Response(429)
+        return httpx.Response(422)
+
+    status, _, details = await _probe(BY_SOURCE["workday"], "acme/wd5/site", handler)
+    assert (status, details["reason"]) == ("inconclusive", "http_429")
+
+
+@pytest.mark.asyncio
 async def test_oracle_rejects_a_site_its_tenant_does_not_list():
     """recruitingCEJobRequisitions ignores `siteNumber` and answers 200 with the
     tenant's whole requisition list, so a bogus site used to look live. Only the
@@ -1448,6 +1545,111 @@ async def test_oracle_still_counts_jobs_for_a_listed_site():
         return httpx.Response(200, json={"items": [{"TotalJobsCount": 81}]})
 
     assert (await _probe(BY_SOURCE["oracle"], "eeho.fa.us2/CX_1", handler))[:2] == ("live", 81)
+
+
+@pytest.mark.asyncio
+async def test_avature_probes_the_board_path_in_its_token():
+    """The board lives at a customer-named path, not always `/careers`; the
+    probe must fetch that path, and its control must stay on the same host."""
+    seen: list[str] = []
+    board = (
+        '<html><script>avature.portal.init()</script>'
+        '<a href="/careersau/JobDetail/Carer/1">Search jobs</a></html>'
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.path == "/careersau/SearchJobs":
+            return httpx.Response(200, text=board)
+        return httpx.Response(404)
+
+    status, _count, _details = await _probe(BY_SOURCE["avature"], "bupaanz/careersau", handler)
+
+    assert status == "live"
+    assert seen[0] == "https://bupaanz.avature.net/careersau/SearchJobs"
+    assert seen[1].startswith("https://bupaanz.avature.net/keyscan-token-does-not-exist")
+
+
+@pytest.mark.asyncio
+async def test_avature_bare_token_is_the_careers_board():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://deloitteus.avature.net/careers/SearchJobs"
+        return httpx.Response(404)
+
+    assert (await _probe(BY_SOURCE["avature"], "deloitteus", handler))[0] == "absent"
+
+
+def test_ashby_board_name_with_a_space_is_not_cut_at_the_space():
+    """`Citizen%20Health` used to become `citizen` -- another company's board."""
+    assert extract("https://jobs.ashbyhq.com/Citizen%20Health/eaa76517") == ("ashby", "Citizen%20Health")
+    assert keyscan_core._canonical_token("ashby", "Citizen%20Health") == "citizen health"
+
+
+@pytest.mark.asyncio
+async def test_ashby_probe_sends_the_space_encoded():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.raw_path == b"/posting-api/job-board/citizen%20health"
+        return httpx.Response(200, json={"jobs": [{}, {}, {}]})
+
+    assert (await _probe(BY_SOURCE["ashby"], "citizen health", handler))[:2] == ("live", 3)
+
+
+def test_avature_careers_board_token_is_stored_bare_and_lowercase():
+    """Mirrors feed_identity: `company/careers` is the bare key's board."""
+    assert keyscan_core._canonical_token("avature", "deloitteus/careers") == "deloitteus"
+    assert keyscan_core._canonical_token("avature", "Bupaanz/CareersAU") == "bupaanz/careersau"
+    assert keyscan_core._canonical_token("avature", "Acme/ja_jp/Careers") == "acme/ja_JP/careers"
+
+
+@pytest.mark.asyncio
+async def test_oracle_accepts_a_site_named_by_its_vanity_url_name():
+    """`/sites/Aerospace` names the site by SiteURLName, not SiteNumber. A
+    SiteNumber-only check called every such board absent."""
+    queries: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "recruitingCESites" in request.url.path:
+            query = request.url.params["q"]
+            queries.append(query)
+            matched = query == "SiteURLName='aerospace'"
+            return httpx.Response(200, json={"count": int(matched), "items": [{}] if matched else []})
+        return httpx.Response(200, json={"items": [{"TotalJobsCount": 827}]})
+
+    status, count, _ = await _probe(BY_SOURCE["oracle"], "icfcjb.fa.ocs/aerospace", handler)
+
+    assert (status, count) == ("live", 827)
+    assert queries == ["SiteNumber='aerospace'", "SiteURLName='aerospace'"]
+
+
+@pytest.mark.asyncio
+async def test_oracle_site_number_match_skips_the_vanity_lookup():
+    queries: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "recruitingCESites" in request.url.path:
+            queries.append(request.url.params["q"])
+            return httpx.Response(200, json={"count": 1, "items": [{}]})
+        return httpx.Response(200, json={"items": [{"TotalJobsCount": 81}]})
+
+    assert (await _probe(BY_SOURCE["oracle"], "eeho.fa.us2/cx_1", handler))[0] == "live"
+    assert queries == ["SiteNumber='cx_1'"]
+
+
+@pytest.mark.asyncio
+async def test_oracle_failed_vanity_lookup_is_inconclusive_not_absent():
+    """A zero on SiteNumber is only half the answer; if the SiteURLName lookup
+    then fails, the site may still be real."""
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "recruitingCESites" in request.url.path:
+            if request.url.params["q"].startswith("SiteNumber="):
+                return httpx.Response(200, json={"count": 0, "items": []})
+            return httpx.Response(500)
+        raise AssertionError("job endpoint must not be reached when the check failed")
+
+    status, _count, details = await _probe(BY_SOURCE["oracle"], "icfcjb.fa.ocs/aerospace", handler)
+
+    assert status == "inconclusive"
+    assert details["reason"] == "exists_check_failed"
 
 
 @pytest.mark.asyncio
@@ -1792,7 +1994,7 @@ async def test_validation_skips_sources_whose_rule_is_unverified(tmp_path: Path,
         return httpx.Response(200, json=[{"id": 1, "text": "Engineer"}])
 
     scan = Keyscan(tmp_path / "work", transport=transport(handler))
-    await scan.run(["board"])
+    await scan.run(["board", "validate"])
 
     rows = {row["ats"]: row["status"] for row in scan.list_candidates()}
     assert rows == {"lever": "live", "breezy": "unknown"}
@@ -1801,41 +2003,55 @@ async def test_validation_skips_sources_whose_rule_is_unverified(tmp_path: Path,
 
 
 @pytest.mark.asyncio
-async def test_validation_stops_and_records_the_first_refusal(tmp_path: Path, monkeypatch):
-    """A 429 ends validation for the run, and says so on the run row.
+async def test_validation_paces_a_refusing_host_and_keeps_going(tmp_path: Path, monkeypatch):
+    """A 429 paces the one host that sent it; the rest of the sweep continues.
 
-    Retrying a rate limit only deepens it, and every later probe would be
-    rejected anyway -- so the run records who refused us and stops.
+    The old behaviour stopped the whole run on the first refusal, so one touchy
+    vendor froze every other token. Now a 429 opens that host's cooldown and the
+    sweep carries on. The token actually refused is left unchecked by streaming
+    validation (NULL checked_at), so the explicit sweep reprobes it once the host
+    has cooled -- here it then validates too, so all six end up live instead of
+    one 429 freezing the run.
     """
     monkeypatch.setattr(keyscan_core, "BOARD_FEEDS", ({"repo": "acme/board", "path": "listings.json"},))
     listings = json.dumps([
         {"url": f"https://boards.greenhouse.io/acme{n}", "active": True} for n in range(6)
     ])
-    probed: list[str] = []
+    # Requests to greenhouse's host are serialised by the per-host lock, so the
+    # single 429 lands on whichever board is probed first; the retry-after keeps
+    # the resulting cooldown short enough for a test.
+    refusals = {"count": 0}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url).endswith("listings.json"):
             return httpx.Response(200, text=listings)
-        probed.append(str(request.url))
-        return httpx.Response(429, headers={"retry-after": "120"})
+        if request.url.host == "boards-api.greenhouse.io":
+            if refusals["count"] == 0:
+                refusals["count"] = 1
+                return httpx.Response(429, headers={"retry-after": "0.2"})
+            if request.url.path.endswith("/jobs"):
+                return httpx.Response(200, json={"jobs": []})
+            return httpx.Response(200, json={"name": "Acme"})
+        return httpx.Response(404)
 
     scan = Keyscan(tmp_path / "work", transport=transport(handler))
-    run_id = await scan.run(["board"])
+    run_id = await scan.run(["board", "validate"])
 
+    # The run finished rather than being stopped by the refusal.
+    assert scan.status(run_id)["status"] == "completed"
+
+    # A 429 really did happen and was recorded as a diagnostic (only that).
+    assert refusals["count"] == 1
     blocked = scan.status(run_id)["blocked"]
     assert blocked["reason"] == "rate_limited"
     assert blocked["host"] == "boards-api.greenhouse.io"
-    assert blocked["retry_after"] == "120"
 
-    # Stopped rather than working through all six, and never retried the 429.
-    assert len(probed) == 1
-
-    # Nothing was probed successfully, so no token may carry a checked_at:
-    # streaming validation only picks up rows where it is NULL, and stamping
-    # one here would hide the token from every later run.
+    # All six validated: the five that never saw the 429 directly, plus the one
+    # that did -- reprobed by the sweep after the host's cooldown lifted. The old
+    # run-wide abort would have left every one of them frozen at `unknown`.
     rows = scan.list_candidates()
     assert len(rows) == 6
-    assert all(row["checked_at"] is None and row["status"] == "unknown" for row in rows)
+    assert all(row["status"] == "live" and row["checked_at"] is not None for row in rows)
 
     entries, _ = scan.tail_log(run_id)
     assert any(_flat(entry).get("event") == "blocked" for entry in entries)
@@ -2111,3 +2327,146 @@ async def test_enum_writes_only_live_guesses_and_treats_nxdomain_as_absent(tmp_p
     assert rows["amd"]["status"] == "live"
     assert rows["amd"]["method"] == "enum"
     assert rows["amd"]["canonical_url"] == "https://careers.amd.com/api/jobs?page=1"
+
+
+@pytest.mark.asyncio
+async def test_discovery_without_validate_leaves_tokens_unprobed(tmp_path: Path, monkeypatch) -> None:
+    """Validation is opt-in: a plain board run records tokens and probes none."""
+    monkeypatch.setattr(keyscan_core, "BOARD_FEEDS", ({"repo": "acme/board", "path": "listings.json"},))
+    probed: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://raw.githubusercontent.com/acme/board/dev/listings.json":
+            return httpx.Response(200, text=BOARD_LISTINGS)
+        probed.append(request.url.host)
+        return httpx.Response(200, json={"jobs": [], "name": "Acme"})
+
+    scan = Keyscan(tmp_path / "work", transport=transport(handler))
+    run_id = await scan.run(["board"])
+
+    assert scan.status(run_id)["status"] == "completed"
+    rows = scan.list_candidates()
+    assert ("greenhouse", "acme") in {(row["ats"], row["key"]) for row in rows}
+    assert {row["status"] for row in rows} == {"unknown"}
+    assert probed == []
+
+
+def _scanned_fixture(attempted: list[tuple[str, str]]):
+    class Fixture(FixtureScan):
+        def _cc_scan_sources(self, crawl, rules, urls, loop, urls_for_range=None):
+            attempted.extend((crawl, rule.source) for rule in rules)
+            return {rule.source: [] for rule in rules}
+
+    manifest = gzip.compress(b"crawl-data/CC-MAIN-2026-39/cc-index/table/subset=warc/part.parquet\n")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url == httpx.URL("https://index.commoncrawl.org/collinfo.json"):
+            return httpx.Response(200, json=[{"id": "CC-MAIN-2026-39"}])
+        if request.url.host == "data.commoncrawl.org":
+            return httpx.Response(200, content=manifest)
+        return httpx.Response(404)
+
+    return Fixture, transport(handler)
+
+
+@pytest.mark.asyncio
+async def test_a_pair_scanned_by_an_earlier_run_is_skipped(tmp_path: Path):
+    attempted: list[tuple[str, str]] = []
+    Fixture, handler = _scanned_fixture(attempted)
+    scan = Fixture(tmp_path / "work", transport=handler)
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    assert attempted == [("CC-MAIN-2026-39", "greenhouse")]
+
+    # A second run over the same pair -- plus one new vendor -- scans only the new one.
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse", "lever"])
+    assert attempted == [("CC-MAIN-2026-39", "greenhouse"), ("CC-MAIN-2026-39", "lever")]
+
+
+@pytest.mark.asyncio
+async def test_rescan_ignores_earlier_runs(tmp_path: Path):
+    attempted: list[tuple[str, str]] = []
+    Fixture, handler = _scanned_fixture(attempted)
+    scan = Fixture(tmp_path / "work", transport=handler)
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"], rescan=True)
+    assert attempted == [("CC-MAIN-2026-39", "greenhouse")] * 2
+
+
+@pytest.mark.asyncio
+async def test_a_changed_rule_makes_its_scanned_pairs_due_again(tmp_path: Path):
+    attempted: list[tuple[str, str]] = []
+    Fixture, handler = _scanned_fixture(attempted)
+    scan = Fixture(tmp_path / "work", transport=handler)
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    with sqlite3.connect(scan.db_path) as con:
+        con.execute("UPDATE scanned SET rule_hash = 'stale'")
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    assert attempted == [("CC-MAIN-2026-39", "greenhouse")] * 2
+
+
+@pytest.mark.asyncio
+async def test_a_failed_scan_leaves_no_scanned_row(tmp_path: Path):
+    class Failing(FixtureScan):
+        def _cc_scan_sources(self, crawl, rules, urls, loop, urls_for_range=None):
+            raise duckdb.IOException("HTTP 403")
+
+    _, handler = _scanned_fixture([])
+    scan = Failing(tmp_path / "work", transport=handler)
+    with pytest.raises(KeyscanError):
+        await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    with sqlite3.connect(scan.db_path) as con:
+        assert con.execute("SELECT count(*) FROM scanned").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_crawl_footers_rule_out_is_marked_scanned(tmp_path: Path):
+    attempted: list[tuple[str, str]] = []
+    Fixture, handler = _scanned_fixture(attempted)
+    scan = Fixture(tmp_path / "work", transport=handler)
+    scan.initialize()
+    # One harvested file whose only row group sits nowhere near greenhouse.
+    with sqlite3.connect(scan.db_path) as con:
+        con.execute(
+            "INSERT INTO footers VALUES ('CC-MAIN-2026-39', "
+            "'crawl-data/CC-MAIN-2026-39/cc-index/table/subset=warc/part.parquet', 0, 'aa,', 'ab,', 1, 't')"
+        )
+    await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    assert attempted == []
+    with sqlite3.connect(scan.db_path) as con:
+        assert con.execute("SELECT ats, crawl FROM scanned").fetchall() == [("greenhouse", "CC-MAIN-2026-39")]
+
+
+@pytest.mark.asyncio
+async def test_run_counts_separate_new_tokens_from_resightings(tmp_path: Path):
+    class Fixture(FixtureScan):
+        tokens = ["acme"]
+
+        def _cc_scan_sources(self, crawl, rules, urls, loop, urls_for_range=None):
+            return {rule.source: [
+                {"token": token, "url_count": 1, "urls": [f"https://boards.greenhouse.io/{token}"]}
+                for token in self.tokens
+            ] for rule in rules}
+
+    _, handler = _scanned_fixture([])
+    scan = Fixture(tmp_path / "work", transport=handler)
+    first = await scan.run(["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"])
+    assert scan.status(first)["counts"]["found"] == 1
+    assert scan.status(first)["counts"]["added"] == 1
+
+    Fixture.tokens = ["acme", "globex"]
+    second = await scan.run(
+        ["commoncrawl"], crawl_ids=["CC-MAIN-2026-39"], sources=["greenhouse"], rescan=True,
+    )
+    assert scan.status(second)["counts"]["found"] == 2
+    assert scan.status(second)["counts"]["added"] == 1
+
+
+def test_run_ids_are_utc_start_seconds_and_never_collide(tmp_path: Path):
+    import re
+
+    scan = Keyscan(tmp_path / "work")
+    first = scan._new_run(["board"])
+    scan._finish("completed")
+    second = scan._new_run(["board"])
+    assert re.fullmatch(r"\d{8}-\d{6}", first)
+    assert second > first

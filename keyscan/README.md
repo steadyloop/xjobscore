@@ -56,6 +56,24 @@ resumes where it stopped. `robots` reports which shared ATS hosts block CCBot
 — a vendor that blocks it will never appear in the index, which is the
 difference between a broken rule and a genuine blind spot.
 
+`footers` collects Parquet metadata so later scans can skip unrelated files:
+
+```sh
+PYTHONPATH=. uv run python -m keyscan footers
+```
+
+The 2012, 2009–2010, and 2008–2009 collections predate the Parquet index.
+The UI snapshot picker and `keyscan list` exclude them, including when using
+an older cached collection list. The default `footers` selection uses this
+same supported list.
+`footers` and `crawl` skip these with an explanation, without requesting a
+missing manifest or marking them scanned. A `crawl` selection containing only
+these collections reports that no supported index was selected. For `footers`,
+the JSON `skipped` map explains each omission; `no_index` is retained for
+compatibility. Neither means the archived webpages contain no website footers.
+An HTTP 404 for another crawl is reported as a missing manifest, rather than
+classified as an unsupported legacy collection.
+
 `scan` reads public GitHub-hosted internship boards (`BOARD_FEEDS`
 in `core.py`). These boards publish no tokens directly -- each listing row
 carries a per-posting ATS deep link, which `rules.extract` reduces to a
@@ -81,6 +99,24 @@ psql -At -c "SELECT domain FROM company WHERE domain ~ '\.com$'" xjobscore \
 
 `--dry-run` probes and reports without writing; `--concurrency` bounds probes
 in flight (default 16).
+
+`wayback` asks the Internet Archive's CDX index for every capture under each
+vendor domain, one capture year at a time, and runs the URLs through the same
+rule patterns the crawl uses. It reaches what Common Crawl cannot: hosts that
+refuse CCBot (jobs.lever.co, absent from every snapshot since CC-MAIN-2025-47)
+and pages people saved by hand. Defaults to tier1 + tier2, every year from
+2013; each finished (vendor, year) is recorded in `scanned` as `wayback:YYYY`
+and skipped by later runs unless `--rescan`. Requests are spaced 4s apart (the
+archive's ~15/min ceiling) and back off on 429/503:
+
+```sh
+uv run python -m keyscan wayback --vendor lever --years 2025,2026
+uv run python -m keyscan wayback --from-year 2020
+```
+
+The archive rate-limits by network as well as by request rate: from a
+datacenter or VPN address (its 429 carries `x-nid: <network>`) it can refuse
+every request regardless of pacing, so run it from a residential connection.
 
 ## Validation runs alongside discovery
 
