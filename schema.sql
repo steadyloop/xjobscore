@@ -1,20 +1,8 @@
 -- xjobscore -- PostgreSQL 18
--- DO NOT EDIT, this is source of truth. --
+-- Pipeline storage contract. OneShot-owned tables live in frontend.sql.
+-- Keep live changes in a matching migration. --
 
 BEGIN;
-
--- USERS --
-CREATE TABLE account (
-    id          uuid PRIMARY KEY,
-    profile     jsonb NOT NULL DEFAULT '{}',
-    email       text UNIQUE,
-    google_sub  text UNIQUE,        -- OIDC subject; stable across email changes
-    name        text NOT NULL DEFAULT '',
-    picture_url text NOT NULL DEFAULT '',
-    created_at  timestamptz NOT NULL DEFAULT now()
-);
-INSERT INTO account (id)
-VALUES ('00000000-0000-0000-0000-000000000001');
 
 -- COMPANIES --
 CREATE TABLE company (
@@ -121,7 +109,9 @@ CREATE TABLE feed (
     CONSTRAINT feed_token_identity_fkey
         FOREIGN KEY (source, key) REFERENCES token (ats, token) ON DELETE RESTRICT,
     CONSTRAINT feed_workday_key_lower
-        CHECK (source <> 'workday' OR key = lower(key))
+        CHECK (source <> 'workday' OR key = lower(key)),
+    CONSTRAINT feed_paylocity_disabled
+        CHECK (lower(source) <> 'paylocity' OR NOT polling)
 );
 CREATE INDEX feed_due_idx ON feed (due_at) WHERE polling;
 -- run.cycle's per-vendor worker pools each claim the oldest due feed *of one
@@ -161,6 +151,26 @@ CREATE TABLE scheduler_control (
     note       text
 );
 INSERT INTO scheduler_control (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+-- Operator-named sections on the Scheduler board ("Watchlist", "Finance"),
+-- in board order. Display only: the scheduler never reads these, so a group
+-- changes what the board shows, never what polls or how often.
+--
+-- A provider (feed.source) is in at most one group -- the member primary key
+-- -- and a provider in none is "Ungrouped", which is not a row: new providers
+-- land there without anyone having to file them. Deleting a group returns its
+-- providers to Ungrouped through the cascade.
+CREATE TABLE provider_group (
+    id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name     text NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 64),
+    position integer NOT NULL
+);
+
+CREATE TABLE provider_group_member (
+    source   text PRIMARY KEY,
+    group_id bigint NOT NULL REFERENCES provider_group (id) ON DELETE CASCADE
+);
+CREATE INDEX provider_group_member_group_idx ON provider_group_member (group_id);
 
 CREATE TABLE token_heartbeat (
     id                 boolean PRIMARY KEY DEFAULT true CHECK (id),
@@ -373,11 +383,12 @@ CREATE TABLE job_posting (
     status                   text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
     first_seen_at            timestamptz NOT NULL DEFAULT now(),
     last_seen_at             timestamptz NOT NULL DEFAULT now(),
-    ------------ Tracking ----------------
-    vendor_closed_at         timestamptz,
-    link_marked_at           timestamptz,
+    ------------ Closure signals ----------------
+    missing_since            timestamptz,   -- Board disappearance
+    ats_closed_at            timestamptz,   -- ATS flag
     link_checked_at          timestamptz,
-    link_closed_at           timestamptz,
+    linked_dead_at           timestamptz,   -- Link gone
+    paged_closed_at          timestamptz,   -- Link works, page shows closed
     ------------- Enriched (Gold) ---------
     attributes               jsonb NOT NULL DEFAULT '{"version": 1}'::jsonb
         CHECK (jsonb_typeof(attributes) = 'object')
@@ -428,20 +439,23 @@ CREATE TABLE job_posting (
             'unlabeled'
         )),
     job_domain_version       smallint,
+    ------------ Provenance and deduplication ----------------
     -- Traceability to the unmodified input
     raw_id                   bigint NOT NULL REFERENCES raw_posting(id),  -- raw version it produced current row
     dup_group_id             uuid,              -- groups suspected duplicates together
-    -- Judgement, not a source fact: set by hand, never by the pipeline.
-    removal_marked_at        timestamptz,       -- NULL = not marked for removal
-    -- Source fact: the first complete poll of the posting's board that no longer
-    -- listed it. last_seen_at is the last poll that did, so the disappearance
-    -- lies between the two. Cleared when the board lists the posting again.
-    missing_since            timestamptz,       -- NULL = still listed
 
     UNIQUE (source, source_key),
     CONSTRAINT job_posting_workday_source_lower
         CHECK (source NOT LIKE 'workday:%' OR source = lower(source))
 );
+COMMENT ON COLUMN job_posting.linked_dead_at IS
+    'First confirmed HTTP 404/410 from the job link. Independent of ATS and page closure signals.';
+COMMENT ON COLUMN job_posting.ats_closed_at IS
+    'First explicit closed/inactive status reported by the ATS.';
+COMMENT ON COLUMN job_posting.paged_closed_at IS
+    'First explicit closed-page message or job-page redirect. Closure evidence is replayable in raw_posting.';
+COMMENT ON COLUMN job_posting.link_checked_at IS
+    'Latest individual job check, including live, blocked, and inconclusive results.';
 COMMENT ON COLUMN job_posting.attributes IS
     'OneShot enrichment v1: version, term, remote, skills/meta, degree/meta, summary/meta, deadline_at';
 COMMENT ON COLUMN job_posting.degree_version IS
@@ -450,8 +464,6 @@ COMMENT ON COLUMN job_posting.job_domain IS
     'Gold title domain populated by --enrich job_type: software, finance, or unlabeled.';
 COMMENT ON COLUMN job_posting.job_domain_version IS
     'Classifier revision behind job_domain; NULL means not yet enriched.';
-COMMENT ON COLUMN job_posting.removal_marked_at IS
-    'When a human marked this posting for removal; NULL means not marked. Never written by ingest.';
 COMMENT ON COLUMN job_posting.missing_since IS
     'First complete board poll that no longer listed this posting; NULL while listed. A signal, not a closure: status is untouched.';
 CREATE INDEX job_posting_attributes_idx ON job_posting USING gin (attributes);
@@ -477,13 +489,14 @@ CREATE INDEX job_posting_fresh_active_idx
 CREATE INDEX job_posting_missing_since_idx
     ON job_posting (missing_since DESC)
     WHERE missing_since IS NOT NULL;
-CREATE INDEX job_posting_removal_marked_idx
-    ON job_posting (removal_marked_at DESC)
-    WHERE removal_marked_at IS NOT NULL;
 -- Scheduler telemetry (open counts, discovery p95) reads only these columns;
 -- an index-only scan of this avoids a full pass over the wide heap.
 CREATE INDEX job_posting_stats_idx
     ON job_posting (source, status, first_seen_at, posted_at);
+-- Per-poll Gold reads one feed's companies (`gold._incremental_job_type`). Without
+-- this every changed poll scanned the whole table -- ~45 concurrent 19s scans
+-- during a backfill, about 5s of DB wait added to every poll.
+CREATE INDEX job_posting_company_idx ON job_posting (company_id);
 
 -- DEDUP
 CREATE TABLE job_posting_dup_group (
@@ -514,161 +527,15 @@ VALUES (
     now()
 );
 
--- APPLICATION TRACKER
-CREATE TABLE job_application (
-    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    -- No DEFAULT, deliberately: every writer supplies an account. A DEFAULT here
-    -- would turn a query that forgot to scope into a silent write against the
-    -- shared sentinel row, which is how one user ends up seeing another's data.
-    account_id         uuid NOT NULL REFERENCES account(id),
-    job_posting_id     bigint REFERENCES job_posting(id),
-    -- Job Specs
-    company_snapshot   text NOT NULL,
-    title_snapshot     text NOT NULL,
-    location_snapshot  text,
-    apply_url_snapshot text,
-    resume_variant     text,
-
-    -- Updates
-    stage text NOT NULL DEFAULT 'considering'
-        CHECK (stage IN (
-            'considering',
-            'applied',
-            'assessment',
-            'interview',
-            'offer',
-            'closed'
-        )),
-    closed_reason text
-        CHECK (closed_reason IN (
-            'rejected',
-            'withdrawn',
-            'no_reply'
-        )),
-    next_action text,
-    note        text NOT NULL DEFAULT '',
-
-    submitted_at timestamptz,
-    updated_at   timestamptz NOT NULL DEFAULT now(),
-    next_due_at  timestamptz,
-
-    CHECK (stage = 'closed' OR closed_reason IS NULL),
-    UNIQUE (account_id, job_posting_id)
+-- Publication identities survive pipeline row-ID changes. Neon and the local
+-- frontend share these serving IDs; personal data never travels through here.
+CREATE TABLE frontend_identity (
+    kind text NOT NULL CHECK (kind IN ('job', 'company', 'meta')),
+    key jsonb NOT NULL,
+    id bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL,
+    PRIMARY KEY (kind, key),
+    UNIQUE (kind, id)
 );
-CREATE INDEX job_application_stage_due_idx
-    ON job_application (account_id, stage, next_due_at, updated_at DESC);
-
-CREATE TABLE job_application_event (
-    id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    job_application_id bigint NOT NULL REFERENCES job_application(id) ON DELETE CASCADE,
-    event_type         text NOT NULL,
-    to_stage           text
-        CHECK (to_stage IN (
-            'considering',
-            'applied',
-            'assessment',
-            'interview',
-            'offer',
-            'closed'
-        )),
-    occurred_at        timestamptz NOT NULL DEFAULT now(),
-    note               text
-);
-CREATE INDEX job_application_event_application_idx
-    ON job_application_event (job_application_id, occurred_at DESC);
-
--- TRIAGE FEEDBACK
--- A row hides the posting (and its duplicate group) from this account's
--- Opportunities feed; deleting it restores the posting. `mislabeled` rows are
--- also the account's label corrections, kept for the classifier eval.
-CREATE TABLE job_feedback (
-    account_id     uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
-    job_posting_id bigint NOT NULL REFERENCES job_posting(id),
-    kind           text NOT NULL
-        CHECK (kind IN ('skip', 'mislabeled')),
-    -- Optional, and only a skip carries one.
-    skip_reason    text
-        CHECK (skip_reason IN ('level', 'location', 'field', 'company')),
-    -- [{field, from, to}]: field is type | focus | company | location | skills,
-    -- `to` is null when the reporter didn't say what it should be.
-    corrections    jsonb NOT NULL DEFAULT '[]'
-        CHECK (jsonb_typeof(corrections) = 'array'),
-    created_at     timestamptz NOT NULL DEFAULT now(),
-    updated_at     timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (account_id, job_posting_id),
-    CHECK (kind = 'skip' OR skip_reason IS NULL),
-    CHECK (kind = 'mislabeled' OR corrections = '[]'::jsonb)
-);
-CREATE INDEX job_feedback_recent_idx
-    ON job_feedback (account_id, created_at DESC);
-
--- RESUME STUDIO
-CREATE TABLE resume_workspace (
-    account_id   uuid PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
-    profile      jsonb NOT NULL DEFAULT '{}'
-        CHECK (jsonb_typeof(profile) = 'object'),
-    entries      jsonb NOT NULL DEFAULT '[]'
-        CHECK (jsonb_typeof(entries) = 'array'),
-    skills       jsonb NOT NULL DEFAULT '[]'
-        CHECK (jsonb_typeof(skills) = 'array'),
-    variants     jsonb NOT NULL DEFAULT '[]'
-        CHECK (jsonb_typeof(variants) = 'array'),
-    next_item_id bigint NOT NULL DEFAULT 1 CHECK (next_item_id > 0),
-    updated_at   timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE resume_target (
-    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    account_id  uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
-    company     text NOT NULL,
-    title       text NOT NULL,
-    url         text NOT NULL DEFAULT '',
-    jd_text     text NOT NULL DEFAULT '',
-    date_posted text NOT NULL DEFAULT '',
-    note        text NOT NULL DEFAULT '',
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    -- The queued application this target was built from, so tailoring a resume
-    -- for a tracked job is a link rather than a retype. NULL for a target typed
-    -- in by hand. ON DELETE SET NULL: dropping an application must not discard
-    -- the resume work done for it.
-    job_application_id bigint REFERENCES job_application(id) ON DELETE SET NULL,
-
-    UNIQUE (account_id, id)
-);
-CREATE INDEX resume_target_account_idx
-    ON resume_target (account_id, created_at DESC, id DESC);
--- Makes "tailor a resume for this application" idempotent: the second click
--- finds this row instead of creating a near-duplicate target.
-CREATE UNIQUE INDEX resume_target_account_application_key
-    ON resume_target (account_id, job_application_id)
-    WHERE job_application_id IS NOT NULL;
-
-CREATE TABLE resume_document (
-    id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    account_id        uuid NOT NULL REFERENCES account(id) ON DELETE CASCADE,
-    target_job_id     bigint,
-    name              text NOT NULL,
-    -- No CHECK: valid values are the keys in resume_workspace.variants, which
-    -- each account defines for itself. Validated in the store, where that list
-    -- is readable; '' means no variant selected.
-    variant           text NOT NULL DEFAULT '',
-    -- The typeset design; the list lives in resume_models.Template.
-    template          text NOT NULL DEFAULT 'main'
-        CHECK (template IN ('main', 'barlow')),
-    availability_line text NOT NULL DEFAULT '',
-    education_note    text NOT NULL DEFAULT '',
-    selection         jsonb NOT NULL DEFAULT '{}'
-        CHECK (jsonb_typeof(selection) = 'object'),
-    created_at        timestamptz NOT NULL DEFAULT now(),
-    updated_at        timestamptz NOT NULL DEFAULT now(),
-
-    FOREIGN KEY (account_id, target_job_id)
-        REFERENCES resume_target(account_id, id)
-        ON DELETE SET NULL (target_job_id)
-);
-CREATE INDEX resume_document_account_updated_idx
-    ON resume_document (account_id, updated_at DESC, id DESC);
-
 
 -- EXPERIMENTS --
 CREATE TABLE job_classification_experiment (
@@ -711,5 +578,34 @@ CREATE TABLE job_classification_experiment (
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE reconcile_control (
+    id boolean PRIMARY KEY DEFAULT true CHECK (id),
+    running boolean NOT NULL DEFAULT true,
+    concurrency integer NOT NULL DEFAULT 5 CHECK (concurrency BETWEEN 1 AND 32),
+    checks_per_second double precision NOT NULL DEFAULT 5 CHECK (checks_per_second BETWEEN 0.1 AND 20),
+    recheck_s integer NOT NULL DEFAULT 21600 CHECK (recheck_s BETWEEN 60 AND 604800),
+    retry_s integer NOT NULL DEFAULT 900 CHECK (retry_s BETWEEN 60 AND 604800),
+    changed_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO reconcile_control(id) VALUES(true) ON CONFLICT DO NOTHING;
+
+CREATE TABLE reconcile_queue (
+    posting_id bigint NOT NULL REFERENCES job_posting(id) ON DELETE CASCADE,
+    missing_since timestamptz NOT NULL,
+    priority smallint NOT NULL DEFAULT 0 CHECK (priority IN (0,1)),
+    next_check_at timestamptz NOT NULL DEFAULT now(),
+    lease_token uuid,
+    lease_until timestamptz,
+    failures integer NOT NULL DEFAULT 0 CHECK (failures>=0),
+    last_checked_at timestamptz,
+    last_outcome text,
+    last_error text,
+    finished_at timestamptz,
+    PRIMARY KEY (posting_id,missing_since),
+    CHECK ((lease_token IS NULL) = (lease_until IS NULL))
+);
+CREATE INDEX reconcile_queue_due_idx ON reconcile_queue(priority,next_check_at,posting_id) WHERE finished_at IS NULL;
+CREATE INDEX reconcile_queue_finished_idx ON reconcile_queue(finished_at) WHERE finished_at IS NOT NULL;
 
 COMMIT;
