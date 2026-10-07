@@ -23,7 +23,6 @@ __pycache__
 
 # Frontend/development dependencies and generated output
 node_modules
-frontend/node_modules
 dist
 build
 **/build/
