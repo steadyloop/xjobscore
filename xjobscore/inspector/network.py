@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from xjobscore import workable_policy
+
 from xjobscore.net import (
     RETRYABLE_STATUS,
     Net,
@@ -159,6 +161,7 @@ class InspectorNet(Net):
         shared_host_semaphores: dict[str, asyncio.Semaphore] | None = None,
         shared_host_paces: dict[str, _HostPace] | None = None,
         shared_vendor_semaphores: dict[str, asyncio.Semaphore] | None = None,
+        shared_vendor_budgets: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -181,35 +184,27 @@ class InspectorNet(Net):
         # vendor -- see InspectorService.__init__.
         if shared_vendor_semaphores is not None:
             self._vendor_semaphores = shared_vendor_semaphores
+        # And for Net._vendor_budgets: a per-feed budget would hand every
+        # concurrent inspector fetch the vendor's whole rate.
+        if shared_vendor_budgets is not None:
+            self._vendor_budgets = shared_vendor_budgets
 
     async def _request(self, method: str, url: str, *, concurrency: int = 1, **kwargs: Any) -> Response:
         if self._client is None:
             raise RuntimeError("Net must be used as an async context manager")
         host = urlsplit(url).netloc
-        # Vendor cap first (Net._vendor_semaphore), exact-host shared cap
-        # second -- the same vendor -> host order Net._request uses, and
-        # distinct semaphores (different key spaces: suffix vs. exact host),
-        # so this never re-acquires the same lock twice for one request.
-        vendor = self._vendor_semaphore(host)
+        # Host limits only -- the exact-host shared cap, then the local one.
+        # The vendor-wide slot and rate budget are taken per attempt, around
+        # the wire call alone (Net._admitted), same as Net._request.
         shared = self._shared_host_semaphores.get(host)
-        if vendor is None:
-            if shared is not None:
-                async with shared:
-                    return await self._request_with_local_limit(
-                        method, url, host, concurrency=concurrency, **kwargs
-                    )
-            return await self._request_with_local_limit(
-                method, url, host, concurrency=concurrency, **kwargs
-            )
-        async with vendor:
-            if shared is not None:
-                async with shared:
-                    return await self._request_with_local_limit(
-                        method, url, host, concurrency=concurrency, **kwargs
-                    )
-            return await self._request_with_local_limit(
-                method, url, host, concurrency=concurrency, **kwargs
-            )
+        if shared is not None:
+            async with shared:
+                return await self._request_with_local_limit(
+                    method, url, host, concurrency=concurrency, **kwargs
+                )
+        return await self._request_with_local_limit(
+            method, url, host, concurrency=concurrency, **kwargs
+        )
 
     async def _request_with_local_limit(
         self, method: str, url: str, host: str, *, concurrency: int, **kwargs: Any
@@ -236,10 +231,12 @@ class InspectorNet(Net):
             # this whole call including retries -- see Net._request_one.
             if throttled:
                 await self._throttle(host)
-            paced_s = await pace.reserve()
+            paced_s = 0.0
             started = time.monotonic()
             try:
-                response = await self._client.request(method, url, **kwargs)
+                async with self._admitted(host, pace, validation=workable_policy.verification(url, kwargs.get("params"))) as paced_s:
+                    started = time.monotonic()
+                    response = await self._client.request(method, url, **kwargs)
             except httpx.TransportError as exc:
                 elapsed_ms = (time.monotonic() - started) * 1000
                 self.events.append(
@@ -290,6 +287,8 @@ class InspectorNet(Net):
                 )
 
             if response.status_code == 429:
+                if await workable_policy.note_response(response):
+                    raise NetError("HTTP 429", url=sanitize_url(str(response.url)), status=429)
                 # Host-wide: the next reserve() waits the cooldown out, and so
                 # does every sibling slot, instead of each sleeping alone.
                 pace.throttled(_retry_after_seconds(response.headers.get("retry-after")))

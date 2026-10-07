@@ -23,6 +23,14 @@ export async function setFeedsEnabled(feeds, enabled) {
   return api("/api/feeds/bulk-policy", { body: { refs, enabled } });
 }
 
+/* Scheduler provider control resolves the complete membership on the server,
+   avoiding both stale browser subsets and a full Inspector inventory read. */
+export async function setProviderPaused(source, paused) {
+  return api(`/api/scheduler/providers/${encodeURIComponent(source)}/pause`, {
+    body: { paused },
+  });
+}
+
 /* The token endpoint owns the whole mutation: muted=true and feed deletion
    happen atomically in PostgreSQL. */
 export async function muteFeed(feed) {

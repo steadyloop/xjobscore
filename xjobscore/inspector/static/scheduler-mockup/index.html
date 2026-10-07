@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xJobscore · scheduler groups mockup</title>
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="../shared/components.css">
+  <link rel="stylesheet" href="../system/styles.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    /* Mockup-only rules. Everything else is the System page's own sheet. */
+
+    .mk-banner {
+      padding: 7px 10px;
+      border: 1px dashed var(--ops-line);
+      border-radius: 5px;
+      color: var(--ops-subtle);
+      font: 12px/1.5 var(--font-mono);
+    }
+
+    .mk-banner b {
+      color: var(--ops-ink);
+    }
+
+    .mk-banner .ops-linkish {
+      font: inherit;
+    }
+
+    /* ---------- board: one section per group ---------- */
+
+    /* A section heading: the group's name in the UI face (providers are mono),
+       an ink underline, and its totals aligned under the provider columns. */
+    .scheduler-page table.ops-table tr.mk-sec td {
+      height: auto;
+      padding-top: 20px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--ops-subtle);
+      background: var(--ops-bg);
+      vertical-align: top;
+      cursor: pointer;
+    }
+
+    .scheduler-page table.ops-table tbody:first-of-type tr.mk-sec td {
+      padding-top: 10px;
+    }
+
+    /* Folded, a section is one row the same size as a provider row: no
+       heading space above, and the plain row rule instead of the underline. */
+    .scheduler-page table.ops-table .mk-sec-body[data-open="false"] tr.mk-sec td {
+      height: 30px;
+      padding-top: 3px;
+      padding-bottom: 3px;
+      border-bottom-color: var(--ops-line);
+      vertical-align: middle;
+    }
+
+    .mk-sec-toggle {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--ops-ink);
+      font-family: var(--font-mono);
+      cursor: pointer;
+    }
+
+    .mk-sec-name {
+      font-family: var(--font-ui);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .mk-sec-body[data-open="true"] .ops-chevron {
+      transform: rotate(90deg);
+    }
+
+    .mk-sec-sum {
+      font-weight: 700;
+    }
+
+    /* Ungrouped recedes: lighter heading, flat rows, lighter names. */
+    .mk-sec-body[data-ungrouped="true"] .mk-sec-name {
+      color: var(--ops-subtle);
+    }
+
+    .mk-provider[data-ungrouped="true"] tr.ops-group td {
+      background: transparent;
+    }
+
+    .mk-provider[data-ungrouped="true"] .ops-group-name {
+      color: var(--ops-subtle);
+      font-weight: 600;
+    }
+
+    .mk-provider[data-ungrouped="true"] td.num {
+      color: var(--ops-subtle);
+    }
+
+    /* Row handle: sits in the cell's left padding, just before the chevron,
+       and shows only on the hovered row (or while its menu is open). The
+       cell is already position: sticky, which anchors it. */
+    .mk-row-handle {
+      position: absolute;
+      top: 50%;
+      left: -3px;
+      width: 14px;
+      height: 20px;
+      padding: 0;
+      border: 0;
+      border-radius: 3px;
+      background: transparent;
+      color: var(--ops-faint);
+      font: 12px/20px var(--font-mono);
+      text-align: center;
+      opacity: 0;
+      transform: translateY(-50%);
+      cursor: pointer;
+    }
+
+    tr.ops-group:hover .mk-row-handle,
+    .mk-row-handle:focus-visible,
+    .mk-row-handle[aria-expanded="true"] {
+      opacity: 1;
+    }
+
+    .mk-row-handle:hover,
+    .mk-row-handle[aria-expanded="true"] {
+      background: var(--ops-line-soft);
+      color: var(--ops-ink);
+    }
+
+    /* ---------- group ▾ menu ---------- */
+
+    .mk-menu {
+      position: fixed;
+      z-index: 40;
+      min-width: 190px;
+      padding: 4px;
+      border: 1px solid var(--ops-line);
+      border-radius: 6px;
+      background: var(--ops-panel);
+      box-shadow: 0 14px 38px rgba(8, 10, 12, 0.2);
+      font: 12px/1.4 var(--font-mono);
+    }
+
+    .mk-menu[hidden] {
+      display: none;
+    }
+
+    .mk-menu-k {
+      padding: 4px 8px 6px;
+      color: var(--ops-faint);
+      font-size: 11px;
+    }
+
+    .mk-menu-item {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ops-ink);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .mk-menu-item:hover,
+    .mk-menu-item:focus-visible {
+      outline: none;
+      background: var(--ops-selected);
+    }
+
+    .mk-check {
+      flex: none;
+      width: 1.5ch;
+      color: var(--ops-good);
+    }
+
+    .mk-menu hr {
+      margin: 4px 0;
+      border: 0;
+      border-top: 1px solid var(--ops-line-soft);
+    }
+
+    .scheduler-page .mk-menu-input {
+      width: 100%;
+      padding: 4px 8px;
+      border: 1px solid var(--ops-subtle);
+      border-radius: 4px;
+      background: var(--ops-panel);
+      color: var(--ops-ink);
+      font: inherit;
+    }
+
+    /* ---------- edit groups drawer ---------- */
+
+    /* The real drawer sits under the 52px topnav; the mockup has no nav. */
+    .scheduler-page .mk-panel {
+      top: 0;
+    }
+
+    .mk-g {
+      padding: 10px 14px 12px;
+      border-top: 1px solid var(--ops-line-soft);
+    }
+
+    .mk-g.mk-dragging {
+      opacity: 0.4;
+    }
+
+    .mk-g[data-drop="into"] {
+      background: var(--ops-selected);
+    }
+
+    .mk-g[data-drop="before"] {
+      box-shadow: inset 0 2px 0 var(--ops-link);
+    }
+
+    .mk-g[data-drop="after"] {
+      box-shadow: inset 0 -2px 0 var(--ops-link);
+    }
+
+    .mk-g-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      margin-bottom: 8px;
+    }
+
+    .mk-handle {
+      flex: none;
+      width: 14px;
+      color: var(--ops-faint);
+      text-align: center;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .mk-g-name,
+    .scheduler-page .mk-g-name-input {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--ops-ink);
+      font: 700 13px/1.3 var(--font-ui);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .scheduler-page .mk-g-name-input {
+      width: 180px;
+      padding: 0 2px;
+      border: 0;
+      border-bottom: 1px solid var(--ops-ink);
+      border-radius: 0;
+      outline: none;
+      background: transparent;
+    }
+
+    .mk-g-count,
+    .mk-g-note {
+      color: var(--ops-faint);
+      font: 11px var(--font-mono);
+      white-space: nowrap;
+    }
+
+    .mk-g-tools {
+      display: inline-flex;
+      gap: 2px;
+      margin-left: auto;
+    }
+
+    .mk-icon {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ops-faint);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .mk-icon:hover:not(:disabled) {
+      border-color: var(--ops-line);
+      color: var(--ops-ink);
+    }
+
+    .mk-icon:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+
+    .mk-icon.mk-danger:hover {
+      border-color: color-mix(in srgb, var(--ops-bad) 40%, var(--ops-line));
+      color: var(--ops-bad);
+    }
+
+    .mk-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      padding-left: 20px;
+    }
+
+    .mk-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border: 1px solid var(--ops-line);
+      border-radius: 4px;
+      background: var(--ops-panel);
+      color: var(--ops-ink);
+      font: 12px/18px var(--font-mono);
+      cursor: grab;
+    }
+
+    .mk-chip:has(.mk-chip-x) {
+      padding-right: 3px;
+    }
+
+    .mk-chip.mk-dragging {
+      opacity: 0.4;
+    }
+
+    .mk-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .mk-dot[data-state="backing_off"] {
+      background: var(--ops-bad);
+    }
+
+    .mk-dot[data-state="stale"] {
+      background: var(--ops-warn);
+    }
+
+    .mk-chip-x {
+      padding: 0 3px;
+      border: 0;
+      background: transparent;
+      color: var(--ops-faint);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .mk-chip-x:hover {
+      color: var(--ops-ink);
+    }
+
+    .scheduler-page .mk-add {
+      width: 110px;
+      height: auto;
+      padding: 2px 8px;
+      border: 1px dashed var(--ops-line);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ops-ink);
+      font: 12px/18px var(--font-mono);
+    }
+
+    .scheduler-page .mk-add:focus {
+      border-style: solid;
+      border-color: var(--ops-subtle);
+      outline: none;
+    }
+
+    .scheduler-page .mk-add[aria-invalid="true"] {
+      border-color: var(--ops-bad);
+    }
+
+    .mk-g-foot {
+      padding: 12px 14px 28px;
+      border-top: 1px solid var(--ops-line-soft);
+    }
+  </style>
+</head>
+<body class="scheduler-page">
+  <main class="ops-shell">
+    <div class="mk-banner">
+      <b>Mockup</b> · static numbers from the 5 Oct scheduler. <b>⠿</b> (hover a row, left of its name) moves one provider;
+      <b>edit groups</b> adds, renames, reorders and deletes groups. Saved in this browser
+      · <button class="ops-linkish" type="button" id="reset">reset</button>
+    </div>
+
+    <header class="ops-header sys-section-head">
+      <div class="ops-header-title"><h2>Scheduler</h2></div>
+    </header>
+
+    <section class="sys-strip sys-sched-strip" aria-label="Feed status and recent polling">
+      <div class="sys-strip-row">
+        <span class="sys-strip-k">feeds</span>
+        <div class="sys-strip-v ops-summary-line" id="summary-line"></div>
+      </div>
+      <div class="sys-strip-row">
+        <span class="sys-strip-k">last 5m</span>
+        <span class="sys-strip-v">
+          1,878 polled<span class="wk-sep">·</span>206 with new jobs<span class="wk-sep">·</span><b>25,312 new postings</b><span class="wk-sep">·</span><span class="sys-quiet">0 partial</span><span class="wk-sep">·</span><span class="sys-quiet">0 errors</span>
+        </span>
+      </div>
+    </section>
+
+    <div class="ops-filterbar">
+      <label class="ops-search">
+        <span class="sr-only">Filter providers</span>
+        <input type="search" id="search" placeholder="filter…  group:name" autocomplete="off">
+        <kbd>/</kbd>
+      </label>
+
+      <div class="ops-view-pills" role="group" aria-label="Feed view">
+        <button type="button" data-view="all" aria-pressed="true">all <span></span></button>
+        <button type="button" data-view="issues" aria-pressed="false">issues <span></span></button>
+        <button type="button" data-view="failing" aria-pressed="false">failing <span></span></button>
+        <button type="button" data-view="paused" aria-pressed="false">paused <span></span></button>
+      </div>
+
+      <div class="ops-expand-links">
+        <button class="ops-linkish" type="button" id="expand-all">expand all</button>
+        <span aria-hidden="true">·</span>
+        <button class="ops-linkish" type="button" id="collapse-all">collapse all</button>
+        <span aria-hidden="true">·</span>
+        <button class="ops-linkish" type="button" id="edit-groups" aria-expanded="false" aria-controls="groups-panel">edit groups</button>
+      </div>
+
+      <span class="ops-shown" id="row-count"></span>
+      <button class="btn small" type="button">Refresh</button>
+      <button class="btn small" type="button">Fetch matching</button>
+    </div>
+
+    <div class="table-wrap ops-table-wrap">
+      <table class="data ops-table" id="table">
+        <thead>
+          <tr>
+            <th><button type="button">status</button></th>
+            <th><button type="button">source</button></th>
+            <th class="sys-workers-col">workers</th>
+            <th class="num"><button type="button">interval</button></th>
+            <th class="num" aria-sort="ascending"><button type="button">next</button></th>
+            <th class="num"><button type="button">last</button></th>
+            <th class="num"><button type="button">new·1d</button></th>
+            <th class="num"><button type="button">err·7d</button></th>
+            <th class="ops-actions-col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+  </main>
+
+  <aside class="ops-detail-panel mk-panel" id="groups-panel" aria-labelledby="groups-title" hidden></aside>
+  <div class="mk-menu" id="menu" role="menu" hidden></div>
+  <div class="ops-toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <datalist id="mk-providers"></datalist>
+
+  <script>
+    // Plain script, no imports: the mockup has to work from file:// too.
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [name, value] of Object.entries(attrs)) {
+        if (value == null) continue;
+        if (name.startsWith("on")) node.addEventListener(name.slice(2), value);
+        else node.setAttribute(name, value);
+      }
+      for (const child of children.flat(Infinity)) {
+        if (child == null) continue;
+        node.append(child.nodeType ? child : document.createTextNode(String(child)));
+      }
+      return node;
+    }
+
+    const fmt = (n) => n.toLocaleString("en-US");
+
+    const STATUS_TEXT = { backing_off: "err", stale: "stale", never_polled: "new", healthy: "ok", paused: "paused" };
+    const PRIORITY = ["backing_off", "stale", "never_polled", "healthy", "paused"];
+    const VIEW_STATES = {
+      all: PRIORITY,
+      issues: ["backing_off", "stale", "never_polled"],
+      failing: ["backing_off"],
+      paused: ["paused"],
+    };
+
+    // [source, {state: count}, workers, ivl, next, last, new·1d, err·7d]
+    // workers: [width, busy tick states, longest age flag]
+    const W1 = [1, [], null];
+    const PROVIDERS = [
+      ["workday", { backing_off: 1, stale: 85, never_polled: 3989, healthy: 2282, paused: 1 },
+        [6, ["slow", "slow", "slow", "busy", "busy", "busy"], ["slow", "2m58s"]], "15m–24h", "due", "7s", 80126, 0],
+      ["avature", { backing_off: 1, stale: 3, healthy: 34 }, [1, ["stuck"], ["stuck", "5m52s"]], "15m–24h", "due", "3h", 478, 21],
+      ["teamtailor", { backing_off: 1, healthy: 9 }, W1, "15m", "10m", "4m", 0, 6],
+      ["taleo", { backing_off: 1, healthy: 1 }, W1, "15m", "10m", "5m", 0, 0],
+      ["unstop", { backing_off: 1 }, W1, "15m", "5.8h", "10h", 0, 0],
+      ["workable", { never_polled: 1983, healthy: 4050, paused: 5188 }, [1, ["busy"], null], "15m–24h", "due", "3s", 1557, 51],
+      ["greenhouse", { healthy: 6907 }, [30, [], null], "15m–24h", "9m", "2m", 88, 0],
+      ["smartrecruiters", { stale: 20, never_polled: 1845, healthy: 975, paused: 1 },
+        [16, ["stuck", "stuck", "stuck", "stuck", "slow", "slow", "slow", "slow", "slow", "slow", "slow", "slow", "slow", "busy", "busy", "busy"], ["stuck", "3m10s"]],
+        "15m–24h", "due", "3m", 24537, 0],
+      ["ashby", { healthy: 2036 }, [44, [], null], "15m–24h", "9m", "2m", 116, 8],
+      ["lever", { healthy: 1910 }, [40, [], null], "15m–24h", "10m", "5m", 1, 72],
+      ["oracle", { healthy: 1813 }, [12, [], null], "15m–24h", "9m", "3m", 18, 2],
+      ["gem", { healthy: 924 }, [20, [], null], "15m–24h", "10m", "5m", 20, 0],
+      ["comeet", { healthy: 42, paused: 527 }, W1, "15m–24h", "23.6h", "25m", 0, 415],
+      ["rippling", { healthy: 402 }, [8, [], null], "15m", "10m", "3m", 7, 0],
+      ["eightfold", { healthy: 70 }, [2, [], null], "15m–24h", "9m", "3m", 52, 46],
+      ["jobvite", { healthy: 11 }, W1, "15m", "10m", "4m", 0, 0],
+      ["successfactors", { healthy: 10 }, W1, "15m–24h", "11m", "3m", 2, 4],
+      ["icims", { healthy: 7 }, W1, "15m–24h", "11m", "3m", 54, 0],
+      ["personio", { healthy: 4 }, W1, "15m", "10m", "4m", 0, 0],
+      ["pinpoint", { healthy: 4 }, W1, "15m", "10m", "4m", 3, 0],
+      ["bamboohr", { healthy: 3 }, [2, [], null], "15m", "10m", "5m", 0, 0],
+      ["breezy", { healthy: 3 }, W1, "15m", "10m", "5m", 0, 0],
+      ["recruitee", { healthy: 3 }, W1, "15m", "10m", "5m", 0, 0],
+      ["ukg", { healthy: 3 }, W1, "15m", "10m", "4m", 0, 0],
+      ["adp", { healthy: 2 }, W1, "15m", "10m", "4m", 0, 3],
+      ["dayforce", { healthy: 2 }, W1, "15m", "10m", "4m", 0, 0],
+      ["jazzhr", { healthy: 2 }, W1, "15m", "10m", "4m", 0, 0],
+      ["trakstar", { healthy: 2 }, W1, "15m", "10m", "5m", 0, 0],
+      ["amazon", { healthy: 1 }, W1, "15m", "10m", "5m", 0, 0],
+      ["apple", { healthy: 1 }, W1, "15m", "10m", "5m", 8, 0],
+      // The screenshot cut off after apple; six single-feed stand-ins fill out the 36.
+      ["hn", { healthy: 1 }, W1, "15m", "10m", "6m", 0, 0],
+      ["join", { healthy: 1 }, W1, "15m", "10m", "6m", 0, 0],
+      ["zohorecruit", { healthy: 1 }, W1, "15m", "10m", "6m", 0, 0],
+      ["paylocity", { healthy: 1 }, W1, "15m", "10m", "6m", 0, 0],
+      ["paycor", { healthy: 1 }, W1, "15m", "10m", "6m", 0, 0],
+      ["freshteam", { paused: 1 }, W1, "15m", "—", "2d", 0, 0],
+    ].map(([source, counts, workers, ivl, next, last, jobs, errors]) => ({
+      source, counts, workers, ivl, next, last, jobs, errors,
+    }));
+
+    const BY_SOURCE = new Map(PROVIDERS.map((p) => [p.source, p]));
+    const total = (p) => Object.values(p.counts).reduce((a, b) => a + b, 0);
+    const TOTAL_FEEDS = PROVIDERS.reduce((n, p) => n + total(p), 0);
+
+    /* ---------- groups ---------- */
+
+    /* Groups are ordered and named; each provider is in at most one. Anything
+       not in a group is Ungrouped, which is always last and cannot be renamed
+       or deleted, so a newly added provider can never go missing. The real
+       build keeps this in PostgreSQL; the mockup keeps it in this browser. */
+    const STORAGE_KEY = "scheduler-groups-mockup";
+    const FOLDED_KEY = "scheduler-groups-mockup-folded";
+    const UNGROUPED = "ungrouped";
+
+    function defaults() {
+      return {
+        groups: [
+          { id: "g1", name: "Watchlist", members: ["workday", "greenhouse", "ashby", "lever", "smartrecruiters", "oracle", "eightfold"] },
+          { id: "g2", name: "Finance", members: ["avature", "successfactors", "icims"] },
+        ],
+        folded: {},
+      };
+    }
+
+    function load() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (stored && Array.isArray(stored.groups)) return { groups: stored.groups, folded: loadFolded() };
+      } catch {
+        /* fall through to the defaults */
+      }
+      return { ...defaults(), folded: loadFolded() };
+    }
+
+    // Every section starts unfolded; only what you fold is remembered.
+    function loadFolded() {
+      try {
+        return JSON.parse(localStorage.getItem(FOLDED_KEY)) ?? {};
+      } catch {
+        return {};
+      }
+    }
+
+    function save() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ groups: store.groups }));
+        localStorage.setItem(FOLDED_KEY, JSON.stringify(store.folded));
+      } catch {
+        /* the groups just will not survive a reload */
+      }
+    }
+
+    let store = load();
+    const ui = { view: "all", search: "", panelOpen: false, renaming: null, refocus: null, menu: null };
+
+    function sections() {
+      const grouped = new Set(store.groups.flatMap((g) => g.members));
+      return [
+        ...store.groups.map((g) => ({ id: g.id, name: g.name, members: g.members.filter((s) => BY_SOURCE.has(s)) })),
+        {
+          id: UNGROUPED,
+          name: "Ungrouped",
+          members: PROVIDERS.map((p) => p.source).filter((s) => !grouped.has(s)),
+        },
+      ];
+    }
+
+    const groupOf = (source) => store.groups.find((g) => g.members.includes(source))?.id ?? UNGROUPED;
+    const groupName = (id) => (id === UNGROUPED ? "Ungrouped" : store.groups.find((g) => g.id === id)?.name);
+
+    function moveProvider(source, groupId) {
+      for (const g of store.groups) g.members = g.members.filter((s) => s !== source);
+      if (groupId !== UNGROUPED) store.groups.find((g) => g.id === groupId).members.push(source);
+    }
+
+    function addGroup(name) {
+      const group = { id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name, members: [] };
+      store.groups.push(group);
+      return group;
+    }
+
+    function uniqueName(base = "New group") {
+      const taken = new Set(store.groups.map((g) => g.name));
+      let name = base;
+      for (let n = 2; taken.has(name); n += 1) name = `${base} ${n}`;
+      return name;
+    }
+
+    function commit() {
+      save();
+      render();
+      renderPanel();
+    }
+
+    // Every change that moves providers is one undoable step.
+    function change(apply, message) {
+      const snapshot = JSON.stringify(store);
+      apply();
+      commit();
+      toast(message, () => {
+        store = JSON.parse(snapshot);
+        commit();
+      });
+    }
+
+    /* ---------- board ---------- */
+
+    const tableEl = document.getElementById("table");
+    const countEl = document.getElementById("row-count");
+    const shownCount = (p, view = ui.view) => VIEW_STATES[view].reduce((sum, s) => sum + (p.counts[s] ?? 0), 0);
+    const worstOf = (counts) => PRIORITY.find((s) => counts[s]) ?? "healthy";
+    const statusMark = (s) => el("span", { class: "ops-st", "data-state": s }, STATUS_TEXT[s]);
+    const sep = (text) => el("span", { class: "ops-group-sep", "aria-hidden": "true" }, text);
+
+    function viewCounts(p) {
+      if (ui.view === "all") return p.counts;
+      return Object.fromEntries(VIEW_STATES[ui.view].filter((s) => p.counts[s]).map((s) => [s, p.counts[s]]));
+    }
+
+    // "1 err / 85 stale / … / 6,358 feeds", ordered by concern.
+    function breakdown(counts, feeds, prefix = []) {
+      const parts = PRIORITY.filter((s) => counts[s]).flatMap((s) => [
+        el("span", {}, `${fmt(counts[s])} `), statusMark(s), sep("/"),
+      ]);
+      return el("span", { class: "ops-group-count" }, prefix, parts, el("b", {}, fmt(feeds)), " feeds");
+    }
+
+    function workersCell(p) {
+      const [width, busy, age] = p.workers;
+      const ticks = [];
+      for (let i = 0; i < width; i += 1) ticks.push(el("i", { "data-s": busy[i] ?? "idle" }));
+      return el("td", { class: "sys-workers-cell" },
+        el("span", { class: "sys-bar" }, ticks),
+        el("span", { class: "sys-busy" }, el("b", {}, String(busy.length)), `/${width}`),
+        age ? el("span", { class: "wk-age", "data-s": age[0] }, age[1]) : null);
+    }
+
+    // Same order the real board uses inside each section: most failing, then size.
+    function sorted(providers) {
+      return [...providers].sort((a, b) =>
+        (b.counts.backing_off ?? 0) - (a.counts.backing_off ?? 0)
+        || shownCount(b) - shownCount(a)
+        || a.source.localeCompare(b.source));
+    }
+
+    function providerRows(p, sectionId) {
+      const imminent = p.next === "due";
+      const menuOpen = ui.menu?.source === p.source;
+      return el("tbody", {
+        class: "ops-group-body mk-provider",
+        "data-expanded": "false",
+        "data-ungrouped": String(sectionId === UNGROUPED),
+      },
+        el("tr", { class: "ops-group" },
+          el("td", { class: "ops-status-cell" }, statusMark(worstOf(viewCounts(p)))),
+          el("td", { class: "ops-group-cell" },
+            el("button", {
+              class: "mk-row-handle",
+              type: "button",
+              "aria-haspopup": "menu",
+              "aria-expanded": String(menuOpen),
+              title: `In ${groupName(groupOf(p.source))} · move to another group`,
+              "aria-label": `Move ${p.source} to another group (now in ${groupName(groupOf(p.source))})`,
+              onclick: (event) => {
+                event.stopPropagation();
+                if (menuOpen) closeMenu();
+                else openMenu(p.source, event.currentTarget);
+              },
+            }, "⠿"),
+            el("button", { class: "ops-group-toggle", type: "button", "aria-expanded": "false" },
+              el("span", { class: "ops-chevron", "aria-hidden": "true" }, "▶"),
+              el("span", { class: "ops-group-name" }, p.source),
+              breakdown(viewCounts(p), shownCount(p)))),
+          workersCell(p),
+          el("td", { class: "num secondary" }, p.ivl),
+          el("td", { class: `num ops-next${imminent ? " ops-imminent" : ""}` }, el("span", {}, p.next)),
+          el("td", { class: "num secondary" }, p.last),
+          el("td", { class: "num" }, fmt(p.jobs)),
+          el("td", { class: "num ops-errors-cell" }, p.errors ? el("span", { class: "ops-err" }, `x${fmt(p.errors)}`) : null),
+          el("td", { class: "ops-row-actions" },
+            el("button", { class: "ops-row-btn", type: "button" }, "fetch"),
+            el("button", { class: "ops-row-btn", type: "button" }, "pause"))));
+    }
+
+    function sectionRows(section, providers, open) {
+      const counts = {};
+      let feeds = 0, jobs = 0, errors = 0, busy = 0, width = 0;
+      for (const p of providers) {
+        for (const [s, n] of Object.entries(viewCounts(p))) counts[s] = (counts[s] ?? 0) + n;
+        feeds += shownCount(p);
+        jobs += p.jobs;
+        errors += p.errors;
+        width += p.workers[0];
+        busy += p.workers[1].length;
+      }
+      const label = providers.length
+        ? breakdown(counts, feeds, [el("b", {}, String(providers.length)), providers.length === 1 ? " provider" : " providers", sep("·")])
+        : el("span", { class: "ops-group-count" }, "empty · move providers here with ⠿");
+      return el("tbody", {
+        class: "mk-sec-body",
+        "data-open": String(open),
+        "data-ungrouped": String(section.id === UNGROUPED),
+      },
+        el("tr", {
+          class: "mk-sec",
+          onclick: () => {
+            store.folded[section.id] = !store.folded[section.id];
+            save();
+            render();
+          },
+        },
+          el("td", { class: "ops-status-cell" }, providers.length ? statusMark(worstOf(counts)) : null),
+          el("td", { class: "ops-group-cell" },
+            el("button", { class: "mk-sec-toggle", type: "button", "aria-expanded": String(open) },
+              el("span", { class: "ops-chevron", "aria-hidden": "true" }, "▶"),
+              el("span", { class: "mk-sec-name" }, section.name),
+              label)),
+          el("td", { class: "sys-workers-cell" },
+            providers.length ? [el("span", { class: "sys-bar" }), el("span", { class: "sys-busy" }, el("b", {}, String(busy)), `/${width}`)] : null),
+          el("td", {}), el("td", {}), el("td", {}),
+          el("td", { class: "num mk-sec-sum" }, providers.length ? fmt(jobs) : null),
+          el("td", { class: "num ops-errors-cell" }, errors ? el("span", { class: "ops-err" }, `x${fmt(errors)}`) : null),
+          el("td", {})));
+    }
+
+    // "group:finance" (or group:"long tail") narrows to matching groups.
+    function parseSearch(raw) {
+      let group = null;
+      const text = raw.replace(/group:(?:"([^"]*)"|(\S*))/i, (_, quoted, word) => {
+        group = (quoted ?? word).toLowerCase();
+        return "";
+      }).trim().toLowerCase();
+      return { group, text };
+    }
+
+    function render() {
+      for (const body of [...tableEl.tBodies]) body.remove();
+
+      const sum = (s) => PROVIDERS.reduce((n, p) => n + (p.counts[s] ?? 0), 0);
+      const erroring = sum("backing_off");
+      document.getElementById("summary-line").replaceChildren(
+        el("span", { class: "ops-sum-ok" }, `${fmt(sum("healthy"))} ok`),
+        el("span", { class: "ops-sum-sep" }, "·"),
+        el("span", { class: erroring ? "ops-sum-bad" : null }, `${fmt(erroring)} erroring`),
+        el("span", { class: "ops-sum-sep" }, "·"),
+        el("span", { class: "sys-quiet" }, `${fmt(sum("paused"))} paused`));
+
+      for (const button of document.querySelectorAll("[data-view]")) {
+        const name = button.dataset.view;
+        button.setAttribute("aria-pressed", String(ui.view === name));
+        button.querySelector("span").textContent = fmt(PROVIDERS.reduce((n, p) => n + shownCount(p, name), 0));
+      }
+
+      const { group, text } = parseSearch(ui.search);
+      const narrowed = ui.view !== "all" || Boolean(ui.search.trim());
+      let shown = 0;
+      let providerCount = 0;
+      for (const section of sections()) {
+        if (group && !section.name.toLowerCase().includes(group)) continue;
+        const providers = sorted(section.members.map((s) => BY_SOURCE.get(s))
+          .filter((p) => shownCount(p) > 0 && p.source.includes(text)));
+        if (!providers.length && (narrowed || section.id === UNGROUPED)) continue;
+        const open = narrowed || !store.folded[section.id];
+        tableEl.append(sectionRows(section, providers, open));
+        if (open) tableEl.append(...providers.map((p) => providerRows(p, section.id)));
+        shown += providers.reduce((n, p) => n + shownCount(p), 0);
+        providerCount += providers.length;
+      }
+      countEl.textContent = `${fmt(shown)}/${fmt(TOTAL_FEEDS)} shown · ${providerCount} providers`;
+    }
+
+    /* ---------- group ▾ menu ---------- */
+
+    const menuEl = document.getElementById("menu");
+
+    function openMenu(source, anchor) {
+      closeMenu();
+      ui.menu = { source, anchor, creating: false };
+      anchor.setAttribute("aria-expanded", "true");
+      renderMenu();
+    }
+
+    function closeMenu({ restoreFocus = false } = {}) {
+      if (!ui.menu) return;
+      ui.menu.anchor.setAttribute("aria-expanded", "false");
+      if (restoreFocus) ui.menu.anchor.focus();
+      ui.menu = null;
+      menuEl.hidden = true;
+    }
+
+    function renderMenu() {
+      const menu = ui.menu;
+      const current = groupOf(menu.source);
+      const items = sections().map((section) => el("button", {
+        class: "mk-menu-item",
+        type: "button",
+        role: "menuitemradio",
+        "aria-checked": String(section.id === current),
+        onclick: () => {
+          closeMenu();
+          if (section.id === current) return;
+          change(() => moveProvider(menu.source, section.id), `${menu.source} moved to ${section.name}`);
+        },
+      }, el("span", { class: "mk-check", "aria-hidden": "true" }, section.id === current ? "✓" : ""), section.name));
+
+      const create = menu.creating
+        ? el("input", {
+            class: "mk-menu-input",
+            placeholder: "new group name",
+            maxlength: "32",
+            "aria-label": "New group name",
+            onkeydown: (event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                closeMenu({ restoreFocus: true });
+              }
+              const name = event.target.value.trim();
+              if (event.key !== "Enter" || !name) return;
+              closeMenu();
+              change(() => {
+                const group = addGroup(name);
+                moveProvider(menu.source, group.id);
+              }, `${menu.source} moved to new group ${name}`);
+            },
+          })
+        : el("button", {
+            class: "mk-menu-item",
+            type: "button",
+            role: "menuitem",
+            onclick: (event) => {
+              event.stopPropagation();
+              menu.creating = true;
+              renderMenu();
+            },
+          }, el("span", { class: "mk-check", "aria-hidden": "true" }, "+"), "New group…");
+
+      menuEl.replaceChildren(el("div", { class: "mk-menu-k" }, `move ${menu.source} to`), ...items, el("hr"), create);
+      menuEl.hidden = false;
+
+      // Below the handle, left edges aligned; flipped above near the bottom.
+      const rect = menu.anchor.getBoundingClientRect();
+      const height = menuEl.offsetHeight;
+      const top = rect.bottom + 4 + height > innerHeight ? rect.top - 4 - height : rect.bottom + 4;
+      menuEl.style.top = `${Math.max(8, top)}px`;
+      menuEl.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - menuEl.offsetWidth - 8))}px`;
+      (menuEl.querySelector("input") ?? menuEl.querySelector('[aria-checked="true"]'))?.focus();
+    }
+
+    menuEl.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const items = [...menuEl.querySelectorAll(".mk-menu-item")];
+      const index = items.indexOf(document.activeElement);
+      const next = (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    });
+
+    /* ---------- edit groups drawer ---------- */
+
+    const panelEl = document.getElementById("groups-panel");
+    const editLinkEl = document.getElementById("edit-groups");
+
+    function openPanel() {
+      ui.panelOpen = true;
+      panelEl.hidden = false;
+      editLinkEl.setAttribute("aria-expanded", "true");
+      renderPanel();
+      panelEl.querySelector(".ops-close").focus();
+    }
+
+    function closePanel() {
+      ui.panelOpen = false;
+      ui.renaming = null;
+      panelEl.hidden = true;
+      editLinkEl.setAttribute("aria-expanded", "false");
+      editLinkEl.focus();
+    }
+
+    function finishRename(id, value) {
+      if (ui.renaming !== id) return;
+      ui.renaming = null;
+      const group = store.groups.find((g) => g.id === id);
+      if (group && value.trim()) group.name = value.trim();
+      commit();
+    }
+
+    function shiftGroup(id, delta) {
+      const from = store.groups.findIndex((g) => g.id === id);
+      const to = from + delta;
+      if (to < 0 || to >= store.groups.length) return;
+      [store.groups[from], store.groups[to]] = [store.groups[to], store.groups[from]];
+      ui.refocus = `[data-focus="${delta < 0 ? "up" : "down"}-${id}"]`;
+      commit();
+    }
+
+    function clearDropHints() {
+      for (const node of panelEl.querySelectorAll("[data-drop]")) delete node.dataset.drop;
+    }
+
+    function onDragOver(event, section) {
+      const types = event.dataTransfer.types;
+      let kind = null;
+      if (types.includes("text/x-provider")) kind = "into";
+      else if (types.includes("text/x-group")) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        kind = section.id === UNGROUPED || event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+      }
+      if (!kind) return;
+      event.preventDefault();
+      if (event.currentTarget.dataset.drop !== kind) {
+        clearDropHints();
+        event.currentTarget.dataset.drop = kind;
+      }
+    }
+
+    function onDrop(event, section) {
+      event.preventDefault();
+      const where = event.currentTarget.dataset.drop;
+      const source = event.dataTransfer.getData("text/x-provider");
+      const moving = event.dataTransfer.getData("text/x-group");
+      clearDropHints();
+      if (source) {
+        if (groupOf(source) !== section.id) {
+          change(() => moveProvider(source, section.id), `${source} moved to ${section.name}`);
+        }
+        return;
+      }
+      if (!moving || moving === section.id) return;
+      const group = store.groups.find((g) => g.id === moving);
+      store.groups = store.groups.filter((g) => g.id !== moving);
+      const at = section.id === UNGROUPED
+        ? store.groups.length
+        : store.groups.findIndex((g) => g.id === section.id) + (where === "after" ? 1 : 0);
+      store.groups.splice(at, 0, group);
+      commit();
+    }
+
+    function chip(source, sectionId) {
+      const p = BY_SOURCE.get(source);
+      const worst = worstOf(p.counts);
+      return el("span", {
+        class: "mk-chip",
+        draggable: "true",
+        title: `${source} · ${fmt(total(p))} feeds · drag to another group`,
+        ondragstart: (event) => {
+          event.stopPropagation();
+          event.dataTransfer.setData("text/x-provider", source);
+          event.dataTransfer.effectAllowed = "move";
+          event.currentTarget.classList.add("mk-dragging");
+        },
+        ondragend: (event) => {
+          event.currentTarget.classList.remove("mk-dragging");
+          clearDropHints();
+        },
+      },
+        worst === "backing_off" || worst === "stale" ? el("span", { class: "mk-dot", "data-state": worst }) : null,
+        source,
+        sectionId === UNGROUPED ? null : el("button", {
+          class: "mk-chip-x",
+          type: "button",
+          title: "Move to Ungrouped",
+          "aria-label": `Move ${source} to Ungrouped`,
+          onclick: () => change(() => moveProvider(source, UNGROUPED), `${source} moved to Ungrouped`),
+        }, "×"));
+    }
+
+    function addInput(section) {
+      const tryAdd = (input) => {
+        const source = input.value.trim().toLowerCase();
+        if (!BY_SOURCE.has(source)) {
+          input.setAttribute("aria-invalid", "true");
+          return;
+        }
+        ui.refocus = `.mk-g[data-id="${section.id}"] .mk-add`;
+        if (groupOf(source) === section.id) commit();
+        else change(() => moveProvider(source, section.id), `${source} moved to ${section.name}`);
+      };
+      return el("input", {
+        class: "mk-add",
+        list: "mk-providers",
+        placeholder: "+ add…",
+        autocomplete: "off",
+        "aria-label": `Add a provider to ${section.name}`,
+        onkeydown: (event) => {
+          if (event.key === "Enter") tryAdd(event.target);
+        },
+        // Picking from the suggestion list adds straight away.
+        oninput: (event) => {
+          event.target.removeAttribute("aria-invalid");
+          if ((!event.inputType || event.inputType === "insertReplacementText") && BY_SOURCE.has(event.target.value)) {
+            tryAdd(event.target);
+          }
+        },
+      });
+    }
+
+    function groupBlock(section, index, count) {
+      const fixed = section.id === UNGROUPED;
+      const name = ui.renaming === section.id
+        ? el("input", {
+            class: "mk-g-name-input",
+            value: section.name,
+            maxlength: "32",
+            "aria-label": "Group name",
+            onkeydown: (event) => {
+              if (event.key === "Enter") finishRename(section.id, event.target.value);
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                ui.renaming = null;
+                renderPanel();
+              }
+            },
+            onblur: (event) => finishRename(section.id, event.target.value),
+          })
+        : el("span", { class: "mk-g-name" }, section.name);
+      const rename = () => {
+        ui.renaming = section.id;
+        renderPanel();
+      };
+
+      const head = el("div", { class: "mk-g-head" },
+        fixed
+          ? el("span", { class: "mk-handle", "aria-hidden": "true" })
+          : el("span", {
+              class: "mk-handle",
+              draggable: "true",
+              title: "Drag to reorder",
+              "aria-hidden": "true",
+              ondragstart: (event) => {
+                const block = event.currentTarget.closest(".mk-g");
+                event.dataTransfer.setData("text/x-group", section.id);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setDragImage(block, 12, 12);
+                block.classList.add("mk-dragging");
+              },
+              ondragend: (event) => {
+                event.currentTarget.closest(".mk-g")?.classList.remove("mk-dragging");
+                clearDropHints();
+              },
+            }, "⠿"),
+        name,
+        el("span", { class: "mk-g-count" }, `${section.members.length}`),
+        fixed ? el("span", { class: "mk-g-note" }, "· new providers land here") : null,
+        fixed ? null : el("span", { class: "mk-g-tools" },
+          el("button", { class: "mk-icon", type: "button", title: "Rename", "aria-label": `Rename ${section.name}`, onclick: rename }, "✎"),
+          el("button", {
+            class: "mk-icon",
+            type: "button",
+            title: "Move up",
+            "aria-label": `Move ${section.name} up`,
+            "data-focus": `up-${section.id}`,
+            disabled: index === 0 ? "" : null,
+            onclick: () => shiftGroup(section.id, -1),
+          }, "↑"),
+          el("button", {
+            class: "mk-icon",
+            type: "button",
+            title: "Move down",
+            "aria-label": `Move ${section.name} down`,
+            "data-focus": `down-${section.id}`,
+            disabled: index === count - 1 ? "" : null,
+            onclick: () => shiftGroup(section.id, 1),
+          }, "↓"),
+          el("button", {
+            class: "mk-icon mk-danger",
+            type: "button",
+            title: "Delete group (its providers go to Ungrouped)",
+            "aria-label": `Delete ${section.name}`,
+            onclick: () => change(() => {
+              store.groups = store.groups.filter((g) => g.id !== section.id);
+              delete store.folded[section.id];
+            }, `Deleted ${section.name}; ${section.members.length} providers moved to Ungrouped`),
+          }, "✕")));
+
+      // Ungrouped lists biggest first; groups keep the order providers were added.
+      const members = fixed ? sorted(section.members.map((s) => BY_SOURCE.get(s))).map((p) => p.source) : section.members;
+      return el("section", {
+        class: "mk-g",
+        "data-id": section.id,
+        ondragover: (event) => onDragOver(event, section),
+        ondragleave: (event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) delete event.currentTarget.dataset.drop;
+        },
+        ondrop: (event) => onDrop(event, section),
+      },
+        head,
+        el("div", { class: "mk-chips" }, members.map((s) => chip(s, section.id)), fixed ? null : addInput(section)));
+    }
+
+    function renderPanel() {
+      if (!ui.panelOpen) return;
+      document.getElementById("mk-providers").replaceChildren(
+        ...PROVIDERS.map((p) => el("option", { value: p.source }, groupName(groupOf(p.source)))));
+      const all = sections();
+      panelEl.replaceChildren(
+        el("header", { class: "ops-panel-header" },
+          el("div", { class: "ops-panel-title" },
+            el("div", { class: "ops-panel-title-row" }, el("h2", { id: "groups-title" }, "Groups")),
+            el("p", {}, "top to bottom is the order on the board")),
+          el("button", { class: "ops-close", type: "button", "aria-label": "Close groups", onclick: closePanel }, "×")),
+        ...all.map((section, index) => groupBlock(section, index, all.length - 1)),
+        el("div", { class: "mk-g-foot" },
+          el("button", {
+            class: "ops-linkish",
+            type: "button",
+            onclick: () => {
+              const group = addGroup(uniqueName());
+              ui.renaming = group.id;
+              commit();
+            },
+          }, "+ new group")));
+
+      const input = panelEl.querySelector(".mk-g-name-input");
+      if (input) {
+        input.focus();
+        input.select();
+      } else if (ui.refocus) {
+        panelEl.querySelector(ui.refocus)?.focus();
+      }
+      ui.refocus = null;
+    }
+
+    /* ---------- toast ---------- */
+
+    const toastEl = document.getElementById("toast");
+    let toastTimer = null;
+
+    function toast(message, undo) {
+      clearTimeout(toastTimer);
+      toastEl.replaceChildren(el("span", {}, message, undo ? [
+        el("span", { class: "wk-sep" }, "·"),
+        el("button", {
+          class: "ops-linkish",
+          type: "button",
+          onclick: () => {
+            toastEl.hidden = true;
+            undo();
+          },
+        }, "undo"),
+      ] : null));
+      toastEl.hidden = false;
+      toastTimer = setTimeout(() => {
+        toastEl.hidden = true;
+      }, 5000);
+    }
+
+    /* ---------- wiring ---------- */
+
+    for (const button of document.querySelectorAll("[data-view]")) {
+      button.addEventListener("click", () => {
+        ui.view = button.dataset.view;
+        render();
+      });
+    }
+    document.getElementById("search").addEventListener("input", (event) => {
+      ui.search = event.target.value;
+      render();
+    });
+    document.getElementById("expand-all").addEventListener("click", () => {
+      store.folded = {};
+      save();
+      render();
+    });
+    document.getElementById("collapse-all").addEventListener("click", () => {
+      store.folded = Object.fromEntries(sections().map((s) => [s.id, true]));
+      save();
+      render();
+    });
+    editLinkEl.addEventListener("click", () => (ui.panelOpen ? closePanel() : openPanel()));
+    document.getElementById("reset").addEventListener("click", () => {
+      store = defaults();
+      ui.renaming = null;
+      commit();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (ui.menu && !menuEl.contains(event.target)) closeMenu();
+    });
+    addEventListener("scroll", () => closeMenu(), true);
+    addEventListener("resize", () => closeMenu());
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (ui.menu) closeMenu({ restoreFocus: true });
+        else if (ui.panelOpen) closePanel();
+        return;
+      }
+      if (event.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
+        event.preventDefault();
+        document.getElementById("search").focus();
+      }
+    });
+
+    // Screenshot hooks: #panel opens the drawer, #open unfolds every section.
+    if (location.hash.includes("open")) store.folded = {};
+    render();
+    if (location.hash.includes("panel")) openPanel();
+  </script>
+</body>
+</html>

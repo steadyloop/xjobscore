@@ -31,6 +31,7 @@ from typing import Literal
 
 __all__ = [
     "LINK_DEAD",
+    "PAGE_CLOSED",
     "Canonical",
     "Fact",
     "Feed",
@@ -69,10 +70,11 @@ Provenance = Literal["source", "model", "human"]
 Precision = Literal["exact", "date", "unknown"]
 
 # The `closed_evidence` string a probed dead URL carries. It is a constant, not
-# free text, because silver keys `job_posting.link_closed_at` off it: only the
+# free text, because silver keys `job_posting.linked_dead_at` off it: only the
 # probed channel may claim a dead link, and a vendor flag flipping must not be
 # mistaken for one.
 LINK_DEAD = "probe: origin url gone"
+PAGE_CLOSED = "probe: page closed or redirected"
 
 
 class Unparseable(ValueError):

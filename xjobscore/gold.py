@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 import asyncpg
 
-from xjobscore import degrees, job_domain, skills, store, summaries
+from xjobscore import bioengineering, degrees, job_domain, skills, store, summaries
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -42,6 +42,8 @@ __all__ = [
     "description_hash",
     "degree_input_hash",
     "degree_payload",
+    "focus_input_hash",
+    "focus_payload",
     "job_domain_label",
     "normalize_title",
     "plan_dedup",
@@ -140,19 +142,32 @@ def job_domain_label(title: str, *, quant_employer: bool = False) -> str:
     return evidence.label or job_domain.UNLABELED_FILTER
 
 
-async def _quant_company_ids(conn: Connection) -> set[int]:
-    """Compute the employer prior consumed by the canonical domain classifier."""
+async def _quant_company_ids(
+    conn: Connection, company_ids: Sequence[int] | None = None
+) -> set[int]:
+    """Compute the employer prior consumed by the canonical domain classifier.
+
+    The prior is per company -- its own active postings, nothing global -- so
+    restricting both counts to ``company_ids`` returns exactly the full set
+    intersected with them. The incremental path passes its affected companies:
+    over job_posting_company_idx that is an index read, where the unrestricted
+    form regex-scans every active title on every changed poll.
+    """
+    scope = "" if company_ids is None else "AND company_id = ANY($3::bigint[])"
+    args: list[Any] = [job_domain.QUANT_PATTERN, job_domain.FINANCE_FUNCTION_PATTERN]
+    if company_ids is not None:
+        args.append(list(company_ids))
     rows = await conn.fetch(
-        """
+        f"""
         WITH company_postings AS MATERIALIZED (
             SELECT company_id, COUNT(*) AS posting_count
             FROM job_posting
-            WHERE status = 'active'
+            WHERE status = 'active' {scope}
             GROUP BY company_id
         ), company_titles AS MATERIALIZED (
             SELECT company_id, COUNT(*) AS quant_count
             FROM job_posting
-            WHERE status = 'active'
+            WHERE status = 'active' {scope}
               AND title ~* $1
               AND NOT (title ~* $2)
             GROUP BY company_id
@@ -163,8 +178,7 @@ async def _quant_company_ids(conn: Connection) -> set[int]:
         WHERE cp.posting_count >= 3
           AND ct.quant_count::numeric / cp.posting_count >= 0.40
         """,
-        job_domain.QUANT_PATTERN,
-        job_domain.FINANCE_FUNCTION_PATTERN,
+        *args,
     )
     return {int(row["id"]) for row in rows}
 
@@ -545,6 +559,105 @@ async def _degrees_rebuild(
     return Counts(postings=enriched)
 
 
+# FOCUS CHIPS --------------------------------------------------------------
+#
+# MedTech / Regulatory / BioTech chips for the OneShot feed, which shows typed
+# postings only. Stored rather than computed in SQL: the rules need ~45 regular
+# expressions per posting. The version stamp folds in a fingerprint of the
+# employer registry, so editing it re-enriches every typed posting.
+
+_FOCUS_BATCH_SIZE = 1_000
+
+
+def focus_input_hash(title: str, description: str | None, company: str | None) -> str:
+    """Fingerprint the posting text and employer name consumed by the rules."""
+    value = f"{title}\n{company or ''}\n{description or ''}"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def focus_payload(
+    title: str,
+    description: str | None,
+    company: str | None,
+    *,
+    parsed_at: datetime,
+) -> dict[str, Any]:
+    """The complete JSONB patch for one posting's focus chips."""
+    evidence = bioengineering.classify(title, description, company=company or "")
+    return {
+        "focus": list(evidence.chips),
+        "focus_meta": {
+            "version": bioengineering.focus_version(),
+            "reasons": dict(evidence.reasons),
+            "parsed_at": _utc_text(parsed_at),
+            "input_hash": focus_input_hash(title, description, company),
+        },
+    }
+
+
+_FOCUS_UPDATE = """
+    UPDATE job_posting
+    SET attributes = attributes || $2::jsonb
+    WHERE id = $1
+      AND title = $3
+      AND COALESCE(description, '') = $4
+      AND company_id = $5
+      AND job_type IS NOT NULL
+      AND COALESCE(attributes #>> '{focus_meta,version}', '') <> $6
+"""
+
+
+async def _focus_rebuild(
+    conn: Connection,
+    *,
+    dry_run: bool = False,
+    parsed_at: datetime | None = None,
+) -> Counts:
+    """Stamp focus chips on every typed posting whose rules or registry changed."""
+    stamp = parsed_at or datetime.now(timezone.utc)
+    version = bioengineering.focus_version()
+    last_id = 0
+    enriched = 0
+    while True:
+        rows = await conn.fetch(
+            """
+            SELECT j.id, j.title, j.description, j.company_id, c.name AS company
+            FROM job_posting j
+            JOIN company c ON c.id = j.company_id
+            WHERE j.id > $1
+              AND j.job_type IS NOT NULL
+              AND COALESCE(j.attributes #>> '{focus_meta,version}', '') <> $3
+            ORDER BY j.id
+            LIMIT $2
+            """,
+            last_id,
+            _FOCUS_BATCH_SIZE,
+            version,
+        )
+        if not rows:
+            break
+        last_id = int(rows[-1]["id"])
+        updates = [
+            (
+                int(row["id"]),
+                focus_payload(
+                    row["title"], row["description"], row["company"], parsed_at=stamp
+                ),
+                row["title"],
+                row["description"] or "",
+                int(row["company_id"]),
+                version,
+            )
+            for row in rows
+        ]
+        if not dry_run:
+            await _executemany_with_deadlock_retry(
+                conn, _FOCUS_UPDATE, updates, step="focus"
+            )
+        enriched += len(updates)
+    return Counts(postings=enriched)
+
+
 # DEDUP --------------------------------------------------------------------
 #
 # Stage one generates *candidates and evidence*, not verdicts. Prefer native
@@ -805,7 +918,7 @@ async def _incremental_job_type(
     if not affected:
         return Counts()
 
-    quant_company_ids = await _quant_company_ids(conn)
+    quant_company_ids = await _quant_company_ids(conn, sorted(affected))
     rows = await conn.fetch(
         """
         SELECT id, title, company_id, job_domain, job_domain_version
@@ -957,6 +1070,46 @@ async def _incremental_summaries(
     return Counts(postings=len(updates))
 
 
+async def _incremental_focus(
+    conn: Connection, posting_ids: Sequence[int], *, dry_run: bool
+) -> Counts:
+    if not posting_ids:
+        return Counts()
+    rows = await conn.fetch(
+        """
+        SELECT j.id, j.title, j.description, j.company_id, j.attributes, c.name AS company
+        FROM job_posting j
+        JOIN company c ON c.id = j.company_id
+        WHERE j.id = ANY($1::bigint[]) AND j.job_type IS NOT NULL
+        """,
+        list(posting_ids),
+    )
+    version = bioengineering.focus_version()
+    stamp = datetime.now(timezone.utc)
+    updates = []
+    for row in rows:
+        meta = dict(row["attributes"] or {}).get("focus_meta") or {}
+        if str(meta.get("version", "")) == version:
+            continue
+        updates.append(
+            (
+                int(row["id"]),
+                focus_payload(
+                    row["title"], row["description"], row["company"], parsed_at=stamp
+                ),
+                row["title"],
+                row["description"] or "",
+                int(row["company_id"]),
+                version,
+            )
+        )
+    if updates and not dry_run:
+        await _executemany_with_deadlock_retry(
+            conn, _FOCUS_UPDATE, updates, step="focus"
+        )
+    return Counts(postings=len(updates))
+
+
 async def apply_incremental(
     conn: Connection,
     name: str,
@@ -982,6 +1135,8 @@ async def apply_incremental(
         return await _incremental_degrees(conn, posting_ids, dry_run=dry_run)
     if name == "summaries":
         return await _incremental_summaries(conn, posting_ids, dry_run=dry_run)
+    if name == "focus":
+        return await _incremental_focus(conn, posting_ids, dry_run=dry_run)
     raise ValueError(f"{name!r} is not an incremental Gold step")
 
 
@@ -1022,6 +1177,14 @@ async def stale_posting_ids(
             ORDER BY id LIMIT $1
         """
         rows = await conn.fetch(query, limit, str(_SUMMARIES_VERSION))
+    elif name == "focus":
+        query = """
+            SELECT id FROM job_posting
+            WHERE job_type IS NOT NULL
+              AND COALESCE(attributes #>> '{focus_meta,version}', '') <> $2
+            ORDER BY id LIMIT $1
+        """
+        rows = await conn.fetch(query, limit, bioengineering.focus_version())
     else:
         raise ValueError(f"{name!r} is not an incremental Gold step")
     return [int(row["id"]) for row in rows]
@@ -1037,6 +1200,7 @@ STEPS: tuple[Step, ...] = (
     Step("skills", _SKILLS_VERSION, _skills_rebuild),
     Step("degrees", _DEGREES_VERSION, _degrees_rebuild),
     Step("summaries", _SUMMARIES_VERSION, _summaries_rebuild),
+    Step("focus", bioengineering.FOCUS_VERSION, _focus_rebuild),
     Step("dedup", _STRATEGY_VERSION, _dedup_rebuild, atomic=True),
 )
 

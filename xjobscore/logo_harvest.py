@@ -3,7 +3,20 @@
 Companies are identified in the UI by a 40px box; this fills it. The source of
 truth is the site itself -- `apple-touch-icon` first because it is the only
 icon vendors are required to ship at a usable size (180px), then any declared
-`rel=icon`, then the `/favicon.ico` every server still answers.
+`rel=icon`, then the `/favicon.ico` every server still answers. An apex domain
+that does not answer at all is retried as `www.`; Prudential's apex times out
+while its `www` serves.
+
+When the site yields nothing drawable, Google's favicon service is asked next.
+It serves what Google's crawler collected rather than fetching live, so it gets
+past bot walls that let Googlebot through (Blue Origin's Vercel checkpoint
+answers every request of ours with 429) and it knows manifest icons a homepage
+never links. It is undocumented, so it is the fallback, never the source of
+truth; a 404 is its "no icon" answer and carries a placeholder globe that the
+status check already discards.
+
+A mark under `MIN_EDGE` is kept only as a last resort: a soft 16px icon in the
+box still beats an empty one, but any larger mark from any source wins first.
 
 Anything wider than `MAX_EDGE` is downscaled on the way in. The box draws the
 mark at 30 CSS px, so 128 covers a 3x display and every pixel above that is
@@ -54,12 +67,13 @@ MAX_LOGO_BYTES = 250_000
 # 90 device px on a 3x display. 128 clears that with room and is a size icon
 # encoders are already tuned for.
 MAX_EDGE = 128
-# Below this a mark is drawn larger than it was authored and reads as a smudge,
-# so the card is better off with its initials. 16px favicons are the offenders;
-# by 32px even a detailed mark survives the 30px box. Measured by eye against
-# the real card, not assumed.
+# Below this a mark is drawn larger than it was authored and reads soft. 16px
+# favicons are the offenders; by 32px even a detailed mark survives the 30px
+# box. Measured by eye against the real card, not assumed. A smaller mark is
+# held back and stored only when no source has anything at this size.
 MIN_EDGE = 32
 CONCURRENCY = 24
+GOOGLE_FAVICON = "https://www.google.com/s2/favicons?domain={domain}&sz=" + str(MAX_EDGE)
 
 LINK_TAG = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
 REL_ATTR = re.compile(r"\brel\s*=\s*[\"']([^\"']*)[\"']", re.IGNORECASE)
@@ -80,19 +94,25 @@ def _is_image(payload: bytes) -> bool:
     return head.startswith(b"<?xml") or head.startswith(b"<svg")
 
 
+def _edge(payload: bytes) -> int | None:
+    """Longest side in pixels, or None for SVG and anything Pillow cannot read."""
+    if not payload.startswith(RASTER_MAGIC) and not payload.startswith(b"RIFF"):
+        return None
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            return max(image.size)
+    except Exception:  # noqa: BLE001 -- Pillow raises broadly on junk
+        return None
+
+
 def too_small(payload: bytes) -> bool:
-    """True when a mark is too low-resolution to draw in the card box.
+    """True when a mark is too low-resolution to draw sharply in the card box.
 
     SVG and anything Pillow cannot read are never rejected: the first is
     resolution-independent and the second is judged by the browser, not here.
     """
-    if not payload.startswith(RASTER_MAGIC) and not payload.startswith(b"RIFF"):
-        return False
-    try:
-        with Image.open(BytesIO(payload)) as image:
-            return max(image.size) < MIN_EDGE
-    except Exception:  # noqa: BLE001 -- Pillow raises broadly on junk
-        return False
+    edge = _edge(payload)
+    return edge is not None and edge < MIN_EDGE
 
 
 def normalize(payload: bytes) -> bytes:
@@ -161,34 +181,81 @@ def _icon_candidates(html: str, base: str) -> list[str]:
     return [url for url in ordered if not (url in seen or seen.add(url))]
 
 
-async def _fetch_logo(client: httpx.AsyncClient, domain: str) -> bytes | None:
-    home = f"https://{domain}/"
+class _Small:
+    """The largest under-`MIN_EDGE` mark seen so far, held as a last resort."""
+
+    def __init__(self) -> None:
+        self.payload: bytes | None = None
+        self.edge = 0
+
+    def offer(self, payload: bytes) -> None:
+        edge = _edge(payload) or 0
+        if self.payload is None or edge > self.edge:
+            self.payload, self.edge = payload, edge
+
+
+async def _get_image(
+    client: httpx.AsyncClient, domain: str, url: str, small: _Small
+) -> bytes | None:
+    """Fetch `url`; return a drawable image, or hold a too-small one in `small`."""
+    try:
+        response = await client.get(url, timeout=ICON_TIMEOUT)
+    except httpx.HTTPError as error:
+        log.debug("%s: %s: %s", domain, url, error)
+        return None
+    payload = response.content
+    if response.status_code >= 400 or not payload or len(payload) > MAX_LOGO_BYTES:
+        return None
+    if not _is_image(payload):
+        return None
+    if too_small(payload):
+        log.debug("%s: %s too small to draw, held as last resort", domain, url)
+        small.offer(payload)
+        return None
+    log.debug("%s: took %s (%d bytes)", domain, url, len(payload))
+    return normalize(payload)
+
+
+async def _from_site(
+    client: httpx.AsyncClient, host: str, small: _Small
+) -> tuple[bytes | None, bool]:
+    """Try one host's declared icons. Returns (logo, whether the homepage answered)."""
+    home = f"https://{host}/"
     html = ""
+    answered = False
     try:
         response = await client.get(home, timeout=HOMEPAGE_TIMEOUT)
+        answered = True
         if response.status_code < 400:
             html = response.text[:HOMEPAGE_BYTES]
             home = str(response.url)
     except (httpx.HTTPError, UnicodeDecodeError) as error:
-        log.debug("%s: homepage unreadable: %s", domain, error)
+        log.debug("%s: homepage unreadable: %s", host, error)
 
     for url in _icon_candidates(html, home):
-        try:
-            response = await client.get(url, timeout=ICON_TIMEOUT)
-        except httpx.HTTPError as error:
-            log.debug("%s: %s: %s", domain, url, error)
-            continue
-        payload = response.content
-        if response.status_code >= 400 or not payload or len(payload) > MAX_LOGO_BYTES:
-            continue
-        if _is_image(payload):
-            if too_small(payload):
-                log.debug("%s: %s too small to draw", domain, url)
-                continue
-            payload = normalize(payload)
-            log.debug("%s: took %s (%d bytes)", domain, url, len(payload))
+        payload = await _get_image(client, host, url, small)
+        if payload:
+            return payload, answered
+    return None, answered
+
+
+async def _fetch_logo(client: httpx.AsyncClient, domain: str) -> bytes | None:
+    small = _Small()
+    payload, answered = await _from_site(client, domain, small)
+    if payload:
+        return payload
+    # Only a host that never answered is worth a second address; one that served
+    # a page served its icons too, and `www` would repeat the same requests.
+    if not answered and not domain.startswith("www."):
+        payload, _ = await _from_site(client, f"www.{domain}", small)
+        if payload:
             return payload
-    return None
+    payload = await _get_image(client, domain, GOOGLE_FAVICON.format(domain=domain), small)
+    if payload:
+        return payload
+    if small.payload:
+        log.debug("%s: storing a %dpx mark, nothing larger exists", domain, small.edge)
+    return small.payload
 
 
 @dataclass
@@ -200,12 +267,25 @@ class Result:
     failures: list[str] = field(default_factory=list)
 
 
-async def harvest(pool: Pool, *, limit: int | None = None, refresh: bool = False) -> Result:
+async def harvest(
+    pool: Pool,
+    *,
+    limit: int | None = None,
+    refresh: bool = False,
+    retry_failed: bool = False,
+) -> Result:
     """Fetch and store a logo for every company that has a domain but no row.
 
     `refresh` reconsiders companies already recorded, including the failures.
+    `retry_failed` reconsiders only the recorded failures (NULL `bytes`), for a
+    rerun after the fetch learned a new source.
     """
-    where = "" if refresh else "AND l.company_id IS NULL"
+    if refresh:
+        where = ""
+    elif retry_failed:
+        where = "AND (l.company_id IS NULL OR l.bytes IS NULL)"
+    else:
+        where = "AND l.company_id IS NULL"
     rows = await pool.fetch(
         f"""
         SELECT c.id, c.domain
@@ -349,6 +429,11 @@ async def main(argv: list[str] | None = None) -> int:
         "--refresh", action="store_true", help="also refetch companies already recorded"
     )
     parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="also refetch companies recorded as failed (no logo), keeping stored logos",
+    )
+    parser.add_argument(
         "--normalize-stored",
         action="store_true",
         help="downscale already-stored logos and exit, without fetching anything",
@@ -370,7 +455,9 @@ async def main(argv: list[str] | None = None) -> int:
                 f"examined={examined} rewritten={rewritten} saved={saved / 1e6:.1f}MB"
             )
             return 0
-        result = await harvest(pool, limit=args.limit, refresh=args.refresh)
+        result = await harvest(
+            pool, limit=args.limit, refresh=args.refresh, retry_failed=args.retry_failed
+        )
     finally:
         await pool.close()
 

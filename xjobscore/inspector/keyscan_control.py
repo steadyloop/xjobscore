@@ -133,6 +133,8 @@ def start(
     date_to: str | None = None,
     crawl_ids: str | None = None,
     sources: str | None = None,
+    validate: bool = False,
+    rescan: bool = False,
 ) -> dict[str, Any]:
     """Launch a detached ``keyscan crawl`` and return immediately.
 
@@ -149,7 +151,7 @@ def start(
 
     running = active_run()
     if running is not None and process_alive(running.get("pid")):
-        raise RunAlreadyActive(f"run {running['id'][:8]} is already running")
+        raise RunAlreadyActive(f"run {running['id']} is already running")
 
     argv = [sys.executable, "-m", "keyscan", "crawl", "--quiet"]
     checked_crawl_ids = _checked_crawl_ids(crawl_ids)
@@ -162,6 +164,10 @@ def start(
     ):
         if value:
             argv += [flag, value]
+    if validate:
+        argv.append("--validate")
+    if rescan:
+        argv.append("--rescan")
 
     environment = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     # stdout carries the final JSON result and stderr the durable-log echo;

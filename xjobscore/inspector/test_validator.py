@@ -30,6 +30,23 @@ async def test_live_board_maps_to_live():
     assert result["status"] == "live"
 
 
+async def test_html_batch_reuses_its_control():
+    seen = []
+
+    async def handler(request):
+        seen.append(str(request.url))
+        if request.url.path.endswith("keyscan-token-does-not-exist-9f4d2a"):
+            return httpx.Response(200, text="<html><title>Error</title></html>")
+        return httpx.Response(200, text="<html><title>Acme - Job Opportunities</title></html>")
+
+    async with _client(handler) as client:
+        results = await validator.validate_tokens(
+            [("jobvite", "acme"), ("jobvite", "other")], client=client,
+        )
+    assert [result["status"] for result in results] == ["live", "live"]
+    assert len(seen) == 3
+
+
 @pytest.mark.asyncio
 async def test_all_404_maps_to_dead():
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -49,7 +66,10 @@ async def test_zero_count_without_name_is_unknown_not_dead():
     # smartrecruiters is the vendor this guard exists for, and the reason it is
     # excluded from the liveness-only shortcut: a nonexistent company id
     # answers 200 with this exact payload, so the verdict is only in the body.
+    # Its departments check settles most of these; here it answers neither way.
     async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/departments"):
+            return httpx.Response(500)
         return httpx.Response(200, json={"totalFound": 0, "content": []})
 
     async with _client(handler) as client:
@@ -83,6 +103,10 @@ async def test_comeet_two_step_handshake_resolves():
     async with _client(handler) as client:
         result = await validator.validate_token("comeet", "acme/A5.004", client=client)
     assert result["status"] == "live"
+    # The resolved board id and API token travel as the adapter config that
+    # `persist_result` merges into `token.config`; the private key is gone.
+    assert result["details"]["config"] == {"company": "A5.004", "token": "abcdef0123456789abcd"}
+    assert "_comeet_adapter_token" not in result["details"]
 
 
 @pytest.mark.asyncio

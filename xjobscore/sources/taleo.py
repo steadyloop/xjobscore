@@ -306,9 +306,11 @@ async def harvest(feed: Feed, net: Net) -> Record:
             seen.add(external_id)
             identities.append(external_id)
 
+    # Pin the rendering timezone so hour/day shifts do not create revisions.
     responses = await asyncio.gather(
         *(
-            net.get(_detail_url(first.url, external_id), concurrency=_CONCURRENCY)
+            net.get(_detail_url(first.url, external_id) + "&tz=GMT%2B00%3A00&tzname=UTC",
+                    concurrency=_CONCURRENCY)
             for external_id in identities
         ),
         return_exceptions=True,

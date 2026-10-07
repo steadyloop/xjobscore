@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Callable
+from time import perf_counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -16,7 +18,7 @@ from xjobscore.silver import ChangeSet
 
 logger = logging.getLogger(__name__)
 
-INCREMENTAL_STEPS = ("job_type", "skills", "degrees", "summaries")
+INCREMENTAL_STEPS = ("job_type", "skills", "degrees", "summaries", "focus")
 DEDUP_DEBOUNCE_S = 30
 DEDUP_MAX_DELAY_S = 5 * 60
 DEDUP_LEASE_S = 60 * 60
@@ -26,12 +28,24 @@ DEDUP_LEASE_S = 60 * 60
 DEDUP_ATTEMPTS = 3
 DEDUP_RETRY_S = 60
 RUN_RETENTION_DAYS = 30
+# A changed poll's Gold runs beside polling, not inside the worker that
+# polled: awaiting it there kept the worker off its vendor's queue for the
+# whole step, which on 2026-10-05 was ~27s of a ~48s Workday poll whose fetch
+# took 2.5s. At most DEFERRED_GOLD_CONCURRENCY jobs run at once, so a burst of
+# changed polls cannot take the connection pool away from claims; past
+# DEFERRED_GOLD_QUEUE queued jobs `defer` waits, which is the backpressure that
+# keeps a Gold step slower than polling from queueing without bound.
+DEFERRED_GOLD_CONCURRENCY = 4
+DEFERRED_GOLD_QUEUE = 64
 
 
 @dataclass(frozen=True, slots=True)
 class GoldResult:
     counts: dict[str, gold.Counts] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
+    stage_ms: dict[str, float] = field(default_factory=dict, compare=False)
+    duration_ms: float | None = field(default=None, compare=False)
+    postings: int | None = field(default=None, compare=False)
 
     @property
     def degraded(self) -> bool:
@@ -39,6 +53,9 @@ class GoldResult:
 
     def detail(self) -> dict[str, Any]:
         return {
+            "stage_ms": self.stage_ms,
+            "duration_ms": self.duration_ms,
+            "postings": self.postings,
             "counts": {
                 name: {
                     "groups": value.groups,
@@ -119,6 +136,9 @@ class GoldCoordinator:
         self.batch_size = batch_size
         self._backlog: dict[str, int] = {}
         self._wake_callback: Callable[[], None] | None = None
+        self._deferred: set[asyncio.Task[None]] = set()
+        self._deferred_running = asyncio.Semaphore(DEFERRED_GOLD_CONCURRENCY)
+        self._deferred_queued = asyncio.Semaphore(DEFERRED_GOLD_QUEUE)
 
     def set_wake_callback(self, callback: Callable[[], None]) -> None:
         self._wake_callback = callback
@@ -132,6 +152,43 @@ class GoldCoordinator:
 
     def catchup_may_remain(self) -> bool:
         return any(count >= self.batch_size for count in self._backlog.values())
+
+    async def defer(self, job: Callable[[], Awaitable[None]]) -> None:
+        """Run one poll's Gold off the poll path; returns once it is queued.
+
+        Waits only when DEFERRED_GOLD_QUEUE jobs are already pending. A job
+        that raises is logged and dropped: its rows keep stale version
+        stamps, which `catch_up_once` repairs, exactly as for a crash.
+        """
+        await self._deferred_queued.acquire()
+
+        async def run_job() -> None:
+            try:
+                async with self._deferred_running:
+                    await job()
+            except Exception:
+                logger.exception("deferred Gold failed")
+            finally:
+                self._deferred_queued.release()
+
+        task = asyncio.create_task(run_job(), name="xjobscore-gold-feed")
+        self._deferred.add(task)
+        task.add_done_callback(self._deferred.discard)
+
+    async def drain(self, timeout: float | None = None) -> None:
+        """Wait for deferred Gold, cancelling whatever outlives `timeout`.
+
+        A cancelled job loses nothing durable: its postings keep stale version
+        stamps for catch-up, and its `system_run` row is marked interrupted at
+        the next startup.
+        """
+        pending = set(self._deferred)
+        if not pending:
+            return
+        _, late = await asyncio.wait(pending, timeout=timeout)
+        for task in late:
+            task.cancel()
+        await asyncio.gather(*late, return_exceptions=True)
 
     async def begin_feed(self, pool: Any, feed: Feed) -> int:
         return await self.runs.begin(pool, "feed", f"{feed.source}:{feed.key}")
@@ -212,9 +269,12 @@ class GoldCoordinator:
             return GoldResult()
         counts: dict[str, gold.Counts] = {}
         errors: dict[str, str] = {}
+        stage_ms: dict[str, float] = {}
+        started = perf_counter()
         ids = sorted(changes.posting_ids)
         companies = sorted(changes.company_ids)
         for name in INCREMENTAL_STEPS:
+            step_started = perf_counter()
             try:
                 async with pool.acquire() as conn, conn.transaction():
                     counts[name] = await gold.apply_incremental(
@@ -223,7 +283,13 @@ class GoldCoordinator:
             except Exception as exc:
                 errors[name] = f"{type(exc).__name__}: {exc}"
                 logger.exception("incremental Gold failed step=%s", name)
-        return GoldResult(counts=counts, errors=errors)
+            finally:
+                stage_ms[name] = round((perf_counter() - step_started) * 1000, 3)
+        return GoldResult(
+            counts=counts, errors=errors, stage_ms=stage_ms,
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            postings=0 if errors else len(ids),
+        )
 
     async def catch_up_once(
         self,
@@ -246,6 +312,8 @@ class GoldCoordinator:
         run_id = await self.runs.begin(pool, "gold_catchup")
         counts: dict[str, gold.Counts] = {}
         errors: dict[str, str] = {}
+        stage_ms: dict[str, float] = {}
+        started = perf_counter()
         interrupted = False
         for name, ids in stale.items():
             if accepting is not None and not accepting():
@@ -253,13 +321,27 @@ class GoldCoordinator:
                 break
             if not ids:
                 continue
+            step_started = perf_counter()
             try:
                 async with pool.acquire() as conn, conn.transaction():
                     counts[name] = await gold.apply_incremental(conn, name, ids)
             except Exception as exc:
                 errors[name] = f"{type(exc).__name__}: {exc}"
                 logger.exception("Gold catch-up failed step=%s", name)
-        result = GoldResult(counts=counts, errors=errors)
+            finally:
+                stage_ms[name] = round((perf_counter() - step_started) * 1000, 3)
+        # A posting touched by several steps is one posting. Exclude candidates
+        # whose attempted batch failed or was interrupted; never add step counts.
+        completed_ids = {posting_id for name in counts for posting_id in stale[name]}
+        pending_ids = {
+            posting_id for name, ids in stale.items() if name not in counts
+            for posting_id in ids
+        }
+        result = GoldResult(
+            counts=counts, errors=errors, stage_ms=stage_ms,
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            postings=len(completed_ids - pending_ids),
+        )
         await self.runs.finish(
             pool,
             run_id,

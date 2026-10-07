@@ -19,6 +19,7 @@ const PAGE_SIZE = 200;
 const RESOLUTION_LABEL = {
   resolved: (r) => `resolved: ${r.company_name} (#${r.company_id})`,
   fallback: (r) => `fallback: feed company ${r.company_name ?? ""} (#${r.company_id})`,
+  would_mint: (r) => `would create company: ${r.company_raw ?? "token slug"}`,
   would_park: () => "would park in company_new",
 };
 
@@ -733,6 +734,7 @@ export function createInspector(container, { standalone = false, onClose, onMute
       stat("Postings", String(s.postings)),
       stat("Resolved", String(s.resolved)),
       stat("Fallback", String(s.fallback_company)),
+      stat("Would create", String(s.would_mint ?? 0)),
       stat("Would park", String(s.would_park)),
       stat("Unsupported", String(s.unsupported))
     );

@@ -127,6 +127,15 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
   expansion choices survive telemetry refreshes. Collapsing a group is only a
   display choice and never changes the candidate set for Fetch visible feeds.
 
+  A provider's **pause/resume** button applies to all its imported feeds,
+  including rows hidden by search or status filters. It sends one provider
+  policy request and updates all its current feeds in one SQL statement,
+  without loading the full fleet or resolving individual feed references.
+  Feed pauses and the
+  separate global Scheduler pause persist across page reloads and backend
+  restarts. Already claimed polls may finish; paused feeds cannot be claimed
+  again until resumed.
+
   Vendor HTTP protection is separate from feed cadence. `net.py` still caps
   per-host concurrency and reacts to 429 responses so an operator-set interval
   cannot disable production's rate-limit safeguards. The scheduler's per-vendor

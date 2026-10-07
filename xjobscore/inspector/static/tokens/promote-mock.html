@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bulk Promote Mockup</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/tokens/styles.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    /* ---- Static mockup: per-vendor bulk promote on the Tokens table. ----
+       Everything new is .tok-pv-* / .tok-promote-*. Numbers are illustrative. */
+
+    .mock-label {
+      margin: var(--space-5) 0 var(--space-2);
+      color: var(--text-muted);
+      font: 11px/1 var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .mock-note {
+      margin: 0 0 var(--space-3);
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    /* Vendor summary table: one row per vendor, server-counted, so nothing
+       hides behind the 5,000-row page limit. */
+    .tok-pv {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tok-pv th {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    .tok-pv th.num, .tok-pv td.num { text-align: right; }
+
+    .tok-pv td {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .tok-pv tr.tok-pv-row:hover td { background: var(--surface-2); }
+
+    .tok-pv .vendor { font-weight: 650; }
+    .tok-pv .live { color: var(--ok-text); font-weight: 600; }
+    .tok-pv .muted-num { color: var(--text-muted); }
+    .tok-pv .junk { color: var(--serious); }
+
+    .tok-pv-yield {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tok-pv-yield-bar {
+      width: 54px;
+      height: 5px;
+      border-radius: 3px;
+      background: var(--surface-3);
+      overflow: hidden;
+    }
+
+    .tok-pv-yield-bar > span { display: block; height: 100%; background: var(--ok); }
+
+    .tok-pv-tier {
+      display: inline-block;
+      padding: 0 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 10px;
+      font-weight: 650;
+      line-height: 16px;
+      white-space: nowrap;
+    }
+
+    .tok-pv-tier[data-tier="core"] {
+      color: var(--ok-text);
+      border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
+      background: color-mix(in srgb, var(--ok) 10%, var(--surface));
+    }
+
+    .tok-pv-tier[data-tier="slow"] {
+      color: var(--serious);
+      border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+      background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+    }
+
+    .tok-pv-tier[data-tier="skip"] { color: var(--text-muted); }
+
+    .tok-pv-actions { display: flex; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+
+    .tok-pv-done { color: var(--text-muted); font-size: 12px; }
+
+    .tok-pv tr.tok-pv-group td {
+      padding-top: 12px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      border-bottom: none;
+    }
+
+    /* Bulk bar above the vendor table. */
+    .tok-promote-bar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .tok-promote-bar strong { font-size: 13px; }
+    .tok-promote-bar .grow { flex: 1; }
+    .tok-promote-bar label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+
+    /* Confirm sheet (state 2). */
+    .tok-promote-confirm {
+      max-width: 520px;
+      padding: 16px 18px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md, var(--radius));
+      background: var(--surface);
+      box-shadow: 0 12px 32px color-mix(in srgb, black 14%, transparent);
+    }
+
+    .tok-promote-confirm h2 { margin: 0 0 10px; font-size: 15px; }
+
+    .tok-promote-confirm dl {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 5px 14px;
+      margin: 0 0 12px;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tok-promote-confirm dt { color: var(--text-muted); }
+    .tok-promote-confirm dd { margin: 0; }
+
+    .tok-promote-confirm .sample {
+      margin: 0 0 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+      font: 11px/1.7 var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    .tok-promote-confirm .sample .x { color: var(--serious); }
+
+    .tok-promote-confirm footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+    /* Junk flag inside the existing token table rows. */
+    .tok-junk {
+      display: inline-flex;
+      padding: 0 5px;
+      border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+      border-radius: 999px;
+      color: var(--serious);
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 14px;
+    }
+
+    .tok-toast {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--border));
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--ok) 8%, var(--surface));
+      font-size: 12px;
+    }
+
+    .tok-toast a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body class="tokens-page">
+  <main class="page">
+
+    <!-- ================= Filters: vendor list now comes from the server ================= -->
+    <p class="mock-label">Filters — vendor dropdown is server-side, every vendor reachable</p>
+    <div class="page-header">
+      <select title="Status" aria-label="Status">
+        <option selected>Inactive (live, not in feed)</option>
+        <option>Unknown</option>
+        <option>Muted</option>
+        <option>Dead</option>
+        <option>All (including active)</option>
+      </select>
+      <select title="Vendor" aria-label="Vendor">
+        <option>All vendors (34,481)</option>
+        <option>greenhouse (6,434)</option>
+        <option>ashby (1,334)</option>
+        <option>oracle (1,649)</option>
+        <option>smartrecruiters (1,381)</option>
+        <option>lever (959)</option>
+        <option>workday (249)</option>
+        <option>eightfold (31)</option>
+        <option>—</option>
+        <option>join (4,052)</option>
+        <option>bamboohr (2,095)</option>
+        <option>…</option>
+      </select>
+      <label class="tok-muted-toggle"><input type="checkbox" checked> Hide sandbox/test</label>
+      <div class="grow"></div>
+    </div>
+
+    <!-- ================= State 1: vendor promote table ================= -->
+    <p class="mock-label">State 1 — promote by vendor</p>
+    <p class="mock-note">Sits at the top of the Tokens card in the Inactive view. One row per vendor, counted on the server.</p>
+
+    <section class="card">
+      <header>
+        <h1>Promote to feed</h1>
+        <span class="secondary">34,481 live tokens not in feed · 312 flagged as sandbox/test</span>
+        <div class="grow"></div>
+      </header>
+
+      <div class="tok-promote-bar">
+        <span><strong>7 core vendors</strong> · 12,037 live · ~90% of current student-job yield</span>
+        <span class="grow"></span>
+        <label>New feeds poll
+          <select aria-label="Trial interval">
+            <option>every 6h</option>
+            <option selected>daily (trial)</option>
+            <option>weekly</option>
+          </select>
+        </label>
+        <button class="btn small primary" type="button">Promote all core (12,037)</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="tok-pv">
+          <thead>
+            <tr>
+              <th>Vendor</th>
+              <th>Tier</th>
+              <th class="num">Live · not in feed</th>
+              <th class="num">Unchecked</th>
+              <th class="num">Sandbox/test</th>
+              <th>Student yield (current feeds)</th>
+              <th class="num">Poll cost</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="tok-pv-group"><td colspan="8">Core — high student yield, cheap to poll</td></tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">greenhouse</td>
+              <td><span class="tok-pv-tier" data-tier="core">core</span></td>
+              <td class="num live">6,434</td>
+              <td class="num muted-num">213</td>
+              <td class="num junk">41</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:47%"></span></span>47% · 843 jobs</span></td>
+              <td class="num">0.3s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Validate 213</button><button class="btn small primary" type="button">Promote 6,393</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">smartrecruiters</td>
+              <td><span class="tok-pv-tier" data-tier="core">core</span></td>
+              <td class="num live">1,381</td>
+              <td class="num muted-num">107</td>
+              <td class="num junk">9</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:48%"></span></span>48% · 189 jobs</span></td>
+              <td class="num">1.1s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Validate 107</button><button class="btn small primary" type="button">Promote 1,372</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">lever</td>
+              <td><span class="tok-pv-tier" data-tier="core">core</span></td>
+              <td class="num live">959</td>
+              <td class="num muted-num">3,237</td>
+              <td class="num junk">12</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:41%"></span></span>41% · 104 jobs</span></td>
+              <td class="num">1.0s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Validate 3,237</button><button class="btn small primary" type="button">Promote 947</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">ashby</td>
+              <td><span class="tok-pv-tier" data-tier="core">core</span></td>
+              <td class="num live">1,334</td>
+              <td class="num muted-num">26</td>
+              <td class="num junk">18</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:20%"></span></span>20% · 431 jobs</span></td>
+              <td class="num">0.2s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Validate 26</button><button class="btn small primary" type="button">Promote 1,316</button></div></td>
+            </tr>
+
+            <tr class="tok-pv-group"><td colspan="8">Core but slow — worth it, polled less often</td></tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">workday</td>
+              <td><span class="tok-pv-tier" data-tier="slow">slow</span></td>
+              <td class="num live">249</td>
+              <td class="num muted-num">7,971</td>
+              <td class="num junk">23</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:79%"></span></span>79% · 2,803 jobs</span></td>
+              <td class="num">2.7s · p95 137s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Validate 7,971</button><button class="btn small primary" type="button">Promote 226</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">oracle</td>
+              <td><span class="tok-pv-tier" data-tier="slow">slow</span></td>
+              <td class="num live">1,649</td>
+              <td class="num muted-num">49</td>
+              <td class="num junk">205</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:86%"></span></span>86% · 565 jobs</span></td>
+              <td class="num">15s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Validate 49</button><button class="btn small primary" type="button">Promote 1,444</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">eightfold</td>
+              <td><span class="tok-pv-tier" data-tier="slow">slow</span></td>
+              <td class="num live">31</td>
+              <td class="num muted-num">79</td>
+              <td class="num junk">4</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:83%"></span></span>83% · 325 jobs</span></td>
+              <td class="num">10s</td>
+              <td><div class="tok-pv-actions"><span class="tok-pv-done">✓ promoted 27 · 2m ago</span></div></td>
+            </tr>
+
+            <tr class="tok-pv-group"><td colspan="8">Low yield — kept as tokens; promote only on purpose</td></tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">join</td>
+              <td><span class="tok-pv-tier" data-tier="skip">low</span></td>
+              <td class="num live">4,052</td>
+              <td class="num muted-num">23,029</td>
+              <td class="num junk">0</td>
+              <td><span class="tok-pv-yield muted-num">no feeds yet</span></td>
+              <td class="num muted-num">–</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Promote 4,052…</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor">bamboohr</td>
+              <td><span class="tok-pv-tier" data-tier="skip">low</span></td>
+              <td class="num live">2,095</td>
+              <td class="num muted-num">9,478</td>
+              <td class="num junk">0</td>
+              <td><span class="tok-pv-yield"><span class="tok-pv-yield-bar"><span style="width:33%"></span></span>1 of 3 · 1 job</span></td>
+              <td class="num">0.9s</td>
+              <td><div class="tok-pv-actions"><button class="btn small" type="button">Promote 2,095…</button></div></td>
+            </tr>
+            <tr class="tok-pv-row">
+              <td class="vendor muted-num" colspan="8">+ 22 more low-yield vendors (21,904 live) <a href="#" class="secondary">show</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= State 2: confirm ================= -->
+    <p class="mock-label">State 2 — confirm (after "Promote 1,444" on oracle)</p>
+    <div class="tok-promote-confirm" role="dialog" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Promote 1,444 oracle tokens to feed?</h2>
+      <dl>
+        <dt>Promoting</dt><dd>1,444 live, unmuted, not already a feed</dd>
+        <dt>Skipped</dt><dd>205 sandbox/test · 0 muted</dd>
+        <dt>Polling</dt><dd>daily (trial) — ~6h of scheduler time per round</dd>
+        <dt>After 7 days</dt><dd>feeds with student jobs → every 15m · jobs but none for students → weekly · no jobs → off</dd>
+      </dl>
+      <div class="sample">
+        ejgk.fa.em2/cx · emit.fa.ca3/cx · hcbt.fa.em2/cx · eofh.fa.em2/cx_3001 · …<br>
+        <span class="x">skipped: citigroup-qa-sandbox · hcvk.fa.em2/cx_test · …</span>
+      </div>
+      <footer>
+        <button class="btn small" type="button">Cancel</button>
+        <button class="btn small primary" type="button">Promote 1,444</button>
+      </footer>
+    </div>
+
+    <!-- ================= State 3: result ================= -->
+    <p class="mock-label">State 3 — done</p>
+    <div class="tok-toast">
+      ✓ 1,444 oracle feeds added · polling daily · first polls start now
+      <a href="/feeds?source=oracle">view in Feeds →</a>
+      <a href="#">undo</a>
+    </div>
+
+    <!-- ================= Junk flag in the existing token rows ================= -->
+    <p class="mock-label">Token rows — sandbox/test flagged (shown when "Hide sandbox/test" is off)</p>
+    <section class="card">
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th></th><th>Vendor</th><th>Token</th><th>Status</th><th>Feed</th><th>Checked</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><input type="checkbox"></td><td>eightfold</td><td>hp-sandbox.eightfold.ai/hp-sandbox.com <span class="tok-junk">sandbox</span></td><td>live</td><td>none</td><td>2h ago</td></tr>
+            <tr><td><input type="checkbox"></td><td>oracle</td><td>hcvk.fa.em2/cx_test <span class="tok-junk">test</span></td><td>live</td><td>none</td><td>3h ago</td></tr>
+            <tr><td><input type="checkbox"></td><td>oracle</td><td>ejgk.fa.em2/cx</td><td>live</td><td>none</td><td>3h ago</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>

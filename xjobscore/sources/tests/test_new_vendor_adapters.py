@@ -7,7 +7,7 @@ from typing import NamedTuple
 import pytest
 
 from xjobscore.net import NetError, Response
-from xjobscore.records import Feed
+from xjobscore.records import Feed, Item
 from xjobscore.sources import PARSERS, SOURCES, avature, dayforce, docxtract, join, taleo, zohorecruit
 
 
@@ -99,6 +99,62 @@ async def test_avature_enumerates_pages_and_keeps_raw_detail_html():
     assert posting.description_html == "<p>Build <b>things</b>.</p>"
 
 
+async def test_avature_reads_the_board_named_in_its_key():
+    """`company/board` reads that board only: one subdomain hosts several
+    (bupaanz serves /careersau and /careersnz), and a sibling board's links on
+    the same page are not this feed's jobs. Slug-less links count too."""
+    root = "https://bupaanz.avature.net/careersau/SearchJobs"
+    page2 = f"{root}?jobOffset=12"
+    detail1 = "https://bupaanz.avature.net/careersau/JobDetail/Carer/1"
+    detail2 = "https://bupaanz.avature.net/CareersAU/JobDetail/2"
+    sibling = "https://bupaanz.avature.net/careersnz/JobDetail/Nurse/9"
+    net = RouteNet({
+        ("GET", root): response(
+            root, f'<a href="{detail1}">1</a><a href="{sibling}">nz</a><a href="{page2}">2</a>'
+        ),
+        ("GET", page2): response(page2, f'<a href="{detail2}">2</a>'),
+        ("GET", detail1): response(detail1, avature_detail("1", "Carer")),
+        ("GET", detail2): response(detail2, avature_detail("2", "Nurse")),
+    })
+    feed = Feed(1, "avature", "bupaanz/careersau", company_name="Bupa")
+
+    record = await avature.harvest(feed, net)
+
+    assert [item.external_id for item in record.items] == ["1", "2"]
+    assert record.partition_count == 2
+
+
+def test_avature_bare_key_and_locale_boards_build_their_search_url():
+    assert avature._search_url(Feed(1, "avature", "deloitteus")) == (
+        "https://deloitteus.avature.net/careers/SearchJobs"
+    )
+    assert avature._search_url(Feed(1, "avature", "astellasjapan/ja_JP/careers")) == (
+        "https://astellasjapan.avature.net/ja_JP/careers/SearchJobs"
+    )
+    # A bare key keeps accepting a locale in front of `careers`, as before.
+    assert avature._detail(Feed(1, "avature", "deloitteus")).search(
+        "https://apply.deloitte.com/en_US/careers/JobDetail/Analyst/123"
+    )
+
+
+def test_avature_title_comes_from_banner_not_leading_unlabeled_field():
+    # Boards like broadinstitute lead with an unlabeled description field.
+    page = """
+    <meta property="og:title" content="Data Scientist &amp; Engineer" />
+    <h2 class="banner__text__title title title--banner">Data Scientist &amp; Engineer</h2>
+    <div class="article__content__view__field">
+      <div class="article__content__view__field__value">The Institute seeks a scientist to ...</div>
+    </div>
+    """
+    feed = Feed(1, "avature", "demo")
+    item = Item(external_id="1", payload=page, kind="html")
+    assert avature.parse(feed, item, {})[0].title == "Data Scientist & Engineer"
+
+    banner_only = page.replace('<meta property="og:title" content="Data Scientist &amp; Engineer" />', "")
+    item = Item(external_id="1", payload=banner_only, kind="html")
+    assert avature.parse(feed, item, {})[0].title == "Data Scientist & Engineer"
+
+
 async def test_dayforce_uses_csrf_search_and_parses_complete_row():
     root = "https://jobs.dayforcehcm.com"
     site_url = f"{root}/api/geo/demo/sitecontext/demo/CANDIDATEPORTAL/en-US"
@@ -168,7 +224,7 @@ def taleo_definition(name: str, labels: list[str], values: list[str]) -> str:
 
 async def test_taleo_keeps_raw_detail_and_parses_filllist_fields():
     root = "https://demo.taleo.net/careersection/ex/jobsearch.ftl?lang=en"
-    detail = "https://demo.taleo.net/careersection/ex/jobdetail.ftl?job=42&lang=en"
+    detail = "https://demo.taleo.net/careersection/ex/jobdetail.ftl?job=42&lang=en&tz=GMT%2B00%3A00&tzname=UTC"
     list_html = (
         '<input name="listRequisition.nbElements" value="1">'
         '<input name="listRequisition.size" value="1">'
@@ -198,7 +254,9 @@ async def test_taleo_keeps_raw_detail_and_parses_filllist_fields():
     assert posting.requisition_id == "REQ-42"
     assert posting.description_html == "<p>Build</p>\n<p>Learn</p>"
     assert posting.employment_type == "Full-time"
-    assert posting.published_at is not None
+    assert posting.published_at.isoformat() == "2026-08-13T15:26:14"
+    assert posting.url_posting == detail.split("&tz=", 1)[0]
+    assert net.calls[1].url == detail
 
 
 async def test_zohorecruit_reads_hidden_jobs_and_meta_payloads():
@@ -304,7 +362,7 @@ def taleo_pager(pages: dict):
 def taleo_details(rows) -> dict:
     routes = {}
     for external_id, title in rows:
-        url = f"https://demo.taleo.net/careersection/ex/jobdetail.ftl?job={external_id}&lang=en"
+        url = f"https://demo.taleo.net/careersection/ex/jobdetail.ftl?job={external_id}&lang=en&tz=GMT%2B00%3A00&tzname=UTC"
         routes[("GET", url)] = response(
             url, taleo_definition("descRequisition", ["reqlistitem.title"], [title])
         )
@@ -495,7 +553,7 @@ async def test_taleo_uses_one_width_for_the_pager_and_detail_legs():
 async def test_taleo_reports_partial_when_a_detail_fetch_fails():
     rows = taleo_rows(0, 3)
     routes = taleo_details(rows)
-    dead = f"https://demo.taleo.net/careersection/ex/jobdetail.ftl?job={rows[1][0]}&lang=en"
+    dead = f"https://demo.taleo.net/careersection/ex/jobdetail.ftl?job={rows[1][0]}&lang=en&tz=GMT%2B00%3A00&tzname=UTC"
 
     def fail(url, data=None):
         raise NetError("HTTP 500", url=dead, status=500)

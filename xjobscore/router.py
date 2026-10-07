@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from xjobscore import store
 from xjobscore.records import Feed, Item, Record
@@ -36,6 +38,81 @@ VOLATILE: dict[str, frozenset[str]] = {
     "icims": frozenset({"opensearch", "last_mod"}),
     "oracle": frozenset({"Relevancy", "SearchId", "Facets"}),
 }
+
+# Board totals describe the listing, not a revision of each posting on it.
+_BOARD_COUNTS = {"oracle": "TotalJobsCount", "icims": "totalCount", "greenhouse": "total"}
+_HASH_NORMALIZED_SOURCES = {*_BOARD_COUNTS, "avature", "taleo", "hn", "workday", "adp"}
+
+
+def _normalized(source: str, data: dict) -> dict:
+    """Ignore verified transport noise in the hash, preserving the stored raw."""
+    volatile = VOLATILE.get(source, frozenset())
+    payload = _strip(data["payload"], volatile)
+    envelope = _strip(data.get("envelope") or {}, volatile)
+    if source in _BOARD_COUNTS:
+        parent = envelope.get("meta", {}) if source == "greenhouse" else envelope
+        if isinstance(parent, dict):
+            parent.pop(_BOARD_COUNTS[source], None)
+    if source == "adp" and isinstance(payload, dict):
+        group = payload.get("customFieldGroup")
+        dates = group.get("dateFields") if isinstance(group, dict) else None
+        for field in dates if isinstance(dates, list) else []:
+            name = field.get("nameCode") if isinstance(field, dict) else None
+            if isinstance(name, dict) and name.get("codeValue") == "CurrentServerDateTime":
+                field.pop("dateValue", None)  # Request clock, not a posting date.
+    if source == "workday" and isinstance(payload, dict):
+        params = payload
+        for key in ("jobPostingInfo", "videoInfo", "params"):
+            params = params.get(key) if isinstance(params, dict) else None
+        if isinstance(params, dict):
+            # Media credentials expire independently of the job or video.
+            params.pop("cdn_token", None)
+            urls = [(params, "poster")]
+            for key in ("sources", "tracks"):
+                entries = params.get(key)
+                if isinstance(entries, list):
+                    urls.extend((entry, "url") for entry in entries if isinstance(entry, dict))
+            for entry, key in urls:
+                if isinstance(entry.get(key), str):
+                    try:
+                        parts = urlsplit(entry[key])
+                    except ValueError:
+                        continue
+                    query = "&".join(part for part in parts.query.split("&")
+                                     if part.partition("=")[0] != "__token__")
+                    if query != parts.query:
+                        entry[key] = urlunsplit(parts._replace(query=query))
+    if source == "hn" and isinstance(envelope.get("story"), dict):
+        for key in ("children", "num_comments", "updated_at"):
+            envelope["story"].pop(key, None)
+    if source == "avature" and isinstance(payload, str):
+        payload = re.sub(
+            r'''<meta\b(?=[^>]*\sname\s*=\s*["']csp-nonce-(?:style|script)["'])[^>]*>''',
+            lambda tag: re.sub(r'''(\scontent\s*=\s*)(["']).*?\2''', r'\1\2\2', tag[0], flags=re.I),
+            payload, flags=re.I,
+        )
+        payload = re.sub(r'''(<(?:script|style)\b[^>]*\snonce\s*=\s*)(["']).*?\2''',
+                         r'\1\2\2', payload, flags=re.I)
+        # These portal attributes change per session, not per job revision.
+        payload = re.sub(
+            r'<portal-data(?=[\s/>])[^>]*>',
+            lambda tag: re.sub(r'''(\sdata-(?:trackercode|cortex|publicsessionname)\s*=\s*)(["']).*?\2''',
+                               r'\1\2\2', tag[0], flags=re.I | re.S),
+            payload, flags=re.I,
+        )
+    if source == "taleo" and isinstance(payload, str):
+        from xjobscore.probe import _VisibleText
+        from xjobscore.sources.taleo import _definition, _fill, _rows
+
+        try:
+            fields, labels, _ = _definition(payload, "descRequisition")
+            requisitions = _rows(_fill(payload, "descRequisition"), fields, labels)
+            text = _VisibleText()
+            text.feed(payload)
+            payload = {"requisitions": requisitions, "text": " ".join(" ".join(text.parts).split())}
+        except (ValueError, SyntaxError):
+            pass  # Preserve the full hash for an error page or an unfamiliar shape.
+    return {**data, "payload": payload, "envelope": envelope}
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +164,6 @@ def _content_hash(payload: dict | str, kind: str, volatile: frozenset[str]) -> s
 
 def prepare(feed: Feed, record: Record) -> list[PreparedRaw]:
     """Wrap every item uniformly while hashing a normalized copy."""
-    volatile = VOLATILE.get(feed.source, frozenset())
     result = []
     for item in record.items:
         data = {
@@ -96,12 +172,7 @@ def prepare(feed: Feed, record: Record) -> list[PreparedRaw]:
             "payload": item.payload,
             "envelope": record.envelope,
         }
-        normalized = {
-            "version": 1,
-            "kind": item.kind,
-            "payload": _strip(item.payload, volatile),
-            "envelope": _strip(record.envelope, volatile),
-        }
+        normalized = _normalized(feed.source, data)
         result.append(PreparedRaw(item=item, data=data, data_hash=encoded_hash(normalized)))
     return result
 
@@ -164,20 +235,45 @@ async def persist(
     items: list[PreparedRaw],
 ) -> list[StoredRaw]:
     source = store.source_instance(feed)
+    prior = {}
+    if items and feed.source in _HASH_NORMALIZED_SOURCES:
+        prior = {
+            (row["source_key"], row["requested_hash"]): row
+            for row in await store.raw_candidates(
+                conn, source,
+                [item.item.external_id for item in items],
+                [item.data_hash for item in items],
+            )
+        }
     result = []
     for prepared in items:
-        raw_id, created = await store.save_raw(
-            conn,
-            source=source,
-            source_key=prepared.item.external_id,
-            data=prepared.data,
-            data_hash=prepared.data_hash,
-        )
+        previous = prior.get((prepared.item.external_id, prepared.data_hash))
+        previous_hash = previous["data_hash"] if previous else None
+        if previous and previous["data"] is not None:
+            try:
+                unwrap(previous["data"])
+                previous_hash = encoded_hash(_normalized(feed.source, previous["data"]))
+            except ValueError:
+                pass
+        if previous and previous_hash == prepared.data_hash:
+            # Old hashes may include the now-ignored fields. Reuse their row,
+            # without rewriting history or creating a rollout-only revision.
+            raw_id, created = previous["id"], False
+            data_hash = previous["data_hash"]
+        else:
+            raw_id, created = await store.save_raw(
+                conn,
+                source=source,
+                source_key=prepared.item.external_id,
+                data=prepared.data,
+                data_hash=prepared.data_hash,
+            )
+            data_hash = prepared.data_hash
         result.append(
             StoredRaw(
                 item=prepared.item,
                 raw_id=raw_id,
-                data_hash=prepared.data_hash,
+                data_hash=data_hash,
                 created=created,
                 data=prepared.data,
             )

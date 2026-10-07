@@ -8,35 +8,58 @@
 import { api, isDegraded } from "/static/shared/api.js";
 import { el, formatCount, relativeTime } from "/static/shared/format.js";
 import { renderNav } from "/static/shared/nav.js";
-import { heartbeatPresentation, tokenPromotable } from "/static/tokens/model.mjs";
+import {
+  clock,
+  compactCount,
+  heartbeatPresentation,
+  shortDuration,
+  sweepActive,
+  sweepHeadline,
+  sweepRate,
+  sweepVendorRows,
+  tokenPromotable,
+} from "/static/tokens/model.mjs";
 
-// Show all tokens without pagination
-const ROW_LIMIT = 5000;
+// An open vendor group shows one page of rows at a time, fetched from the
+// server. Group headers come from per-vendor counts, so every vendor shows no
+// matter how large the filter is, and the DOM never holds more than a page.
+const PAGE_SIZE = 100;
+// Typing in the search box waits this long before asking the server.
+const SEARCH_DEBOUNCE_MS = 300;
 
-// A vendor's tokens are validated a chunk at a time. The server probes three
-// boards at once with a 10s timeout each, so a whole vendor in one request
-// would outlive any browser or proxy patience; a chunk also gives the progress
-// counter something real to count.
-const VALIDATE_CHUNK = 20;
+// Adding at least this many at once asks first: each one becomes a feed the
+// scheduler polls from then on.
+const CONFIRM_ADD_AT = 100;
 
 const state = {
   filter: "inactive",
-  // Vendor to narrow to, client-side (the whole inventory is already on
-  // screen -- see ROW_LIMIT). Empty string = all vendors.
+  // Vendor to narrow to (group headers are already loaded). "" = all vendors.
   ats: "",
+  // Server-side search over token and company, and the row order in a group.
+  q: "",
+  order: "token",
   total: 0,
-  // Identity keys, kept across filter changes within an enable. Cleared
-  // whenever the filters change, because the set on screen no longer
-  // describes what is checked.
+  // Identity key -> {ats, token, promotable}. Kept across pages, so a
+  // selection can span several; `promotable` is captured at check time
+  // because the row itself may be on a page no longer loaded.
   selected: new Map(),
-  // The one vendor group open, accordion-style; null = all closed. A single
-  // name rather than a set of collapsed ones, so "only one at a time" is the
-  // shape of the state instead of an invariant every writer must remember.
+  // Whole vendors ticked for "Add to feed". The server resolves each one under
+  // the filter and search in force, so no vendor's rows need to be loaded.
+  selectedGroups: new Set(),
+  // The one vendor group open, accordion-style; null = all closed, which is
+  // also how the page starts. A single name rather than a set of collapsed
+  // ones, so "only one at a time" is the shape of the state.
   expanded: null,
+  // The open group's current page of rows, and where that page starts.
   rows: [],
-  firstLoad: true,
-  groupValidate: new Map(), // vendor -> {completed, total}
-  validateAllRunning: false,
+  offset: 0,
+  // Per-vendor sizes under the current filter: the group headers.
+  groups: [],
+  // True while the open group's page is in flight.
+  pageLoading: false,
+  // Bumped by every load() and page fetch; a response that lands after the
+  // view moved on belongs to the old view and is dropped.
+  generation: 0,
   heartbeat: null,
   // Newest-first probe log, and whether token_log could be read at all. An
   // unreadable log is not an empty one -- see the header dot.
@@ -78,38 +101,87 @@ const nodes = {
   heartbeatFacts: document.getElementById("heartbeat-facts"),
   heartbeatRun: document.getElementById("heartbeat-run"),
   heartbeatPause: document.getElementById("heartbeat-pause"),
-  validateAll: document.getElementById("validate-all-btn"),
+  addInterval: document.getElementById("add-interval"),
   range: document.getElementById("range"),
-  truncated: document.getElementById("truncated-banner"),
+  order: document.getElementById("order-filter"),
+  search: document.getElementById("search"),
 };
 
 const identity = (row) => `${row.ats} ${row.token}`;
 
-const visibleRows = () => (state.ats ? state.rows.filter((row) => row.ats === state.ats) : state.rows);
+const visibleRows = () => state.rows;
+const visibleGroups = () => (state.ats ? state.groups.filter((group) => group.ats === state.ats) : state.groups);
+const groupCount = (vendor) => state.groups.find((group) => group.ats === vendor)?.count ?? 0;
+
+/* The filter, search and order every token request shares. */
+function viewParams(extra) {
+  const params = new URLSearchParams({ filter: state.filter, order: state.order, ...extra });
+  if (state.q) params.set("q", state.q);
+  return params;
+}
 
 renderNav("Tokens");
 
 /* --- data ---------------------------------------------------------------- */
 
 async function load() {
-  const params = new URLSearchParams({
-    filter: state.filter,
-    limit: String(ROW_LIMIT),
-    offset: "0",
-  });
+  const generation = ++state.generation;
+  const params = viewParams({ limit: "1", offset: "0", groups: "true" });
   try {
     const payload = await api(`/api/tokens?${params}`);
+    if (generation !== state.generation) return;
     showError(null);
     nodes.degraded.hidden = true;
+    state.groups = payload.groups ?? [];
+    // An open group stays open on its page, unless the view no longer has it.
+    if (state.expanded && !groupCount(state.expanded)) state.expanded = null;
+    state.rows = [];
     render(payload);
+    if (state.expanded) loadPage(state.expanded, state.offset);
   } catch (error) {
     if (isDegraded(error)) {
       nodes.degraded.hidden = false;
-      render({ rows: [], total: 0, counts: {}, ats_options: [] });
+      state.rows = [];
+      state.expanded = null;
+      render({ groups: [], total: 0, counts: {} });
     } else {
       showError(error);
     }
   }
+}
+
+/* One page of the open vendor group, from the server. */
+async function loadPage(vendor, offset) {
+  const generation = ++state.generation;
+  const total = groupCount(vendor);
+  // Clamp: a page past the end (the group shrank) falls back to its last page.
+  offset = Math.max(0, Math.min(offset, Math.max(0, total - 1)));
+  offset -= offset % PAGE_SIZE;
+  state.pageLoading = true;
+  renderRows();
+  try {
+    const params = viewParams({ ats: vendor, limit: String(PAGE_SIZE), offset: String(offset) });
+    const payload = await api(`/api/tokens?${params}`);
+    if (generation !== state.generation || state.expanded !== vendor) return;
+    state.rows = payload.rows ?? [];
+    state.offset = offset;
+  } catch (error) {
+    if (generation === state.generation) showError(error);
+  } finally {
+    if (generation === state.generation) {
+      state.pageLoading = false;
+      renderRows();
+      syncPromote();
+    }
+  }
+}
+
+function openGroup(vendor) {
+  state.expanded = vendor;
+  state.rows = [];
+  state.offset = 0;
+  if (vendor) loadPage(vendor, 0);
+  else renderRows();
 }
 
 async function loadHeartbeat() {
@@ -132,9 +204,6 @@ async function loadHeartbeat() {
   }
 }
 
-/* The counts header is served alongside the list, so re-ask for it with the
-   smallest page the API will give rather than reloading the table underneath
-   someone who is still working through it. */
 async function refreshCounts() {
   const params = new URLSearchParams({ filter: state.filter, limit: "1", offset: "0" });
   try {
@@ -145,23 +214,41 @@ async function refreshCounts() {
   }
 }
 
+/* Rows ticked one by one, minus any whose whole vendor is ticked. */
+function selectedTokens() {
+  return [...state.selected.values()]
+    .filter((t) => t.promotable && !state.selectedGroups.has(t.ats))
+    .map(({ ats, token }) => ({ ats, token }));
+}
+
+function addCount() {
+  const fromGroups = [...state.selectedGroups]
+    .reduce((sum, vendor) => sum + (state.groups.find((g) => g.ats === vendor)?.addable ?? 0), 0);
+  return fromGroups + selectedTokens().length;
+}
+
 async function enableTokens() {
-  const tokens = [...state.selected.values()].filter(t => {
-    const row = state.rows.find(r => r.ats === t.ats && r.token === t.token);
-    return row && tokenPromotable(row);
-  });
-  if (!tokens.length) return;
+  const tokens = selectedTokens();
+  const vendors = [...state.selectedGroups];
+  const count = addCount();
+  if (!count) return;
+  const interval = Number(nodes.addInterval.value);
+  const every = nodes.addInterval.selectedOptions[0]?.textContent ?? "";
+  if (count >= CONFIRM_ADD_AT && !window.confirm(
+    `Add ${formatCount(count)} tokens to feed, polled ${every.toLowerCase()}?` +
+      (vendors.length ? `\n\nVendors: ${vendors.join(", ")}` : ""),
+  )) return;
   nodes.promote.disabled = true;
   try {
-    const result = await api("/api/tokens/enable", { body: { tokens } });
+    const result = await api("/api/tokens/enable", {
+      body: { tokens, vendors, filter: state.filter, q: state.q || null, interval_s: interval },
+    });
     showError(null);
     state.selected.clear();
+    state.selectedGroups.clear();
     await load();
     await loadHeartbeat();
-    note(
-      `Promoted ${formatCount(result.imported)} selected tokens` +
-        (result.skipped ? `; ${formatCount(result.skipped)} no longer eligible` : "")
-    );
+    note(`Added ${formatCount(result.imported)} to feed`);
   } catch (error) {
     showError(error);
   } finally {
@@ -221,57 +308,15 @@ async function validateToken(row) {
   }
 }
 
-/* Validates exactly the rows on screen for this vendor -- the number on the
-   button. The identities travel with the request rather than a bare vendor
-   name, because the server has no idea which filter is in force and would
-   otherwise probe every token the vendor has ever had. */
-async function validateVendor(vendor, rows) {
-  const identities = rows.map((row) => ({ ats: row.ats, token: row.token }));
-  const progress = { completed: 0, total: identities.length };
-  state.groupValidate.set(vendor, progress);
-  renderRows();
-
-  const byKey = new Map(state.rows.map((row) => [identity(row), row]));
-  try {
-    for (let i = 0; i < identities.length; i += VALIDATE_CHUNK) {
-      const chunk = identities.slice(i, i + VALIDATE_CHUNK);
-      const result = await api("/api/tokens/validate", { body: { tokens: chunk } });
-      // Validation only records liveness. Muting a token is a deliberate,
-      // separate action on the Feeds page -- a probe can be wrong (a
-      // transient block, a markup change), so it must never delete on its own.
-      for (const validation of result.results ?? []) {
-        const row = byKey.get(`${validation.ats} ${validation.token}`);
-        if (row) {
-          Object.assign(row, {
-            status: validation.status,
-            checked_at: validation.checked_at,
-          });
-        }
-      }
-      progress.completed += chunk.length;
-      renderRows();
-    }
-  } catch (error) {
-    showError(error);
-  } finally {
-    state.groupValidate.delete(vendor);
-    renderRows();
-    syncPromote();
-    // A vendor run writes a log row per token; do not make the reader wait a
-    // full tick to see the batch it just started.
-    await Promise.all([refreshCounts(), loadLog()]);
-  }
-}
-
 /* --- render -------------------------------------------------------------- */
 
 function render(payload) {
   state.total = payload.total ?? 0;
+  state.groups = payload.groups ?? [];
   renderCounts(payload.counts ?? {});
-  state.rows = payload.rows ?? [];
   populateAtsFilter();
   renderRows();
-  nodes.empty.hidden = state.rows.length > 0;
+  nodes.empty.hidden = state.groups.length > 0;
   renderRange();
   syncPromote();
 }
@@ -303,7 +348,7 @@ function renderHeartbeat() {
     ? heartbeat.last_error
     : `${formatCount(heartbeat.eligible)} eligible · Last batch: ` +
       `${formatCount(heartbeat.last_validated)} checked · ` +
-      `${formatCount(heartbeat.last_promoted)} promoted`;
+      `${formatCount(heartbeat.last_promoted)} added to feed`;
 
   const paused = Boolean(heartbeat.paused);
   const connected = Boolean(heartbeat.postgres?.connected);
@@ -320,18 +365,18 @@ function renderHeartbeat() {
   nodes.heartbeatPause.disabled = !connected;
   nodes.heartbeatPause.textContent = paused ? "Resume" : "Pause";
   nodes.heartbeatPause.title = paused
-    ? "Resume scheduled token validation and promotion"
-    : "Stop scheduled token validation and promotion until resumed";
+    ? "Resume scheduled token validation and adding to feed"
+    : "Stop scheduled token validation and adding to feed until resumed";
 }
 
-/* Grouped by vendor. Vendors are ordered alphabetically regardless of the
-   row sort, so a group never splits across two positions in the table; rows
-   keep whatever order the API returned. */
 /* Rebuilds the vendor dropdown from whatever is loaded. Preserves the current
    selection unless the newly loaded set no longer has that vendor (e.g. the
    status filter changed underneath it), in which case it falls back to all. */
 function populateAtsFilter() {
-  const vendors = [...new Set(state.rows.map((row) => row.ats))].sort();
+  const vendors = state.groups.map((group) => group.ats).sort();
+  // A vendor the search or filter emptied out still shows while selected, so
+  // the dropdown never silently jumps back to "All vendors" under the user.
+  if (state.ats && !vendors.includes(state.ats)) vendors.push(state.ats);
   const current = nodes.atsFilter.value;
   nodes.atsFilter.replaceChildren(
     el("option", { value: "" }, "All vendors"),
@@ -345,33 +390,60 @@ function populateAtsFilter() {
   }
 }
 
+/* Grouped by vendor, largest first (server order). Every group starts
+   closed; opening one shows a page of its rows with a pager at both ends. */
 function renderRows() {
-  const groups = new Map();
-  for (const row of visibleRows()) {
-    if (!groups.has(row.ats)) groups.set(row.ats, []);
-    groups.get(row.ats).push(row);
-  }
-  const vendors = [...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length);
-  // The biggest vendor opens itself on arrival, and again whenever the open
-  // one is filtered off screen -- landing on a page of nothing but headers
-  // reads as an empty inventory. A group the user closed by hand leaves
-  // `expanded` null, which is left alone: that one was deliberate.
-  if (state.firstLoad) {
-    state.expanded = vendors[0] ?? null;
-    state.firstLoad = false;
-  } else if (state.expanded && !groups.has(state.expanded)) {
-    state.expanded = vendors[0] ?? null;
-  }
   const fragment = document.createDocumentFragment();
-  for (const vendor of vendors) {
-    const vendorRows = groups.get(vendor);
+  for (const { ats: vendor, count } of visibleGroups()) {
     const collapsed = state.expanded !== vendor;
-    fragment.append(groupRow(vendor, vendorRows, collapsed));
-    if (!collapsed) {
-      for (const row of vendorRows) fragment.append(renderRow(row));
+    fragment.append(groupRow(vendor, count, collapsed));
+    if (collapsed) continue;
+    if (!state.rows.length) {
+      fragment.append(el("tr", { class: "tok-page-note" },
+        el("td", { colspan: COLUMN_COUNT, class: "secondary" }, state.pageLoading ? "Loading…" : "No tokens")));
+      continue;
     }
+    for (const row of state.rows) fragment.append(renderRow(row));
+    if (count > PAGE_SIZE) fragment.append(pagerRow(vendor, count));
   }
   nodes.body.replaceChildren(fragment);
+}
+
+function pager(vendor, count) {
+  const first = state.offset + 1;
+  const last = Math.min(state.offset + PAGE_SIZE, count);
+  const step = (delta) => (event) => {
+    event.stopPropagation();
+    loadPage(vendor, state.offset + delta);
+  };
+  return el(
+    "span",
+    { class: "tok-pager", onclick: (event) => event.stopPropagation() },
+    el("button", {
+      class: "btn small", type: "button", title: "First page",
+      disabled: state.offset === 0 || state.pageLoading, onclick: step(-state.offset),
+    }, "«"),
+    el("button", {
+      class: "btn small", type: "button", title: "Previous page",
+      disabled: state.offset === 0 || state.pageLoading, onclick: step(-PAGE_SIZE),
+    }, "‹"),
+    el("span", { class: "tok-pager-range" },
+      `${formatCount(first)}–${formatCount(last)} of ${formatCount(count)}`),
+    el("button", {
+      class: "btn small", type: "button", title: "Next page",
+      disabled: last >= count || state.pageLoading, onclick: step(PAGE_SIZE),
+    }, "›"),
+    el("button", {
+      class: "btn small", type: "button", title: "Last page",
+      disabled: last >= count || state.pageLoading,
+      onclick: step((Math.ceil(count / PAGE_SIZE) - 1) * PAGE_SIZE - state.offset),
+    }, "»"),
+  );
+}
+
+function pagerRow(vendor, count) {
+  return el("tr", { class: "tok-pager-row" },
+    el("td", { colspan: COLUMN_COUNT }, pager(vendor, count)));
 }
 
 function validateButton(row) {
@@ -380,7 +452,6 @@ function validateButton(row) {
     { class: "btn small", type: "button", title: "Check if this token is still live" },
     "Check"
   );
-  if (state.validateAllRunning || state.groupValidate.size) button.disabled = true;
   button.addEventListener("click", async (event) => {
     event.stopPropagation();
     button.disabled = true;
@@ -395,27 +466,25 @@ function validateButton(row) {
   return button;
 }
 
-function groupRow(vendor, rows, collapsed) {
-  const progress = state.groupValidate.get(vendor);
-  const validateLabel = progress
-    ? `Validating ${progress.completed}/${progress.total}…`
-    : `Validate ${formatCount(rows.length)}`;
-  const validateButton = el(
-    "button",
-    {
-      class: "btn small",
-      type: "button",
-      onclick: (event) => {
-        event.stopPropagation();
-        validateVendor(vendor, rows);
-      },
-      title: `Validate all ${rows.length} tokens in this vendor`,
+function groupRow(vendor, count, collapsed) {
+  const addable = state.groups.find((group) => group.ats === vendor)?.addable ?? 0;
+  const groupCheck = el("input", {
+    type: "checkbox",
+    class: "tok-group-check",
+    disabled: addable === 0,
+    "aria-label": `Select every addable ${vendor} token`,
+    title: addable
+      ? `Select all ${formatCount(addable)} addable ${vendor} tokens under this filter`
+      : "Nothing here can be added to feed",
+    onclick: (event) => event.stopPropagation(),
+    onchange: (event) => {
+      if (event.target.checked) state.selectedGroups.add(vendor);
+      else state.selectedGroups.delete(vendor);
+      renderRows();
+      syncPromote();
     },
-    validateLabel
-  );
-  if (progress || state.validateAllRunning) {
-    validateButton.disabled = true;
-  }
+  });
+  groupCheck.checked = state.selectedGroups.has(vendor);
 
   const row = el(
     "tr",
@@ -426,19 +495,19 @@ function groupRow(vendor, rows, collapsed) {
       el(
         "span",
         { style: "display:flex;align-items:center;gap:12px" },
-        validateButton,
+        groupCheck,
         el("span", {}, `${collapsed ? "▸" : "▾"} ${vendor}`),
-        el("span", { class: "secondary" }, `(${formatCount(rows.length)})`)
+        el("span", { class: "secondary" },
+          `(${formatCount(count)})` + (addable && addable !== count ? ` · ${formatCount(addable)} addable` : "")),
+        !collapsed && count > PAGE_SIZE ? el("span", { class: "grow" }) : null,
+        !collapsed && count > PAGE_SIZE ? pager(vendor, count) : null,
       )
     )
   );
-  row.addEventListener("click", (e) => {
-    if (e.target !== validateButton) {
-      // Opening one closes whichever was open; clicking the open one closes it.
-      state.expanded = collapsed ? vendor : null;
-      renderRows();
-      syncPromote();
-    }
+  row.addEventListener("click", () => {
+    // Opening one closes whichever was open; clicking the open one closes it.
+    openGroup(collapsed ? vendor : null);
+    syncPromote();
   });
   return row;
 }
@@ -455,7 +524,7 @@ function renderCounts(counts) {
     el("span", { class: "tok-sum-ok" }, `${formatCount(counts.live)} live`),
     el("span", { class: counts.dead ? "tok-sum-bad" : null }, `${formatCount(counts.dead)} dead`),
     `${formatCount(counts.muted)} muted`,
-    `${formatCount(counts.promotable)} live and unpromoted`,
+    `${formatCount(counts.promotable)} live, not in feed`,
     `${formatCount(counts.checked_24h)} checked today`,
     el(
       "span",
@@ -590,17 +659,17 @@ function renderRow(row) {
   const key = identity(row);
   const check = el("input", {
     type: "checkbox",
-    disabled: !tokenPromotable(row),
+    disabled: !tokenPromotable(row) || state.selectedGroups.has(row.ats),
     onchange: (event) => {
       if (event.target.checked) {
-        state.selected.set(key, { ats: row.ats, token: row.token });
+        state.selected.set(key, { ats: row.ats, token: row.token, promotable: tokenPromotable(row) });
       } else {
         state.selected.delete(key);
       }
       syncPromote();
     },
   });
-  check.checked = state.selected.has(key);
+  check.checked = state.selected.has(key) || (tokenPromotable(row) && state.selectedGroups.has(row.ats));
 
   const mutedInput = el("input", {
     type: "checkbox",
@@ -677,35 +746,25 @@ function chip(value) {
 }
 
 function renderRange() {
-  const shown = visibleRows().length;
-  // Truncation is about what the server handed over (state.rows vs.
-  // state.total), independent of the vendor dropdown narrowing it further.
-  const truncated = state.rows.length < state.total;
+  const groups = visibleGroups();
+  const total = groups.reduce((sum, group) => sum + group.count, 0);
   nodes.range.textContent = state.ats
-    ? `${formatCount(shown)} matching tokens for ${state.ats}`
-    : truncated
-      ? `Showing ${formatCount(shown)} of ${formatCount(state.total)} matching tokens`
-      : `${formatCount(shown)} matching tokens`;
-  nodes.truncated.hidden = !truncated;
-  if (truncated) {
-    nodes.truncated.textContent =
-      `Only the first ${formatCount(state.rows.length)} of ${formatCount(state.total)} matching tokens are shown — narrow the filters above to see the rest.`;
-  }
+    ? `${formatCount(total)} matching tokens for ${state.ats}`
+    : `${formatCount(total)} matching tokens · ${formatCount(groups.length)} vendors`;
 }
 
 function syncPromote() {
-  const liveSelected = [...state.selected.values()].filter(t => {
-    const row = state.rows.find(r => r.ats === t.ats && r.token === t.token);
-    return row && tokenPromotable(row);
-  });
-  const count = liveSelected.length;
+  const count = addCount();
   nodes.promote.disabled = count === 0;
-  nodes.promote.textContent = count
-    ? `Promote ${formatCount(count)} selected`
-    : "Promote selected";
-  nodes.selectionCount.textContent = state.selected.size ? `${formatCount(state.selected.size)} selected (${formatCount(count)} promotable)` : "";
-  // Based on all selectable rows in view, not just the ones currently
-  // rendered -- collapsed vendor groups have no checkboxes in the DOM at all.
+  nodes.promote.textContent = count ? `Add ${formatCount(count)} to feed` : "Add to feed";
+  const parts = [];
+  if (state.selectedGroups.size) {
+    parts.push(`${formatCount(state.selectedGroups.size)} vendor${state.selectedGroups.size === 1 ? "" : "s"}`);
+  }
+  const tokens = selectedTokens().length;
+  if (tokens) parts.push(`${formatCount(tokens)} token${tokens === 1 ? "" : "s"}`);
+  nodes.selectionCount.textContent = parts.length ? `${parts.join(" + ")} selected` : "";
+  // The header box covers the page on screen -- the only rows with boxes.
   const selectable = visibleRows().filter(tokenPromotable);
   const allSelected = selectable.length > 0 && selectable.every((row) => state.selected.has(identity(row)));
   nodes.selectAll.checked = allSelected;
@@ -738,7 +797,7 @@ nodes.selectAll.addEventListener("change", (event) => {
   for (const row of visibleRows()) {
     if (!tokenPromotable(row)) continue;
     const key = identity(row);
-    if (checked) state.selected.set(key, { ats: row.ats, token: row.token });
+    if (checked) state.selected.set(key, { ats: row.ats, token: row.token, promotable: true });
     else state.selected.delete(key);
   }
   renderRows();
@@ -747,45 +806,288 @@ nodes.selectAll.addEventListener("change", (event) => {
 
 nodes.atsFilter.addEventListener("change", (event) => {
   state.ats = event.target.value;
-  renderRows();
+  // Picking a vendor opens it; going back to all vendors closes everything.
+  openGroup(state.ats || null);
   renderRange();
   syncPromote();
 });
 
+/* A new filter, search or order describes a different set of rows: the
+   selection no longer matches what is on screen, so it goes too. */
+function resetView() {
+  state.selected.clear();
+  state.selectedGroups.clear();
+  state.offset = 0;
+  load();
+  syncPromote();
+}
+
 nodes.filter.addEventListener("change", (event) => {
   state.filter = event.target.value;
-  state.firstLoad = true;
-  load();
+  resetView();
+});
+
+nodes.order.addEventListener("change", (event) => {
+  state.order = event.target.value;
+  resetView();
+});
+
+let searchTimer = null;
+nodes.search.addEventListener("input", (event) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    const q = event.target.value.trim();
+    if (q === state.q) return;
+    state.q = q;
+    resetView();
+  }, SEARCH_DEBOUNCE_MS);
 });
 
 nodes.promote.addEventListener("click", enableTokens);
 nodes.heartbeatRun.addEventListener("click", runHeartbeat);
 nodes.heartbeatPause.addEventListener("click", toggleHeartbeatPause);
 
-nodes.validateAll.addEventListener("click", async () => {
-  if (!state.rows.length) return;
-  state.validateAllRunning = true;
-  nodes.validateAll.disabled = true;
-  const original = nodes.validateAll.textContent;
+/* Validate-unknown sweep --------------------------------------------------- */
+
+// Fast while a sweep moves so progress never looks stale; slow when idle,
+// where the only thing changing is the backlog count.
+const SWEEP_ACTIVE_MS = 2_000;
+const SWEEP_IDLE_MS = 30_000;
+const SWEEP_EVENTS_KEY = "tokens-sweep-events";
+
+const sweepNodes = {
+  section: document.getElementById("sweep"),
+  meta: document.getElementById("sweep-meta"),
+  headline: document.getElementById("sweep-headline"),
+  bar: document.getElementById("sweep-bar"),
+  barFill: document.getElementById("sweep-bar-fill"),
+  idleControls: document.getElementById("sweep-idle-controls"),
+  vendor: document.getElementById("sweep-vendor"),
+  limit: document.getElementById("sweep-limit"),
+  start: document.getElementById("sweep-start"),
+  pause: document.getElementById("sweep-pause"),
+  cancel: document.getElementById("sweep-cancel"),
+  vendors: document.getElementById("sweep-vendors"),
+  foot: document.getElementById("sweep-foot"),
+  unclearLink: document.getElementById("sweep-unclear-link"),
+  eventsToggle: document.getElementById("sweep-events-toggle"),
+  events: document.getElementById("sweep-events"),
+};
+
+const sweep = {
+  snapshot: null,
+  timer: null,
+  wasActive: false,
+  showEvents: readShowEvents(),
+};
+
+function readShowEvents() {
   try {
-    const vendorGroups = new Map();
-    for (const row of state.rows) {
-      if (!vendorGroups.has(row.ats)) vendorGroups.set(row.ats, []);
-      vendorGroups.get(row.ats).push(row);
-    }
-    for (const [vendor, vendorRows] of vendorGroups) {
-      nodes.validateAll.textContent = `Validating ${vendor}…`;
-      await validateVendor(vendor, vendorRows);
-    }
-  } finally {
-    state.validateAllRunning = false;
-    nodes.validateAll.disabled = false;
-    nodes.validateAll.textContent = original;
+    return localStorage.getItem(SWEEP_EVENTS_KEY) !== "hidden";
+  } catch {
+    return true;
   }
+}
+
+function scheduleSweep() {
+  clearTimeout(sweep.timer);
+  sweep.timer = setTimeout(loadSweep, sweepActive(sweep.snapshot) ? SWEEP_ACTIVE_MS : SWEEP_IDLE_MS);
+}
+
+async function loadSweep() {
+  try {
+    sweep.snapshot = await api("/api/tokens/sweep");
+    renderSweep();
+  } catch (error) {
+    // Degraded or briefly unreachable: keep the last picture, try again.
+    if (!sweep.snapshot) sweepNodes.section.hidden = true;
+  } finally {
+    scheduleSweep();
+  }
+}
+
+function headlineSpan(text, cls) {
+  return el("span", cls ? { class: cls } : {}, text);
+}
+
+function sep() {
+  return el("span", { class: "sep" }, "·");
+}
+
+function renderSweep() {
+  const snap = sweep.snapshot;
+  if (!snap) return;
+  const active = sweepActive(snap);
+  const backlog = snap.backlog ?? {};
+  const backlogTotal = Object.values(backlog).reduce((sum, n) => sum + n, 0);
+  const ran = Boolean(snap.started_at);
+  sweepNodes.section.hidden = !active && !ran && backlogTotal === 0;
+
+  // When a sweep ends, the table is stale: pick up the new statuses once.
+  if (sweep.wasActive && !active) load();
+  sweep.wasActive = active;
+
+  // Meta line.
+  if (active) {
+    const scope = snap.ats?.length ? snap.ats.join(", ") : "all vendors";
+    sweepNodes.meta.textContent = `started ${relativeTime(snap.started_at)} · ${scope} · ` +
+      `${formatCount(snap.total)} tokens`;
+  } else if (ran) {
+    const verb = { finished: "finished", cancelled: "cancelled", failed: "failed" }[snap.status] ?? snap.status;
+    sweepNodes.meta.textContent = `last sweep ${verb} ${relativeTime(snap.finished_at)} · ` +
+      `${formatCount(snap.done)} checked in ${shortDuration(snap.elapsed_s)}`;
+  } else {
+    sweepNodes.meta.textContent = "";
+  }
+
+  // Headline.
+  const parts = [];
+  if (active) {
+    const { pct, text } = sweepHeadline(snap);
+    parts.push(el("span", {}, el("strong", {}, formatCount(snap.done)), ` / ${formatCount(snap.total)}`));
+    parts.push(sep(), headlineSpan(text));
+    parts.push(sep(), headlineSpan(`${formatCount(snap.live)} live`, "ok"),
+      headlineSpan(`${formatCount(snap.dead)} dead`, "bad"),
+      headlineSpan(`${formatCount(snap.unclear)} unclear`));
+    sweepNodes.bar.hidden = false;
+    sweepNodes.barFill.style.width = `${pct}%`;
+  } else {
+    sweepNodes.bar.hidden = true;
+    if (ran && snap.status !== "idle") {
+      parts.push(headlineSpan(`${formatCount(snap.live)} live`, "ok"),
+        headlineSpan(`${formatCount(snap.dead)} dead`, "bad"),
+        headlineSpan(`${formatCount(snap.unclear)} unclear`), sep());
+    }
+    const top = Object.entries(backlog).slice(0, 3)
+      .map(([ats, n]) => `${ats} ${compactCount(n)}`).join(" · ");
+    const more = Object.keys(backlog).length - 3;
+    parts.push(el("span", {}, el("strong", {}, formatCount(backlogTotal)), " never checked"));
+    if (top) parts.push(sep(), headlineSpan(more > 0 ? `${top} · +${more} vendors` : top));
+  }
+  if (snap.error) parts.push(sep(), headlineSpan(snap.error, "err"));
+  sweepNodes.headline.replaceChildren(...parts);
+
+  // Controls.
+  sweepNodes.idleControls.hidden = active;
+  sweepNodes.pause.hidden = !active;
+  sweepNodes.cancel.hidden = !active;
+  sweepNodes.pause.textContent = snap.status === "paused" ? "Resume" : "Pause";
+  sweepNodes.start.disabled = backlogTotal === 0;
+  syncSweepVendorOptions(backlog);
+
+  renderSweepVendors(snap, active || ran);
+  renderSweepFoot(snap, active || ran);
+}
+
+function syncSweepVendorOptions(backlog) {
+  const current = sweepNodes.vendor.value;
+  const wanted = ["", ...Object.keys(backlog).sort()];
+  const have = [...sweepNodes.vendor.options].map((option) => option.value);
+  if (wanted.join("|") === have.join("|")) return;
+  sweepNodes.vendor.replaceChildren(
+    el("option", { value: "" }, "All vendors"),
+    ...Object.keys(backlog).sort().map((ats) =>
+      el("option", { value: ats }, `${ats} (${compactCount(backlog[ats])})`)),
+  );
+  sweepNodes.vendor.value = wanted.includes(current) ? current : "";
+}
+
+function vendorState(vendor) {
+  if (vendor.state === "cooling") return `cooling · ${clock(vendor.cooling_s)}`;
+  if (vendor.state === "failing") return "gave up";
+  return vendor.state;
+}
+
+function renderSweepVendors(snap, show) {
+  const { active, done } = sweepVendorRows(snap.vendors);
+  sweepNodes.vendors.hidden = !show || (!active.length && !done.length);
+  if (sweepNodes.vendors.hidden) return;
+  const cells = [
+    el("span", { class: "hd" }, "vendor"), el("span", { class: "hd" }),
+    el("span", { class: "hd num" }, "checked"), el("span", { class: "hd num rate" }, "rate"),
+    el("span", { class: "hd" }, "state"),
+  ];
+  for (const vendor of active) {
+    const pct = vendor.total ? (100 * vendor.done) / vendor.total : 0;
+    cells.push(
+      el("span", {}, vendor.ats),
+      el("div", { class: "tok-sweep-vbar", "data-state": vendor.state },
+        el("span", { style: `width:${pct.toFixed(1)}%` })),
+      el("span", { class: "num" }, `${compactCount(vendor.done)} / ${compactCount(vendor.total)}`),
+      el("span", { class: "num rate" }, vendor.state === "running" ? sweepRate(vendor.rate) : "–"),
+      el("span", { class: "tok-sweep-state", "data-state": vendor.state }, vendorState(vendor)),
+    );
+  }
+  if (done.length) {
+    const names = done.length > 6 ? `${done.slice(0, 6).join(", ")}, …` : done.join(", ");
+    cells.push(el("span", { class: "tok-sweep-done-row" },
+      `✓ ${done.length} vendor${done.length === 1 ? "" : "s"} done — ${names}`));
+  }
+  sweepNodes.vendors.replaceChildren(...cells);
+}
+
+function renderSweepFoot(snap, show) {
+  sweepNodes.foot.hidden = !show;
+  if (!show) {
+    sweepNodes.events.hidden = true;
+    return;
+  }
+  sweepNodes.unclearLink.hidden = !snap.unclear;
+  sweepNodes.unclearLink.textContent = `${formatCount(snap.unclear)} unclear → view in table`;
+  const events = snap.events ?? [];
+  sweepNodes.eventsToggle.hidden = events.length === 0;
+  sweepNodes.eventsToggle.textContent = sweep.showEvents ? "hide events" : `show events (${events.length})`;
+  sweepNodes.events.hidden = !sweep.showEvents || events.length === 0;
+  if (sweepNodes.events.hidden) return;
+  sweepNodes.events.replaceChildren(...events.map((event) => el("div", {},
+    el("time", {}, new Date(event.at).toLocaleTimeString([], { hour12: false })),
+    el("span", { class: event.tone }, event.vendor),
+    el("span", {}, event.text),
+  )));
+}
+
+async function sweepAction(path, body) {
+  for (const button of [sweepNodes.start, sweepNodes.pause, sweepNodes.cancel]) button.disabled = true;
+  try {
+    sweep.snapshot = await api(path, { method: "POST", ...(body === undefined ? {} : { body }) });
+    renderSweep();
+  } catch (error) {
+    showError(error);
+  } finally {
+    for (const button of [sweepNodes.pause, sweepNodes.cancel]) button.disabled = false;
+    scheduleSweep();
+  }
+}
+
+sweepNodes.start.addEventListener("click", () => {
+  const limit = sweepNodes.limit.value ? Number(sweepNodes.limit.value) : null;
+  const ats = sweepNodes.vendor.value ? [sweepNodes.vendor.value] : null;
+  sweepAction("/api/tokens/sweep/start", { limit, ats });
+});
+sweepNodes.pause.addEventListener("click", () => {
+  sweepAction("/api/tokens/sweep/pause", { paused: sweep.snapshot?.status !== "paused" });
+});
+sweepNodes.cancel.addEventListener("click", () => sweepAction("/api/tokens/sweep/cancel"));
+sweepNodes.eventsToggle.addEventListener("click", (event) => {
+  event.preventDefault();
+  sweep.showEvents = !sweep.showEvents;
+  try {
+    localStorage.setItem(SWEEP_EVENTS_KEY, sweep.showEvents ? "shown" : "hidden");
+  } catch {
+    // Private mode: the toggle still works for this visit.
+  }
+  renderSweep();
+});
+sweepNodes.unclearLink.addEventListener("click", (event) => {
+  event.preventDefault();
+  nodes.filter.value = "unknown";
+  nodes.filter.dispatchEvent(new Event("change"));
+  document.getElementById("tokens-table").scrollIntoView({ behavior: "smooth" });
 });
 
 load();
 loadHeartbeat();
 loadLog();
+loadSweep();
 setInterval(loadHeartbeat, 30_000);
 setInterval(loadLog, LOG_REFRESH_MS);

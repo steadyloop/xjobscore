@@ -50,11 +50,6 @@ DEFAULT_KEYSCAN_DB = Path(__file__).resolve().parent.parent / "keyscan" / "work"
 # for tokens discovered before the rename lags behind.
 _ATS_RENAMES = {"workday-list": "workday"}
 
-# Vendors whose token is a compound path (`tenant/wdN/site`, `tenant/site`)
-# rather than a bare company slug -- the company-resolution candidate is the
-# first path segment, not the full token.
-_TENANT_PREFIXED_ATS = {"workday", "oracle"}
-
 
 @dataclass(frozen=True, slots=True)
 class Row:
@@ -73,9 +68,7 @@ def resolve_ats(keyscan_ats: str) -> str:
 
 def resolve_key(ats: str, token: str) -> str:
     """The name-like substring of `token` to resolve a company against."""
-    if ats in _TENANT_PREFIXED_ATS:
-        return token.split("/", 1)[0]
-    return token
+    return store.token_slug(ats, token)
 
 
 def load_pending(db_path: Path) -> list[Row]:

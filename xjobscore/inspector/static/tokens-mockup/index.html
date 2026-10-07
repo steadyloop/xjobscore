@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xJobscore · tokens mockup</title>
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="../shared/components.css">
+  <link rel="stylesheet" href="../keyscan/styles.css">
+  <script>
+    (() => {
+      const theme = localStorage.getItem("inspector-theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    /* Mockup-only rules. Everything else is the Keyscan page's own sheet. */
+
+    /* Pipeline: the tally line grown into the page's main filter. */
+    .mk-pipe {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 4px 12px;
+      margin: 0 0 4px;
+      font-size: 15px;
+      color: var(--text-secondary);
+    }
+
+    .mk-next {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 2px 8px;
+      margin: 0 0 var(--space-5);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .mk-next .mk-gap { margin-left: 10px; }
+
+    .mk-arrow { color: var(--text-muted); }
+
+    .mk-stage {
+      padding: 0 0 1px;
+      border: none;
+      border-bottom: 1px solid transparent;
+      background: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .mk-stage b { color: var(--text); }
+    .mk-stage:hover { border-bottom-color: var(--text-muted); }
+
+    .mk-stage[aria-pressed="true"] {
+      border-bottom-color: var(--accent);
+      color: var(--text);
+    }
+
+    /* Jobs: one line per background job, label column first. */
+    .mk-jobs {
+      margin-bottom: var(--space-4);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      font-size: 12.5px;
+    }
+
+    .mk-job {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 4px 12px;
+      padding: 8px 0;
+      color: var(--text-secondary);
+    }
+
+    .mk-job + .mk-job { border-top: 1px solid var(--border); }
+
+    .mk-job-name {
+      flex: none;
+      width: 10ch;
+      color: var(--text-muted);
+    }
+
+    .mk-job .ks-cmd { margin: 0; font-size: inherit; }
+    .mk-job .btn.small { align-self: center; }
+
+    /* Logs drawer. */
+    .mk-drawer { margin-bottom: var(--space-5); }
+
+    .mk-tabs {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 6px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .mk-tab {
+      padding: 0;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .mk-tab:hover { color: var(--text-secondary); }
+    .mk-tab[aria-selected="true"] { color: var(--text); font-weight: 600; }
+
+    /* The one table. It owns the page, so it takes the full width and is not
+       boxed into the fixed pane height the Keyscan panes share. */
+    .keyscan-page table.mk-table { width: 100%; }
+
+    .mk-table .ks-key { max-width: 40ch; font-weight: 600; }
+
+    .mk-table tr.mk-group td {
+      padding-top: 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .mk-table tr.mk-group:hover td { background: none; }
+    .mk-table tr.mk-group .ks-link { margin-left: 14px; font-weight: 400; }
+
+    .mk-table input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      vertical-align: -1px;
+      accent-color: var(--text);
+    }
+
+    .mk-tag {
+      margin-left: 6px;
+      color: var(--text-muted);
+    }
+
+    .mk-note {
+      width: 100%;
+      min-width: 12ch;
+      padding: 0;
+      border: none;
+      border-bottom: 1px dotted transparent;
+      background: none;
+      color: var(--text-secondary);
+      font: inherit;
+    }
+
+    .mk-table tr:hover .mk-note,
+    .mk-note:focus {
+      outline: none;
+      border-bottom-color: var(--text-muted);
+    }
+
+    .mk-note::placeholder { color: transparent; }
+    .mk-table tr:hover .mk-note::placeholder { color: var(--text-muted); }
+  </style>
+</head>
+<body class="keyscan-page">
+  <!-- Static copy of shared/nav.js's markup, so the mockup also opens straight
+       from disk. Keyscan is gone: this page replaces it. -->
+  <header id="topnav" class="topnav">
+    <div class="brand">xJobscore</div>
+    <nav>
+      <a href="/system">System</a>
+      <a href="/tokens" aria-current="page">Tokens</a>
+      <a href="/feeds">Feeds</a>
+      <a href="/companies">Companies</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="health-chips">
+      <span class="health-chip" data-state="up"><span class="dot"></span><span class="label">Postgres</span></span>
+    </div>
+    <button class="theme-toggle" type="button" id="theme-toggle" title="Toggle color theme">Theme</button>
+  </header>
+  <main class="page">
+
+    <p class="ks-note">mockup · sample data · buttons do nothing</p>
+
+    <!-- 1. Pipeline. Every number filters the table below. -->
+    <div class="mk-pipe mono" id="pipe">
+      <button class="mk-stage" type="button" data-stage="found" aria-pressed="true"><b>77,689</b> found</button>
+      <span class="mk-arrow">→</span>
+      <button class="mk-stage" type="button" data-stage="imported"><b>24,457</b> imported</button>
+      <span class="mk-arrow">→</span>
+      <button class="mk-stage" type="button" data-stage="live"><b class="c-ok">3,852</b> live</button>
+      <span class="mk-arrow">→</span>
+      <button class="mk-stage" type="button" data-stage="feed"><b>1,132</b> in feed</button>
+    </div>
+    <div class="mk-next mono" id="next">
+      <button class="mk-stage c-acc" type="button" data-stage="pending">3,727 pending import</button>
+      <button class="ks-link" type="button" data-fake>import them</button>
+      <button class="mk-stage mk-gap" type="button" data-stage="promotable">3 live, not in feed</button>
+      <button class="ks-link" type="button" data-fake>promote them</button>
+      <button class="mk-stage mk-gap" type="button" data-stage="unchecked">72,997 never checked</button>
+      <button class="ks-link" type="button" data-fake>validate all</button>
+      <button class="mk-stage mk-gap c-err" type="button" data-stage="dead">840 dead</button>
+      <button class="mk-stage mk-gap" type="button" data-stage="new">14 new in last run</button>
+    </div>
+
+    <!-- 2. Jobs. Crawl finds tokens, heartbeat checks them. -->
+    <section class="mk-jobs mono" aria-label="Jobs">
+      <div class="mk-job">
+        <span class="mk-job-name">crawl</span>
+        <div class="ks-cmd">
+          <span class="ks-cmd-name">keyscan crawl</span>
+          <span class="ks-crawls"><button type="button" class="ks-crawls-btn" data-fake>CC-MAIN-2026-39</button></span>
+          <span class="ks-flag">--vendor</span>
+          <select class="ks-inline" aria-label="Sources">
+            <option>all</option><option>tier 1</option><option>tier 2</option>
+          </select>
+          <label class="ks-flag ks-validate"><input type="checkbox"> --validate</label>
+          <label class="ks-flag ks-validate"><input type="checkbox"> --rescan</label>
+        </div>
+        <button class="btn primary small" type="button" data-fake>run</button>
+        <span class="grow"></span>
+        <span>last <b class="ks-run-id">14cf2316</b> <span class="c-ok">● completed</span> · 8m12s · 40m ago</span>
+        <button class="ks-link" type="button" data-logs="run">logs</button>
+      </div>
+      <div class="mk-job">
+        <span class="mk-job-name">heartbeat</span>
+        <span><span class="c-ok">● healthy</span> · last run 5h ago · next in 36m · 10 eligible</span>
+        <button class="btn small" type="button" data-fake>pause</button>
+        <button class="btn small" type="button" data-fake>run now</button>
+        <span class="grow"></span>
+        <span>last batch 0 checked · 0 promoted</span>
+        <button class="ks-link" type="button" data-logs="checks">logs</button>
+      </div>
+    </section>
+
+    <!-- 3. Logs. Closed until asked for (or while a job is running). -->
+    <section class="mk-drawer" id="drawer" aria-label="Logs" hidden>
+      <div class="mk-tabs mono" role="tablist">
+        <button class="mk-tab" type="button" role="tab" data-tab="run">run log</button>
+        <button class="mk-tab" type="button" role="tab" data-tab="checks">token checks</button>
+        <button class="mk-tab" type="button" role="tab" data-tab="feed">feed in/out</button>
+        <button class="mk-tab" type="button" role="tab" data-tab="history">run history</button>
+        <span class="grow"></span>
+        <button class="ks-link" type="button" id="drawer-close">close</button>
+      </div>
+      <div class="ks-lines" data-panel="run"></div>
+      <div class="ks-lines" data-panel="checks" hidden></div>
+      <div class="ks-lines" data-panel="feed" hidden></div>
+      <div class="table-wrap ks-scroll" data-panel="history" hidden>
+        <table class="data ks-table">
+          <thead>
+            <tr>
+              <th>run</th><th>methods</th><th>status</th>
+              <th class="num">found</th><th class="num">live</th><th class="num">dead</th>
+              <th>started</th><th>took</th>
+            </tr>
+          </thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. The one table: candidates and tokens are the same rows. -->
+    <section class="ks-pane" aria-labelledby="tokens-title">
+      <div class="ks-pane-head">
+        <h2 class="ks-pane-title mono" id="tokens-title">tokens <span class="ks-src" id="count"></span></h2>
+        <div class="grow"></div>
+        <select id="vendor-filter" class="ks-inline" aria-label="Vendor">
+          <option value="">all vendors</option>
+        </select>
+        <select id="status-filter" class="ks-inline" aria-label="Status">
+          <option value="">any status</option>
+          <option value="live">live</option>
+          <option value="dead">dead</option>
+          <option value="unknown">unknown</option>
+        </select>
+        <input type="search" id="search" class="ks-inline" placeholder="filter…" autocomplete="off">
+        <button class="btn primary small" type="button" id="promote-btn" data-fake disabled>promote selected</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data ks-table mk-table">
+          <thead>
+            <tr>
+              <th class="ks-check"><input type="checkbox" id="select-all" aria-label="Select all"></th>
+              <th>token</th>
+              <th>company</th>
+              <th>status</th>
+              <th>feed</th>
+              <th>via</th>
+              <th class="num">urls</th>
+              <th>discovered</th>
+              <th>checked</th>
+              <th>note</th>
+            </tr>
+          </thead>
+          <tbody id="tokens-body"></tbody>
+        </table>
+      </div>
+      <div class="ks-empty" id="empty" hidden>no tokens match these filters.</div>
+      <div class="ks-more">
+        <button class="ks-link" type="button" data-fake>load 200 more</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Plain script, no imports: the mockup has to work from file:// too.
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [name, value] of Object.entries(attrs)) {
+        if (value != null) node.setAttribute(name, value);
+      }
+      for (const child of children.flat()) {
+        if (child == null) continue;
+        node.append(child.nodeType ? child : document.createTextNode(String(child)));
+      }
+      return node;
+    }
+
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const root = document.documentElement;
+      const dark = root.dataset.theme
+        ? root.dataset.theme === "dark"
+        : matchMedia("(prefers-color-scheme: dark)").matches;
+      root.dataset.theme = dark ? "light" : "dark";
+    });
+
+    // [vendor, token, company, tags, status, imported, inFeed, via, urls, discovered, checked, isNew]
+    const ROWS = [
+      ["join", "43-apts", "43 Apts", [], "unknown", true, false, "cc", 1, "40m", "", true],
+      ["join", "barbist", "Barbist", [], "unknown", true, false, "cc", 1, "40m", "", true],
+      ["join", "egroup", "eGroup", [], "live", false, false, "cc", 1, "40m", "38m", true],
+      ["join", "littledotstudios", "Little Dot Studios", [], "live", false, false, "cc", 2, "40m", "38m", true],
+      ["join", "pwl-vermessung", "", [], "dead", false, false, "cc", 1, "40m", "38m", true],
+      ["ashby", "ziplines", "Ziplines", [], "live", true, true, "cc", 4, "1h", "33m", false],
+      ["ashby", "zippymh", "Zippy MH", [], "live", true, true, "cc", 2, "1h", "33m", false],
+      ["ashby", "zolplay", "Zolplay", [], "dead", true, false, "cc", 1, "1h", "33m", false],
+      ["ashby", "zus-health", "Zus Health", [], "live", false, false, "cc", 6, "1h", "33m", false],
+      ["ashby", "arcada", "Arcada", [], "dead", true, false, "registry", 0, "61d", "5h", false],
+      ["greenhouse", "3redpartners", "3Red Partners", [], "live", true, true, "registry", 0, "56d", "7h", false],
+      ["greenhouse", "8451", "84.51°", [], "live", true, true, "registry", 0, "56d", "7h", false],
+      ["greenhouse", "acadianassetmanagementllc", "Acadian Asset Management", [], "live", true, true, "cc", 12, "56d", "7h", false],
+      ["greenhouse", "northwindlabs", "", [], "unknown", true, false, "cc", 3, "2h", "", false],
+      ["lever", "amo", "amo", ["recovered", "snapshot"], "live", true, false, "registry", 0, "56d", "54d", false],
+      ["lever", "kestrelbio", "", [], "unknown", false, false, "cc", 1, "2h", "", false],
+      ["recruitee", "1x", "1X", [], "live", true, false, "registry", 0, "56d", "54d", false],
+      ["rippling", "amplify", "Amplify", [], "live", true, false, "registry", 0, "56d", "54d", false],
+      ["workday", "zoom/wd5/zoom", "Zoom", [], "live", true, true, "cc", 31, "12d", "5h", false],
+      ["workday", "harborfreight/wd1/careers", "", [], "unknown", false, false, "cc", 9, "2h", "", false],
+    ].map(([ats, token, company, tags, status, imported, feed, via, urls, discovered, checked, isNew]) =>
+      ({ ats, token, company, tags, status, imported, feed, via, urls, discovered, checked, isNew }));
+
+    const STAGES = {
+      found: () => true,
+      imported: (r) => r.imported,
+      pending: (r) => !r.imported,
+      live: (r) => r.status === "live",
+      promotable: (r) => r.status === "live" && r.imported && !r.feed,
+      feed: (r) => r.feed,
+      unchecked: (r) => r.status === "unknown",
+      dead: (r) => r.status === "dead",
+      new: (r) => r.isNew,
+    };
+
+    const state = { stage: "found", vendor: "", status: "", q: "", closed: new Set(), picked: new Set() };
+    const $ = (id) => document.getElementById(id);
+    const keyOf = (r) => `${r.ats}/${r.token}`;
+
+    function toast(text) {
+      document.querySelector(".ks-toast")?.remove();
+      const node = el("div", { class: "ks-toast mono" }, text);
+      document.body.append(node);
+      setTimeout(() => node.remove(), 1400);
+    }
+
+    function visibleRows() {
+      const q = state.q.toLowerCase();
+      return ROWS.filter((r) =>
+        STAGES[state.stage](r) &&
+        (!state.vendor || r.ats === state.vendor) &&
+        (!state.status || r.status === state.status) &&
+        (!q || keyOf(r).includes(q) || r.company.toLowerCase().includes(q)));
+    }
+
+    function feedCell(r) {
+      if (r.feed) return el("span", { class: "c-ok" }, "in feed");
+      if (!r.imported) return el("button", { class: "ks-link", type: "button", "data-fake": "" }, "import");
+      if (r.status === "live") return el("button", { class: "ks-link", type: "button", "data-fake": "" }, "promote");
+      return el("span", { class: "c-mut" }, "·");
+    }
+
+    function tokenRow(r) {
+      const box = el("input", { type: "checkbox", "data-key": keyOf(r), "aria-label": `Select ${keyOf(r)}` });
+      box.checked = state.picked.has(keyOf(r));
+      return el("tr", {},
+        el("td", { class: "ks-check" }, box),
+        el("td", {}, el("span", { class: "ks-key", title: keyOf(r) }, r.token)),
+        el("td", {},
+          r.company || el("span", { class: "c-mut" }, "·"),
+          r.tags.map((tag) => el("span", { class: "mk-tag" }, tag))),
+        el("td", {}, el("span", { class: "ks-verdict", "data-form": "text", "data-verdict": r.status }, r.status)),
+        el("td", {}, feedCell(r)),
+        el("td", { class: "c-mut" }, r.via),
+        el("td", { class: "num" }, r.urls ? String(r.urls) : el("span", { class: "c-mut" }, "·")),
+        el("td", { class: "c-mut" }, r.discovered),
+        el("td", { class: "c-mut" }, r.checked || "never"),
+        el("td", {}, el("input", { class: "mk-note", type: "text", placeholder: "add note…", "aria-label": "Note" })));
+    }
+
+    function render() {
+      const rows = visibleRows();
+      const groups = new Map();
+      for (const r of rows) groups.set(r.ats, [...(groups.get(r.ats) ?? []), r]);
+
+      const out = [];
+      for (const [ats, members] of groups) {
+        const open = !state.closed.has(ats);
+        out.push(el("tr", { class: "mk-group", "data-group": ats },
+          el("td", { colspan: "10" },
+            `${open ? "▾" : "▸"} ${ats} `,
+            el("span", { class: "ks-src" }, String(members.length)),
+            el("button", { class: "ks-link", type: "button", "data-fake": "" }, `validate ${members.length}`))));
+        if (open) out.push(...members.map(tokenRow));
+      }
+      $("tokens-body").replaceChildren(...out);
+      $("empty").hidden = rows.length > 0;
+      $("count").textContent = `${rows.length} of ${ROWS.length} sample rows`;
+
+      for (const btn of document.querySelectorAll(".mk-stage")) {
+        btn.setAttribute("aria-pressed", String(btn.dataset.stage === state.stage));
+      }
+      const n = state.picked.size;
+      $("promote-btn").disabled = n === 0;
+      $("promote-btn").textContent = n ? `promote selected (${n})` : "promote selected";
+    }
+
+    // Filters -----------------------------------------------------------------
+
+    for (const ats of new Set(ROWS.map((r) => r.ats))) $("vendor-filter").append(el("option", {}, ats));
+
+    for (const btn of document.querySelectorAll(".mk-stage")) {
+      btn.addEventListener("click", () => {
+        // Clicking the active stage again goes back to everything.
+        state.stage = state.stage === btn.dataset.stage ? "found" : btn.dataset.stage;
+        render();
+      });
+    }
+    $("vendor-filter").addEventListener("change", (e) => { state.vendor = e.target.value; render(); });
+    $("status-filter").addEventListener("change", (e) => { state.status = e.target.value; render(); });
+    $("search").addEventListener("input", (e) => { state.q = e.target.value.trim(); render(); });
+
+    // Table -------------------------------------------------------------------
+
+    $("tokens-body").addEventListener("click", (e) => {
+      if (e.target.closest("[data-fake]")) return;
+      const group = e.target.closest("tr.mk-group");
+      if (!group) return;
+      const ats = group.dataset.group;
+      state.closed.has(ats) ? state.closed.delete(ats) : state.closed.add(ats);
+      render();
+    });
+
+    $("tokens-body").addEventListener("change", (e) => {
+      const key = e.target.dataset.key;
+      if (!key) return;
+      e.target.checked ? state.picked.add(key) : state.picked.delete(key);
+      render();
+    });
+
+    $("select-all").addEventListener("change", (e) => {
+      for (const r of visibleRows()) e.target.checked ? state.picked.add(keyOf(r)) : state.picked.delete(keyOf(r));
+      render();
+    });
+
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("[data-fake]")) toast("mockup · no action");
+    });
+
+    // Logs drawer -------------------------------------------------------------
+
+    const line = (time, ...rest) => el("div", { class: "ks-line" }, el("time", {}, time), ...rest);
+    const runLine = (time, phase, msg, took) =>
+      line(time, el("span", { class: "ks-phase" }, phase), el("span", { class: "ks-msg" }, msg),
+        took ? el("span", { class: "ks-urls" }, took) : null);
+    const checkLine = (time, status, token, ats) =>
+      line(time, el("span", { class: "ks-verdict", "data-verdict": status }, status), el("b", {}, token),
+        el("span", { class: "ks-urls" }, ats));
+    const feedLine = (time, dir, token, ats) =>
+      line(time, el("span", { class: "ks-mark", "data-kind": dir === "→" ? "live" : "dead" }, dir),
+        el("b", {}, token), el("span", { class: "ks-urls" }, ats));
+
+    const panel = (name) => document.querySelector(`[data-panel="${name}"]`);
+
+    panel("run").append(
+      runLine("10/04 22:25", "validate", "live · ashby/ziplines"),
+      runLine("10/04 22:25", "validate", "live · ashby/zippymh"),
+      runLine("10/04 22:25", "validate", "4250 done · 2 queued"),
+      runLine("10/04 22:25", "validate", "404 · api.ashbyhq.com", "336ms"),
+      runLine("10/04 22:25", "validate", "dead · ashby/zolplay"),
+      runLine("10/04 22:25", "validate", "live · ashby/zus-health"),
+      runLine("10/04 22:25", "validate", "232 requests · 72 failed · median 366ms"),
+      runLine("10/04 22:25", "validate", "finished", "182s"),
+      runLine("10/04 22:25", "run", "run completed"));
+
+    panel("checks").append(
+      checkLine("03:48:24", "live", "3redpartners", "greenhouse"),
+      checkLine("03:48:25", "live", "8451", "greenhouse"),
+      checkLine("03:48:26", "live", "acadianassetmanagementllc", "greenhouse"),
+      checkLine("05:30:54", "dead", "arcada", "ashby"),
+      checkLine("05:30:55", "dead", "artemisanalytics", "ashby"),
+      checkLine("05:30:56", "dead", "chronospherejobs", "ashby"));
+
+    panel("feed").append(
+      feedLine("05:04:45", "→", "zoom/wd5/zoom", "workday"),
+      feedLine("05:04:46", "←", "chronospherejobs", "ashby"),
+      feedLine("05:04:46", "←", "arcada", "ashby"),
+      feedLine("05:04:46", "←", "artemisanalytics", "ashby"),
+      feedLine("05:32:37", "←", "amplify", "rippling"),
+      feedLine("05:32:37", "←", "1x", "recruitee"),
+      feedLine("05:32:37", "←", "amo", "lever"));
+
+    $("history-body").append(...[
+      ["14cf2316", "completed", "c-ok", "4,254", "3,262", "723", "40m", "8m12s"],
+      ["dbcd0d3e", "completed", "c-ok", "77,675", "590", "117", "1h", "32m17s"],
+      ["af1e21e2", "cancelled", "c-warn", "59", "·", "·", "1h", "1m47s"],
+      ["b3eac487", "cancelled", "c-warn", "103", "·", "·", "2h", "34m53s"],
+    ].map(([id, status, tone, found, live, dead, started, took]) => el("tr", {},
+      el("td", {}, el("b", {}, id)),
+      el("td", { class: "c-mut" }, "commoncrawl"),
+      el("td", { class: tone }, status),
+      el("td", { class: "num" }, found),
+      el("td", { class: "num" }, live),
+      el("td", { class: "num" }, dead),
+      el("td", { class: "c-mut" }, started),
+      el("td", {}, took))));
+
+    function showTab(name) {
+      $("drawer").hidden = false;
+      for (const tab of document.querySelectorAll(".mk-tab")) {
+        tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
+      }
+      for (const node of document.querySelectorAll("[data-panel]")) node.hidden = node.dataset.panel !== name;
+    }
+
+    for (const tab of document.querySelectorAll(".mk-tab")) {
+      tab.addEventListener("click", () => showTab(tab.dataset.tab));
+    }
+    for (const btn of document.querySelectorAll("[data-logs]")) {
+      btn.addEventListener("click", () => showTab(btn.dataset.logs));
+    }
+    $("drawer-close").addEventListener("click", () => { $("drawer").hidden = true; });
+
+    // #logs opens the drawer on load, for sharing a link to that state.
+    if (location.hash === "#logs") showTab("run");
+
+    render();
+  </script>
+</body>
+</html>

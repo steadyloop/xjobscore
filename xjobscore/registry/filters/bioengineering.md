@@ -1,161 +1,112 @@
-# Bioengineering opportunity filter resolution
+# Bioengineering focus chips: MedTech, Regulatory, BioTech
 
-## Scope
+The three focus chips answer one question per posting: should a bioengineering or
+biomedical-engineering student (BS/MS) target this role, and as which kind of work?
+`job_type` still decides whether a posting is student-oriented. The chips are
+stored by the Gold `focus` step as `attributes.focus` (chip keys `med_device`,
+`clinical_affairs`, `biotech`) with the evidence behind each in
+`attributes.focus_meta.reasons`. Rules live in `xjobscore/bioengineering.py`;
+the employer registry in `bioengineering-employers.yaml`.
 
-This filter was derived from all 242,954 rows in `job_posting` on 2026-08-21.
-Because student recruiting was out of season, full-time titles without senior or
-manager markers were used as the main proxy for future internship and co-op
-titles. Existing student rows were retained as a validation slice.
+## What each chip means
 
-The filter answers two separate questions:
+- **MedTech** — building, testing, making, servicing or clinically supporting
+  medical technology: any engineering, quality, manufacturing, software or
+  design role at a device, diagnostics, imaging, surgical-robotics or neurotech
+  company; device-specific roles anywhere (biomedical/clinical engineering, HTM,
+  medical physics, health sensing); field-clinical roles at device makers.
+- **Regulatory** — regulatory affairs, life-science quality (QA/QC, validation,
+  CAPA, GMP/GCP), clinical research and trial operations, pharmacovigilance,
+  medical/scientific writing.
+- **BioTech** — biotech, pharma and life-science R&D, process development,
+  biomanufacturing, QC/analytical labs, computational biology, research tools,
+  synthetic and ag biotech, biomedical research labs.
 
-1. Is the posting student-oriented? This remains `job_type`.
-2. Does the title resemble work a bioengineering student could perform? This is
-   the title cascade below.
+Out of scope everywhere: business and support functions, corporate IT, supply
+chain, facilities and trades, patient care and licensed clinical roles,
+teaching, chemistry-only roles, gig "AI training" work.
 
-Description-only focus-area matches are discovery evidence, not sufficient
-recommendation evidence.
+## Evidence cascade
 
-## Corpus findings
+1. **Vetoes** on the title (business/support/trade; patient care). Phrases such
+   as "post-market", "drug delivery", "adverse event", "regulatory policy",
+   "health economics" and "patient recruitment" are blanked first so their veto
+   word does not fire.
+2. **Strong title words** count at any employer ("Biomedical Engineer",
+   "Regulatory Affairs", "Cell Culture", "Clinical Research").
+3. **Weak title words** count only with life-science context: a registered
+   employer or a role-level description term ("Quality", "Microbiology",
+   "Ultrasound", "Formulation"). Therapeutic areas ("Oncology", "Vaccines")
+   count for BioTech only beside a science or engineering noun.
+4. **Employer segment × role function.** Device makers and pharma post most
+   student roles under generic titles, so a registered segment plus the role's
+   function decides the chip (see the YAML header for the mapping).
+   Program-wide postings ("Undergrad Intern", "Co-op Opportunities, Waltham")
+   take the employer's chip.
+5. **Role-level description terms** stand in for an unregistered employer:
+   ISO 13485, design controls, IEC 60601, 510(k) for MedTech; cell culture,
+   transfection, flow cytometry for BioTech; cGMP, IRB, informed consent,
+   21 CFR for Regulatory. Industry words ("medical devices", "biologics",
+   "pharmaceutical") are never enough — they recur in boilerplate (LLNL's
+   wireless-device footer, consultancies' industry lists). Food, beverage and
+   water-treatment descriptions cannot supply BioTech evidence.
 
-- The current bio focus fields selected 8,397 unique postings.
-- Of 85 student-oriented postings in that set, only 26 had a bio signal in the
-  title; 59 inherited the signal from description text.
-- At least 860 of the 8,397 had explicitly nontechnical titles such as sales,
-  marketing, finance, accounting, legal, or recruiting.
-- A direct title cohort contained 2,461 postings. A separate cohort of 7,305
-  postings at `company.tags.biotech` employers showed that company membership
-  alone is not sufficient: sales and translation titles were among its most
-  frequent terms.
-- Mining technical, non-senior title families produced 1,983 proxy candidates
-  and 56 current student postings for manual inspection.
+## Measurement (2026-10-06)
 
-Representative true controls include `Biomedical Engineer Intern`,
-`Neuroengineer Intern`, `Computational Neuroscience Intern`, `Lab Automation
-Internship`, `Intern, Protein Design`, `Engineering Intern` at Medtronic, and
-Roche internships naming pharmaceutical sciences.
+Gold set: 2,342 US student postings, stratified (title vocabulary, employer
+signal, description signal, and a 400-posting random draw from everything
+else), labeled independently against a written rubric; 70/30 dev/test split.
 
-Representative false controls include AbbVie finance and pharmaceutical-sales
-internships, a Tacto videography internship, and LLNL national-security
-internships that inherit `medical devices` from a wireless-device compliance
-footer.
+| Labels | MedTech P / R | Regulatory P / R | BioTech P / R |
+|---|---|---|---|
+| High-confidence (2,098) | 0.97 / 1.00 | 0.97 / 0.97 | 0.96 / 0.96 |
+| All, incl. gray (2,342) | 0.95 / 0.90 | 0.96 / 0.59 | 0.95 / 0.88 |
+| Held-out test split | 0.96 / 0.90 | 0.94 / 0.59 | 0.95 / 0.88 |
 
-## Resolution cascade
+Most Regulatory misses are medium-confidence program-wide or business-adjacent
+postings (e.g. "Co-op Opportunities" at Sanofi, "Clinical Trial Diversity").
+The persistent high-confidence errors are J&J process/automation co-ops, which
+sit on either the MedTech or the Innovative Medicine side and get both chips.
 
-Apply the layers in order and retain the reason that admitted each posting.
+Without the employer registry, title and description evidence alone keep
+precision near 1.0 but recall drops to 0.26 (MedTech), 0.78 (Regulatory) and
+0.63 (BioTech): device makers in particular post generic engineering titles.
+On 2026-10-06 the live US student feed had 35,252 postings: 422 MedTech,
+170 Regulatory, 546 BioTech, 1,011 with any chip.
 
-### 1. Nontechnical veto
+## Why stored, not computed in SQL
 
-Do not recommend a title containing one of these functions solely because it
-also names a bio domain:
+The rules use ~45 regular expressions. PostgreSQL evaluates these alternations
+at 10-14 µs per pattern per row and recompiles once more than 32 distinct
+patterns are live in one query (a 45-pattern scan of 63k rows ran for over
+eight minutes). Python classifies all 63k typed postings in about 75 s, once.
 
-`sales`, `marketing`, `brand`, `commercial`, `finance`, `accounting`,
-`recruiting`, `human resources`, `legal`, `counsel`, `communications`,
-`business development`, `customer success`, `account executive`,
-`administrative`, `executive assistant`, `videography`, `partnerships`,
-`product specialist`, or `business technology`.
+## Collisions measured or reported
 
-The posting may remain discoverable as a low-confidence industry match.
+- `implant`: semiconductor ion implant. `ultrasound`: sonography students, NDT.
+- `regulatory affairs`: utilities, banks, chemical makers (needs a life-science
+  regulator in the description at an unregistered employer).
+- `quality systems`, CAPA, IQ/OQ/PQ: steel, EMS and drone makers use them too.
+- `cell engineering/manufacturing`: battery makers. `fermentation`, `assay`,
+  `chromatography`: breweries, mining, petrochemicals.
+- `CRM` is Cardiac Rhythm Management at Abbott/Medtronic, not only Salesforce.
+- `GCP` is Google Cloud Platform unless qualified; `GLP` can be GLP-1.
+- "Associate Clinical Specialist" / mapping roles are MedTech field-clinical
+  work, not clinical research.
+- Employer names: many are raw ATS keys ("jj", "bdx", "gehc", "vrtx") or
+  anonymous Oracle tenants; `icon`, `Rho`, `Kestra`, `caribou`, `novoco`
+  are unrelated companies sharing a life-science name.
 
-### 2. Direct domain-title evidence
+## Maintaining the registry
 
-Accept a title when it contains a domain phrase plus a technical occupation or
-an explicit student marker. High-value domain phrases are:
+1. List employers with student postings that are not registered but show
+   life-science signals: strong chip words in their titles, or role-level
+   description terms. Review each by its titles and description head.
+2. Add confirmed employers under the right segment(s), keyed by
+   `company.name` exactly as stored; note the real company for tenant keys.
+3. Editing the YAML changes `focus_version()`, so the Gold catch-up loop
+   restamps every typed posting on its next pass (or run
+   `uv run python -m xjobscore.run --enrich focus`).
 
-- bioengineering, biomedical engineering, biological engineering, biochemical
-  engineering, biosystems engineering, clinical engineering;
-- neuroengineering, neural engineering, biomechanics, biomaterials, tissue
-  engineering, regenerative medicine, biosensors;
-- bioinformatics, computational biology, biostatistics;
-- immunology, neuroscience, neurobiology, pharmacology, toxicology,
-  microbiology, biochemistry, biophysics;
-- pharmaceutical sciences, drug discovery, drug development, drug delivery,
-  assay development, cell biology, cell culture, cell engineering, protein
-  design, protein engineering;
-- bioprocessing, biomanufacturing, biorefinery, upstream/downstream processing,
-  fermentation, laboratory automation, microfluidics;
-- medical-device engineering, medical imaging, biomedical equipment, surgical
-  robotics, neural interfaces, and brain-computer interfaces.
-
-Technical/student markers include `engineer`, `scientist`, `research`,
-`associate`, `technician`, `technologist`, `analyst`, `developer`, `programmer`,
-`clinical`, `regulatory`, `laboratory`, `process`, `manufacturing`, `quality`,
-`validation`, `specialist`, `intern`, `internship`, `co-op`, `student`,
-`trainee`, and `apprentice`.
-
-### 3. Bio-employer prior
-
-Generic technical titles require employer evidence. An employer is a candidate
-bio employer when either:
-
-- `company.tags` contains `biotech`; or
-- at least five current titles contain direct domain evidence and those titles
-  are at least 2% of the employer's current postings; or
-- at least three current titles contain direct domain evidence and those titles
-  are at least 4% of the employer's current postings.
-
-This corpus-derived prior recovered large pharmaceutical and med-device
-employers plus focused companies such as Adaptyv, Freenome, Alamar Biosciences,
-and Neuralink. The 2% floor prevents large mixed employers such as Oracle from
-qualifying on a handful of unrelated titles. It also did not promote LLNL from
-a repeated description footer.
-
-### 4. Technical title families at a bio employer
-
-At a bio employer, accept non-senior titles in these families:
-
-- research scientist, research associate/assistant/engineer/technician, R&D
-  engineer or scientist;
-- process, process-development, manufacturing, or product-development engineer,
-  scientist, associate, or technician;
-- quality, QA/QC, or validation engineer, scientist, associate, specialist, or
-  technician;
-- laboratory scientist, associate, engineer, technician, technologist, or
-  automation engineer;
-- clinical engineer/scientist/specialist/technologist, clinical research
-  associate/coordinator, or regulatory associate/specialist/scientist/engineer;
-- systems, mechanical, electrical, mechatronics, materials, software, data, or
-  machine-learning engineer.
-
-For the full-time proxy set, seniority markers (`senior`, `principal`, `staff`,
-`lead`, `manager`, `director`, `head`, `chief`, `VP`, `fellow`) are excluded.
-They are not needed when the posting already has a student `job_type`.
-
-### 5. Generic student technical titles
-
-At a bio employer, also accept titles such as `Engineering Intern`, `R&D
-Intern`, `Quality Intern`, `Validation Engineer Trainee`, and comparable co-op
-or apprentice forms. Keep the technical function in the evidence so facilities,
-support, and unrelated software roles can be ranked below direct domain titles.
-
-### 6. Description-only evidence
-
-A description-only bio match must not admit a recommendation. Keep it as a
-low-confidence discovery candidate until one of these supplies role evidence:
-
-- a title rule above;
-- a parsed qualification explicitly naming the field or degree; or
-- a parsed responsibility describing relevant technical work.
-
-Company introductions, product portfolios, legal footers, EEO language, and
-wireless-device notices are boilerplate for this purpose.
-
-## Ambiguous terms
-
-- Never match bare `GCP`; use `ICH-GCP`, `good clinical practice`, or a qualified
-  clinical form. Bare `GCP` overwhelmingly means Google Cloud Platform here.
-- Never match bare `genetics` in descriptions. It occurs in 16,479 otherwise
-  unlabeled descriptions, primarily through EEO text containing `genetic
-  information`.
-- `immunology` and `neuroscience` are useful title signals but noisy description
-  signals because pharmaceutical companies repeat therapeutic-area language
-  across unrelated roles.
-- `life sciences`, `medical devices`, and `biotechnology` remain useful company
-  or focus-area evidence, but are not sufficient role evidence.
-
-## Refresh rule
-
-Recompute title counts and employer priors on each materially new corpus. New
-terms enter the cascade only after actual matching titles and false controls are
-reviewed. Preserve unmatched postings as an explicit residual rather than
-weakening a rule to force coverage.
+Bump `FOCUS_VERSION` in `bioengineering.py` whenever a rule changes, and add the
+posting that motivated the change to `tests/test_bioengineering.py`.

@@ -31,6 +31,24 @@ from xjobscore import store
 _schema_counter = itertools.count()
 
 
+@pytest.fixture
+def live_migration():
+    """Read a `xjobscore/migrations/` file, skipping the test when it is absent.
+
+    That directory is applied against the live database and deliberately
+    untracked (.gitignore), so a checkout without the file has nothing to check.
+    """
+    root = pathlib.Path(__file__).resolve().parent / "migrations"
+
+    def read(name: str) -> str:
+        path = root / name
+        if not path.is_file():
+            pytest.skip(f"untracked migration {name} not present")
+        return path.read_text()
+
+    return read
+
+
 @dataclass(frozen=True, slots=True)
 class CoreSchema:
     """A private schema plus a pool already scoped to it."""

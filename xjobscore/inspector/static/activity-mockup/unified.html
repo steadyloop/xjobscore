@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Activity · unified log preview</title>
+  <style>
+    :root { color-scheme:light; --bg:#f7f7f5; --ink:#1a1c1e; --subtle:#5c6166; --muted:#8b9096; --line:#dcdcd8; --good:#0f7d33; --bad:#b42318; --warn:#9a5b08; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button,input,select { font:inherit; color:inherit; }
+    button,select,input[type=checkbox] { cursor:pointer; }
+    button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid #1d4ed8; outline-offset:3px; }
+    main { max-width:1560px; margin:auto; padding:28px 30px 40px; }
+    .head { display:flex; align-items:center; gap:14px; }
+    h1,h2 { margin:0; font-size:21px; font-weight:650; letter-spacing:-.025em; }
+    .rule { flex:1; height:1px; background:var(--line); margin:0 6px; }
+    .spinner { font:25px var(--mono); color:var(--good); }
+    .runtime { padding:4px 12px; border:1px solid var(--good); border-radius:5px; color:var(--good); background:#e6f2e9; }
+    .runtime[aria-pressed=true] { border-color:var(--warn); color:var(--warn); background:#f8efdd; }
+    .clock { color:var(--muted); font:14px var(--mono); white-space:nowrap; }
+    .summary { display:flex; align-items:baseline; flex-wrap:wrap; gap:12px; margin:25px 0 23px; font:14px/1.5 var(--mono); }
+    .summary-label { font:650 14px/1.5 system-ui,sans-serif; }
+    .summary .details { margin-left:5px; }
+    .sep { color:var(--muted); }
+    .quiet { color:var(--subtle); }
+    .details { border:0; padding:0; background:none; color:var(--subtle); font:12px var(--mono); }
+    .toolbar { display:flex; align-items:center; gap:22px; flex-wrap:wrap; padding-bottom:11px; border-bottom:1px solid var(--line); font-size:13px; }
+    .views { display:flex; gap:20px; }
+    .view { border:0; background:none; padding:2px 0; color:var(--subtle); }
+    .view[aria-pressed=true] { color:var(--ink); font-weight:650; }
+    .count { color:var(--muted); margin-left:5px; font:12px var(--mono); font-weight:400; }
+    .toolbar select { border:0; color:var(--subtle); background:transparent; padding:2px 0; max-width:145px; }
+    .check { display:flex; align-items:center; gap:6px; color:var(--subtle); white-space:nowrap; }
+    input[type=checkbox] { accent-color:var(--good); }
+    .search { margin-left:auto; max-width:215px; flex:1; min-width:140px; }
+    .search input { width:100%; border:0; border-bottom:1px solid var(--line); background:transparent; padding:3px 0; color:var(--ink); font:12px var(--mono); }
+    .follow { border:0; padding:2px 0; background:none; color:var(--good); white-space:nowrap; font-size:12px; }
+    .follow[aria-pressed=false] { color:var(--subtle); }
+    .stream { height:368px; overflow:auto; margin-top:8px; scrollbar-color:#c7c9c7 transparent; scrollbar-width:thin; }
+    .entry:hover { background:#efefeb; }
+    .row { display:grid; grid-template-columns:8ch 5ch 10ch minmax(0,1fr) 6ch 11ch; align-items:baseline; gap:14px; padding:7px 7px 7px 0; font:13px/1.5 var(--mono); }
+    .row time,.level { color:var(--muted); }
+    .level { font-weight:650; font-size:12px; }
+    .stage { color:var(--subtle); font-size:12px; letter-spacing:.025em; }
+    .message { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .message .detail { color:var(--subtle); }
+    .outcome { color:var(--good); }
+    .duration { text-align:right; color:var(--muted); font-size:12px; }
+    .trace { justify-self:end; border:0; padding:0; background:none; font:12px var(--mono); color:var(--subtle); white-space:nowrap; }
+    .entry[data-level=ERROR] .level,.entry[data-level=ERROR] .action { color:var(--bad); }
+    .entry[data-level=WARN] .level,.entry[data-level=WARN] .action { color:var(--warn); }
+    .trace-content { margin:3px 7px 9px 0; padding:12px 15px; border-left:2px solid #d9a49e; background:#f0f0ed; overflow:auto; color:var(--subtle); font:12px/1.8 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .stream-note { display:flex; justify-content:space-between; gap:12px; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font:11px/1.5 var(--mono); }
+    .empty { padding:35px 0; color:var(--subtle); font:13px var(--mono); }
+    [hidden] { display:none !important; }
+    .scheduler { margin-top:36px; }
+    .scheduler .head { margin-bottom:20px; }
+    .stats { font:12px/1.7 var(--mono); color:var(--subtle); display:flex; flex-wrap:wrap; gap:10px; margin-bottom:17px; }
+    .stats b { color:var(--ink); }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; font:12px/1.5 var(--mono); min-width:650px; }
+    th { color:var(--muted); font-size:11px; font-weight:500; text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
+    td { padding:9px 8px; border-bottom:1px solid #e8e8e4; }
+    th:first-child,td:first-child { padding-left:0; }
+    .num { text-align:right; }
+    .good { color:var(--good); }
+    .workers { color:var(--good); letter-spacing:3px; }
+    .workers span { color:#d8dad6; }
+    .mock-note { color:var(--muted); font-size:12px; margin:23px 0 0; }
+    dialog { position:fixed; inset:0 0 0 auto; margin:0; width:min(580px,100vw); height:100dvh; max-width:100vw; max-height:100dvh; padding:25px; border:0; border-left:1px solid var(--line); background:var(--bg); color:var(--ink); box-shadow:-8px 0 28px #1a1c1e10; overflow:auto; font:12px/1.6 var(--mono); }
+    dialog::backdrop { background:#1a1c1e17; }
+    .drawer-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; gap:12px; }
+    .drawer-head h2 { font:650 17px system-ui,sans-serif; }
+    .close { border:0; padding:0 5px; background:none; color:var(--subtle); font:24px system-ui,sans-serif; }
+    .run-select { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:12px; }
+    .run-select select { border:0; background:transparent; color:var(--subtle); font:12px var(--mono); }
+    .drawer-meta { color:var(--subtle); border-bottom:1px solid var(--line); padding-bottom:15px; margin-bottom:18px; }
+    .stage-row { display:grid; grid-template-columns:1ch minmax(0,1fr) 13ch 5ch; gap:10px; align-items:baseline; padding:6px 0; }
+    .stage-row .num { color:var(--subtle); }
+    .stage-error { grid-column:2/-1; display:flex; align-items:baseline; justify-content:space-between; gap:12px; color:var(--bad); }
+    .stage-row .trace-content { grid-column:1/-1; }
+    .drawer-note { margin-top:22px; color:var(--subtle); }
+    @media (max-width:900px) { .toolbar { gap:14px; } .search { order:1; max-width:none; flex-basis:100%; } .row { gap:10px; font-size:12px; grid-template-columns:8ch 5ch 9ch minmax(0,1fr) 5ch 11ch; } }
+    @media (max-width:600px) {
+      main { padding:20px 16px; } .clock { display:none; } h1,h2 { font-size:19px; }
+      .toolbar { gap:10px 16px; } .summary { gap:9px; font-size:12px; } .summary-label { font-size:13px; }
+      .row { grid-template-columns:8ch 5ch minmax(0,1fr) 11ch; gap:4px 8px; padding:9px 4px 9px 0; }
+      .row .message { grid-row:2; grid-column:1/-1; } .duration { display:none; } .stage { font-size:11px; }
+      .stream { height:405px; } .stream-note { font-size:10px; } dialog { padding:22px 16px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section aria-labelledby="activity-title">
+      <header class="head">
+        <h1 id="activity-title">Activity</h1><span class="spinner" id="spinner" role="img" aria-label="Running">⠿</span><span class="rule" aria-hidden="true"></span>
+        <button class="runtime" id="runtime" type="button" aria-pressed="false">Pause</button><time class="clock">2:23:10 PM PDT</time>
+      </header>
+      <div class="summary" aria-label="Enrichment summary">
+        <span class="summary-label" title="Background enrichment, independent of feed fetching">Enriched</span><span class="sep">·</span>
+        <b id="enrich-count" title="Distinct postings enriched across all steps">123 postings</b><span class="sep">·</span><span class="quiet" id="enrich-duration">4s</span><span class="sep">·</span><span class="quiet" id="enrich-errors">0 errors</span>
+        <button class="details" id="details" type="button" aria-expanded="false" aria-controls="enrich-drawer">▸ Details</button>
+      </div>
+      <div class="toolbar" aria-label="Activity filters">
+        <div class="views" role="group" aria-label="Activity view">
+          <button class="view" type="button" data-view="all" aria-pressed="true">All activity<span class="count" id="all-count"></span></button>
+          <button class="view" type="button" data-view="issues" aria-pressed="false">Issues<span class="count" id="issue-count"></span></button>
+        </div>
+        <select id="process" aria-label="Filter by process"><option value="all">All processes</option><option>FETCH</option><option>SILVER</option><option>RUN</option><option>ENRICH</option><option>HEARTBEAT</option><option>DEDUP</option><option>SYSTEM</option></select>
+        <label class="check"><input type="checkbox" id="all-polls">All polls</label>
+        <label class="search"><input type="search" id="search" placeholder="filter activity…" aria-label="Search activity"></label>
+        <button class="follow" id="follow" type="button" aria-pressed="true">↓ Following</button>
+      </div>
+      <div class="stream" id="stream" role="log" aria-label="Unified activity stream" aria-live="off"></div>
+      <div class="stream-note"><span id="shown"></span><span>Newest at bottom</span></div>
+    </section>
+    <section class="scheduler" aria-labelledby="scheduler-title">
+      <header class="head"><h2 id="scheduler-title">Scheduler</h2><span class="spinner" aria-hidden="true">⠿</span><span class="rule" aria-hidden="true"></span></header>
+      <div class="stats"><span><b>1,842</b> feeds</span><span class="sep">·</span><span class="good">1,816 healthy</span><span class="sep">·</span><span>18 paused</span><span class="sep">·</span><span>8 backing off</span><span class="sep">│</span><span>last 15m</span><span><b>674</b> polled</span><span class="sep">·</span><span><b>38</b> new postings</span></div>
+      <div class="table-wrap"><table aria-label="Sample scheduler overview">
+        <thead><tr><th>status</th><th>source</th><th>workers</th><th class="num">interval</th><th class="num">next</th><th class="num">last</th><th class="num">new·1d</th><th class="num">err·7d</th></tr></thead>
+        <tbody>
+          <tr><td class="good">healthy</td><td>workday</td><td class="workers">▰▰▰▰<span>▰▰▰▰</span></td><td class="num">15m</td><td class="num">12s</td><td class="num">8s</td><td class="num">142</td><td class="num quiet">3</td></tr>
+          <tr><td class="good">healthy</td><td>greenhouse</td><td class="workers">▰▰<span>▰▰▰▰</span></td><td class="num">30m</td><td class="num">45s</td><td class="num">22s</td><td class="num">87</td><td class="num quiet">0</td></tr>
+          <tr><td class="good">healthy</td><td>lever</td><td class="workers">▰<span>▰▰▰</span></td><td class="num">30m</td><td class="num">1m</td><td class="num">34s</td><td class="num">56</td><td class="num quiet">0</td></tr>
+          <tr><td class="good">healthy</td><td>workable</td><td class="workers">▰▰<span>▰▰</span></td><td class="num">30m</td><td class="num">2m</td><td class="num">1m</td><td class="num">24</td><td class="num quiet">5</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <p class="mock-note">Interactive mockup · sample data. Try Issues, All polls, Traceback, and enrichment Details.</p>
+  </main>
+  <dialog id="enrich-drawer" aria-labelledby="drawer-title">
+    <header class="drawer-head"><h2 id="drawer-title">Enrichment details</h2><button class="close" id="close" type="button" aria-label="Close enrichment details" autofocus>×</button></header>
+    <div class="run-select"><b id="drawer-summary"></b><select id="enrich-run" aria-label="Enrichment run"><option value="complete">14:14:18 · complete</option><option value="degraded">13:47:48 · degraded</option></select></div>
+    <div class="drawer-meta" id="drawer-meta"></div>
+    <div id="stages" role="list" aria-label="Enrichment stages"></div>
+    <p class="drawer-note" id="drawer-note"></p>
+  </dialog>
+  <script>
+    const fetchTrace = 'Traceback (most recent call last):\n  File "xjobscore/run.py", in poll_one\n    record = await harvest(feed)\n  File "xjobscore/net.py", in request\n    response = await client.get(url)\nhttpx.ReadTimeout: request timed out\n\nSource: workable:stay-alfred\nFetch duration: 17s\nThe feed will retry after its backoff interval.';
+    const enrichTrace = 'Traceback (most recent call last):\n  File "xjobscore/pipeline.py", in catch_up_once\n    counts[name] = await gold.apply_incremental(conn, name, ids)\nTimeoutError: summary update exceeded statement timeout\n\n3 postings remain pending and will be retried.';
+    const entries = [
+      {time:'14:12:50',level:'INFO',stage:'SYSTEM',action:'Scheduler resumed',detail:'Feed workers are accepting work',logger:'xjobscore.runtime'},
+      {time:'14:13:08',level:'INFO',stage:'HEARTBEAT',action:'Completed',detail:'284 tokens checked',duration:'1s',logger:'xjobscore.inspector.token_heartbeat'},
+      {time:'14:13:21',level:'INFO',stage:'SILVER',action:'Minted company',detail:'workable:rev1-ventures-1 · Rev1 Ventures',logger:'xjobscore.silver'},
+      {time:'14:13:37',level:'ERROR',stage:'FETCH',action:'Harvest failed',detail:'workable:stay-alfred · request timed out',duration:'17s',logger:'xjobscore.run',exc:fetchTrace},
+      {time:'14:14:06',level:'INFO',stage:'FETCH',action:'workday:elevancehealth/wd1/ant',detail:'2 new postings',duration:'3.2s',logger:'poll_log',outcome:true},
+      {time:'14:14:18',level:'INFO',stage:'ENRICH',action:'Completed',detail:'123 postings · 0 errors',duration:'4s',logger:'xjobscore.pipeline'},
+      {time:'14:14:33',level:'INFO',stage:'FETCH',action:'workday:circle/wd1/circle',detail:'unchanged',duration:'0.4s',logger:'poll_log',routine:true},
+      {time:'14:14:41',level:'INFO',stage:'SILVER',action:'Linked company',detail:'workable:novacom · Novacom Building Partners',logger:'xjobscore.silver'},
+      {time:'14:15:02',level:'INFO',stage:'SILVER',action:'Skipped 3 postings',detail:'simplify:summer2027-internships · unsupported format',logger:'xjobscore.run'},
+      {time:'14:15:14',level:'INFO',stage:'FETCH',action:'workday:cmegroup/wd1/cme_careers',detail:'no new postings',duration:'1.1s',logger:'poll_log',routine:true},
+      {time:'14:15:26',level:'INFO',stage:'FETCH',action:'workday:financemea/wd1/financemeacareers',detail:'3 new postings',duration:'2.8s',logger:'poll_log',outcome:true},
+      {time:'14:15:39',level:'INFO',stage:'DEDUP',action:'Completed',detail:'8 duplicate groups · 19 postings',duration:'2.4s',logger:'xjobscore.gold'},
+      {time:'14:16:03',level:'INFO',stage:'FETCH',action:'workday:ewvl.fa.us8/cx_1',detail:'no new postings',duration:'0.8s',logger:'poll_log',routine:true},
+      {time:'14:16:21',level:'WARN',stage:'FETCH',action:'Rate limited · HTTP 429',detail:'workday:cvshealth/wd1/cvshealth · backing off',duration:'1.3s',logger:'xjobscore.run'},
+      {time:'14:16:34',level:'INFO',stage:'RUN',action:'Coverage snapshot refreshed',detail:'1,842 feeds included',duration:'0.6s',logger:'xjobscore.run'},
+      {time:'14:16:44',level:'INFO',stage:'FETCH',action:'workday:fmr/wd1/fidelitycareers',detail:'unchanged',duration:'0.3s',logger:'poll_log',routine:true},
+      {time:'14:16:45',level:'INFO',stage:'FETCH',action:'workday:geico/wd1/external',detail:'4 new postings',duration:'2.1s',logger:'poll_log',outcome:true},
+      {time:'14:16:57',level:'INFO',stage:'FETCH',action:'workday:ghr/wd1/lateral-us',detail:'5 new postings',duration:'3.6s',logger:'poll_log',outcome:true}
+    ];
+    const byId = id => document.getElementById(id);
+    function node(tag, className, text) { const n=document.createElement(tag); if(className)n.className=className; if(text!=null)n.textContent=text; return n; }
+    function traceback(text, id) {
+      const button=node('button','trace','▸ Traceback'); button.type='button'; button.setAttribute('aria-expanded','false'); button.setAttribute('aria-controls',id);
+      const pre=node('pre','trace-content',text); pre.id=id; pre.hidden=true;
+      button.addEventListener('click',()=>{ pre.hidden=!pre.hidden; button.setAttribute('aria-expanded',String(!pre.hidden)); button.textContent=pre.hidden?'▸ Traceback':'▾ Traceback'; });
+      return {button,pre};
+    }
+    const stream=byId('stream');
+    const rows=entries.map((entry,index)=>{
+      const wrapper=node('div','entry'); wrapper.dataset.level=entry.level;
+      const row=node('div','row'); const time=node('time','',entry.time); time.dateTime='2026-10-06T'+entry.time+'-07:00';
+      const stage=node('span','stage',entry.stage); stage.title=entry.logger;
+      const message=node('span','message'); message.title=entry.action+' · '+entry.detail;
+      message.append(node('span','action',entry.action),document.createTextNode(' · '),node('span',entry.outcome?'outcome':'detail',entry.detail));
+      row.append(time,node('span','level',entry.level),stage,message,node('span','duration',entry.duration||''));
+      wrapper.append(row);
+      if(entry.exc){ const trace=traceback(entry.exc,'trace-'+index); row.append(trace.button); wrapper.append(trace.pre); }
+      stream.append(wrapper); return wrapper;
+    });
+    const empty=node('div','empty','No activity matches these filters.'); stream.append(empty);
+    let activeView='all';
+    const isIssue=entry=>entry.level==='ERROR'||entry.level==='WARN';
+    function filter(){
+      const allPolls=byId('all-polls').checked,process=byId('process').value,search=byId('search').value.trim().toLowerCase();
+      const matchesScope=entry=>(process==='all'||entry.stage===process)&&[entry.time,entry.level,entry.stage,entry.action,entry.detail].join(' ').toLowerCase().includes(search);
+      const scoped=entries.filter(entry=>(allPolls||!entry.routine)&&matchesScope(entry));
+      let shown=0;
+      entries.forEach((entry,index)=>{ const visible=(allPolls||!entry.routine)&&matchesScope(entry)&&(activeView==='all'||isIssue(entry)); rows[index].hidden=!visible; if(visible)shown++; });
+      byId('all-count').textContent=scoped.length; byId('issue-count').textContent=scoped.filter(isIssue).length;
+      byId('shown').textContent=shown+' events'+(allPolls?'':' · '+entries.filter(entry=>entry.routine&&matchesScope(entry)).length+' routine polls hidden'); empty.hidden=shown>0;
+      if(byId('follow').getAttribute('aria-pressed')==='true')stream.scrollTop=stream.scrollHeight;
+    }
+    document.querySelectorAll('.view').forEach(button=>button.addEventListener('click',()=>{activeView=button.dataset.view;document.querySelectorAll('.view').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));filter();}));
+    ['process','all-polls'].forEach(id=>byId(id).addEventListener('change',filter)); byId('search').addEventListener('input',filter);
+    const follow=byId('follow');
+    function setFollowing(value){ follow.setAttribute('aria-pressed',String(value));follow.textContent=value?'↓ Following':'↓ Follow latest'; }
+    follow.addEventListener('click',()=>{const value=follow.getAttribute('aria-pressed')!=='true';setFollowing(value);if(value)stream.scrollTop=stream.scrollHeight;});
+    stream.addEventListener('scroll',()=>setFollowing(stream.scrollHeight-stream.scrollTop-stream.clientHeight<12));
+    byId('runtime').addEventListener('click',()=>{const button=byId('runtime'),paused=button.getAttribute('aria-pressed')!=='true';button.setAttribute('aria-pressed',String(paused));button.textContent=paused?'Resume':'Pause';byId('spinner').style.color=paused?'var(--warn)':'var(--good)';byId('spinner').setAttribute('aria-label',paused?'Paused':'Running');});
+    const drawer=byId('enrich-drawer');
+    byId('details').addEventListener('click',()=>{drawer.showModal();byId('details').setAttribute('aria-expanded','true');});
+    byId('close').addEventListener('click',()=>drawer.close());drawer.addEventListener('close',()=>byId('details').setAttribute('aria-expanded','false'));
+    drawer.addEventListener('click',event=>{const box=drawer.getBoundingClientRect();if(event.target===drawer&&(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom))drawer.close();});
+    function renderEnrichment(){
+      const degraded=byId('enrich-run').value==='degraded',count=degraded?120:123,errors=degraded?'1 error':'0 errors';
+      byId('enrich-count').textContent=count+' postings';byId('enrich-errors').textContent=errors;byId('enrich-errors').style.color=degraded?'var(--bad)':'';
+      byId('drawer-summary').textContent=count+' postings · 4s · '+errors;byId('drawer-meta').textContent='Oct 6, 2026 · '+(degraded?'13:47:44–13:47:48':'14:14:14–14:14:18')+' PDT';
+      const names=['Job type','Skills','Degrees','Summaries','Focus'],durations=['0.3s','1.1s','0.4s','1.7s','0.5s'];
+      byId('stages').replaceChildren(...names.map((name,index)=>{
+        const failed=degraded&&index===3,row=node('div','stage-row');row.setAttribute('role','listitem');
+        const mark=node('span',failed?'':'good',failed?'×':'✓');if(failed)mark.style.color='var(--bad)';mark.setAttribute('aria-label',failed?'Failed':'Complete');mark.setAttribute('role','img');
+        row.append(mark,node('span','',name),node('span','num',(failed?120:123)+' postings'),node('span','num',durations[index]));
+        if(failed){const error=node('div','stage-error');error.append(node('span','','3 pending · database timeout'));const trace=traceback(enrichTrace,'enrich-trace');error.append(trace.button);row.append(error,trace.pre);}return row;
+      }));
+      byId('drawer-note').textContent=degraded?'120 distinct postings fully enriched; 3 remain pending. The failed stage will retry.':'123 distinct postings enriched across five steps. Each posting is counted once in the summary.';
+    }
+    byId('enrich-run').addEventListener('change',renderEnrichment);renderEnrichment();filter();
+  </script>
+</body>
+</html>

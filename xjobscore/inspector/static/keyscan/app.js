@@ -44,6 +44,8 @@ const state = {
   // something to offer instead of going empty.
   crawlsSource: null,
   crawlsFetchedAt: null,
+  // Index of the last clicked snapshot row, for shift-click ranges.
+  crawlAnchor: null,
 };
 
 const VERDICT_MARK = { live: "✓", dead: "✗", unknown: "·" };
@@ -86,6 +88,13 @@ function duration(from, to) {
   if (h) return `${h}h${String(m).padStart(2, "0")}m`;
   if (m) return `${m}m${String(s).padStart(2, "0")}s`;
   return `${s}s`;
+}
+
+// Timestamp ids (20261004-215230) are shown whole; older random-hex ids are
+// cut to their first eight characters as before.
+function shortRunId(id) {
+  const text = String(id);
+  return /^\d{8}-\d{6}$/.test(text) ? text : text.slice(0, 8);
 }
 
 function count(value) {
@@ -141,7 +150,7 @@ function renderRun(run) {
     ? `${config.date_from}..${config.date_to ?? "?"}`
     : `${config.crawls ?? "?"} snapshots`;
 
-  document.getElementById("run-id").textContent = `run ${String(run.id).slice(0, 8)}`;
+  document.getElementById("run-id").textContent = `run ${shortRunId(run.id)}`;
   const stateEl = document.getElementById("run-state");
   stateEl.textContent = `● ${run.status}`;
   stateEl.className = RUN_CLASS[run.status] ?? "c-mut";
@@ -178,7 +187,7 @@ function renderRun(run) {
     state.logOffset = 0;
     state.logEntries = [];
     document.getElementById("log-src").textContent =
-      `runs/${String(run.id).slice(0, 8)}/run.jsonl`;
+      `runs/${run.id}/run.jsonl`;
   }
   state.running = run.status === "running";
   // A `running` row whose process is gone is wreckage, not a run: say so
@@ -408,13 +417,13 @@ function renderRuns(rows) {
       el(
         "tr",
         {},
-        el("td", { class: "mono" }, String(row.id).slice(0, 8)),
+        el("td", { class: "mono" }, shortRunId(row.id)),
         el("td", { class: "ks-dim" }, (row.methods ?? []).join(",")),
         el("td", { class: "mono" },
           el("span", { class: RUN_CLASS[row.status] ?? "" }, row.status)),
         el("td", { class: "num mono" }, count(row.counts?.found)),
-        el("td", { class: "num mono" }, count(row.counts?.live)),
-        el("td", { class: "num mono" }, count(row.counts?.dead)),
+        // Runs from before `added` was counted show a dot, not a false 0.
+        el("td", { class: "num mono" }, count(row.counts?.added)),
         el("td", { class: "ks-dim" }, ago(row.started_at) ?? "·"),
         el("td", { class: "mono" }, duration(row.started_at, row.finished_at))
       )
@@ -550,39 +559,118 @@ function crawlsButtonLabel() {
   if (!state.crawls.length) return "unavailable";
   if (n === 0) return "select snapshots…";
   if (n === 1) return [...state.selectedCrawls][0];
+  if (n === state.crawls.length) return `all ${n} snapshots`;
   return `${n} snapshots`;
+}
+
+function setCrawls(ids, on) {
+  for (const id of ids) {
+    if (on) state.selectedCrawls.add(id);
+    else state.selectedCrawls.delete(id);
+  }
+}
+
+// Footer coverage decides what a scan of the snapshot costs: full means it is
+// planned from the local table and opens only the files a vendor can be in;
+// partial or none means it reads every file.
+function footerMark(footers) {
+  if (footers?.full) {
+    return el("span", { class: "ks-fp ks-fp-full", title: "footers harvested — scans open only matching files" }, "↯");
+  }
+  if (footers?.parts) {
+    return el("span", { class: "ks-fp ks-fp-part", title: `footers ${footers.parts} files — incomplete, scans still read every file` }, "…");
+  }
+  return el("span", { class: "ks-fp", title: "no footers — scans read every file" }, "");
 }
 
 function renderCrawlsPanel() {
   const panel = document.getElementById("crawls-panel");
+  const list = panel.querySelector(".ks-crawls-list");
+  const scrollTop = list?.scrollTop ?? 0;
   const rows = [];
   // A cached snapshot list is served silently: it is days-stale at worst and
   // still picks a valid crawl, so the fallback is not worth a warning.
   // `state.crawlsSource` / `crawlsFetchedAt` still record it for debugging.
   if (!state.crawls.length) {
-    rows.push(el("div", { class: "ks-dim" }, "no snapshots available"));
-  } else {
+    panel.replaceChildren(el("div", { class: "ks-dim ks-crawls-empty" }, "no snapshots available"));
+    document.getElementById("crawls-btn").textContent = crawlsButtonLabel();
+    return;
+  }
+
+  const rerender = () => renderCrawlsPanel();
+  // Grouped by year, newest first: a year heading toggles that whole year,
+  // and shift-click between two rows toggles everything between them.
+  const byYear = new Map();
+  state.crawls.forEach((crawl, index) => {
+    const year = crawl.from.slice(0, 4);
+    if (!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year).push({ crawl, index });
+  });
+  for (const [year, entries] of byYear) {
+    const ids = entries.map(({ crawl }) => crawl.id);
+    const picked = ids.filter((id) => state.selectedCrawls.has(id)).length;
+    const yearBox = el("input", {
+      type: "checkbox",
+      checked: picked === ids.length,
+      onchange: (event) => { setCrawls(ids, event.target.checked); rerender(); },
+    });
+    yearBox.indeterminate = picked > 0 && picked < ids.length;
+    const full = entries.filter(({ crawl }) => crawl.footers?.full).length;
     rows.push(
-      ...state.crawls.map((crawl) =>
+      el("label", { class: "ks-crawls-year" }, yearBox, year,
+        el("span", { class: "ks-dim" }, `${picked}/${ids.length}`),
+        full ? el("span", {
+          class: "ks-fp ks-fp-full",
+          title: `footers harvested for ${full} of ${ids.length}`,
+        }, full === ids.length ? "↯" : `↯ ${full}`) : null)
+    );
+    for (const { crawl, index } of entries) {
+      rows.push(
         el(
           "label",
           {},
           el("input", {
             type: "checkbox",
             checked: state.selectedCrawls.has(crawl.id),
-            onchange: (event) => {
-              if (event.target.checked) state.selectedCrawls.add(crawl.id);
-              else state.selectedCrawls.delete(crawl.id);
-              document.getElementById("crawls-btn").textContent = crawlsButtonLabel();
+            onclick: (event) => {
+              const on = event.target.checked;
+              const anchor = state.crawlAnchor;
+              if (event.shiftKey && anchor != null) {
+                const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor];
+                setCrawls(state.crawls.slice(lo, hi + 1).map((c) => c.id), on);
+              } else {
+                setCrawls([crawl.id], on);
+              }
+              state.crawlAnchor = index;
+              rerender();
             },
           }),
           crawl.id,
-          el("span", { class: "ks-dim" }, `${crawl.from}..${crawl.to}`)
+          footerMark(crawl.footers)
         )
-      )
-    );
+      );
+    }
   }
-  panel.replaceChildren(...rows);
+
+  const newList = el("div", { class: "ks-crawls-list" }, ...rows);
+  const allIds = state.crawls.map((crawl) => crawl.id);
+  const summary = el(
+    "div",
+    { class: "ks-crawls-summary ks-dim" },
+    el("button", {
+      type: "button",
+      class: "ks-link",
+      onclick: () => { setCrawls(allIds, true); state.crawlAnchor = null; rerender(); },
+    }, "all"),
+    el("button", {
+      type: "button",
+      class: "ks-link",
+      onclick: () => { state.selectedCrawls.clear(); state.crawlAnchor = null; rerender(); },
+    }, "none"),
+    `${state.selectedCrawls.size} of ${state.crawls.length} selected · shift-click selects a range`
+  );
+  panel.replaceChildren(newList, summary);
+  newList.scrollTop = scrollTop;
   document.getElementById("crawls-btn").textContent = crawlsButtonLabel();
 }
 
@@ -626,6 +714,8 @@ async function startRun() {
       body: {
         crawl_ids: [...state.selectedCrawls].join(","),
         sources: document.getElementById("sources").value || null,
+        validate_tokens: document.getElementById("validate").checked,
+        rescan: document.getElementById("rescan").checked,
       },
     });
     // keyscan writes its own runs row a moment after the process starts, so
@@ -659,8 +749,19 @@ function init() {
   renderNav("Keyscan");
 
   const sources = document.getElementById("sources");
-  fitSelect(sources);
-  sources.addEventListener("change", () => fitSelect(sources));
+  // Vendor rows carry their tree prefix only while the menu is open, so the
+  // closed select reads "ashby", not "- ashby".
+  const treeMenu = (open) => {
+    for (const option of sources.options) {
+      if (option.dataset.tree) option.text = (open ? option.dataset.tree : "") + option.value;
+    }
+    if (!open) fitSelect(sources);
+  };
+  treeMenu(false);
+  sources.addEventListener("mousedown", () => treeMenu(true));
+  sources.addEventListener("keydown", () => treeMenu(true));
+  sources.addEventListener("change", () => treeMenu(false));
+  sources.addEventListener("blur", () => treeMenu(false));
 
   document.getElementById("start-run-btn").addEventListener("click", startRun);
   document.getElementById("cancel-btn").addEventListener("click", cancelRun);
@@ -670,7 +771,9 @@ function init() {
     toggleCrawlsPanel();
   });
   document.addEventListener("click", (event) => {
-    if (!document.getElementById("crawls-field").contains(event.target)) toggleCrawlsPanel(false);
+    // composedPath, not contains(): a click inside the panel re-renders it,
+    // so by the time this runs the clicked node is already detached.
+    if (!event.composedPath().includes(document.getElementById("crawls-field"))) toggleCrawlsPanel(false);
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") toggleCrawlsPanel(false);

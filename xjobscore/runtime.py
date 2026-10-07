@@ -6,13 +6,13 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import asyncpg
 
-from xjobscore import publish, run
+from xjobscore import coverage_snapshot, publish, reconcile, run, store, workable_policy
 from xjobscore.inspector import config
 from xjobscore.inspector.cache import now_utc
 from xjobscore.inspector.db import CatalogDB
@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 # ASCII "XJOBSCORE", within PostgreSQL's signed-bigint advisory-lock range.
 SYSTEM_LOCK_ID = 0x584A4F4253434F52
-REQUIRED_TABLES = ("scheduler_control", "gold_control", "system_run")
+REQUIRED_TABLES = ("scheduler_control", "gold_control", "system_run", "reconcile_queue", "reconcile_control")
+# Global dedup is off: each rebuild loads every posting into this process and
+# ran back to back on 2026-10-05, starving the feed workers' event loop.
+# Postings still mark gold_control dirty, so re-enabling resumes from there.
+DEDUP_ENABLED = False
 
 
 def _env(name: str, legacy: str | None, default: str) -> str:
@@ -62,6 +66,7 @@ class RuntimeSettings:
     heartbeat_lease_s: int = 900
     # Unset disables the Neon publisher; the harvest runs the same either way.
     publish_dsn: str | None = None
+    frontend_dsn: str | None = None
     publish_interval_s: float = 3600.0
     publish_seen_drift_s: float = float(publish.DEFAULT_SEEN_DRIFT_S)
 
@@ -158,6 +163,7 @@ class RuntimeSettings:
                 )
             ),
             publish_dsn=os.environ.get("PUBLISH_DATABASE_URL") or None,
+            frontend_dsn=os.environ.get("FRONTEND_DATABASE_URL") or None,
             publish_interval_s=float(
                 _env("XJOBSCORE_PUBLISH_INTERVAL_S", None, "3600")
             ),
@@ -185,6 +191,7 @@ class SystemScheduler:
         lease_seconds: int,
         shutdown_grace_s: float,
         ownership_check: Callable[[], Awaitable[None]] | None = None,
+        net: Net | None = None,
     ) -> None:
         self._policy = policy
         self._coordinator = coordinator
@@ -199,18 +206,69 @@ class SystemScheduler:
         self._ownership_check = ownership_check
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
-        self._net: Net | None = None
+        self._net = net
+        self._owns_net = net is None
         self._stopping = False
         self._last_cycle_at: datetime | None = None
         self._last_polled: int | None = None
         self._consecutive_errors = 0
         self._last_error: str | None = None
         self._last_pruned_at: datetime | None = None
+        self._workable_cooldown_until = 0.0
+        # One lane per vendor with due work, or per partition for a vendor
+        # whose limiter counts per partition (`sources.lanes`; Workday: per
+        # data center), each `run.drain_source`. Lanes run
+        # beside the tick, never inside it: the tick only starts lanes for due
+        # vendors without one, so no vendor ever waits on another's slowest poll.
+        self._lanes: dict[str, asyncio.Task[int]] = {}
+        # Cleared when the scheduler is paused or ownership is lost; lanes stop
+        # claiming at their next feed. In-flight polls finish under their lease.
+        self._scheduling = False
+        self._polled_since_tick = 0
+        self._polled_since_refresh = 0
+        self._last_refresh: float = float("-inf")
+
+    def _accepting(self) -> bool:
+        return self._scheduling and not self._stopping
+
+    def _start_lane(self, pool: Any, source: str) -> None:
+        async def lane() -> int:
+            polled = await run.drain_source(
+                pool,
+                self._net,
+                self._cfg,
+                source,
+                coordinator=self._coordinator,
+                accepting=self._accepting,
+            )
+            self._polled_since_tick += polled
+            self._polled_since_refresh += polled
+            return polled
+
+        task = asyncio.create_task(lane(), name=f"xjobscore-lane-{source}")
+        task.add_done_callback(self._lane_done)
+        self._lanes[source] = task
+
+    def _lane_done(self, task: asyncio.Task[int]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            # The next tick restarts the lane; one vendor's failure is its own.
+            self._last_error = f"{type(exc).__name__}: {exc}"
+            logger.error("scheduler lane failed: %s", task.get_name(), exc_info=exc)
+
+    def rate_groups(self) -> dict[str, dict[str, Any]]:
+        """`Net.rate_groups` of the polling client; {} before it opens."""
+        return self._net.rate_groups() if self._net is not None else {}
 
     def status(self) -> dict[str, Any]:
         return {
             "alive": self._task is not None and not self._task.done(),
             "accepting": not self._stopping,
+            "lanes": sorted(
+                source for source, task in self._lanes.items() if not task.done()
+            ),
             "last_cycle_at": self._last_cycle_at.isoformat()
             if self._last_cycle_at
             else None,
@@ -227,7 +285,8 @@ class SystemScheduler:
         if self._task is not None:
             return
         self._stopping = False
-        self._net = await Net(user_agent=self._cfg.user_agent).__aenter__()
+        if self._owns_net:
+            self._net = await Net(user_agent=self._cfg.user_agent).__aenter__()
         self._task = asyncio.create_task(self._loop(), name="xjobscore-scheduler")
 
     async def stop(self) -> None:
@@ -244,8 +303,20 @@ class SystemScheduler:
             except asyncio.CancelledError:
                 pass
         finally:
+            # Lanes stop claiming at once (`_accepting`); give in-flight polls
+            # the same grace the tick had, then cancel what is left.
+            lanes = [task for task in self._lanes.values() if not task.done()]
+            if lanes:
+                _, pending = await asyncio.wait(lanes, timeout=self._shutdown_grace_s)
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            self._lanes.clear()
+            # Gold the lanes handed off (`GoldCoordinator.defer`) gets the same
+            # grace; anything cancelled is repaired by catch-up.
+            await self._coordinator.drain(self._shutdown_grace_s)
             self._task = None
-            if self._net is not None:
+            if self._owns_net and self._net is not None:
                 await self._net.__aexit__(None, None, None)
                 self._net = None
 
@@ -278,9 +349,14 @@ class SystemScheduler:
 
     async def tick(self) -> None:
         if self._ownership_check is not None:
-            await self._ownership_check()
+            try:
+                await self._ownership_check()
+            except BaseException:
+                self._scheduling = False
+                raise
         pool = await self._policy.pool_or_none()
         if pool is None or self._net is None:
+            self._scheduling = False
             raise RuntimeError("PostgreSQL or network client unavailable")
 
         current = now_utc()
@@ -292,27 +368,39 @@ class SystemScheduler:
             self._last_pruned_at = current
 
         control = await self._policy.scheduler_control()
-        queue_drained = False
-        if control is not None and control.get("running"):
-            while not self._stopping:
-                result = await run.cycle(
-                    pool,
-                    self._net,
-                    self._cfg,
-                    now_utc(),
-                    coordinator=self._coordinator,
-                    accepting=lambda: not self._stopping,
+        self._scheduling = bool(control is not None and control.get("running"))
+        if self._scheduling and not self._stopping:
+            hold_until = await workable_policy.cooldown_until()
+            if hold_until > current.timestamp() and hold_until != self._workable_cooldown_until:
+                logger.warning(
+                    "Workable rate-limited; polling deferred until %s. Other sources continue.",
+                    datetime.fromtimestamp(hold_until).astimezone().isoformat(timespec="seconds"),
                 )
-                self._last_cycle_at = now_utc()
-                self._last_polled = result.polled
-                queue_drained = result.drained
-                if self._stopping:
-                    break
-                if queue_drained:
-                    break
-                control = await self._policy.scheduler_control()
-                if control is None or not control.get("running"):
-                    break
+            self._workable_cooldown_until = hold_until
+            async with pool.acquire() as conn:
+                due = await run.due_lanes(conn, current)
+            for source in due:
+                lane = self._lanes.get(source)
+                if lane is None or lane.done():
+                    self._start_lane(pool, source)
+
+        self._last_cycle_at = now_utc()
+        self._last_polled = self._polled_since_tick
+        self._polled_since_tick = 0
+
+        # `cycle` refreshed this once per round; lanes have no rounds, so the
+        # read model refreshes on the same cadence by the clock instead.
+        loop = asyncio.get_running_loop()
+        if (
+            self._polled_since_refresh
+            and loop.time() - self._last_refresh >= self._cfg.cycle_budget_s
+        ):
+            self._polled_since_refresh = 0
+            self._last_refresh = loop.time()
+            try:
+                await coverage_snapshot.refresh(pool)
+            except Exception:
+                logger.exception("coverage snapshot refresh failed")
 
 
 class GoldWorker:
@@ -337,6 +425,8 @@ class GoldWorker:
         self._stopping = False
         self._next_delay_s: float | None = None
         self._last_tick_at: datetime | None = None
+        self._next_check_at: datetime | None = None
+        self._checking = False
         self._consecutive_errors = 0
         self._last_error: str | None = None
 
@@ -347,6 +437,10 @@ class GoldWorker:
             "last_tick_at": self._last_tick_at.isoformat()
             if self._last_tick_at
             else None,
+            "next_check_at": self._next_check_at.isoformat()
+            if self._next_check_at
+            else None,
+            "checking": self._checking,
             "consecutive_errors": self._consecutive_errors,
             "last_error": self._last_error,
         }
@@ -354,6 +448,8 @@ class GoldWorker:
     def nudge(self) -> None:
         if not self._stopping:
             self._wake.set()
+            if self._task is not None and not self._task.done():
+                self._next_check_at = now_utc()
 
     async def start(self) -> None:
         if self._task is not None:
@@ -376,9 +472,13 @@ class GoldWorker:
                 pass
         finally:
             self._task = None
+            self._next_check_at = None
+            self._checking = False
 
     async def _loop(self) -> None:
         while not self._stopping:
+            self._next_check_at = None
+            self._checking = True
             try:
                 await self.tick()
                 self._consecutive_errors = 0
@@ -389,6 +489,8 @@ class GoldWorker:
                 self._consecutive_errors += 1
                 self._last_error = f"{type(exc).__name__}: {exc}"
                 logger.exception("Gold worker tick failed")
+            finally:
+                self._checking = False
 
             if self._stopping:
                 break
@@ -401,6 +503,7 @@ class GoldWorker:
             if not self._consecutive_errors and self._next_delay_s is not None:
                 delay = min(delay, max(0.1, self._next_delay_s))
             self._next_delay_s = None
+            self._next_check_at = now_utc() + timedelta(seconds=delay)
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=delay)
             except asyncio.TimeoutError:
@@ -419,6 +522,8 @@ class GoldWorker:
         )
         self._last_tick_at = now_utc()
         if self._stopping:
+            return
+        if not DEDUP_ENABLED:
             return
 
         queue_drained = bool(
@@ -455,6 +560,7 @@ class NeonPublisher:
         policy: PolicyStore,
         *,
         target_dsn: str | None,
+        local_target_dsn: str | None = None,
         interval_s: float,
         seen_drift_s: float,
         shutdown_grace_s: float,
@@ -462,6 +568,8 @@ class NeonPublisher:
     ) -> None:
         self._policy = policy
         self._target_dsn = target_dsn
+        self._local_target_dsn = local_target_dsn
+        self._target_status: dict[str, Any] = {}
         self._interval_s = interval_s
         self._seen_drift_s = seen_drift_s
         self._shutdown_grace_s = shutdown_grace_s
@@ -477,11 +585,12 @@ class NeonPublisher:
 
     @property
     def enabled(self) -> bool:
-        return bool(self._target_dsn)
+        return bool(self._target_dsn or self._local_target_dsn)
 
     def status(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
+            "targets": self._target_status,
             "alive": self._task is not None and not self._task.done(),
             "interval_seconds": self._interval_s,
             "last_published_at": self._last_published_at.isoformat()
@@ -558,14 +667,32 @@ class NeonPublisher:
         if self._ownership_check is not None:
             await self._ownership_check()
         pool = await self._policy.pool_or_none()
-        if pool is None or not self._target_dsn:
+        if pool is None or not self.enabled:
             raise RuntimeError("PostgreSQL unavailable")
 
         started = asyncio.get_running_loop().time()
-        async with pool.acquire() as source:
-            counts = await publish.publish_to(
-                source, self._target_dsn, seen_drift_s=self._seen_drift_s
+        if self._local_target_dsn:
+            targets = {"local": self._local_target_dsn}
+            if self._target_dsn:
+                targets["neon"] = self._target_dsn
+            results = await publish.publish_targets(
+                pool, targets, seen_drift_s=self._seen_drift_s
             )
+            for name, result in results.items():
+                self._target_status[name] = (
+                    {"error": f"{type(result).__name__}: {result}"}
+                    if isinstance(result, BaseException)
+                    else {"last_counts": {field: getattr(result, field) for field in publish.PublishCounts.__slots__}, "error": None}
+                )
+            failures = [r for r in results.values() if isinstance(r, BaseException)]
+            if failures:
+                raise RuntimeError("Frontend publication failed: " + "; ".join(str(r) for r in failures))
+            counts = results.get("neon", results["local"])
+        else:
+            async with pool.acquire() as source:
+                counts = await publish.publish_to(
+                    source, self._target_dsn, seen_drift_s=self._seen_drift_s
+                )
         self._last_duration_s = round(asyncio.get_running_loop().time() - started, 2)
         self._last_counts = counts
         self._last_published_at = now_utc()
@@ -581,6 +708,7 @@ class UnifiedRuntime:
 
     def __init__(self, settings: RuntimeSettings) -> None:
         self.settings = settings
+        self.net = Net(user_agent=settings.user_agent)
         self.policy = PolicyStore(settings.dsn)
         self.catalog = CatalogDB(self.policy)
         self.result_store = ResultStore(
@@ -602,6 +730,8 @@ class UnifiedRuntime:
             ownership_check=self._assert_system_lock,
         )
         self.coordinator.set_wake_callback(self.gold_worker.nudge)
+        self.reconciler = reconcile.Worker(self.policy, self.net,
+            shutdown_grace_s=settings.shutdown_grace_s, ownership_check=self._assert_system_lock)
         self.scheduler = SystemScheduler(
             self.policy,
             self.coordinator,
@@ -609,6 +739,7 @@ class UnifiedRuntime:
             tick_s=settings.tick_s,
             cycle_budget_s=settings.cycle_budget_s,
             lease_seconds=settings.lease_seconds,
+            net=self.net,
             shutdown_grace_s=settings.shutdown_grace_s,
             ownership_check=self._assert_system_lock,
         )
@@ -626,6 +757,7 @@ class UnifiedRuntime:
         self.publisher = NeonPublisher(
             self.policy,
             target_dsn=settings.publish_dsn,
+            local_target_dsn=settings.frontend_dsn,
             interval_s=settings.publish_interval_s,
             seen_drift_s=settings.publish_seen_drift_s,
             shutdown_grace_s=settings.shutdown_grace_s,
@@ -648,12 +780,13 @@ class UnifiedRuntime:
                 joined = ", ".join(missing)
                 raise RuntimeError(
                     "unified runtime schema is missing "
-                    f"{joined}; apply xjobscore/migrations/20260923_unified_runtime.sql"
+                    f"{joined}; apply pending SQL migrations in xjobscore/migrations/"
                 )
             owned = await conn.fetchval("SELECT pg_try_advisory_lock($1)", SYSTEM_LOCK_ID)
             if not owned:
                 raise RuntimeError(
-                    "another xjobscore system already owns this database"
+                    "another xjobscore system already owns this database; "
+                    "stop the existing instance (Ctrl+C in its terminal) before restarting"
                 )
         except Exception:
             await conn.close()
@@ -680,7 +813,9 @@ class UnifiedRuntime:
             await self.runs.startup(pool)
             await self.result_store.initialize()
             await self.catalog.connect()
+            await self.net.__aenter__()
             await self.scheduler.start()
+            await self.reconciler.start()
             await self.gold_worker.start()
             await self.heartbeat.start()
             await self.publisher.start()
@@ -693,9 +828,11 @@ class UnifiedRuntime:
         await asyncio.gather(
             self.heartbeat.stop(grace_s=self.settings.shutdown_grace_s),
             self.scheduler.stop(),
+            self.reconciler.stop(),
             self.gold_worker.stop(),
             self.publisher.stop(),
         )
+        await self.net.__aexit__(None, None, None)
         await self.catalog.disconnect()
         await self.result_store.close()
         await self.policy.close()
@@ -717,6 +854,7 @@ class UnifiedRuntime:
         pool = await self.policy.pool_or_none()
         pipeline: dict[str, Any] | None = None
         heartbeat: dict[str, Any] | None = None
+        reconciliation = None
         scheduler = self.scheduler.status()
         control = None
         status_errors: list[str] = []
@@ -761,6 +899,7 @@ class UnifiedRuntime:
                     offline_after_s=max(180, self.settings.heartbeat_tick_s * 3),
                 )
                 heartbeat["cadence_seconds"] = self.settings.heartbeat_interval_s
+                reconciliation = await reconcile.snapshot(pool, self.reconciler)
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 status_errors.append(error)
@@ -772,6 +911,7 @@ class UnifiedRuntime:
             scheduler["alive"]
             and self.gold_worker.status()["alive"]
             and self.heartbeat.alive
+            and self.reconciler.status()["alive"]
             and (not self.publisher.enabled or self.publisher.status()["alive"])
         )
         return {
@@ -785,6 +925,7 @@ class UnifiedRuntime:
             "pipeline": pipeline,
             "heartbeat": heartbeat,
             "publish": self.publisher.status(),
+            "reconcile": reconciliation,
             "status_error": status_error,
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }

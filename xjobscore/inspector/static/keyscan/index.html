@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/shared/tokens.css">
   <link rel="stylesheet" href="/static/shared/base.css">
   <link rel="stylesheet" href="/static/shared/components.css">
-  <link rel="stylesheet" href="/static/keyscan/styles.css?v=31">
+  <link rel="stylesheet" href="/static/keyscan/styles.css?v=34">
   <script>
     (() => {
       const theme = localStorage.getItem("inspector-theme");
@@ -31,32 +31,32 @@
       <span class="ks-flag">--vendor</span>
       <select id="sources" class="ks-inline" aria-label="Sources">
         <option value="" selected>all</option>
-        <!-- Whole-tier picks sit with `all` at the top; the optgroups below
-             are the same sets, named, so the heading and the tier option
-             always agree. `other` is the remainder: rules with no tier. -->
-        <option>tier1</option>
-        <option>tier2</option>
-        <optgroup label="tier1">
-          <option>ashby</option>
-          <option>avature</option>
-          <option>eightfold</option>
-          <option>greenhouse</option>
-          <option>lever</option>
-          <option>oracle</option>
-          <option>smartrecruiters</option>
-          <option>workable</option>
-          <option>workday</option>
-        </optgroup>
-        <optgroup label="tier2">
-          <option>adp</option>
-          <option>bamboohr</option>
-          <option>ukg</option>
-        </optgroup>
-        <optgroup label="other">
-          <option>icims</option>
-          <option>successfactors</option>
-        </optgroup>
+        <!-- Flat options, not optgroups: a native optgroup heading cannot be
+             picked, and a tier must be. The "- " prefixes are menu-only --
+             app.js strips them while the select is closed. icims and
+             successfactors are left out: no crawl can find either (their
+             boards are on customer domains / robots-blocked). -->
+        <option value="tier1">tier 1</option>
+        <option value="ashby" data-tree="&nbsp;-&nbsp;">ashby</option>
+        <option value="avature" data-tree="&nbsp;-&nbsp;">avature</option>
+        <option value="eightfold" data-tree="&nbsp;-&nbsp;">eightfold</option>
+        <option value="greenhouse" data-tree="&nbsp;-&nbsp;">greenhouse</option>
+        <option value="lever" data-tree="&nbsp;-&nbsp;">lever</option>
+        <option value="oracle" data-tree="&nbsp;-&nbsp;">oracle</option>
+        <option value="smartrecruiters" data-tree="&nbsp;-&nbsp;">smartrecruiters</option>
+        <option value="workable" data-tree="&nbsp;-&nbsp;">workable</option>
+        <option value="workday" data-tree="&nbsp;-&nbsp;">workday</option>
+        <option value="tier2">tier 2</option>
+        <option value="adp" data-tree="&nbsp;-&nbsp;">adp</option>
+        <option value="bamboohr" data-tree="&nbsp;-&nbsp;">bamboohr</option>
+        <option value="ukg" data-tree="&nbsp;-&nbsp;">ukg</option>
       </select>
+      <label class="ks-flag ks-validate" title="probe each discovered token against its vendor — slow, and hits vendor hosts">
+        <input type="checkbox" id="validate"> --validate
+      </label>
+      <label class="ks-flag ks-validate" title="scan vendor/snapshot pairs again even if an earlier run finished them">
+        <input type="checkbox" id="rescan"> --rescan
+      </label>
       <span class="grow"></span>
       <button class="btn primary small" type="button" id="start-run-btn">run</button>
     </div>
@@ -99,9 +99,8 @@
                 <th>run</th>
                 <th>methods</th>
                 <th>status</th>
-                <th class="num">found</th>
-                <th class="num">live</th>
-                <th class="num">dead</th>
+                <th class="num" title="tokens this run saw, including ones already known">found</th>
+                <th class="num" title="tokens new to the table">added</th>
                 <th>started</th>
                 <th>took</th>
               </tr>
@@ -161,6 +160,6 @@
     <p class="ks-foot mono" id="foot"></p>
   </main>
 
-  <script type="module" src="/static/keyscan/app.js?v=31"></script>
+  <script type="module" src="/static/keyscan/app.js?v=34"></script>
 </body>
 </html>

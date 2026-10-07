@@ -257,3 +257,224 @@
     margin: 4px 0 0;
   }
 }
+
+/* Validate-unknown sweep. Same shell as the heartbeat card; per-vendor rows
+   change in place and finished vendors collapse to one line. */
+
+.tokens-page .tok-sweep {
+  margin-bottom: var(--space-4);
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, var(--radius));
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+}
+
+.tok-sweep-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.tok-sweep-main { flex: 1; min-width: 0; }
+
+.tok-sweep-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.tok-sweep-heading h1 { margin: 0; font-size: 14px; font-weight: 680; }
+
+.tok-sweep-meta { color: var(--text-muted); font-size: 12px; }
+
+.tok-sweep-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
+
+.tok-sweep-actions select { font-size: 12px; }
+
+/* Headline: the one line that answers "where are we" at a glance. */
+.tok-sweep-headline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tok-sweep-headline strong { color: var(--text); font-size: 13px; font-weight: 650; }
+.tok-sweep-headline .ok { color: var(--ok-text); }
+.tok-sweep-headline .bad { color: var(--err); }
+.tok-sweep-headline .sep { color: var(--border); }
+
+.tok-sweep-bar {
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.tok-sweep-bar > span { display: block; height: 100%; background: var(--accent); }
+
+/* Vendor grid: fixed rows, values change in place, nothing scrolls. */
+.tok-sweep-vendors {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) 1fr 92px 54px minmax(110px, 150px);
+  align-items: center;
+  gap: 5px 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font: 12px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tok-sweep-vendors .hd {
+  color: var(--text-muted);
+  font: 11px/1 var(--font-ui);
+  font-weight: 600;
+}
+
+.tok-sweep-vendors .num { text-align: right; color: var(--text-secondary); }
+
+.tok-sweep-vbar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.tok-sweep-vbar > span { display: block; height: 100%; background: var(--accent); }
+.tok-sweep-vbar[data-state="cooling"] > span { background: var(--warn); }
+.tok-sweep-vbar[data-state="done"] > span { background: var(--text-muted); }
+
+.tok-sweep-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
+.tok-sweep-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.tok-sweep-state[data-state="running"]::before { background: var(--accent); }
+.tok-sweep-state[data-state="cooling"] { color: var(--text); }
+.tok-sweep-state[data-state="cooling"]::before { background: var(--warn); }
+.tok-sweep-state[data-state="failing"] { color: var(--err); }
+.tok-sweep-state[data-state="failing"]::before { background: var(--err); }
+
+.tok-sweep-done-row {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+}
+
+.tok-sweep-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tok-sweep-foot a { color: var(--accent); text-decoration: none; }
+.tok-sweep-foot .grow { flex: 1; }
+
+/* Event log: important transitions only, never one line per token. */
+.tok-sweep-events {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font: 11px/1.75 var(--font-mono);
+}
+
+.tok-sweep-events div { display: flex; gap: 8px; white-space: nowrap; }
+.tok-sweep-events time { color: var(--text-muted); }
+.tok-sweep-events .warn { color: var(--serious); }
+.tok-sweep-events .ok { color: var(--ok-text); }
+
+@media (max-width: 700px) {
+  .tok-sweep-top { align-items: flex-start; flex-wrap: wrap; }
+  .tok-sweep-vendors { grid-template-columns: 90px 1fr 80px minmax(90px, 1fr); }
+  .tok-sweep-vendors .rate { display: none; }
+}
+
+.tok-sweep-idle-controls { display: inline-flex; align-items: center; gap: 6px; }
+.tok-sweep-headline .err { color: var(--err); }
+.tok-sweep-events .err { color: var(--err); }
+.tok-sweep-events .empty { color: var(--text-muted); }
+
+/* The table's own filters live in its header, beside the actions they scope. */
+.tokens-page .tok-table-header {
+  flex-wrap: wrap;
+}
+
+.tokens-page .tok-table-header h1 {
+  margin-right: var(--space-2);
+}
+
+.tokens-page .tok-table-header input[type="search"] {
+  width: 220px;
+}
+
+/* The table scrolls inside its card so the column headers can stay put. */
+.tokens-page .table-wrap {
+  max-height: 72vh;
+  overflow: auto;
+}
+
+.tokens-page #tokens-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.tok-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tok-pager .btn.small {
+  min-width: 26px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.tok-pager-range {
+  min-width: 13ch;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tok-pager-row td {
+  text-align: right;
+}
+
+.tok-page-note td {
+  padding: 10px 16px;
+}
+
+.tokens-page .group-row .grow { flex: 1; }
+
+.tokens-page .tok-group-check {
+  margin: 0;
+}

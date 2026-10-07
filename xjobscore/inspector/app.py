@@ -13,7 +13,7 @@ import asyncpg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from xjobscore.inspector import config, scheduling, telemetry
 from xjobscore.inspector.cache import now_utc
@@ -28,6 +28,7 @@ from xjobscore.inspector.policy import (
 from xjobscore.inspector.profile import source_profile, wire_content_type
 from xjobscore.inspector.runner import GoldJob, SchedulerRunner
 from xjobscore.inspector.service import InspectorService
+from xjobscore.inspector.token_sweep import SweepAlreadyRunning, SweepRunner
 from xjobscore.inspector.token_heartbeat import (
     HeartbeatAlreadyRunning,
     HeartbeatPaused,
@@ -36,11 +37,12 @@ from xjobscore.inspector.token_heartbeat import (
     heartbeat_snapshot as token_heartbeat_snapshot,
     set_paused as token_heartbeat_set_paused,
 )
-from xjobscore import logo_harvest
+from xjobscore import logo_harvest, reconcile
 from xjobscore.inspector import companies as companies_view
 from xjobscore.inspector.tokens import query as tokens_query
 from xjobscore.inspector.tokens import recent_checks as tokens_recent_checks
 from xjobscore.inspector.tokens import promote_verified as tokens_promote_verified
+from xjobscore.inspector.tokens import add_vendors_to_feed as tokens_add_vendors_to_feed
 from xjobscore.inspector.tokens import recent_feed_events as tokens_recent_feed_events
 from xjobscore.inspector.tokens import set_muted as tokens_set_muted
 from xjobscore.inspector.tokens import set_note as tokens_set_note
@@ -56,6 +58,7 @@ from xjobscore.inspector import validator
 from xjobscore.sources import UnknownSource
 from xjobscore import activity
 from xjobscore import sources as source_registry
+from xjobscore.source_policy import source_disabled
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -65,6 +68,8 @@ class KeyscanRunBody(BaseModel):
     date_to: str | None = None
     crawl_ids: str | None = None
     sources: str | None = None
+    validate_tokens: bool = False
+    rescan: bool = False
 
 
 class PolicyOptions(BaseModel):
@@ -82,8 +87,22 @@ class BulkPolicyOptions(BaseModel):
     enabled: bool
 
 
+class ProviderPauseOptions(BaseModel):
+    model_config = {"extra": "forbid"}
+    paused: bool
+
+
 class PollNowOptions(BaseModel):
     source: str | None = None
+
+
+class ReconcileControlOptions(BaseModel):
+    model_config = {"extra": "forbid"}
+    running: bool | None = None
+    concurrency: int | None = Field(default=None, ge=1, le=32)
+    checks_per_second: float | None = Field(default=None, ge=.1, le=20)
+    recheck_s: int | None = Field(default=None, ge=60, le=604800)
+    retry_s: int | None = Field(default=None, ge=60, le=604800)
 
 
 class SchedulerControlOptions(BaseModel):
@@ -91,7 +110,29 @@ class SchedulerControlOptions(BaseModel):
     note: str | None = None
 
 
+class ProviderGroupOptions(BaseModel):
+    # None asks for a new group; an existing id keeps fold state across renames.
+    id: int | None = None
+    name: str
+    sources: list[str] = Field(default_factory=list, max_length=1000)
+
+
+class ProviderGroupsOptions(BaseModel):
+    # The whole board layout, in order: every edit replaces it atomically.
+    groups: list[ProviderGroupOptions] = Field(max_length=200)
+
+
 class TokenHeartbeatControl(BaseModel):
+    paused: bool
+
+
+class TokenSweepStart(BaseModel):
+    # None sweeps the whole never-checked backlog.
+    limit: int | None = Field(default=None, ge=1)
+    ats: list[str] | None = None
+
+
+class TokenSweepPause(BaseModel):
     paused: bool
 
 
@@ -103,7 +144,14 @@ class TokenIdentity(BaseModel):
 
 
 class TokenEnableBody(BaseModel):
-    tokens: list[TokenIdentity]
+    """Add to feed: exact tokens, whole vendors under the page's view, or both."""
+
+    tokens: list[TokenIdentity] = []
+    vendors: list[str] = []
+    filter: str = "inactive"
+    q: str | None = None
+    # None keeps the feed default; bounds match the Feeds page's interval edit.
+    interval_s: int | None = Field(default=None, ge=60, le=7 * 86_400)
 
 
 class TokenValidateBody(BaseModel):
@@ -190,6 +238,7 @@ def create_app(
     policy: Any | None = None,
     runner: Any | None = None,
     token_runner: Any | None = None,
+    token_sweep: Any | None = None,
     gold_job: Any | None = None,
 ) -> FastAPI:
     """Build an inspector app, optionally with injected test collaborators."""
@@ -235,6 +284,9 @@ def create_app(
             lease_seconds=config.token_heartbeat_lease_s(),
         )
         dedup_job = gold_job if gold_job is not None else GoldJob(policy_store)
+    # In-process and in-memory by design: a restart just stops it, and the
+    # token rows it already wrote are the progress the next Start resumes.
+    sweep_runner = token_sweep if token_sweep is not None else SweepRunner(policy_store)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -243,6 +295,7 @@ def create_app(
             try:
                 yield
             finally:
+                await sweep_runner.stop()
                 await runtime.stop()
             return
         await database.connect()
@@ -253,6 +306,7 @@ def create_app(
             await heartbeat_runner.start()
             yield
         finally:
+            await sweep_runner.stop()
             await heartbeat_runner.stop()
             await scheduler_runner.stop()
             await policy_store.close()
@@ -266,6 +320,7 @@ def create_app(
     application.state.policy = policy_store
     application.state.scheduler_runner = scheduler_runner
     application.state.token_heartbeat_runner = heartbeat_runner
+    application.state.token_sweep = sweep_runner
     application.state.gold_job = dedup_job
     application.state.system_runtime = runtime
 
@@ -355,24 +410,61 @@ def create_app(
     async def system_live() -> dict[str, Any]:
         """What the workers are doing right now. Memory only; polled every 2s."""
         busy = activity.INFLIGHT.snapshot()
-        names = set(source_registry.SOURCES) | set(busy)
+        names = {
+            name for name in set(source_registry.SOURCES) | set(busy)
+            if not source_disabled(name)
+        }
+        rates = getattr(scheduler_runner, "rate_groups", dict)()
+
+        def pool(name: str) -> dict[str, Any]:
+            running = busy.get(name, [])
+            lanes = source_registry.lanes(name)
+            if len(lanes) == 1:
+                return {"width": source_registry.width(name), "busy": running}
+            # A partitioned vendor runs one pool per lane (`sources.lanes`);
+            # each reports its own slots and the budget `Net` charges it.
+            split = []
+            for lane in lanes:
+                group = source_registry.rate_group(lane)
+                stats = rates.get(group, {})
+                split.append({
+                    "lane": lane,
+                    "label": lane.partition(":")[2],
+                    "width": source_registry.width(lane),
+                    "busy": [
+                        row for row in running
+                        if source_registry.lane_of(name, row["key"]) == lane
+                    ],
+                    "rate_group": group,
+                    "budget": source_registry.rate_budget(lane),
+                    "rate": stats.get("rate"),
+                    "throttled": stats.get("throttled"),
+                })
+            return {
+                "width": sum(lane["width"] for lane in split),
+                "busy": running,
+                "lanes": split,
+                "partition": {
+                    "index": source_registry.partition_index(name),
+                    "named": list(source_registry.partitions(name)),
+                },
+            }
+
         return {
             "observed_at": now_utc().isoformat(),
-            "workers": {
-                name: {"width": source_registry.width(name), "busy": busy.get(name, [])}
-                for name in sorted(names)
-            },
+            "workers": {name: pool(name) for name in sorted(names)},
             "feeds": activity.POLLS.summary(15),
             "polls_total": activity.POLLS.total,
+            "enrichment": runtime.gold_worker.status() if runtime is not None else None,
         }
 
     @application.get("/api/system/events")
     async def system_events(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
-        """Recent non-feed runs and failed feeds, plus the last finished Gold
-        catch-up. Both walk system_run_started_idx newest-first and stop early."""
+        """Recent system events and the latest completed enrichment, including
+        changed feeds enriched immediately and background catch-up runs."""
         pool = await policy_store.pool_or_none()
         if pool is None:
-            return {"events": [], "gold_last": None}
+            return {"events": [], "gold_last": None, "telemetry_available": False}
         try:
             async with pool.acquire() as conn:
                 events = await conn.fetch(
@@ -380,7 +472,7 @@ def create_app(
                     SELECT id, job_type, identity, state, started_at, finished_at,
                            detail, error
                     FROM system_run
-                    WHERE job_type <> 'feed' OR state = 'failed'
+                    WHERE job_type <> 'feed' OR state = 'failed' OR detail ? 'gold'
                     ORDER BY started_at DESC
                     LIMIT $1
                     """,
@@ -391,13 +483,15 @@ def create_app(
                     SELECT id, job_type, identity, state, started_at, finished_at,
                            detail, error
                     FROM system_run
-                    WHERE job_type = 'gold_catchup' AND state <> 'running'
+                    WHERE state <> 'running' AND finished_at IS NOT NULL
+                      AND (job_type = 'gold_catchup'
+                           OR (job_type = 'feed' AND detail ? 'gold'))
                     ORDER BY started_at DESC
                     LIMIT 1
                     """
                 )
         except asyncpg.UndefinedTableError:
-            return {"events": [], "gold_last": None}
+            return {"events": [], "gold_last": None, "telemetry_available": False}
 
         def run_row(row: Any) -> dict[str, Any]:
             return {
@@ -409,6 +503,7 @@ def create_app(
         return {
             "events": [run_row(row) for row in events],
             "gold_last": run_row(gold_last) if gold_last else None,
+            "telemetry_available": True,
         }
 
     @application.get("/api/system/logs")
@@ -550,7 +645,9 @@ def create_app(
 
     @application.get("/api/stats/sources")
     async def source_stats() -> dict[str, Any]:
-        return {"sources": await store.source_stats()}
+        return {"sources": [
+            row for row in await store.source_stats() if not source_disabled(row["source"])
+        ]}
 
     @application.post("/api/feeds/{feed_ref}/policy")
     async def update_feed_policy(
@@ -727,9 +824,45 @@ def create_app(
             **await control_payload(),
         }
 
+    @application.get("/api/reconcile/control")
+    async def reconcile_get() -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            return await reconcile.snapshot(pool, runtime.reconciler if runtime else None)
+        except (asyncpg.PostgresError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @application.post("/api/reconcile/control")
+    async def reconcile_set(body: ReconcileControlOptions) -> dict[str, Any]:
+        pool = await _public_pool()
+        try:
+            async with pool.acquire() as conn:
+                await reconcile.set_control(conn, body.model_dump(exclude_unset=True, exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (asyncpg.PostgresError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if runtime:
+            runtime.reconciler.nudge()
+        return await reconcile_get()
+
     @application.get("/api/scheduler/control")
     async def scheduler_control_get() -> dict[str, Any]:
         return await control_payload()
+
+    @application.post("/api/scheduler/providers/{source}/pause")
+    async def scheduler_provider_pause(
+        source: str, body: ProviderPauseOptions
+    ) -> dict[str, Any]:
+        try:
+            result = await policy_store.set_provider_paused(source, body.paused)
+        except (PolicyUnavailable, ValueError) as exc:
+            raise _policy_error(exc) from exc
+        if not result["affected"]:
+            raise HTTPException(status_code=404, detail="No feeds for this provider")
+        if not body.paused:
+            scheduler_runner.nudge()
+        return result
 
     @application.post("/api/scheduler/control")
     async def scheduler_control_set(body: SchedulerControlOptions) -> dict[str, Any]:
@@ -737,9 +870,31 @@ def create_app(
             await policy_store.set_scheduler_running(body.running, body.note)
         except (PolicyUnavailable, FeedNotInPostgres, ValueError) as exc:
             raise _policy_error(exc) from exc
-        if body.running:
-            scheduler_runner.nudge()
+        # Pause must wake the scheduler too, so its active lanes stop claiming
+        # without waiting for the next periodic tick. In-flight polls finish.
+        scheduler_runner.nudge()
         return await control_payload()
+
+    # Board grouping is display state: unavailable (no PostgreSQL, or the
+    # tables not migrated yet) reads as "no groups" plus the reason, so the
+    # board still renders and only the editing controls switch off.
+    @application.get("/api/scheduler/groups")
+    async def scheduler_groups() -> dict[str, Any]:
+        try:
+            groups = await policy_store.provider_groups()
+        except PolicyUnavailable as exc:
+            return {"available": False, "error": str(exc), "groups": []}
+        return {"available": True, "error": None, "groups": groups}
+
+    @application.put("/api/scheduler/groups")
+    async def scheduler_groups_set(body: ProviderGroupsOptions) -> dict[str, Any]:
+        try:
+            groups = await policy_store.set_provider_groups(
+                [group.model_dump() for group in body.groups]
+            )
+        except (PolicyUnavailable, ValueError) as exc:
+            raise _policy_error(exc) from exc
+        return {"available": True, "error": None, "groups": groups}
 
     @application.post("/api/gold/dedup")
     async def gold_dedup_start() -> dict[str, Any]:
@@ -905,6 +1060,10 @@ def create_app(
         filter: str = "inactive",
         limit: int = Query(default=50, ge=1, le=10000),
         offset: int = Query(default=0, ge=0),
+        ats: str | None = None,
+        groups: bool = False,
+        q: str | None = None,
+        order: str = "token",
     ) -> dict[str, Any]:
         pool = await _public_pool()
         try:
@@ -915,6 +1074,10 @@ def create_app(
                     filter=filter,
                     limit=limit,
                     offset=offset,
+                    ats=ats or None,
+                    groups=groups,
+                    q=q,
+                    order=order,
                 ),
             }
         except ValueError as exc:
@@ -926,22 +1089,32 @@ def create_app(
 
     @application.post("/api/tokens/enable")
     async def enable_tokens(body: TokenEnableBody) -> dict[str, Any]:
-        if not body.tokens:
-            raise HTTPException(status_code=400, detail="tokens must not be empty")
-        identities = list(
-            dict.fromkeys((entry.ats, entry.token) for entry in body.tokens)
-        )
+        if not body.tokens and not body.vendors:
+            raise HTTPException(status_code=400, detail="tokens or vendors must not be empty")
+        vendors = set(body.vendors)
+        # A token whose vendor is also ticked is already covered by it.
+        identities = list(dict.fromkeys(
+            (entry.ats, entry.token) for entry in body.tokens if entry.ats not in vendors
+        ))
         pool = await _public_pool()
         try:
-            promoted = await tokens_promote_verified(pool, identities)
+            added = await tokens_promote_verified(pool, identities, interval_s=body.interval_s)
+            if vendors:
+                added += await tokens_add_vendors_to_feed(
+                    pool, sorted(vendors), filter=body.filter, q=body.q,
+                    interval_s=body.interval_s,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (OSError, asyncpg.PostgresError) as exc:
             raise HTTPException(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
             ) from exc
         return {
             "requested": len(identities),
-            "imported": promoted,
-            "skipped": len(identities) - promoted,
+            "vendors": sorted(vendors),
+            "imported": added,
+            "skipped": max(0, len(identities) - added) if not vendors else 0,
             "enabled": True,
         }
 
@@ -988,6 +1161,44 @@ def create_app(
             "feed_log_available": events is not None,
             "feed_events": events or [],
         }
+
+    async def sweep_payload() -> dict[str, Any]:
+        try:
+            backlog = await sweep_runner.backlog()
+        except (OSError, asyncpg.PostgresError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        return {**sweep_runner.snapshot(), "backlog": backlog}
+
+    @application.get("/api/tokens/sweep")
+    async def token_sweep_get() -> dict[str, Any]:
+        return await sweep_payload()
+
+    @application.post("/api/tokens/sweep/start", status_code=202)
+    async def token_sweep_start(body: TokenSweepStart) -> dict[str, Any]:
+        await _public_pool()
+        try:
+            await sweep_runner.start(limit=body.limit, ats=body.ats or None)
+        except SweepAlreadyRunning as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (OSError, asyncpg.PostgresError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503, detail=f"PostgreSQL unavailable: {exc}"
+            ) from exc
+        return await sweep_payload()
+
+    @application.post("/api/tokens/sweep/pause")
+    async def token_sweep_pause(body: TokenSweepPause) -> dict[str, Any]:
+        sweep_runner.pause(body.paused)
+        return await sweep_payload()
+
+    @application.post("/api/tokens/sweep/cancel")
+    async def token_sweep_cancel() -> dict[str, Any]:
+        await sweep_runner.cancel()
+        return await sweep_payload()
 
     @application.get("/api/tokens/heartbeat")
     async def token_heartbeat_get() -> dict[str, Any]:
@@ -1070,6 +1281,8 @@ def create_app(
                 token=body.token,
                 muted=body.muted,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (OSError, asyncpg.PostgresError) as exc:
             raise HTTPException(
                 status_code=503, detail=f"PostgreSQL unavailable: {exc}"
@@ -1261,6 +1474,8 @@ def create_app(
                 date_to=body.date_to,
                 crawl_ids=body.crawl_ids,
                 sources=body.sources,
+                validate=body.validate_tokens,
+                rescan=body.rescan,
             )
         except keyscan_control.RunAlreadyActive as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1277,9 +1492,15 @@ def create_app(
 
         scan = Keyscan(keyscan_view.database_path().parent)
         try:
-            return await scan.list_crawls()
+            result = await scan.list_crawls()
         except KeyscanError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Which snapshots a scan can plan from footers instead of reading all
+        # ~600 files -- the picker marks them, so the cheap ones are visible.
+        footers = _keyscan_read(keyscan_view.footer_status)
+        for crawl in result["crawls"]:
+            crawl["footers"] = footers.get(crawl["id"])
+        return result
 
     @application.post("/api/keyscan/runs/{run_id}/cancel")
     def keyscan_cancel(run_id: str) -> dict[str, Any]:

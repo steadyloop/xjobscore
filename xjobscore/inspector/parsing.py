@@ -29,6 +29,7 @@ SUMMARY_KEYS = (
     "unsupported",
     "resolved",
     "fallback_company",
+    "would_mint",
     "would_park",
 )
 
@@ -38,7 +39,7 @@ AliasLookup = Callable[[str], tuple[int, str] | None]
 def _company_resolution(
     feed: Feed, posting: Posting, resolve_alias: AliasLookup
 ) -> dict[str, Any]:
-    """Preview silver._company_id: resolved, feed fallback, or parked."""
+    """Preview silver._company_id: resolved, feed fallback, minted, or parked."""
     if posting.company_raw:
         resolved = resolve_alias(posting.company_raw)
         if resolved is not None:
@@ -56,6 +57,9 @@ def _company_resolution(
             "company_name": feed.company_name,
             "company_raw": posting.company_raw,
         }
+    if feed.type == "ATS":
+        # silver mints the token's company on the live poll rather than park.
+        return {"status": "would_mint", "company_raw": posting.company_raw}
     return {"status": "would_park", "company_raw": posting.company_raw}
 
 
@@ -86,9 +90,12 @@ def _canonical_entry(
     entry["classification"] = "posting"
     resolution = _company_resolution(feed, canonical, resolve_alias)
     summary[
-        {"resolved": "resolved", "fallback": "fallback_company", "would_park": "would_park"}[
-            resolution["status"]
-        ]
+        {
+            "resolved": "resolved",
+            "fallback": "fallback_company",
+            "would_mint": "would_mint",
+            "would_park": "would_park",
+        }[resolution["status"]]
     ] += 1
     entry["company_resolution"] = resolution
     try:

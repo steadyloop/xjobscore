@@ -76,6 +76,10 @@ class FakePolicy:
         self.calls.append(("set_paused", source, key, paused))
         return {"feed_id": 11, "paused": paused}
 
+    async def set_provider_paused(self, source: str, paused: bool) -> dict:
+        self.calls.append(("set_provider_paused", source, paused))
+        return {"source": source, "paused": paused, "affected": 2013}
+
     async def set_feeds_enabled(self, identities: list[tuple], enabled: bool) -> dict:
         self.calls.append(("set_feeds_enabled", tuple(identities), enabled))
         return {
@@ -340,8 +344,9 @@ def test_parsed_round_trip(client):
     canonical = detail["canonicals"][0]
     assert canonical["type"] == "Posting"
     assert canonical["classification"] == "posting"
-    # No alias mirror and no feed company: silver would park this posting.
-    assert canonical["company_resolution"]["status"] == "would_park"
+    # No alias mirror and no feed company: silver would mint the ATS token's
+    # company on the live poll rather than park the posting.
+    assert canonical["company_resolution"]["status"] == "would_mint"
     assert canonical["title_normalized"] == "demo"
 
     assert client.get(f"/api/results/{REF}/parsed/9").status_code == 404
@@ -617,6 +622,43 @@ def test_bulk_policy_reports_unknown_refs_without_failing_the_batch(imported_cli
     )
 
 
+@pytest.mark.parametrize("paused", [False, True])
+def test_provider_pause_skips_fleet_lookup_and_wakes_on_resume(polling_client, monkeypatch, paused):
+    async def no_fleet_lookup():
+        raise AssertionError("provider pause must not resolve the full fleet")
+
+    monkeypatch.setattr(polling_client.app.state.inspector, "feed_rows", no_fleet_lookup)
+    response = polling_client.post(
+        "/api/scheduler/providers/paylocity/pause", json={"paused": paused}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"source": "paylocity", "paused": paused, "affected": 2013}
+    assert polling_client.app.state.policy.calls == [("set_provider_paused", "paylocity", paused)]
+    assert polling_client.app.state.scheduler_runner.nudges == int(not paused)
+
+
+def test_provider_pause_reports_an_absent_provider(polling_client, monkeypatch):
+    async def absent(source, paused):
+        return {"source": source, "paused": paused, "affected": 0}
+
+    monkeypatch.setattr(polling_client.app.state.policy, "set_provider_paused", absent)
+    response = polling_client.post(
+        "/api/scheduler/providers/missing/pause", json={"paused": True}
+    )
+    assert response.status_code == 404
+
+
+def test_provider_pause_reports_database_failure(polling_client, monkeypatch):
+    async def unavailable(source, paused):
+        raise PolicyUnavailable("database unavailable")
+
+    monkeypatch.setattr(polling_client.app.state.policy, "set_provider_paused", unavailable)
+    response = polling_client.post(
+        "/api/scheduler/providers/paylocity/pause", json={"paused": True}
+    )
+    assert response.status_code == 503
+
+
 def test_scheduler_feed_detail(imported_client):
     body = imported_client.get(f"/api/scheduler/feeds/{REF}").json()
     assert body["feed"]["feed_ref"] == REF
@@ -673,6 +715,14 @@ def test_scheduler_control_degraded_postgres(client):
 
     response = client.post("/api/scheduler/control", json={"running": True})
     assert response.status_code == 503
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_scheduler_pause_and_resume_wake_the_runner(polling_client, running):
+    response = polling_client.post("/api/scheduler/control", json={"running": running})
+    assert response.status_code == 200
+    assert response.json()["control"]["running"] is running
+    assert polling_client.app.state.scheduler_runner.nudges == 1
 
 
 def test_runner_does_not_start_under_default_config(client):
@@ -824,10 +874,19 @@ def test_feeds_page_moved_to_feeds(client):
 
 def test_system_live_reports_workers_and_the_feed_window(client):
     body = client.get("/api/system/live").json()
-    assert set(body) == {"observed_at", "workers", "feeds", "polls_total"}
+    assert set(body) == {"observed_at", "workers", "feeds", "polls_total", "enrichment"}
+    assert body["enrichment"] is None
     assert isinstance(body["polls_total"], int)
     assert body["workers"]["greenhouse"]["width"] >= 1
     assert body["workers"]["greenhouse"]["busy"] == []
+    assert "lanes" not in body["workers"]["greenhouse"]
+    # Workday runs one pool per data center; its width is their sum.
+    workday = body["workers"]["workday"]
+    assert [lane["label"] for lane in workday["lanes"]] == ["wd1", "wd3", "wd5", "other"]
+    assert workday["width"] == sum(lane["width"] for lane in workday["lanes"])
+    assert workday["lanes"][0]["budget"] == 8.0
+    assert workday["lanes"][0]["rate_group"] == "wd1.myworkdayjobs.com"
+    assert workday["partition"] == {"index": 2, "named": ["wd1", "wd3", "wd5"]}
     assert set(body["feeds"]) == {
         "window_s", "since_start", "polled", "with_new", "new_postings", "partial", "errors",
     }
@@ -836,7 +895,7 @@ def test_system_live_reports_workers_and_the_feed_window(client):
 def test_system_events_without_postgres_are_empty_not_an_error(client):
     response = client.get("/api/system/events")
     assert response.status_code == 200
-    assert response.json() == {"events": [], "gold_last": None}
+    assert response.json() == {"events": [], "gold_last": None, "telemetry_available": False}
 
 
 def test_system_logs_return_lines_after_a_cursor(client):
@@ -959,12 +1018,15 @@ def test_tokens_page_is_served(client):
     response = client.get("/tokens")
     assert response.status_code == 200
     assert "Token heartbeat" in response.text
-    assert "Promote selected" in response.text
+    assert "Add to feed" in response.text
+    assert "validate-all-btn" not in response.text
     inactive = response.text.index('value="inactive" selected')
+    unknown = response.text.index('value="unknown"')
     muted = response.text.index('value="muted"')
     dead = response.text.index('value="dead"')
     all_tokens = response.text.index('value="all">All (including active)</option>')
-    assert inactive < muted < dead < all_tokens
+    assert inactive < unknown < muted < dead < all_tokens
+    assert 'id="sweep"' in response.text
     assert 'value="alive-active"' not in response.text
 
 
@@ -1421,3 +1483,97 @@ def test_companies_page_is_served(client):
     assert "Companies" in response.text
     assert 'id="filter-pills"' in response.text
     assert "/static/companies/app.js" in response.text
+
+
+# ------------------------------------------------------------------ sweep
+
+
+class FakeSweep:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.busy = False
+
+    async def backlog(self):
+        return {"workable": 3}
+
+    def snapshot(self):
+        return {"status": "running" if self.calls else "idle", "vendors": []}
+
+    async def start(self, *, limit, ats=None):
+        if self.busy:
+            from xjobscore.inspector.token_sweep import SweepAlreadyRunning
+
+            raise SweepAlreadyRunning("A sweep is already running")
+        self.calls.append(("start", limit, ats))
+
+    def pause(self, paused):
+        self.calls.append(("pause", paused))
+
+    async def cancel(self):
+        self.calls.append(("cancel",))
+
+    async def stop(self):
+        pass
+
+
+def sweep_client(app_store, pool, sweep):
+    return TestClient(create_app(
+        catalog=FakeCatalog(),
+        store=app_store,
+        user_agent="route-test",
+        policy=FakePolicy(pool=pool),
+        token_sweep=sweep,
+    ))
+
+
+def test_sweep_routes_drive_the_runner(app_store):
+    sweep = FakeSweep()
+    with sweep_client(app_store, FakeTokensPool(), sweep) as client:
+        idle = client.get("/api/tokens/sweep").json()
+        assert idle["status"] == "idle" and idle["backlog"] == {"workable": 3}
+        started = client.post("/api/tokens/sweep/start", json={"limit": 100, "ats": ["workday"]})
+        assert started.status_code == 202 and started.json()["status"] == "running"
+        assert client.post("/api/tokens/sweep/pause", json={"paused": True}).status_code == 200
+        assert client.post("/api/tokens/sweep/cancel").status_code == 200
+    assert sweep.calls == [("start", 100, ["workday"]), ("pause", True), ("cancel",)]
+
+
+def test_sweep_start_rejects_bad_limit_and_second_sweep(app_store):
+    sweep = FakeSweep()
+    with sweep_client(app_store, FakeTokensPool(), sweep) as client:
+        assert client.post("/api/tokens/sweep/start", json={"limit": 0}).status_code == 422
+        sweep.busy = True
+        assert client.post("/api/tokens/sweep/start", json={}).status_code == 409
+
+
+def test_sweep_start_503_without_pool(app_store):
+    with sweep_client(app_store, None, FakeSweep()) as client:
+        assert client.post("/api/tokens/sweep/start", json={}).status_code == 503
+
+
+def test_add_to_feed_by_vendor_skips_tokens_the_vendor_covers(public_client, monkeypatch):
+    app_module = importlib.import_module("xjobscore.inspector.app")
+    seen = {}
+
+    async def fake_tokens(pool, identities, *, interval_s=None):
+        seen["tokens"] = (identities, interval_s)
+        return len(identities)
+
+    async def fake_vendors(pool, vendors, *, filter, q, interval_s):
+        seen["vendors"] = (vendors, filter, q, interval_s)
+        return 10
+
+    monkeypatch.setattr(app_module, "tokens_promote_verified", fake_tokens)
+    monkeypatch.setattr(app_module, "tokens_add_vendors_to_feed", fake_vendors)
+    with public_client(FakeTokensPool()) as test_client:
+        response = test_client.post("/api/tokens/enable", json={
+            "tokens": [{"ats": "lever", "token": "a"}, {"ats": "ashby", "token": "b"}],
+            "vendors": ["lever"], "filter": "all", "q": "ai", "interval_s": 86400,
+        })
+        empty = test_client.post("/api/tokens/enable", json={})
+        too_fast = test_client.post("/api/tokens/enable", json={"vendors": ["lever"], "interval_s": 5})
+
+    assert response.status_code == 200 and response.json()["imported"] == 11
+    assert seen["tokens"] == ([("ashby", "b")], 86400)
+    assert seen["vendors"] == (["lever"], "all", "ai", 86400)
+    assert empty.status_code == 400 and too_fast.status_code == 422

@@ -209,7 +209,7 @@ async def test_oracle_dedupes_ids_repeated_across_pages():
 
 async def test_oracle_skips_rows_missing_from_the_detail_response():
     """A requisition withdrawn between the list and detail pass simply isn't
-    in the batch response -- skipped, not a crash."""
+    in the batch response. Incomplete details must not establish disappearance."""
     rows = [_row("1"), _row("2"), _row("3")]
     net = RoutedFixtureNet(
         [_list_body(rows, total=3)],
@@ -218,7 +218,7 @@ async def test_oracle_skips_rows_missing_from_the_detail_response():
     _, record = await _harvest(net)
 
     assert {item.external_id for item in record.items} == {"1", "3"}
-    assert record.truncated is False
+    assert record.truncated is True
 
 
 async def test_oracle_pages_fetch_concurrently_and_assemble_in_offset_order(monkeypatch):
@@ -262,7 +262,7 @@ async def test_oracle_requests_carry_the_configured_concurrency_to_net():
     first_list, *rest = net.get_calls
     assert "offset=0," in first_list["url"] and first_list["concurrency"] == 1
     assert rest  # a fanned-out page and at least one detail batch
-    assert all(call["concurrency"] == 8 for call in rest)
+    assert all(call["concurrency"] == 4 for call in rest)
 
 
 async def test_oracle_failed_page_mid_fanout_truncates_with_no_items(monkeypatch):

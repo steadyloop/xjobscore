@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
 
@@ -35,16 +36,16 @@ JOB_COLUMNS = (
     "status",
     "first_seen_at",
     "last_seen_at",
-    "vendor_closed_at",
-    "link_marked_at",
+    "missing_since",
+    "linked_dead_at",
+    "ats_closed_at",
+    "paged_closed_at",
     "link_checked_at",
-    "link_closed_at",
     "attributes",
     "degree_version",
     "job_domain",
     "job_domain_version",
     "raw_id",
-    "removal_marked_at",
 )
 
 COMPANY_COLUMNS = (
@@ -135,6 +136,24 @@ JOB_ROWS_SQL = f"""
     ORDER BY id
 """
 
+# Preserve actual closure evidence when a previously served job leaves the
+# active cohort. Other cohort departures still close without a fabricated
+# source signal (for example a location or duplicate-selection change).
+CLOSURE_COLUMNS = (
+    "missing_since", "linked_dead_at", "ats_closed_at", "paged_closed_at",
+    "link_checked_at",
+)
+SOURCE_CLOSURES_SQL = f"""
+    SELECT id, {', '.join(CLOSURE_COLUMNS)}
+    FROM job_posting
+    WHERE id = ANY($1::bigint[]) AND status = 'closed'
+"""
+UPDATE_CLOSURES_SQL = f"""
+    UPDATE job_posting
+    SET {', '.join(f'{column} = ${i}' for i, column in enumerate(CLOSURE_COLUMNS, 2))}
+    WHERE id = $1
+"""
+
 COMPANY_FINGERPRINT_SQL = f"""
     SELECT id, {_fingerprint('company', COMPANY_COLUMNS)} AS fingerprint
     FROM company
@@ -210,15 +229,26 @@ UPSERT_JOB_SQL = f"""
     {_distinct_guard('job_posting', (*_JOB_UPDATE_COLUMNS, 'source', 'source_key'))}
 """
 
-# No target row is deleted. A posting that closed, moved out of the supported
-# geography, was reclassified, or lost duplicate-representative status simply
-# leaves the current cohort and becomes invisible to status='active' UI reads.
+# A posting outside the current cohort becomes invisible to active UI reads.
+# Keep referenced rows for personal history; purge unreferenced closed rows below.
 SOFT_CLOSE_SQL = """
     UPDATE job_posting
     SET status = 'closed'
     WHERE status = 'active'
       AND NOT (id = ANY($1::bigint[]))
 """
+
+DELETE_CLOSED_SQL = """
+    DELETE FROM job_posting j
+    WHERE j.status = 'closed'
+      AND NOT EXISTS (
+          SELECT 1 FROM job_application a WHERE a.job_posting_id = j.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM job_feedback f WHERE f.job_posting_id = j.id
+      )
+"""
+DELETE_CLOSED_PROTECTED_SQL = DELETE_CLOSED_SQL + " AND NOT (j.id = ANY($1::bigint[]))"
 
 UPSERT_COVERAGE_SQL = """
     INSERT INTO coverage_snapshot(id, payload, computed_at)
@@ -352,6 +382,8 @@ async def publish(
     *,
     dry_run: bool = False,
     seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
+    retained: dict[str, list[Any]] | None = None,
+    cleanup_closed: bool = True,
 ) -> PublishCounts:
     """Send Neon only what differs from the home cohort.
 
@@ -369,9 +401,21 @@ async def publish(
         await _ensure_coverage_schema(target)
         await target.execute("SET LOCAL TIME ZONE 'UTC'")
 
+        # Local personal tables stay empty. Retain the public job snapshots
+        # referenced by central tracking without copying accounts or tracker rows.
+        if retained is not None:
+            for query, rows, columns in (
+                (UPSERT_COMPANY_SQL, retained["companies"], COMPANY_COLUMNS),
+                (UPSERT_LOGO_SQL, retained["logos"], ("company_id", "bytes")),
+                (UPSERT_JOB_SQL, retained["jobs"], JOB_COLUMNS),
+            ):
+                if rows:
+                    await target.executemany(query, [_values(row, columns) for row in rows])
+
+        published = await target.fetch(PUBLISHED_JOBS_SQL)
         job_ids = changed_job_ids(
             cohort,
-            await target.fetch(PUBLISHED_JOBS_SQL),
+            published,
             seen_drift_s=seen_drift_s,
         )
         changed_companies = _differing(
@@ -411,6 +455,14 @@ async def publish(
                     for row in await source.fetch(JOB_ROWS_SQL, job_ids)
                 ],
             )
+        departures = sorted({int(row["id"]) for row in published} - set(cohort_ids))
+        if departures:
+            closures = await source.fetch(SOURCE_CLOSURES_SQL, departures)
+            if closures:
+                await target.executemany(
+                    UPDATE_CLOSURES_SQL,
+                    [_values(row, ("id", *CLOSURE_COLUMNS)) for row in closures],
+                )
         closed = _command_count(await target.execute(SOFT_CLOSE_SQL, cohort_ids))
         if coverage_changed:
             coverage = await source.fetchrow(COVERAGE_ROW_SQL)
@@ -420,6 +472,11 @@ async def publish(
                 coverage["payload"],
                 coverage["computed_at"],
             )
+        if cleanup_closed:
+            if retained is not None and retained["jobs"]:
+                await target.execute(DELETE_CLOSED_PROTECTED_SQL, [row["id"] for row in retained["jobs"]])
+            else:
+                await target.execute(DELETE_CLOSED_SQL)
         if dry_run:
             await transaction.rollback()
         else:
@@ -457,6 +514,18 @@ def _load_dotenv() -> None:
 
 
 async def connect_target(dsn: str, **connect_kwargs: Any) -> asyncpg.Connection:
+    # The runtime's dotenv loader retains quotes, and Neon supplies the libpq
+    # channel_binding option, which asyncpg treats as an invalid server setting.
+    # Preserve the URL's TLS settings while adapting it for this driver.
+    dsn = dsn.strip()
+    if len(dsn) >= 2 and dsn[0] == dsn[-1] and dsn[0] in "\"'":
+        dsn = dsn[1:-1]
+    parsed = urlsplit(dsn)
+    dsn = urlunsplit(parsed._replace(query=urlencode([
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != "channel_binding"
+    ])))
     # Rows read from a store pool carry jsonb as Python objects; the target
     # must encode them the same way or asyncpg rejects a dict where it
     # expects JSON text.
@@ -476,14 +545,84 @@ async def publish_to(
     dry_run: bool = False,
     seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
 ) -> PublishCounts:
+    from xjobscore import serving
+
+    if not isinstance(source, serving.Source):
+        source = serving.Source(source, await serving.prepare(source))
     # A fresh connection per run lets Neon's compute scale to zero in between.
     target = await connect_target(target_dsn)
     try:
+        await serving.validate_target(source, target)
         return await publish(
-            source, target, dry_run=dry_run, seen_drift_s=seen_drift_s
+            source, target, dry_run=dry_run, seen_drift_s=seen_drift_s,
+            retained=source.retained, cleanup_closed=source.cleanup_closed,
         )
     finally:
         await target.close()
+
+
+async def publish_targets(
+    pool: Any,
+    targets: dict[str, str],
+    *,
+    dry_run: bool = False,
+    seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
+) -> dict[str, PublishCounts | BaseException]:
+    """Publish one cohort independently to each target using shared serving IDs."""
+    from xjobscore import serving
+
+    async def central_references() -> dict[str, list[Any]] | None:
+        if "neon" not in targets:
+            return None
+        conn = None
+        try:
+            conn = await connect_target(targets["neon"], timeout=15, server_settings={"default_transaction_read_only":"on"})
+            jobs = await conn.fetch(f"""
+                SELECT {', '.join('j.' + c for c in JOB_COLUMNS)} FROM job_posting j
+                WHERE EXISTS (SELECT 1 FROM job_application a WHERE a.job_posting_id=j.id)
+                   OR EXISTS (SELECT 1 FROM job_feedback f WHERE f.job_posting_id=j.id)
+            """)
+            ids = list({row["company_id"] for row in jobs})
+            return {
+                "jobs": jobs,
+                "companies": await conn.fetch(COMPANY_ROWS_SQL, ids),
+                "logos": await conn.fetch(LOGO_ROWS_SQL, ids),
+            }
+        except Exception:
+            # A central outage must not stop local updates. Postpone local
+            # deletion until central references can be checked again.
+            return None
+        finally:
+            if conn is not None:
+                await conn.close()
+
+
+    async with pool.acquire() as connection:
+        await serving.prepare(connection)
+        async with connection.transaction(isolation="repeatable_read", readonly=True):
+            shared = serving.SharedSnapshot(connection)
+            cohort = await read_cohort(serving.Source(shared))
+            references = asyncio.create_task(central_references())
+
+            async def send(name: str, dsn: str) -> PublishCounts:
+                mapped = serving.Source(shared, cohort)
+                if name == "local":
+                    mapped.retained = await references
+                    mapped.cleanup_closed = mapped.retained is not None
+                return await publish_to(
+                    mapped, dsn, dry_run=dry_run, seen_drift_s=seen_drift_s,
+                )
+
+            try:
+                results = await asyncio.gather(
+                    *(send(name, dsn) for name, dsn in targets.items()),
+                    return_exceptions=True,
+                )
+            finally:
+                if not references.done():
+                    references.cancel()
+                await asyncio.gather(references, return_exceptions=True)
+    return dict(zip(targets, results))
 
 
 def format_counts(counts: PublishCounts) -> str:
@@ -507,6 +646,9 @@ async def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
+        "--local-target-dsn", help="local frontend DSN; default: $FRONTEND_DATABASE_URL"
+    )
+    parser.add_argument(
         "--seen-drift-s",
         type=float,
         default=DEFAULT_SEEN_DRIFT_S,
@@ -516,34 +658,36 @@ async def main(argv: Sequence[str] | None = None) -> int:
 
     source_dsn = args.source_dsn or os.environ.get("DATABASE_URL")
     target_dsn = args.target_dsn or os.environ.get("PUBLISH_DATABASE_URL")
+    local_dsn = args.local_target_dsn or os.environ.get("FRONTEND_DATABASE_URL")
     if not source_dsn:
         raise ValueError("no source DSN: pass --source-dsn or set DATABASE_URL")
-    if not target_dsn:
+    if not target_dsn and not local_dsn:
         raise ValueError(
             "no target DSN: pass --target-dsn or set PUBLISH_DATABASE_URL"
         )
-    if source_dsn == target_dsn:
+    if source_dsn in {target_dsn, local_dsn}:
         raise ValueError("source and target DSNs must be different")
 
-    source = await asyncpg.connect(source_dsn)
+    pool = await store.connect(source_dsn)
     try:
-        # Same codec as the runtime's store pool, so both entry points hand
-        # publish() identical row values.
-        await store._install_jsonb_codec(source)
-        counts = await publish_to(
-            source,
-            target_dsn,
-            dry_run=args.dry_run,
-            seen_drift_s=args.seen_drift_s,
+        targets = {}
+        if local_dsn:
+            targets["local"] = local_dsn
+        if target_dsn:
+            targets["neon"] = target_dsn
+        results = await publish_targets(
+            pool, targets, dry_run=args.dry_run, seen_drift_s=args.seen_drift_s,
         )
     finally:
-        await source.close()
-
-    print(
-        format_counts(counts)
-        + (" (dry run, rolled back)" if args.dry_run else "")
-    )
-    return 0
+        await pool.close()
+    failed = False
+    for name, result in results.items():
+        if isinstance(result, BaseException):
+            print(f"{name}: {type(result).__name__}: {result}", file=sys.stderr)
+            failed = True
+        else:
+            print(name + ": " + format_counts(result) + (" (dry run, rolled back)" if args.dry_run else ""))
+    return 1 if failed else 0
 
 
 def cli() -> int:

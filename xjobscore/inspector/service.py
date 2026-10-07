@@ -20,12 +20,13 @@ from xjobscore.inspector.network import InspectorNet, StageTimer, telemetry
 from xjobscore.inspector.profile import source_profile
 from xjobscore.net import NetError
 from xjobscore.records import Feed, Item, Record
+from xjobscore.source_policy import DISABLED_SOURCES
 
 
 SOURCE_CATEGORIES = ("all", "ATS", "Direct", "Board")
 # Generic extraction strategies are implementation details, not inspector
 # sources a user can select or fetch directly.
-HIDDEN_SOURCES = frozenset({"jsonld"})
+HIDDEN_SOURCES = frozenset({"jsonld"}) | DISABLED_SOURCES
 SMARTRECRUITERS_HOST = "api.smartrecruiters.com"
 ASHBY_HOST = "api.ashbyhq.com"
 
@@ -84,6 +85,8 @@ class InspectorService:
         # myworkdayjobs.com, spanning many tenant hostnames) only binds if
         # concurrent fetches of that vendor share one semaphore instance.
         self._shared_vendor_semaphores: dict[str, Any] = {}
+        # Net._VENDOR_RATES budgets, shared for the same reason.
+        self._shared_vendor_budgets: dict[str, Any] = {}
 
     async def get_result(self, feed_id: int) -> RunSnapshot | None:
         snapshot = await self.result_store.load_feed(feed_id)
@@ -160,7 +163,10 @@ class InspectorService:
         return await self._with_parse(snapshot, feed)
 
     async def source_groups(self) -> list[dict[str, Any]]:
-        return await self.result_store.summary_groups()
+        return [
+            group for group in await self.result_store.summary_groups()
+            if group["source"] not in HIDDEN_SOURCES
+        ]
 
     def _lock(self, feed_id: int):
         import asyncio
@@ -287,6 +293,7 @@ class InspectorService:
                     shared_host_semaphores=self._shared_host_semaphores,
                     shared_host_paces=self._shared_host_paces,
                     shared_vendor_semaphores=self._shared_vendor_semaphores,
+                    shared_vendor_budgets=self._shared_vendor_budgets,
                 )
                 async with net:
                     if feed.source == "smartrecruiters":

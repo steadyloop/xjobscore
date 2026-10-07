@@ -2,7 +2,8 @@
 
 The inspector may WRITE four operator-owned things: ``feed.polling``,
 ``feed.interval_s``, ``feed.paused_at``, and ``scheduler_control.running``
-(plus explicit feed import and drop). The runtime columns on ``feed``
+(plus explicit feed import and drop, and the Scheduler board's provider
+groups, which nothing but the board reads). The runtime columns on ``feed``
 -- etag, res_hash, strikes, hold_until -- belong to the production worker and
 are read here for display only. Writing them would corrupt run.py's change
 detection and 304 handling.
@@ -36,7 +37,11 @@ import asyncio
 from datetime import timedelta
 from typing import Any
 
+import asyncpg
+
 from xjobscore import store
+from xjobscore.feed_identity import canonical_feed_source
+from xjobscore.source_policy import require_source_allowed
 
 MIN_INTERVAL_S = 60
 MAX_INTERVAL_S = 7 * 86_400
@@ -81,6 +86,63 @@ class PollNowRefused(RuntimeError):
     def __init__(self, message: str, *, reason: str) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+MAX_GROUP_NAME = 64
+# The board's catch-all section. Not a row, so no group may borrow its name.
+UNGROUPED = "Ungrouped"
+_GROUPS_MIGRATION = "xjobscore/migrations/20261006_provider_groups.sql"
+
+_PROVIDER_GROUPS_SQL = """
+    SELECT g.id, g.name,
+           COALESCE(
+               array_agg(m.source ORDER BY m.source) FILTER (WHERE m.source IS NOT NULL),
+               '{}'
+           ) AS sources
+    FROM provider_group g
+    LEFT JOIN provider_group_member m ON m.group_id = g.id
+    GROUP BY g.id
+    ORDER BY g.position, g.id
+"""
+
+
+def clean_provider_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate a whole board layout before any of it is written.
+
+    Raises ValueError (the API's 400) for an empty or overlong name, two groups
+    with one name, the reserved "Ungrouped", or a provider filed twice -- the
+    member primary key would refuse that last one too, but only after half the
+    layout had been rewritten.
+    """
+    names: set[str] = set()
+    owner: dict[str, str] = {}
+    cleaned = []
+    for group in groups:
+        name = (group.get("name") or "").strip()
+        if not name:
+            raise ValueError("group names cannot be empty")
+        if len(name) > MAX_GROUP_NAME:
+            raise ValueError(f"group names are at most {MAX_GROUP_NAME} characters")
+        folded = name.casefold()
+        if folded == UNGROUPED.casefold():
+            raise ValueError(f'"{UNGROUPED}" is reserved for providers in no group')
+        if folded in names:
+            raise ValueError(f'two groups are named "{name}"')
+        names.add(folded)
+        sources = list(dict.fromkeys(s.strip() for s in group.get("sources") or [] if s.strip()))
+        for source in sources:
+            if source in owner:
+                raise ValueError(f'{source} is in both "{owner[source]}" and "{name}"')
+            owner[source] = name
+        cleaned.append({"id": group.get("id"), "name": name, "sources": sources})
+    return cleaned
+
+
+def _group_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {"id": row["id"], "name": row["name"], "sources": list(row["sources"])}
+        for row in rows
+    ]
 
 
 # Re-exported, not redefined: the scheduler drops feeds automatically on
@@ -294,6 +356,26 @@ class PolicyStore:
             raise FeedNotInPostgres(f"{source}:{key}")
         return {"feed_id": feed_id, "paused": paused, "enabled": not paused}
 
+    async def set_provider_paused(self, source: str, paused: bool) -> dict[str, Any]:
+        """Pause/resume all current provider feeds with one atomic statement.
+
+        Resolving by source avoids loading the full Inspector inventory, and
+        browser filters or stale feed lists cannot narrow the write.
+        """
+        source = canonical_feed_source(source)
+        if not paused:
+            require_source_allowed(source)
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE feed SET polling = $2 WHERE source = $1", source, not paused
+            )
+        return {
+            "source": source,
+            "paused": paused,
+            "affected": int(result.rsplit(" ", 1)[-1]),
+        }
+
     async def poll_now(self, source: str, key: str) -> dict[str, Any]:
         """Put one feed at the front of the production queue, to be polled now.
 
@@ -502,3 +584,74 @@ class PolicyStore:
                 "(see doc/psql-commands.md)"
             )
         return {"running": row["running"], "changed_at": row["changed_at"].isoformat()}
+
+    async def provider_groups(self) -> list[dict[str, Any]]:
+        """The Scheduler board's groups in board order, each with its sources.
+
+        Raises PolicyUnavailable when degraded or when the tables predate this
+        feature, so the board can say why grouping is off instead of 500ing.
+        """
+        pool = await self._ensure_pool()
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(_PROVIDER_GROUPS_SQL)
+        except asyncpg.UndefinedTableError as exc:
+            raise PolicyUnavailable(f"provider groups need {_GROUPS_MIGRATION}") from exc
+        return _group_rows(rows)
+
+    async def set_provider_groups(
+        self, groups: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Replace the whole layout -- names, order, members -- in one transaction.
+
+        Whole-layout writes keep every edit (and its undo) one atomic step.
+        Groups keep their id across renames and moves, so per-browser fold
+        state keyed on it survives; an id that no longer exists (another tab
+        deleted it) is recreated rather than refused, since last write wins.
+        """
+        cleaned = clean_provider_groups(groups)
+        pool = await self._ensure_pool()
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # Serialize writers; readers are not blocked.
+                    await conn.execute(
+                        "LOCK TABLE provider_group IN SHARE ROW EXCLUSIVE MODE"
+                    )
+                    kept = [g["id"] for g in cleaned if g["id"] is not None]
+                    await conn.execute(
+                        "DELETE FROM provider_group WHERE NOT (id = ANY($1::bigint[]))",
+                        kept,
+                    )
+                    await conn.execute("DELETE FROM provider_group_member")
+                    sources: list[str] = []
+                    owners: list[int] = []
+                    for position, group in enumerate(cleaned):
+                        group_id = None
+                        if group["id"] is not None:
+                            group_id = await conn.fetchval(
+                                "UPDATE provider_group SET name = $2, position = $3 "
+                                "WHERE id = $1 RETURNING id",
+                                group["id"],
+                                group["name"],
+                                position,
+                            )
+                        if group_id is None:
+                            group_id = await conn.fetchval(
+                                "INSERT INTO provider_group (name, position) "
+                                "VALUES ($1, $2) RETURNING id",
+                                group["name"],
+                                position,
+                            )
+                        sources.extend(group["sources"])
+                        owners.extend([group_id] * len(group["sources"]))
+                    await conn.execute(
+                        "INSERT INTO provider_group_member (source, group_id) "
+                        "SELECT * FROM unnest($1::text[], $2::bigint[])",
+                        sources,
+                        owners,
+                    )
+                    rows = await conn.fetch(_PROVIDER_GROUPS_SQL)
+        except asyncpg.UndefinedTableError as exc:
+            raise PolicyUnavailable(f"provider groups need {_GROUPS_MIGRATION}") from exc
+        return _group_rows(rows)

@@ -1,0 +1,311 @@
+# Life-science employers for the bioengineering focus chips (MedTech, Regulatory, BioTech).
+#
+# Device makers and pharma companies post most student roles under generic titles
+# ("Mechanical Engineering Co-op", "Quality Engineering Intern"), so the employer is
+# what makes those roles bioengineering targets. Names are matched case-insensitively
+# against company.name exactly as stored -- often a raw ATS tenant key ("jj", "bdx").
+# A company may sit in more than one segment.
+#
+# Seeded 2026-10-06 from a reviewed classification of every employer with student
+# postings plus employer rosters from medtech, pharma and clinical-research career
+# guides; see registry/filters/bioengineering.md. Editing this file changes
+# bioengineering.focus_version(), so the Gold `focus` step recomputes every typed
+# posting on its next pass.
+#
+# Segments:
+#   dev: Medical devices and medical technology: implants, surgical robotics, cardiovascular and neuro devices, imaging,
+#   diabetes and infusion, dental/vision/hearing, neurotech/BCI, regulated medical software, HTM service firms.
+#   Engineering, quality, manufacturing, software and design roles -> MedTech; quality and clinical -> Regulatory.
+#   dx: Diagnostics: IVD makers, genetic-testing and clinical reference labs. Engineering -> MedTech; lab science -> BioTech.
+#   tools: Life-science research tools, instruments, genomics platforms and bioprocess equipment. Technical roles -> BioTech.
+#   pharma: Pharma, biotech, cell and gene therapy, vaccines, animal and consumer health, synthetic biology, AI drug discovery.
+#   Science, engineering and manufacturing -> BioTech; quality, regulatory and clinical -> Regulatory.
+#   agbio: Ag and livestock biotech. Only research, lab, breeding and genetics roles -> BioTech (not seed production).
+#   lab: CDMOs and contract testing labs. Lab, manufacturing and engineering -> BioTech; quality -> Regulatory.
+#   cro: Clinical research organizations, site networks and trial technology. Clinical, quality, data and coordinator roles -> Regulatory.
+#   consult: Life-science validation, quality and regulatory consultancies. Technical roles -> Regulatory (CQV also BioTech).
+#   bio_institute: Biomedical research institutes. Research roles -> BioTech; clinical roles -> Regulatory.
+#   aec_ls: Architecture/engineering firms that design life-science plants. Process and CQV roles only.
+
+segments:
+  dev:
+    - Abbott  # also dx
+    - Accuray
+    - agiliti  # Agiliti (healthcare technology management)
+    - alcon  # Alcon (eye care)
+    - Align Technology
+    - AliveCor
+    - AtriCure
+    - Axogen  # also pharma
+    - baxter  # Baxter
+    - bdx  # BD (Becton Dickinson)
+    - Becton Dickinson
+    - biointellisense  # BioIntelliSense
+    - Blackrock Neurotech
+    - bostonscientific  # Boston Scientific
+    - bracco  # Bracco (contrast agents + ACIST injectors); also pharma
+    - Brainlab
+    - Cala Health
+    - CeriBell
+    - cochlear  # Cochlear
+    - conmed  # CONMED
+    - convatec  # ConvaTec
+    - currentsurgical  # surgical device startup
+    - Dexcom
+    - edwards  # Edwards Lifesciences
+    - Eko Health
+    - ekohealth  # Eko Health
+    - elekta  # Elekta
+    - enovis  # Enovis
+    - envista  # Envista (dental)
+    - freseniusglobal  # Fresenius Kabi; also pharma
+    - gehc  # GE HealthCare
+    - Gerresheimer
+    - globusmedical  # Globus Medical
+    - hcor.fa.us2  # Midmark (Oracle tenant)
+    - healthcare  # Solventum
+    - HeartFlow
+    - Hologic
+    - Hyperfine
+    - ICU Medical
+    - Inogen
+    - Inspire Medical Systems Inc.
+    - insulet  # Insulet
+    - integer  # Integer Holdings (device contract manufacturing)
+    - integralife  # Integra LifeSciences
+    - intuitive  # Intuitive Surgical
+    - Intuitive Surgical
+    - irhythmtech  # iRhythm Technologies
+    - jj  # Johnson & Johnson (MedTech + Innovative Medicine); also pharma
+    - "Lexington Medical, Inc."
+    - livanova  # LivaNova
+    - materialise  # Materialise (medical 3D printing)
+    - medline  # Medline
+    - medrhythms  # MedRhythms (FDA-cleared neurorehab)
+    - Medtronic
+    - merit  # Merit Medical
+    - Motif Neurotech
+    - namsa  # NAMSA (medical device testing); also lab
+    - Neuralink
+    - NeuroPace
+    - Nevro Corp
+    - Noah Medical
+    - orthofix  # Orthofix
+    - ossur  # Ossur
+    - Outset Medical
+    - Paradromics
+    - PathAI  # also dx
+    - Penumbra
+    - penumbrainc  # Penumbra
+    - philips  # Philips
+    - Procept BioRobotics
+    - proceptbiorobotics  # PROCEPT BioRobotics
+    - RefleXion Medical
+    - ResMed
+    - Science Corp
+    - Shockwave Medical
+    - Siemens Healthineers  # also dx
+    - smithnephew  # Smith+Nephew
+    - Spectrum Vascular
+    - Stryker
+    - Synaptrix Labs
+    - tandemdiabetes  # Tandem Diabetes Care
+    - terumo  # Terumo
+    - trimedx  # TRIMEDX (clinical engineering)
+    - Varian Medical Systems
+    - VitalConnect
+    - Viz.ai
+    - Voxelcloud
+    - whiterabbit  # Whiterabbit.ai (breast imaging AI)
+    - zoll  # ZOLL Medical
+  dx:
+    - Abbott  # also dev
+    - BillionToOne
+    - Cepheid
+    - EDP Biotech Corporation
+    - GRAIL
+    - Guardant Health
+    - Illumina  # also tools
+    - labcorp  # Labcorp
+    - Nanopath
+    - Natera
+    - PathAI  # also dev
+    - qiagen  # QIAGEN; also tools
+    - revvity  # Revvity; also tools
+    - Roche  # also pharma
+    - Siemens Healthineers  # also dev
+    - Tempus AI
+    - Veracyte
+  tools:
+    - 10x Genomics
+    - agilent  # Agilent
+    - Agilent Technologies
+    - azenta  # Azenta
+    - Bio-Rad Laboratories
+    - Bio-Techne / ProteinSimple
+    - biotechne  # Bio-Techne
+    - danaher  # Danaher (Cytiva, Beckman, IDT, Leica)
+    - Element Biosciences
+    - GenScript  # also lab
+    - GenScript USA Inc.  # also lab
+    - idt  # Integrated DNA Technologies
+    - Illumina  # also dx
+    - neogen  # Neogen
+    - pacbio  # PacBio
+    - Pacific Biosciences
+    - Parse Biosciences
+    - qiagen  # QIAGEN; also dx
+    - repligen  # Repligen
+    - revvity  # Revvity; also dx
+    - sartorius  # Sartorius
+    - Standard BioTools
+    - standardbiotools  # Standard BioTools
+    - Thermo Fisher  # also lab
+    - Thermo Fisher Scientific  # also lab
+    - thermofisher  # Thermo Fisher Scientific (incl. PPD, Patheon); also lab
+    - Twist Bioscience
+    - Ultima Genomics
+  pharma:
+    - 4D Molecular Therapeutics
+    - AbbVie
+    - Adverum Biotechnologies
+    - Allogene Therapeutics
+    - Amgen
+    - Amyris
+    - Arcellx
+    - ArsenalBio
+    - asimov  # Asimov (synthetic biology)
+    - AstraZeneca
+    - autolus  # Autolus
+    - Axogen  # also dev
+    - bavariannordic  # Bavarian Nordic (vaccines)
+    - Bayer
+    - Beam Therapeutics
+    - beigene  # BeOne (BeiGene)
+    - BioMarin Pharmaceutical
+    - bms  # Bristol Myers Squibb
+    - bracco  # Bracco (contrast agents + ACIST injectors); also dev
+    - bristolmyerssquibb  # Bristol Myers Squibb
+    - "Centessa Pharmaceuticals, a wholly owned subsidiary of Eli Lilly and Company"
+    - Chai Discovery
+    - Colossal Biosciences
+    - csl  # CSL (Behring, Seqirus)
+    - Culture Biosciences
+    - Debut Biotech
+    - differential.bio  # Differential Bio (synthetic biology)
+    - Dyno Therapeutics
+    - elanco  # Elanco (animal health)
+    - Eli Lilly
+    - Exelixis
+    - "Flagship Pioneering, Inc."
+    - freseniusglobal  # Fresenius Kabi; also dev
+    - Genentech
+    - Generate Biomedicines
+    - gilead  # Gilead Sciences / Kite
+    - Gilead Sciences
+    - Ginkgo Bioworks Inc.
+    - gsk  # GSK
+    - gsknch  # Haleon (GSK consumer health)
+    - Halozyme Therapeutics
+    - iambic-therapeutics  # Iambic Therapeutics
+    - insitro
+    - insmed  # Insmed
+    - Integral Molecular
+    - Iovance Biotherapeutics
+    - Isomorphic Labs
+    - Jazz Pharmaceuticals
+    - jj  # Johnson & Johnson (MedTech + Innovative Medicine); also dev
+    - kenvue  # Kenvue (consumer health)
+    - "Kernal Biologics, Inc."
+    - Kyowa Kirin North America
+    - Lyell Immunopharma
+    - Metagenomi
+    - Moderna
+    - modernatx  # Moderna
+    - MSD  # Merck
+    - Neurocrine Biosciences
+    - novartis  # Novartis
+    - Novartis Institutes for BioMedical Research
+    - organon  # Organon
+    - Perfect Day
+    - pfizer  # Pfizer
+    - Prime Medicine
+    - Profluent
+    - Profluent Bio
+    - Recursion Pharmaceuticals
+    - Regeneron
+    - regenxbio  # REGENXBIO
+    - Relay Therapeutics
+    - Revolution Medicines
+    - Roche  # also dx
+    - Sana Biotechnology
+    - sandoz  # Sandoz
+    - sanofi  # Sanofi
+    - sarepta  # Sarepta
+    - Seaport Therapeutics
+    - Takeda
+    - Telix Pharmaceuticals (AMER)
+    - Ultragenyx Pharmaceutical
+    - Upside Foods
+    - viatris  # Viatris
+    - Vir Biotechnology
+    - vrtx  # Vertex Pharmaceuticals
+    - Xaira Therapeutics
+    - zoetis  # Zoetis (animal health)
+  agbio:
+    - corteva  # Corteva Agriscience
+    - hdjm.fa.ca2  # livestock genetics and IVF (Oracle tenant)
+    - Pivot Bio  # Pivot Bio (microbial ag-biotech)
+    - Syngenta Group  # Syngenta (seeds and crop biotech)
+  lab:
+    - altasciences  # Altasciences; also cro
+    - Avid Bioservices
+    - BioAgilytix
+    - catalent  # Catalent (CDMO)
+    - celerion  # Celerion; also cro
+    - Cellares
+    - Charles River Laboratories
+    - ElevateBio
+    - Eurofins  # Eurofins (contract testing)
+    - Genezen
+    - GenScript  # also tools
+    - GenScript USA Inc.  # also tools
+    - lonza  # Lonza (CDMO)
+    - namsa  # NAMSA (medical device testing); also dev
+    - Resilience
+    - soterahealth  # Sotera Health (Sterigenics, Nelson Labs)
+    - Thermo Fisher  # also tools
+    - Thermo Fisher Scientific  # also tools
+    - thermofisher  # Thermo Fisher Scientific (incl. PPD, Patheon); also tools
+  cro:
+    - Allucent
+    - altasciences  # Altasciences; also lab
+    - Care Access
+    - celerion  # Celerion; also lab
+    - Clinical Ink
+    - endpointclinical  # Endpoint Clinical (trial IRT)
+    - fortrea  # Fortrea
+    - Headlands Research
+    - IQVIA
+    - parexel  # Parexel
+    - Precision for Medicine
+    - Precision Medicine Group
+    - premierresearch  # Premier Research
+    - PSI CRO
+    - syneoshealth  # Syneos Health
+    - veristat  # Veristat
+  consult:
+    - Kymanox  # Kymanox
+    - propharmagroup  # ProPharma Group
+    - "Verista, Inc."  # Verista (CQV and validation)
+  bio_institute:
+    - Arc Institute
+    - broadinstitute  # Broad Institute
+    - danafarber  # Dana-Farber Cancer Institute
+    - embl  # EMBL
+    - Salk Institute
+    - Scripps Research
+    - stjude  # St. Jude Children's Research Hospital
+    - vai  # Van Andel Institute
+  aec_ls:
+    - CRB  # CRB (life-science facility design)

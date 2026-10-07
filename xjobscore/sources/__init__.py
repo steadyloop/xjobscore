@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 from xjobscore import net as net_module
 from xjobscore.net import Net
 from xjobscore.records import Canonical, Feed, Item, Record
+from xjobscore.source_policy import require_source_allowed
 from xjobscore.sources import avature, dayforce, hn, join, taleo, zohorecruit
 from xjobscore.sources.planned import janestreet, workatastartup
 
@@ -39,7 +40,8 @@ docxtract = import_module(".docxtract", __name__)
 
 __all__ = [
     "PARSERS", "REVISION_FIELDS", "REVISION_REFRESH_WINDOWS", "SOURCES", "Harvest", "Parse",
-    "UnknownSource", "docxtract", "get", "json_api", "parser", "reusing", "width",
+    "UnknownSource", "docxtract", "get", "json_api", "lane_filter", "lane_of", "lanes",
+    "parser", "partition_index", "partition_lane", "partitions", "rate_budget", "rate_group", "reusing", "width",
 ]
 
 Harvest = Callable[[Feed, Net], Awaitable[Record]]
@@ -145,6 +147,16 @@ REVISION_FIELDS: dict[str, tuple[str, ...]] = {
     # uuid/name/url are identical scalars on both sides, and never null. As
     # with Gem, this can't see a description-only edit, hence the bound below.
     "rippling": ("uuid", "name", "url"),
+    # Workday's detail payload is merged over its list row (config `merge`),
+    # so the stored payload carries these list keys verbatim beside
+    # jobPostingInfo/hiringOrganization/similarJobs/userAuthenticated, which
+    # never collide with them -- checked over 3,000 stored merged payloads
+    # (2026-10-05). `locationsText` is on 97% of them; a row without it is
+    # never reusable and simply refetches. `postedOn` is excluded: it is a
+    # relative bucket ("Posted 3 Days Ago") that moves daily on its own.
+    # Without reuse, every full listing refetched every gated detail -- ~2,800
+    # requests per 15-minute round of the fast Workday feeds.
+    "workday": ("externalPath", "title", "locationsText"),
 }
 
 # Maximum age of a successful all-detail reconciliation. Sources absent from
@@ -163,6 +175,9 @@ REVISION_REFRESH_WINDOWS: dict[str, int] = {
     # was unbounded (the "original SmartRecruiters behavior" noted above),
     # which left such edits permanently stale.
     "smartrecruiters": 86_400,
+    # Same bound, and the same window as the config's `count_probe`, so one
+    # forced pass a day both re-lists the board and refetches every detail.
+    "workday": 86_400,
 }
 
 
@@ -239,13 +254,115 @@ def width(name: str) -> int:
     - An unregistered name is 1; `poll` raising `UnknownSource` is where that
       failure belongs, not here.
     """
-    host = _list_host_template(name)
+    source = name.partition(LANE_SEP)[0]
+    host = _list_host_template(source)
     if host and "{" not in host:
-        return max(1, _config(name).get("list", {}).get("concurrency", 1))
-    cap = net_module.vendor_cap(re.sub(r"\{[^}]*\}", "x", host)) if host else None
+        return max(1, _config(source).get("list", {}).get("concurrency", 1))
+    cap = net_module.vendor_cap(_lane_host(name)) if host else None
     if cap is None:
         return 1
-    return max(1, cap // _fan_out(name))
+    return max(1, cap // _fan_out(source))
+
+
+def _lane_host(name: str) -> str:
+    """A concrete hostname standing for every host of a source or lane.
+
+    A lane's own partition is filled in, so the caps and budgets it resolves
+    to are that partition's; every other placeholder becomes `x`, which no
+    caps-table suffix names.
+    """
+    source, _, partition = name.partition(LANE_SEP)
+    host = _list_host_template(source)
+    if partition and partition != OTHER_PARTITION:
+        host = host.replace("{" + _PARTITION_PARTS[source] + "}", partition)
+    return re.sub(r"\{[^}]*\}", "x", host)
+
+
+def rate_group(name: str) -> str | None:
+    """The `net._VENDOR_RATES` budget a source or lane spends, if any."""
+    host = _list_host_template(name.partition(LANE_SEP)[0])
+    return net_module.rate_group(_lane_host(name)) if host else None
+
+
+def rate_budget(name: str) -> float | None:
+    """Sustained req/s of the budget `rate_group(name)` names, if any."""
+    group = rate_group(name)
+    return None if group is None else net_module._VENDOR_RATES[group][0]
+
+
+# LANES -----------------------------------------------------------------------
+#
+# A lane is one scheduler queue with its own worker pool. Most sources are one
+# lane, named after the source. A source whose limiter counts per part of the
+# feed key rather than per vendor -- Workday, per data center (`wd_host`) --
+# gets one lane per partition that has its own `net._VENDOR_RATES` budget,
+# named `source:partition`, plus `source:other` for every partition sharing
+# the vendor's fallback budget. Separate lanes are what let wd3 feeds use
+# wd3's budget while wd1's queue is still draining; one pool would park every
+# worker on whichever budget its oldest feeds happen to need.
+#
+# The partitions are read off `_VENDOR_RATES`, never listed here, so adding a
+# measured data center there adds its lane.
+
+LANE_SEP = ":"
+OTHER_PARTITION = "other"
+
+# Source -> the `key_parts` name its limiter partitions on.
+_PARTITION_PARTS: dict[str, str] = {"workday": "wd_host"}
+
+
+def partitions(source: str) -> tuple[str, ...]:
+    """Partitions of `source` with their own rate budget; () if unpartitioned."""
+    part = _PARTITION_PARTS.get(source)
+    if part is None:
+        return ()
+    _, _, suffix = _list_host_template(source).partition("{" + part + "}.")
+    found = []
+    for key in net_module._VENDOR_RATES:
+        label = key.removesuffix("." + suffix)
+        if label != key and "." not in label:
+            found.append(label)
+    return tuple(sorted(found))
+
+
+def partition_index(source: str) -> int:
+    """1-based position of `source`'s partition in its '/'-separated key."""
+    return _config(source)["key_parts"].index(_PARTITION_PARTS[source]) + 1
+
+
+def lanes(source: str) -> list[str]:
+    """Every lane of `source`, in a stable order."""
+    named = partitions(source)
+    if not named:
+        return [source]
+    return [f"{source}{LANE_SEP}{part}" for part in (*named, OTHER_PARTITION)]
+
+
+def lane_of(source: str, key: str) -> str:
+    """The lane a feed of `source` with this key is polled from."""
+    if not partitions(source):
+        return source
+    parts = key.split("/")
+    index = partition_index(source) - 1
+    return partition_lane(source, parts[index] if index < len(parts) else "")
+
+
+def partition_lane(source: str, value: str) -> str:
+    """The lane of `source` that partition `value` is polled from."""
+    value = value.lower()
+    named = partitions(source)
+    return f"{source}{LANE_SEP}{value if value in named else OTHER_PARTITION}"
+
+
+def lane_filter(lane: str) -> tuple[str, tuple[int, tuple[str, ...], bool] | None]:
+    """`(source, part)` for `store.claim_due_feeds`; part is None for a whole source."""
+    source, _, partition = lane.partition(LANE_SEP)
+    if not partition:
+        return source, None
+    index = partition_index(source)
+    if partition == OTHER_PARTITION:
+        return source, (index, partitions(source), True)
+    return source, (index, (partition,), False)
 
 
 def reusing(
@@ -265,6 +382,7 @@ def reusing(
     only engine that implements reuse). A time-bounded source with no prior
     payload performs and records a cold full reconciliation.
     """
+    require_source_allowed(name)
     fields = REVISION_FIELDS.get(name)
     if not fields or name not in json_api.SPECS:
         return get(name)
@@ -302,6 +420,7 @@ def reusing(
 
 def get(name: str) -> Harvest:
     """The harvest function for a source name, or raise UnknownSource."""
+    require_source_allowed(name)
     try:
         return SOURCES[name]
     except KeyError:

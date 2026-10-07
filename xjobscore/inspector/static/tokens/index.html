@@ -18,80 +18,46 @@
 <body class="tokens-page">
   <header id="topnav"></header>
   <main class="page">
-    <div class="page-header">
-      <select id="status-feed-filter" title="Status" aria-label="Status">
-        <option value="inactive" selected>Inactive</option>
-        <option value="muted">Muted</option>
-        <option value="dead">Dead</option>
-        <option value="all">All (including active)</option>
-      </select>
-      <select id="ats-filter" title="Vendor" aria-label="Vendor">
-        <option value="">All vendors</option>
-      </select>
-      <select id="order-filter" title="Sort order" aria-label="Sort order" hidden>
-        <option value="discovered">Newest discovery</option>
-        <option value="company">Company</option>
-        <option value="token">Vendor, token</option>
-      </select>
-      <input type="search" id="search" placeholder="Filter token or company…" autocomplete="off" hidden>
-      <div class="grow"></div>
-      <button class="btn small" type="button" id="validate-all-btn" title="Validate all visible tokens">Validate all</button>
-    </div>
 
     <div class="tok-summary" id="summary-line" aria-live="polite">Loading inventory…</div>
-
-    <section class="tok-heartbeat" aria-labelledby="heartbeat-title" aria-live="polite">
-      <div class="tok-heartbeat-main">
-        <div class="tok-heartbeat-heading">
-          <h1 id="heartbeat-title">Token heartbeat</h1>
-          <span class="tok-heartbeat-state">
-            <span class="tok-heartbeat-dot" id="heartbeat-dot" data-state="offline"></span>
-            <span id="heartbeat-state">Loading…</span>
-          </span>
-          <span class="tok-heartbeat-meta" id="heartbeat-meta"></span>
-        </div>
-        <div class="tok-heartbeat-facts" id="heartbeat-facts">Reading system state…</div>
-      </div>
-      <div class="tok-heartbeat-actions">
-        <button class="btn small" type="button" id="heartbeat-pause" disabled>Pause</button>
-        <button class="btn small" type="button" id="heartbeat-run" disabled>Run now</button>
-      </div>
-    </section>
-
-    <div class="tok-logs">
-      <section class="tok-log" aria-label="Token check log">
-        <header class="tok-log-header">
-          <span>token check log</span>
-          <span class="tok-log-dot" id="token-log-dot"></span>
-          <span class="tok-log-tail">tail -f</span>
-        </header>
-        <div class="tok-log-lines" id="token-log-lines" aria-live="off"></div>
-      </section>
-
-      <section class="tok-log" aria-label="Feed membership log">
-        <header class="tok-log-header">
-          <span>feed in/out log</span>
-          <span class="tok-log-dot" id="feed-log-dot"></span>
-          <span class="tok-log-tail">tail -f</span>
-        </header>
-        <div class="tok-log-lines" id="feed-log-lines" aria-live="off"></div>
-      </section>
-    </div>
 
     <div class="banner" id="degraded-banner" hidden>
       PostgreSQL is unreachable — the token inventory cannot be read.
     </div>
-    <div class="banner" id="truncated-banner" hidden></div>
     <div class="banner error" id="error-banner" hidden>
       <span id="error-text"></span>
     </div>
 
-    <section class="card">
-      <header>
+    <section class="card" aria-label="Tokens">
+      <header class="tok-table-header">
         <h1>Tokens</h1>
+        <select id="status-feed-filter" title="Status" aria-label="Status">
+          <option value="inactive" selected>Inactive</option>
+          <option value="unknown">Unknown</option>
+          <option value="muted">Muted</option>
+          <option value="dead">Dead</option>
+          <option value="all">All (including active)</option>
+        </select>
+        <select id="ats-filter" title="Vendor" aria-label="Vendor">
+          <option value="">All vendors</option>
+        </select>
+        <input type="search" id="search" placeholder="Search token or company…" autocomplete="off">
+        <select id="order-filter" title="Sort order" aria-label="Sort order">
+          <option value="token" selected>Sort: token</option>
+          <option value="discovered">Sort: newest found</option>
+          <option value="checked">Sort: last checked</option>
+          <option value="company">Sort: company</option>
+        </select>
         <span class="secondary" id="selection-count"></span>
         <div class="grow"></div>
-        <button class="btn primary" type="button" id="promote-btn" disabled>Promote selected</button>
+        <select id="add-interval" title="How often new feeds are polled" aria-label="Poll interval for new feeds">
+          <option value="900">Every 15 min</option>
+          <option value="3600">Every hour</option>
+          <option value="21600">Every 6 hours</option>
+          <option value="86400" selected>Every day</option>
+          <option value="604800">Every week</option>
+        </select>
+        <button class="btn primary" type="button" id="promote-btn" disabled>Add to feed</button>
       </header>
       <div class="table-wrap">
         <table class="data" id="tokens-table">
@@ -119,6 +85,82 @@
         <span id="range" class="secondary"></span>
       </div>
     </section>
+
+
+    <section class="tok-heartbeat" aria-labelledby="heartbeat-title" aria-live="polite">
+      <div class="tok-heartbeat-main">
+        <div class="tok-heartbeat-heading">
+          <h1 id="heartbeat-title">Token heartbeat</h1>
+          <span class="tok-heartbeat-state">
+            <span class="tok-heartbeat-dot" id="heartbeat-dot" data-state="offline"></span>
+            <span id="heartbeat-state">Loading…</span>
+          </span>
+          <span class="tok-heartbeat-meta" id="heartbeat-meta"></span>
+        </div>
+        <div class="tok-heartbeat-facts" id="heartbeat-facts">Reading system state…</div>
+      </div>
+      <div class="tok-heartbeat-actions">
+        <button class="btn small" type="button" id="heartbeat-pause" disabled>Pause</button>
+        <button class="btn small" type="button" id="heartbeat-run" disabled>Run now</button>
+      </div>
+    </section>
+
+    <section class="tok-sweep" id="sweep" aria-labelledby="sweep-title" hidden>
+      <div class="tok-sweep-top">
+        <div class="tok-sweep-main">
+          <div class="tok-sweep-heading">
+            <h1 id="sweep-title">Validate unknown</h1>
+            <span class="tok-sweep-meta" id="sweep-meta"></span>
+          </div>
+          <div class="tok-sweep-headline" id="sweep-headline" aria-live="polite"></div>
+          <div class="tok-sweep-bar" id="sweep-bar" hidden><span id="sweep-bar-fill"></span></div>
+        </div>
+        <div class="tok-sweep-actions">
+          <span class="tok-sweep-idle-controls" id="sweep-idle-controls">
+            <select id="sweep-vendor" aria-label="Vendor to validate">
+              <option value="">All vendors</option>
+            </select>
+            <select id="sweep-limit" aria-label="Backlog size">
+              <option value="100">100</option>
+              <option value="1000">1,000</option>
+              <option value="10000" selected>10,000</option>
+              <option value="">All</option>
+            </select>
+            <button class="btn small primary" type="button" id="sweep-start">Start</button>
+          </span>
+          <button class="btn small" type="button" id="sweep-pause" hidden>Pause</button>
+          <button class="btn small" type="button" id="sweep-cancel" hidden>Cancel</button>
+        </div>
+      </div>
+      <div class="tok-sweep-vendors" id="sweep-vendors" role="table" aria-label="Per-vendor progress" hidden></div>
+      <div class="tok-sweep-foot" id="sweep-foot" hidden>
+        <a href="#" id="sweep-unclear-link"></a>
+        <span class="grow"></span>
+        <a href="#" id="sweep-events-toggle"></a>
+      </div>
+      <div class="tok-sweep-events" id="sweep-events" aria-label="Sweep events" hidden></div>
+    </section>
+
+    <div class="tok-logs">
+      <section class="tok-log" aria-label="Token check log">
+        <header class="tok-log-header">
+          <span>token check log</span>
+          <span class="tok-log-dot" id="token-log-dot"></span>
+          <span class="tok-log-tail">tail -f</span>
+        </header>
+        <div class="tok-log-lines" id="token-log-lines" aria-live="off"></div>
+      </section>
+
+      <section class="tok-log" aria-label="Feed membership log">
+        <header class="tok-log-header">
+          <span>feed in/out log</span>
+          <span class="tok-log-dot" id="feed-log-dot"></span>
+          <span class="tok-log-tail">tail -f</span>
+        </header>
+        <div class="tok-log-lines" id="feed-log-lines" aria-live="off"></div>
+      </section>
+    </div>
+
   </main>
 
   <script type="module" src="/static/tokens/app.js"></script>

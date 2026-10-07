@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import asyncpg
 
-from xjobscore import activity, coverage_snapshot, gold, probe, router, silver, sources, store, work
+from xjobscore import activity, coverage_snapshot, gold, router, silver, sources, store, work, workable_policy
 from xjobscore.net import DEFAULT_USER_AGENT, Net
 from xjobscore.records import Feed
 from xjobscore.work import Outcome
@@ -36,6 +36,8 @@ __all__ = [
     "Config",
     "CycleResult",
     "cycle",
+    "drain_source",
+    "due_lanes",
     "fetch_all",
     "load_config",
     "main",
@@ -117,7 +119,7 @@ def load_config(argv: Sequence[str]) -> Config:
         "--reconcile",
         action="store_true",
         default=None,
-        help="probe postings missing from a complete poll and close the dead ones",
+        help="queue missing postings for the independent link-check worker",
     )
     parser.add_argument(
         "--enrich",
@@ -169,33 +171,6 @@ def load_config(argv: Sequence[str]) -> Config:
         if args.reconcile is not None
         else _env_bool("XJOBSCORE_RECONCILE", False),
     )
-
-
-def _probe_url(feed: Feed) -> str | None:
-    """This feed's per-posting probe URL with `{id}` still in it, if it has one.
-
-    A vendor with no probe endpoint is not a failure -- it is a vendor whose
-    postings we cannot ask about, and the honest response is to leave its rows
-    alone rather than infer closure from absence.
-    """
-    try:
-        adapter = sources.json_api.get_adapter(feed.source)
-    except KeyError:
-        return None
-    template = (adapter.get("probe") or {}).get("url")
-    if not template:
-        return None
-    # The same context the list and detail legs build, so a vendor keyed on
-    # {tenant}/{site} rather than {key} works without a second code path.
-    parts = adapter.get("key_parts", ())
-    context = {"key": feed.key}
-    if parts:
-        context.update(zip(parts, feed.key.split("/", len(parts) - 1)))
-    context.update(feed.config or {})
-    for token, value in context.items():
-        if isinstance(value, str):
-            template = template.replace("{" + token + "}", value)
-    return template
 
 
 def _status_of(exc: BaseException) -> int | None:
@@ -365,6 +340,10 @@ async def poll(
             # GONE_STRIKES consecutive answers -- but logged as one line, so a
             # real harvest bug still stands out in the log.
             logger.warning("board gone (404) source=%s", source)
+        elif status == 429:
+            # A vendor refusal (including a locally enforced cooldown) is an
+            # expected response. Keep the failure record without a traceback.
+            logger.warning("rate limited (429) source=%s: %s", source, exc)
         else:
             logger.exception("harvest failed source=%s", source)
         await _finish_failure(pool, feed, now, "error", status_code=status)
@@ -425,6 +404,7 @@ async def poll(
                 list_total=record.list_total,
                 full_listing=record.full_listing,
                 last_modified=record.last_modified,
+                reused_detail=record.reused_item_count > 0,
             )
             # "ok", not "unchanged": the content is indeed unchanged, but
             # "unchanged" is reserved for the 304 path where no body crossed
@@ -438,6 +418,12 @@ async def poll(
                     polled_at=now,
                     status="ok",
                     new_postings=0,
+                )
+                # This is still a complete listing. The scoped touch leaves
+                # previously absent postings alone; record any missing stamp
+                # that has not landed yet, even when the snapshot is stable.
+                await store.mark_missing_postings(
+                    conn, source, now, listed_keys=[item.external_id for item in record.items]
                 )
         if not ok:
             logger.warning("lost schedule lease after unchanged poll source=%s", source)
@@ -489,6 +475,7 @@ async def poll(
         "unsupported": counts.unsupported,
         "secondhand": counts.secondhand,
         "unparseable": counts.unparseable,
+        "minted": counts.minted,
     }
 
     if counts.unresolved or counts.unsupported or counts.secondhand or counts.unparseable:
@@ -516,17 +503,32 @@ async def poll(
             stage_ms["gold"] = round((time.monotonic() - gold_started) * 1000)
             coordinator.notify_changed()
 
+    async def finish_with_gold(outcome: Outcome) -> Outcome:
+        if coordinator is None or not changes.posting_ids:
+            return await finish_system_run(outcome)
+
+        async def gold_then_finish() -> None:
+            gold_result = await enrich_changed()
+            await finish_system_run(outcome, gold_result=gold_result)
+
+        # Handed off, not awaited: the worker goes straight back to its
+        # vendor's queue (see pipeline.DEFERRED_GOLD_CONCURRENCY), and the
+        # feed's system run closes when its Gold does.
+        await coordinator.defer(gold_then_finish)
+        return outcome
+
     if outcome == "partial":
         await _finish_failure(
             pool, feed, now, outcome,
             new_postings=counts.created,
             status_code=record.http_status,
         )
-        gold_result = await enrich_changed()
-        return await finish_system_run(outcome, gold_result=gold_result)
+        return await finish_with_gold(outcome)
 
     due_at = work.next_due_at(feed.interval_s, feed.strikes, "ok", now)
-    async with pool.acquire() as conn:
+    # Commit the snapshot, successful observation, and disappearance markers
+    # together. If stamping fails, the next claim must retry the full poll.
+    async with pool.acquire() as conn, conn.transaction():
         ok = await store.finish_schedule_success(
             conn,
             feed,
@@ -538,6 +540,11 @@ async def poll(
             list_total=record.list_total,
             full_listing=record.full_listing,
             last_modified=record.last_modified,
+            reused_detail=record.reused_item_count > 0,
+            # Unresolved postings were dropped, not stored. Keeping the
+            # snapshot would let the next poll skip silver and drop them
+            # forever, even once the company becomes resolvable.
+            forget_snapshot=counts.unresolved > 0,
         )
         # Only when the lease held: a reclaimed worker polled this feed too and
         # records its own row, and two rows for one poll double-count lambda.
@@ -551,11 +558,12 @@ async def poll(
             )
             # A whole listing was just projected (truncated fetches took the
             # partial branch above), so anything it did not list is missing.
-            await store.mark_missing_postings(conn, source, now)
+            await store.mark_missing_postings(
+                conn, source, now, listed_keys=[item.external_id for item in record.items]
+            )
     if not ok:
         logger.warning("lost schedule lease after success source=%s", source)
-    gold_result = await enrich_changed()
-    return await finish_system_run("ok", gold_result=gold_result)
+    return await finish_with_gold("ok")
 
 
 @dataclass(frozen=True, slots=True)
@@ -565,6 +573,88 @@ class CycleResult:
     # is the caller's signal to run another cycle now rather than wait a tick.
     drained: bool = True
     by_source: dict[str, int] = field(default_factory=dict)
+
+
+async def _poll_tracked(
+    pool: Pool,
+    net: Net,
+    feed: Feed,
+    claimed_at: datetime,
+    coordinator: GoldCoordinator | None,
+) -> None:
+    """`poll`, visible to the System page's worker slots while it runs."""
+    activity.INFLIGHT.start(feed)
+    try:
+        if coordinator is None:
+            await poll(pool, net, feed, claimed_at)
+        else:
+            await poll(pool, net, feed, claimed_at, coordinator=coordinator)
+    finally:
+        activity.INFLIGHT.finish(feed)
+
+
+async def _source_cooling(source: str) -> bool:
+    return source == "workable" and await workable_policy.cooldown_until() > time.time()
+
+
+async def due_lanes(conn: Connection, now: datetime) -> list[str]:
+    """Every lane (`sources.lanes`) with at least one claimable feed."""
+    due = []
+    for source in await store.due_sources(conn, now):
+        if await _source_cooling(source):
+            continue
+        if not sources.partitions(source):
+            due.append(source)
+            continue
+        values = await store.due_key_parts(conn, now, source, sources.partition_index(source))
+        due.extend(sorted({sources.partition_lane(source, value) for value in values}))
+    return due
+
+
+async def drain_source(
+    pool: Pool,
+    net: Net,
+    cfg: Config,
+    source: str,
+    *,
+    coordinator: GoldCoordinator | None = None,
+    accepting: Callable[[], bool] | None = None,
+) -> int:
+    """Poll one lane until its due queue is empty. Returns feeds polled.
+
+    `source` is a lane name (`sources.lanes`): a vendor, or one partition of a
+    vendor whose limiter counts per partition (`workday:wd1`).
+
+    The long-running scheduler's unit of work: one lane per vendor, started
+    and awaited by nobody else. `cycle` gathers every vendor's workers and so
+    cannot start the next round until the slowest in-flight poll anywhere
+    finishes -- a single 10-minute Avature poll left Lever idle 96% of six
+    hours. A lane has no time budget for the same reason: the only thing that
+    ends it is its own empty queue, or `accepting` turning false.
+    """
+    polled = 0
+    vendor, part = sources.lane_filter(source)
+
+    async def worker() -> None:
+        nonlocal polled
+        while accepting is None or accepting():
+            # A sibling poll or another local client can open the shared hold
+            # mid-lane. Stop before claiming another feed or adding a strike.
+            if await _source_cooling(vendor):
+                return
+            claimed_at = datetime.now(timezone.utc)
+            async with pool.acquire() as conn:
+                claimed = await store.claim_due_feeds(
+                    conn, claimed_at, 1, lease_seconds=cfg.lease_seconds,
+                    source=vendor, **({"part": part} if part else {}),
+                )
+            if not claimed:
+                return
+            polled += 1
+            await _poll_tracked(pool, net, claimed[0], claimed_at, coordinator)
+
+    await asyncio.gather(*(worker() for _ in range(sources.width(source))))
+    return polled
 
 
 async def cycle(
@@ -593,25 +683,31 @@ async def cycle(
     """
     deadline = time.monotonic() + cfg.cycle_budget_s
     async with pool.acquire() as conn:
-        due = await store.due_sources(conn, now)
+        due = await due_lanes(conn, now)
         # A dry run takes no lease, so nothing would stop a refill loop
         # reselecting the same rows forever: snapshot each queue instead and
         # let the budget bound the work.
-        queues = (
-            {source: await store.due_feeds(conn, now, source=source) for source in due}
-            if cfg.dry_run
-            else {}
-        )
+        queues = {}
+        if cfg.dry_run:
+            for lane in due:
+                vendor, part = sources.lane_filter(lane)
+                queues[lane] = await store.due_feeds(
+                    conn, now, source=vendor, **({"part": part} if part else {})
+                )
 
     polled = dict.fromkeys(due, 0)
     exhausted: set[str] = set()
 
     async def claim_one(source: str, claimed_at: datetime) -> Feed | None:
+        vendor, part = sources.lane_filter(source)
+        if await _source_cooling(vendor):
+            return None
         if cfg.dry_run:
             return queues[source].pop(0) if queues[source] else None
         async with pool.acquire() as conn:
             claimed = await store.claim_due_feeds(
-                conn, claimed_at, 1, lease_seconds=cfg.lease_seconds, source=source
+                conn, claimed_at, 1, lease_seconds=cfg.lease_seconds,
+                source=vendor, **({"part": part} if part else {}),
             )
         return claimed[0] if claimed else None
 
@@ -642,16 +738,7 @@ async def cycle(
                         "dry-run harvest failed source=%s", store.source_instance(feed)
                     )
             else:
-                activity.INFLIGHT.start(feed)
-                try:
-                    if coordinator is None:
-                        await poll(pool, net, feed, claimed_at)
-                    else:
-                        await poll(
-                            pool, net, feed, claimed_at, coordinator=coordinator
-                        )
-                finally:
-                    activity.INFLIGHT.finish(feed)
+                await _poll_tracked(pool, net, feed, claimed_at, coordinator)
 
     await asyncio.gather(
         *(worker(source) for source in due for _ in range(sources.width(source)))
@@ -722,6 +809,8 @@ async def fetch_all(
             return feed
 
     async def one(candidate: Feed) -> str:
+        if await _source_cooling(candidate.source):
+            return "skipped"
         if cfg.dry_run:
             # Cold on purpose -- see the matching comment in `cycle`.
             try:
@@ -757,6 +846,10 @@ async def fetch_all(
             outcomes.append(await one(candidate))
 
     await asyncio.gather(*(worker() for _ in range(min(cfg.concurrency, len(candidates)))))
+    if coordinator is not None:
+        # Polls hand their Gold off rather than awaiting it; a one-shot
+        # command must not exit with that work still queued.
+        await coordinator.drain()
     return FetchAllResult(
         eligible=len(candidates),
         polled=sum(outcome in {"ok", "unchanged"} for outcome in outcomes),
@@ -769,89 +862,16 @@ async def fetch_all(
 @dataclass(frozen=True, slots=True)
 class ReconcileResult:
     candidates: int = 0
-    closed: int = 0
-    live: int = 0
-    inconclusive: int = 0
-    unprobeable: int = 0  # feeds whose adapter declares no probe endpoint
+    queued: int = 0
 
 
-async def reconcile(pool: Pool, net: Net, cfg: Config) -> ReconcileResult:
-    """Probe postings that stopped appearing, and close the ones that are gone.
-
-    Absence is the trigger and the origin's answer is the evidence. The two are
-    kept apart on purpose: a truncated fetch, a dead token, or a board that
-    briefly empties makes every posting in a source look absent at once, and
-    closing on that alone would manufacture closures by the hundred. Because the
-    probe is authoritative, the trigger is allowed to be cheap -- a posting
-    hidden by a bad fetch answers 200 and is left alone.
-
-    Only feeds whose adapter declares a `probe` endpoint participate. A vendor
-    we cannot ask is counted and skipped, never guessed at.
-    """
-    async with pool.acquire() as conn:
-        feeds = await store.replay_feeds(conn)
-
-    result = ReconcileResult()
-    for feed in feeds:
-        template = _probe_url(feed)
-        if template is None:
-            result = replace(result, unprobeable=result.unprobeable + 1)
-            continue
-        source = store.source_instance(feed)
-        async with pool.acquire() as conn:
-            absent = await store.absent_postings(conn, feed, source)
-        if not absent:
-            continue
-
-        urls = [template.replace("{id}", row["source_key"]) for row in absent]
-        probed_at = datetime.now(timezone.utc)
-        results = await probe.probe_many(net, urls, concurrency=cfg.concurrency)
-        logger.info(
-            "reconcile source=%s absent=%d absent_hits=%d",
-            source,
-            len(absent),
-            sum(one.outcome == "absent" for one in results),
-        )
-        if cfg.dry_run:
-            result = replace(result, candidates=result.candidates + len(absent))
-            continue
-
-        checked = [row["id"] for row in absent]
-        async with pool.acquire() as conn, conn.transaction():
-            # Every probe moves link_checked_at, whatever it found: the column
-            # means "when we last looked". Doing it in one statement first also
-            # means an inconclusive probe is not silently re-spent next pass.
-            await store.mark_checked(conn, checked, checked_at=probed_at)
-            for row, one in zip(absent, results):
-                if one.outcome != "absent":
-                    continue
-                # Bronze first, so the closure is replayable: content
-                # addressing means re-probing an already-tombstoned posting
-                # inserts nothing, and a parser fix re-derives the closure
-                # without re-fetching a URL that is already gone.
-                data = router.wrap(probe.tombstone(one, probed_at=probed_at))
-                await store.save_raw(
-                    conn,
-                    source=source,
-                    source_key=row["source_key"],
-                    data=data,
-                    data_hash=router.encoded_hash(data),
-                )
-                await store.close_posting_by_key(
-                    conn,
-                    source=source,
-                    source_key=row["source_key"],
-                    closed_at=probed_at,
-                )
-        result = replace(
-            result,
-            candidates=result.candidates + len(absent),
-            closed=result.closed + sum(one.outcome == "absent" for one in results),
-            live=result.live + sum(one.outcome == "live" for one in results),
-            inconclusive=result.inconclusive
-            + sum(one.outcome == "inconclusive" for one in results),
-        )
-    return result
+async def reconcile(pool: Pool, net: Net | None, cfg: Config) -> ReconcileResult:
+    """Queue missing jobs; the independently controlled worker checks links."""
+    from xjobscore.reconcile import enqueue
+    async with pool.acquire() as conn, conn.transaction():
+        candidates = await enqueue(conn, dry_run=True)
+        queued = 0 if cfg.dry_run else await enqueue(conn, priority=1)
+    return ReconcileResult(candidates=candidates, queued=queued)
 
 
 async def parse_all(pool: Pool, cfg: Config) -> list[tuple[Feed, silver.Counts]]:
@@ -949,14 +969,9 @@ async def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1 if result.errors else 0
         if cfg.reconcile:
-            async with Net(user_agent=cfg.user_agent) as net:
-                outcome = await reconcile(pool, net, cfg)
-            print(
-                f"candidates={outcome.candidates} closed={outcome.closed} "
-                f"live={outcome.live} inconclusive={outcome.inconclusive} "
-                f"unprobeable={outcome.unprobeable}"
-                f"{' (dry run, nothing written)' if cfg.dry_run else ''}"
-            )
+            outcome = await reconcile(pool, None, cfg)
+            print(f"eligible={outcome.candidates} queued={outcome.queued}"
+                  f"{' (dry run, nothing written)' if cfg.dry_run else ''}")
             return 0
         if cfg.parse:
             for feed, counts in await parse_all(pool, cfg):

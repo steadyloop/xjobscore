@@ -19,8 +19,9 @@ from importlib import import_module
 from typing import Any
 
 from xjobscore import classify
+from xjobscore.probe import parse_tombstone
 from xjobscore.net import Net, NetError, etag
-from xjobscore.records import LINK_DEAD, Canonical, Feed, Item, Posting, Record
+from xjobscore.records import Canonical, Feed, Item, Posting, Record
 CONFIGS = import_module(".json-api-configs", __package__).CONFIGS
 
 SPECS = CONFIGS
@@ -578,6 +579,17 @@ async def harvest(
     # into every return below instead of returning early, so a capped list
     # never silently ships without descriptions (see `_finish`).
     pagination_truncated = False
+    # A failed list page loses the rows after it, never the ones before it --
+    # where the source can emit those rows honestly. A gated detail leg
+    # (`only`, Workday) already emits the bare list row of every row its gate
+    # declines, so the fetched rows go on through the gate and detail exactly
+    # as on a complete listing, flagged `truncated` by `_finish`. Returning
+    # nothing instead turned one exhausted page into an empty poll: Target,
+    # CVS, RTX, Mastercard and Airbus all came back `partial` with 0 items on
+    # 2026-10-05. An ungated detail source still returns nothing, because its
+    # bare list rows lack what parse needs and would overwrite stored ones.
+    keeps_partial_list = (config.get("detail") or {}).get("only") is not None
+    list_failed = False
     concurrency = page_config.get("concurrency", 1) if page_config else 1
     partition = list_config.get("partition")
     count_probe = list_config.get("count_probe")
@@ -629,7 +641,9 @@ async def harvest(
         )
         if partition_status is not None:
             last_status = partition_status
-        if list_truncated:
+        if list_truncated and keeps_partial_list:
+            list_failed = True
+        elif list_truncated:
             partial_items = _record_items(config, rows, context) if "detail" not in config else []
             return Record(
                 items=partial_items,
@@ -652,7 +666,9 @@ async def harvest(
         )
         if parallel_status is not None:
             last_status = parallel_status
-        if outcome == "error":
+        if outcome == "error" and keeps_partial_list:
+            list_failed = True
+        elif outcome == "error":
             return Record(
                 items=_record_items(config, rows, context) if "detail" not in config else [],
                 envelope=context["envelope"], truncated=True, http_status=first_status, etag=first_etag,
@@ -670,6 +686,9 @@ async def harvest(
         try:
             response = await _request(list_config, feed, net, context, first=False)
         except NetError:
+            if keeps_partial_list:
+                list_failed = True
+                break
             return Record(
                 items=_record_items(config, rows, context) if "detail" not in config else [],
                 envelope=context["envelope"], truncated=True, http_status=first_status, etag=first_etag,
@@ -744,7 +763,9 @@ async def harvest(
     detail_failed = False
 
     def _finish(*, truncated: bool = False) -> Record:
-        truncated = truncated or detail_capped or pagination_truncated or detail_failed
+        truncated = (
+            truncated or detail_capped or pagination_truncated or detail_failed or list_failed
+        )
         return Record(
             # Gated rows carry their list payload, exactly as a source with no
             # detail leg emits every row. Appended rather than interleaved:
@@ -805,16 +826,26 @@ async def harvest(
         )
         cached: dict[int, Item] = {}
         misses: list[tuple[int, str, dict]] = []
+        merge = bool(detail.get("merge"))
         for index, (detail_id, row) in enumerate(pending):
             prior = prior_items.get(detail_id) if prior_items is not None else None
             row_revision = _revision(row, list_revision_fields)
             prior_revision = (
                 _revision(prior.payload, detail_revision_fields)
                 if prior is not None and isinstance(prior.payload, dict)
+                # A merged payload is the list row plus the detail response's
+                # keys; a prior with no key beyond the row never got its
+                # detail (the gate declined it then), so it is not reusable.
+                and (not merge or set(prior.payload) - set(row))
                 else None
             )
             if row_revision is not None and row_revision == prior_revision:
-                cached[index] = prior
+                # Merged, only the detail half is reused: the live row's own
+                # fields (Workday's `postedOn`, `remoteType`) are this poll's.
+                cached[index] = (
+                    Item(external_id=prior.external_id, payload={**prior.payload, **row})
+                    if merge else prior
+                )
             else:
                 misses.append((index, detail_id, row))
 
@@ -859,6 +890,7 @@ async def harvest(
                 detail_response = result
             payload = _dig(detail_response.json(), detail.get("payload"))
             if not isinstance(payload, dict):
+                detail_failed = True
                 continue
             if detail.get("merge"):
                 payload = {**row, **payload}
@@ -913,6 +945,7 @@ async def harvest(
         for detail_id, row in chunk:
             payload = by_id.get(detail_id)
             if not isinstance(payload, dict):
+                detail_failed = True
                 continue
             if detail.get("merge"):
                 payload = {**row, **payload}
@@ -958,29 +991,8 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
 
 
 def _parse_probe(item: Item, evidence: dict) -> list[Canonical]:
-    """Turn a stored probe result into a closure, or into nothing at all.
-
-    A probe payload is not a job -- there is no title, no body, nothing to
-    project -- so this reads the one fact it carries and stops. Only `absent`
-    produces a Posting, carrying `LINK_DEAD`, which is silver's signal to route
-    it to a narrow closure write instead of the canonical upsert. The empty
-    fields here are never stored.
-
-    A `live` or `inconclusive` probe returns nothing. Both are worth keeping in
-    bronze -- they are what a later analysis measures the probe channel's own
-    reliability against -- but neither changes what silver believes.
-    """
-    if evidence.get("outcome") != "absent":
-        return []
-    return [
-        Posting(
-            external_id=item.external_id,
-            title="",
-            url_posting=evidence.get("url") or "",
-            state="closed",
-            closed_evidence=LINK_DEAD,
-        )
-    ]
+    """Replay link/page closure evidence through the shared probe parser."""
+    return parse_tombstone(item, evidence)
 
 
 def harvester(name: str):

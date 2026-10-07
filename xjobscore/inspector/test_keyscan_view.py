@@ -10,6 +10,21 @@ import pytest
 from xjobscore.inspector import keyscan_view
 
 
+def test_paylocity_is_hidden_from_discovery_views(tmp_path, monkeypatch):
+    path = tmp_path / "disabled-source.sqlite"
+    stamp = "2026-10-07T06:00:00Z"
+    _make_db(path, tokens=[
+        ("paylocity", "disabled", "live", "https://example.com", "crawl", "{}", stamp, stamp, None),
+        ("greenhouse", "visible", "live", "https://example.com", "crawl", "{}", stamp, stamp, None),
+    ])
+    monkeypatch.setenv("XJOBSCORE_INSPECTOR_KEYSCAN_DB", str(path))
+    assert [row["ats"] for row in keyscan_view.found()] == ["greenhouse"]
+    assert [row["ats"] for row in keyscan_view.candidates()] == ["greenhouse"]
+    assert keyscan_view.candidates(source="paylocity") == []
+    assert keyscan_view.candidate_count() == 1
+    assert keyscan_view.tally()["found"] == 1
+
+
 def _make_db(path, *, tokens=(), runs=()):
     con = sqlite3.connect(path)
     con.executescript(
@@ -31,7 +46,7 @@ def _make_db(path, *, tokens=(), runs=()):
             harvested_at TEXT NOT NULL, PRIMARY KEY (crawl, part, rg));
         CREATE TABLE scanned (
             ats TEXT NOT NULL, crawl TEXT NOT NULL, scanned_at TEXT NOT NULL,
-            PRIMARY KEY (ats, crawl));
+            rule_hash TEXT, PRIMARY KEY (ats, crawl));
         """
     )
     con.executemany(
@@ -212,11 +227,40 @@ def test_coverage_reports_a_scanned_pair_instead_of_recomputing_it(db):
     _add_footers([
         ("CC-MAIN-2026-34", "subset=warc/part-00000", 0, "io,github)/a", "io,medium)/z", 111),
     ])
+    from keyscan.rules import BY_SOURCE, rule_fingerprint
+
     con = sqlite3.connect(keyscan_view.database_path())
-    con.execute("INSERT INTO scanned VALUES ('greenhouse', 'CC-MAIN-2026-34', '2026-09-02')")
+    con.execute(
+        "INSERT INTO scanned VALUES ('greenhouse', 'CC-MAIN-2026-34', '2026-09-02', ?)",
+        (rule_fingerprint(BY_SOURCE["greenhouse"]),),
+    )
+    # Scanned under a rule that has since changed: due again, so not "scanned".
+    con.execute("INSERT INTO scanned VALUES ('lever', 'CC-MAIN-2026-34', '2026-09-02', 'stale')")
     con.commit()
     con.close()
 
     cells = keyscan_view.coverage()["crawls"][0]["cells"]
 
     assert cells["greenhouse"] == {"state": "scanned", "at": "2026-09-02"}
+    assert cells["lever"]["state"] != "scanned"
+
+
+def test_history_lists_a_completed_run_that_found_nothing_but_hides_empty_failures(db):
+    con = sqlite3.connect(keyscan_view.database_path())
+    con.executemany(
+        "INSERT INTO runs(id, methods_json, config_json, status, phase, checkpoint_json,"
+        " counts_json, artifact_dir, started_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+            ("20261005-061724", '["commoncrawl"]', "{}", "completed", "done", "{}",
+             '{"found": 0, "added": 0}', "/tmp/a", "2026-10-05T06:17:24+00:00"),
+            ("20261005-060952", '["commoncrawl"]', "{}", "failed", "failed", "{}",
+             '{"found": 0, "added": 0}', "/tmp/b", "2026-10-05T06:09:52+00:00"),
+        ],
+    )
+    con.commit()
+    con.close()
+
+    ids = {row["id"] for row in keyscan_view.runs()}
+
+    assert "20261005-061724" in ids
+    assert "20261005-060952" not in ids

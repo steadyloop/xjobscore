@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 
 __all__ = [
     "canonical_feed_source", "canonical_feed_key", "canonical_feed_identity",
@@ -28,10 +29,11 @@ def canonical_feed_source(source: str) -> str:
 # and must not become two rows. Every entry was checked against the live API
 # rather than assumed -- the trailing comment records the probe that settled it.
 #
-# `comeet` is deliberately absent: its key is `board-id/api-token`, and a
-# credential is not safe to case-fold on the strength of a probe that came back
-# 400 for both spellings (that token is simply dead, so the check proved
-# nothing). Add it only if a live board shows the token folding cleanly.
+# `comeet` is deliberately absent: its key is `slug/board-id` (the API token
+# lives in token.config), and while the API does ignore board-id case
+# (arbe/C6.001 and arbe/c6.001 return identical payloads), the slug half does
+# not fold the same way across renames. Board-level dedup lives in
+# inspector/tokens.py `_BOARD`, keyed on the upper-cased board id.
 CASE_INSENSITIVE_SOURCES = frozenset({
     "workday",          # Cisco_Careers / cisco_careers -- one board
     "greenhouse",       # Duolingo / duolingo -- both 88 jobs
@@ -45,6 +47,25 @@ CASE_INSENSITIVE_SOURCES = frozenset({
     "dayforce",         # ROHCGF / rohcgf -- both 200
     "simplify",         # a GitHub owner/repo path; both spellings 200
 })
+
+_AVATURE_LOCALE = re.compile(r"[a-z]{2}_[a-z]{2}")
+
+
+def _avature_key(key: str) -> str:
+    """`company[/xx_YY]/board`, folded the way Avature itself folds it.
+
+    Company and board ignore case (bupaanz/CareersAU = careersau, same jobs)
+    but the locale does not -- ja_JP is a board, ja_jp a 404 (2026-10-06) --
+    so it keeps its `xx_YY` form. A bare key has always meant the `careers`
+    board, so `company/careers` is stored bare rather than as a second feed.
+    Kept in step with keyscan's `_canonical_token`.
+    """
+    parts = key.lower().split("/")
+    if len(parts) == 3 and _AVATURE_LOCALE.fullmatch(parts[1]):
+        parts[1] = parts[1][:3] + parts[1][3:].upper()
+    if parts[1:] == ["careers"]:
+        parts = parts[:1]
+    return "/".join(parts)
 
 # Verified case-SENSITIVE, and folding them would break live feeds:
 #   lever     11 of 12 live mixed-case slugs 404 when lowered (BDG 12 jobs, bdg gone)
@@ -62,6 +83,13 @@ def canonical_feed_key(source: str, key: str) -> str:
     ``feed``.
     """
     source = canonical_feed_source(source)
+    if source == "avature":
+        return _avature_key(key)
+    if source == "ashby":
+        # Board names hold spaces (`Citizen Health`); discovered URLs carry
+        # them as `%20`. One spelling, decoded: the API takes either, and the
+        # key doubles as `company_raw`. Kept in step with keyscan.
+        key = key.replace("%20", " ")
     return key.lower() if source in CASE_INSENSITIVE_SOURCES else key
 
 

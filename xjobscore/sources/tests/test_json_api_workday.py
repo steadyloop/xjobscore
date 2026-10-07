@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from xjobscore import router
-from xjobscore.net import Response
+from xjobscore.net import NetError, Response
 from xjobscore.records import Feed, Item, Record
 from xjobscore.sources import json_api
 
@@ -416,3 +416,128 @@ def test_a_row_without_detail_gets_an_empty_extras_list(workday_config):
     posting = json_api.parse("workday-test", feed(), Item(row["externalPath"], row), {})[0]
 
     assert posting.location_normalization_extra == []
+
+
+class FailingPageNet(DetailNet):
+    """A board where one list request exhausts its retries."""
+
+    def __init__(self, jobs, memberships=None, *, fail_offset=None, fail_applied=None):
+        super().__init__(jobs, memberships)
+        self.fail_offset = fail_offset
+        self.fail_applied = fail_applied
+
+    async def post(self, url, *, json=None, **kwargs):
+        body = json or {}
+        if (self.fail_offset is None or body.get("offset", 0) == self.fail_offset) and (
+            self.fail_applied is None or body.get("appliedFacets") == self.fail_applied
+        ):
+            raise NetError("HTTP 429", url=url, status=429)
+        return await super().post(url, json=json, **kwargs)
+
+
+async def test_a_failed_page_keeps_the_rows_already_fetched(workday_config):
+    """One exhausted page used to empty the whole poll (Target, CVS, RTX,
+    Mastercard and Airbus on 2026-10-05). The rows before it are real: they
+    go through the gate and detail as usual, and the record says truncated."""
+    rows = [
+        typed(0, "Software Engineer Intern"),  # gated in -> detail
+        typed(1, "Staff Software Engineer"),   # gated out -> bare list row
+        typed(2, "Data Science Intern"),       # on the page that fails
+    ]
+    net = FailingPageNet(rows, {"category": {"A": [r["externalPath"] for r in rows]}}, fail_offset=2)
+
+    record = await harvest(net)
+
+    assert record.truncated is True
+    assert record.full_listing is False  # never a basis for absence
+    assert sorted(item.external_id for item in record.items) == ["/job/0", "/job/1"]
+    assert record.detail_fetched_count == 1
+    assert [g["url"].split("/Site")[1] for g in net.gets] == ["/job/0"]
+
+
+async def test_a_failed_partition_branch_keeps_the_other_branches(workday_config):
+    jobs = [job(index) for index in range(5)]
+    memberships = {"category": {
+        "A": ["/job/0", "/job/1", "/job/2"],
+        "B": ["/job/3", "/job/4"],
+    }}
+    net = FailingPageNet(jobs, memberships, fail_applied={"category": ["B"]})
+
+    record = await harvest(net)
+
+    assert record.truncated is True
+    assert record.result_window_truncated is True
+    assert sorted(item.external_id for item in record.items) == ["/job/0", "/job/1", "/job/2"]
+
+
+# -- detail reuse (sources.REVISION_FIELDS["workday"]) ------------------------
+
+
+def merged_prior(row: dict, description: str) -> Item:
+    """What bronze holds for an admitted row: the detail merged over the row."""
+    return Item(
+        external_id=row["externalPath"],
+        payload={**row, "jobPostingInfo": {"jobDescription": description}},
+    )
+
+
+def reuse_options(prior_items: dict) -> json_api.JsonApiHarvestOptions:
+    from xjobscore import sources
+
+    return json_api.JsonApiHarvestOptions(
+        revision_fields=sources.REVISION_FIELDS["workday"], prior_items=prior_items
+    )
+
+
+def located(number: int, title: str, where: str = "Austin, TX") -> dict:
+    return {**typed(number, title), "locationsText": where, "postedOn": "Posted Today"}
+
+
+async def test_an_unchanged_admitted_row_reuses_its_stored_detail(workday_config):
+    """Without reuse every full listing refetched every gated detail (~2,800
+    requests per 15-minute round of the fast feeds on 2026-10-05)."""
+    row = located(0, "Software Engineer Intern")
+    net = DetailNet([row], {"category": {"A": ["/job/0"]}})
+    stale_row = {**row, "postedOn": "Posted 3 Days Ago"}
+
+    record = await json_api.harvest(
+        "workday-test", feed(), net,
+        options=reuse_options({"/job/0": merged_prior(stale_row, "<p>stored</p>")}),
+    )
+
+    assert net.gets == []
+    assert record.reused_item_count == 1
+    (item,) = record.items
+    # The detail half is reused; the live row's own fields are this poll's.
+    assert item.payload["jobPostingInfo"]["jobDescription"] == "<p>stored</p>"
+    assert item.payload["postedOn"] == "Posted Today"
+
+
+async def test_a_changed_title_refetches_the_detail(workday_config):
+    row = located(0, "Software Engineer Intern")
+    net = DetailNet([row], {"category": {"A": ["/job/0"]}})
+    old = {**row, "title": "Software Intern"}
+
+    record = await json_api.harvest(
+        "workday-test", feed(), net,
+        options=reuse_options({"/job/0": merged_prior(old, "<p>stored</p>")}),
+    )
+
+    assert [g["url"].split("/Site")[1] for g in net.gets] == ["/job/0"]
+    assert record.reused_item_count == 0
+
+
+async def test_a_prior_without_detail_is_never_reused(workday_config):
+    """A bare list row in bronze (stored while the gate declined it) matches
+    the revision fields but has no detail to reuse."""
+    row = located(0, "Software Engineer Intern")
+    net = DetailNet([row], {"category": {"A": ["/job/0"]}})
+
+    record = await json_api.harvest(
+        "workday-test", feed(), net,
+        options=reuse_options({"/job/0": Item(external_id="/job/0", payload=dict(row))}),
+    )
+
+    assert len(net.gets) == 1
+    assert record.reused_item_count == 0
+    assert record.items[0].payload["jobPostingInfo"]["jobDescription"] == "<p>Build things</p>"

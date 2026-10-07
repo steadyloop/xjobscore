@@ -284,5 +284,58 @@ async def test_promote_verified_rechecks_eligibility_during_insert():
     assert "NOT t.muted" in sql
     assert "NOT EXISTS" in sql
     assert "ON CONFLICT (source, key) DO NOTHING" in sql
-    assert args == (["workable"], ["snap"])
+    assert args == (["workable"], ["snap"], None)
     assert promoted == 1
+
+
+async def test_vendor_is_a_bind_value_and_groups_share_the_filter():
+    pool = FakePool([{"ats": "ashby", "count": 7}], [])
+    result = await tokens.query(pool, filter="unknown", limit=10, ats="ashby", groups=True)
+
+    groups_sql, _ = pool.calls[1]
+    page_sql, page_args = pool.calls[-1]
+    assert "WHERE t.status = 'unknown'" in groups_sql and "GROUP BY t.ats" in groups_sql
+    assert "AND t.ats = $3" in page_sql and "ashby" not in page_sql
+    assert page_args == (10, 0, "ashby")
+    assert result["groups"] == [{"ats": "ashby", "count": 7}]
+    assert result["total"] == 7
+
+
+async def test_search_and_vendor_bind_in_order_and_groups_follow_search():
+    pool = FakePool([], [])
+    await tokens.query(pool, filter="all", ats="ashby", groups=True, q=" 50%_off ", order="checked")
+
+    groups_sql, groups_args = pool.calls[1]
+    page_sql, page_args = pool.calls[-1]
+    assert groups_args == ("%50\\%\\_off%",)
+    assert "t.token ILIKE $1 OR c.name ILIKE $1" in groups_sql
+    assert page_args == (50, 0, "%50\\%\\_off%", "ashby")
+    assert "ILIKE $3" in page_sql and "t.ats = $4" in page_sql
+    assert "ORDER BY t.checked_at DESC NULLS LAST" in page_sql
+
+
+async def test_unknown_order_rejected():
+    with pytest.raises(ValueError):
+        await tokens.query(pool_with([]), order="random()")
+
+
+async def test_add_vendors_to_feed_resolves_rows_on_the_server():
+    pool = FakePool([{"added": 42}])
+    added = await tokens.add_vendors_to_feed(
+        pool, ["greenhouse", "greenhouse", "lever"], filter="inactive", q="ai", interval_s=86_400,
+    )
+
+    sql, args = pool.calls[-1]
+    assert added == 42
+    assert args == (["greenhouse", "lever"], 86_400, "%ai%")
+    # Same guard as the per-token path, plus the page's own filter and search.
+    assert "t.status = 'live' AND NOT t.muted AND f.id IS NULL" in sql
+    assert "t.status = 'live' AND (f.id IS NULL OR NOT f.polling)" in sql
+    assert "t.ats = ANY($1::text[])" in sql and "ILIKE $3" in sql
+    assert "'feed_entered'" in sql and "ON CONFLICT (source, key) DO NOTHING" in sql
+
+
+async def test_add_vendors_to_feed_with_nothing_ticked_touches_nothing():
+    pool = FakePool()
+    assert await tokens.add_vendors_to_feed(pool, []) == 0
+    assert pool.calls == []

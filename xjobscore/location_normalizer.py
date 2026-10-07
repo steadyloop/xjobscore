@@ -117,6 +117,71 @@ for alias, admin in {
     add(states, alias, ("DE", admin, admin))
 add(states, "nh", ("NL", "07", "07"))
 
+# Full Dutch province names are useful context, but names such as Limburg and
+# Utrecht are not globally unambiguous. Use them as corroboration per location
+# clause, without changing the existing global country/state vocabulary.
+NL_PROVINCES = {
+    "drenthe": "01", "flevoland": "16", "friesland": "02",
+    "gelderland": "03", "groningen": "04", "limburg": "05",
+    "noord brabant": "06", "noord holland": "07", "overijssel": "15",
+    "utrecht": "09", "zeeland": "10", "zuid holland": "11",
+}
+NL_COMPOUND_PROVINCES = frozenset({"noord brabant", "noord holland", "zuid holland"})
+
+
+def _dutch_context(words, bounds, city_spans, country_hits, full_country_hits, state_hits):
+    """Recognize Dutch administrative text only with corroborating context.
+
+    Nederland is also a real US city. Keep bare/ambiguous occurrences and any
+    clause asserting a US state or a different country on the existing path.
+    Semicolon/pipe/slash-separated offices are independent, so recognizing a
+    Dutch address cannot reclassify an adjoining US address.
+    """
+    if not {"nederland", "noord", "zuid"}.intersection(words):
+        return
+    for number in {part[2] for part in bounds}:
+        parts = [part for part in bounds if part[2] == number]
+        start, end = parts[0][0], parts[-1][1]
+        local_countries = [hit for hit in country_hits if start <= hit[0] < end]
+        local_states = [hit for hit in state_hits if start <= hit[0] < end]
+        if (any(hit[2] != "NL" for hit in local_countries)
+                or any(hit[2] == "US" for hit in local_states)):
+            continue
+        components = [(a, b, " ".join(words[a:b])) for a, b, *_ in parts]
+        component_spans = {(a, b) for a, b, _ in components}
+        provinces = [(a, b, NL_PROVINCES[key]) for a, b, key in components
+                     if key in NL_PROVINCES]
+        # A country suffix can make the existing clause reducer discard other
+        # cities. Treat a US-only city outside the administrative components as
+        # conflicting evidence too, even without a state: "Seattle, Amsterdam,
+        # Noord-Holland, Nederland" may be a comma-separated office list.
+        if any(
+            start <= a < end and alias != "nederland"
+            and ((a, b) in component_spans or (a > start and words[a - 1] == "or")
+                 or (b < end and words[b] == "or"))
+            and not any(p <= a and b <= q for p, q, _ in provinces)
+            and any(place[0] == "US" for place in cities.get(alias, ()))
+            and not any(place[0] == "NL" for place in cities.get(alias, ()))
+            for a, b, alias in city_spans
+        ):
+            continue
+        native_country = [(a, b, "NL") for a, b, key in components if key == "nederland"]
+        has_dutch_city = native_country and any(
+            (a, b) in component_spans and alias != "nederland"
+            and any(place[0] == "NL" for place in cities.get(alias, ()))
+            for a, b, alias in city_spans
+        )
+        country_context = any(hit[2] == "NL" for hit in local_countries)
+        if native_country and (provinces or has_dutch_city or country_context):
+            country_hits.extend(native_country)
+            full_country_hits.extend(native_country)
+        # Only compound names need city-span suppression. Registering Groningen
+        # or Utrecht as states also changes existing city-vs-region decisions
+        # (e.g. "NLD - Groningen"), which is outside this correction.
+        state_hits.extend((a, b, "NL", NL_PROVINCES[key], NL_PROVINCES[key])
+                          for a, b, key in components if key in NL_COMPOUND_PROVINCES)
+
+
 def decode(encoded):
     return [tuple(value or None for value in row.split("|")) for row in encoded.split(";")]
 
@@ -289,6 +354,8 @@ def _normalize_location(value: str) -> dict:
                      if i in short and i in uppercase and word in countries]
     full_country_hits += [(i, i + 1, countries[word]) for i, word in enumerate(words)
                           if i in uppercase and word in {"us"}]
+
+    _dutch_context(words, bounds, city_spans, country_hits, full_country_hits, state_hits)
 
     def nearest(hits, start, end):
         hits = [x for x in hits if word_clauses[x[0]] == word_clauses[start]]

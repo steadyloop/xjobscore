@@ -12,10 +12,13 @@ a test injects a fake with the same three methods and no network runs.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import email.utils
 import json as _json
 import random
 import time
+from collections import deque
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Self
@@ -23,8 +26,11 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from . import workable_policy
+
 __all__ = [
-    "DEFAULT_USER_AGENT", "Net", "NetError", "Response", "conditional", "etag", "vendor_cap",
+    "DEFAULT_USER_AGENT", "Net", "NetError", "Response", "conditional", "etag", "rate_group",
+    "vendor_cap",
 ]
 
 # Declared once here rather than per entry point: the string is long enough
@@ -41,10 +47,10 @@ __all__ = [
 # on TLS/ALPN, below the HTTP layer. Changing the UA cannot reach that.
 #
 # Keep the Chrome version roughly current when touching this -- a long-stale
-# build number is itself a signal.
+# build number is itself a signal. Chrome 154 was stable on 2026-10-05.
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
 )
 
 # 429 and 5xx are transient; everything else 4xx is a final answer. Timeouts
@@ -63,9 +69,21 @@ RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 # multi-label suffixes like `.co.uk`) and would silently impose an unmeasured
 # cap on every vendor, not just the ones actually measured here.
 _VENDOR_CAPS: dict[str, int] = {
+    # Workday's limiter counts per data center (`wdN`), so each measured one
+    # gets its own cap; `myworkdayjobs.com` is every other data center sharing
+    # one. Each cap is the in-flight headroom its rate budget below needs at
+    # p95 reply time (~1.3s), so the budget, not the cap, binds.
+    "wd1.myworkdayjobs.com": 24,
+    "wd5.myworkdayjobs.com": 24,
+    "wd3.myworkdayjobs.com": 16,
     "myworkdayjobs.com": 24,
     "eightfold.ai": 16,
-    "oraclecloud.com": 12,
+    # Measured 2026-10-05: every tenant host resolves to a few dozen Akamai
+    # edge IPs (1,042 hosts -> 77 IPs), so a vendor-wide cap is the right
+    # shape -- an edge limit would bind across tenants. Zero errors at 96
+    # concurrent light list requests and at 72 concurrent full polls (list
+    # pages + 200-id detail batches, 27 boards); 48 is two-thirds of that.
+    "oraclecloud.com": 48,
     "bamboohr.com": 8,
     # Provisional, and the one entry here whose hostnames actively mislead: all
     # 288 catalogued Taleo tenants have distinct hostnames, so the per-host
@@ -84,12 +102,30 @@ def _vendor_key(host: str) -> str | None:
 
     Matches on a dot boundary so `notbamboohr.com` does not match
     `bamboohr.com`. Any port or IPv6 brackets are stripped before matching.
+    The longest matching suffix wins, so `wd1.myworkdayjobs.com` binds a wd1
+    tenant and `myworkdayjobs.com` only the data centers without their own.
     """
+    return _suffix_key(host, _VENDOR_CAPS)
+
+
+def rate_group(host: str) -> str | None:
+    """The `_VENDOR_RATES` key whose budget `host` spends, or None.
+
+    Public for the same reason as `vendor_cap`: the inspector labels each
+    scheduler lane with the budget `Net` actually charges it.
+    """
+    return _suffix_key(host, _VENDOR_RATES)
+
+
+def _suffix_key(host: str, table: Mapping[str, Any]) -> str | None:
+    """The longest `table` key that `host` equals or ends with on a dot."""
     hostname = urlsplit(f"//{host}").hostname or host
-    for suffix in _VENDOR_CAPS:
-        if hostname == suffix or hostname.endswith("." + suffix):
-            return suffix
-    return None
+    matches = [
+        suffix
+        for suffix in table
+        if hostname == suffix or hostname.endswith("." + suffix)
+    ]
+    return max(matches, key=len) if matches else None
 
 
 def vendor_cap(host: str) -> int | None:
@@ -102,6 +138,79 @@ def vendor_cap(host: str) -> int | None:
     """
     key = _vendor_key(host)
     return None if key is None else _VENDOR_CAPS[key]
+
+
+# Vendor-wide request-RATE budgets, keyed like `_VENDOR_CAPS`: (sustained
+# requests per second, burst). A concurrency cap bounds nothing about rate
+# when replies are fast -- 24 slots at Workday's ~0.6s replies is ~40 req/s --
+# and `_HostPace` only slows down after a 429 has already happened. A budget
+# spends below the limiter instead, so the steady state is no 429 at all.
+#
+# Workday's CXS endpoints sit behind Cloudflare with a rate-limiting rule. It
+# counts per client IP per data center (`wdN`), shared by every tenant there:
+# measured 2026-10-05 with load spread at <= 0.2 req/s per tenant, wd1 ran
+# clean at 10 req/s for 6 min and tripped at 20; wd3 clean at 8, tripped at
+# ~11; wd5 clean at 10; wd1 + wd5 at 10 each through the same LAX edge were
+# clean, so the edge is not the counter, and 60 req/s across data centers
+# tripped only wd3's share, so neither is the IP alone. A trip is a managed
+# challenge (HTML 429, `cf-mitigated: challenge`, no Retry-After) that clears
+# within ~2 min. Budgets sit at ~80% of the clean rate; data centers not
+# measured share the old 3 req/s. See docs/ats-poll-rate.md.
+#
+# One budget per `Net` instance, like `_vendor_semaphores`: the scheduler's
+# single Net carries all production polling, and the inspector shares one
+# dict across its per-feed instances (`InspectorNet`).
+_VENDOR_RATES: dict[str, tuple[float, int]] = {
+    "wd1.myworkdayjobs.com": (8.0, 20),
+    "wd5.myworkdayjobs.com": (8.0, 20),
+    "wd3.myworkdayjobs.com": (6.0, 20),
+    "myworkdayjobs.com": (3.0, 20),
+}
+
+# Per-host budgets, keyed by the same suffixes but spent per exact hostname.
+# Single-tenant Workday sweeps drew 429s from ~3.5-5 req/s after a ~400-request
+# burst, a limit the per-data-center budgets above would let one large tenant
+# reach on its own.
+_HOST_RATES: dict[str, tuple[float, int]] = {
+    "myworkdayjobs.com": (2.0, 10),
+}
+
+# How far back `Net.rate_groups` looks for the throttles it reports.
+_THROTTLE_WINDOW_S = 3600.0
+# How far back it averages starts into an achieved rate.
+_RATE_WINDOW_S = 60.0
+
+
+class _RateBudget:
+    """A token bucket that queues callers instead of refusing them.
+
+    Each `take` claims the next token in arrival order, letting the balance go
+    negative, and sleeps until that token has accrued. Callers are therefore
+    served first-come first-served with no lock (every state change happens
+    between awaits), and the starts in any window of T seconds never exceed
+    `burst + rate * T`. A caller cancelled mid-wait forfeits its token, which
+    only ever errs slower.
+    """
+
+    __slots__ = ("rate", "burst", "tokens", "stamp")
+
+    def __init__(self, rate: float, burst: int) -> None:
+        self.rate = rate
+        self.burst = float(burst)
+        self.tokens = float(burst)
+        self.stamp = time.monotonic()
+
+    async def take(self) -> float:
+        """Wait for one token; returns seconds waited."""
+        now = time.monotonic()
+        self.tokens = min(self.burst, self.tokens + (now - self.stamp) * self.rate)
+        self.stamp = now
+        self.tokens -= 1.0
+        if self.tokens >= 0:
+            return 0.0
+        wait = -self.tokens / self.rate
+        await asyncio.sleep(wait)
+        return wait
 
 
 # Adaptive pacing bounds. A host is unpaced until it answers 429; spacing then
@@ -194,6 +303,10 @@ class _HostPace:
         # success, so a burst of successes cannot buy back time we never spent.
         self.last_decay = now
 
+    def cooling(self) -> bool:
+        """True while a 429 cooldown is open for this host."""
+        return time.monotonic() < self.cooldown_until
+
     def succeeded(self) -> None:
         """Credit elapsed time against `interval`, halving per `_PACE_HALFLIFE_S`.
 
@@ -226,10 +339,17 @@ class NetError(Exception):
     common successful outcome of a poll.
     """
 
-    def __init__(self, message: str, *, url: str, status: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, url: str, status: int | None = None,
+        response: Response | None = None,
+    ) -> None:
         super().__init__(message)
         self.url = url
         self.status = status
+        # The final non-2xx response, when there was one: some refusals are
+        # answers that only the body can tell apart (Workday's disabled-site
+        # 403 versus a WAF's).
+        self.response = response
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,9 +424,16 @@ class Net:
         max_retries: int = 3,
         max_connections: int = 256,
         max_keepalive_connections: int = 64,
+        vendor_rates: Mapping[str, tuple[float, int]] | None = None,
+        host_rates: Mapping[str, tuple[float, int]] | None = None,
+        connect_timeout_s: float | None = None,
     ) -> None:
         self._user_agent = user_agent
         self._timeout_s = timeout_s
+        # A tighter bound on establishing a connection alone (DNS, TCP, TLS);
+        # None keeps `timeout_s` for every phase. A host that never accepts
+        # otherwise costs the full timeout on every retry.
+        self._connect_timeout_s = connect_timeout_s
         self._min_interval_s = min_interval_s
         self._max_retries = max_retries
         self._max_connections = max_connections
@@ -326,9 +453,20 @@ class Net:
         self._host_paces: dict[str, _HostPace] = {}
         # Vendor-wide cap, keyed by `_VENDOR_CAPS` suffix rather than exact
         # host: unlike `_host_semaphores`, one entry here is shared by every
-        # tenant hostname under that suffix. Acquired outside the host
-        # semaphore/throttle -- see `_request`.
+        # tenant hostname under that suffix. Held per attempt, around the wire
+        # call alone -- see `_admitted`.
         self._vendor_semaphores: dict[str, asyncio.Semaphore] = {}
+        # Vendor-wide rate budgets, keyed the same way (`_VENDOR_RATES`).
+        self._vendor_rates = _VENDOR_RATES if vendor_rates is None else dict(vendor_rates)
+        self._vendor_budgets: dict[str, _RateBudget] = {}
+        # Per-hostname budgets (`_HOST_RATES`), keyed by exact host.
+        self._host_rates = _HOST_RATES if host_rates is None else dict(host_rates)
+        self._host_budgets: dict[str, _RateBudget] = {}
+        # Monotonic times of wire starts and 429s per rate-budget key, for
+        # `rate_groups`. Starts are trimmed to `_RATE_WINDOW_S`, 429s to
+        # `_THROTTLE_WINDOW_S`, as they are recorded.
+        self._group_starts: dict[str, deque[float]] = {}
+        self._group_throttles: dict[str, deque[float]] = {}
 
     async def __aenter__(self) -> Self:
         """Open the underlying client. Use `async with Net(...) as net`."""
@@ -339,7 +477,8 @@ class Net:
         # which reads as the origin being slow. Headroom, not a measured limit:
         # the real ceilings are `_VENDOR_CAPS` and the per-host semaphores.
         self._client = httpx.AsyncClient(
-            timeout=self._timeout_s,
+            timeout=httpx.Timeout(self._timeout_s, connect=self._connect_timeout_s)
+            if self._connect_timeout_s is not None else self._timeout_s,
             headers={"User-Agent": self._user_agent},
             follow_redirects=True,
             max_redirects=self._max_redirects,
@@ -379,28 +518,117 @@ class Net:
             return None
         return self._vendor_semaphores.setdefault(key, asyncio.Semaphore(_VENDOR_CAPS[key]))
 
+    def _rate_group(self, host: str) -> str | None:
+        """The `_VENDOR_RATES` key whose budget `host` spends, if any."""
+        return _suffix_key(host, self._vendor_rates)
+
+    def _vendor_budget(self, host: str) -> _RateBudget | None:
+        """The vendor-wide rate budget for `host`'s suffix, if it has one."""
+        key = self._rate_group(host)
+        if key is None:
+            return None
+        budget = self._vendor_budgets.get(key)
+        if budget is None:
+            budget = self._vendor_budgets[key] = _RateBudget(*self._vendor_rates[key])
+        return budget
+
+    def _host_budget(self, host: str) -> _RateBudget | None:
+        """This exact host's own rate budget, if its suffix has one."""
+        key = _suffix_key(host, self._host_rates)
+        if key is None:
+            return None
+        budget = self._host_budgets.get(host)
+        if budget is None:
+            budget = self._host_budgets[host] = _RateBudget(*self._host_rates[key])
+        return budget
+
+    def _record(self, events: dict[str, deque[float]], host: str, window_s: float) -> None:
+        key = self._rate_group(host)
+        if key is None:
+            return
+        now = time.monotonic()
+        times = events.setdefault(key, deque())
+        times.append(now)
+        while times and times[0] < now - window_s:
+            times.popleft()
+
+    def rate_groups(self) -> dict[str, dict[str, Any]]:
+        """Each rate budget's configured and achieved rate, and recent 429s.
+
+        Achieved rate averages wire starts over `_RATE_WINDOW_S`, so it reads
+        low for that long after a start; 429s count over `_THROTTLE_WINDOW_S`.
+        """
+        now = time.monotonic()
+        groups = {}
+        for key, (rate, burst) in self._vendor_rates.items():
+            starts = self._group_starts.get(key, ())
+            throttles = self._group_throttles.get(key, ())
+            groups[key] = {
+                "budget": rate,
+                "burst": burst,
+                "rate": round(
+                    sum(1 for t in starts if t >= now - _RATE_WINDOW_S) / _RATE_WINDOW_S, 2
+                ),
+                "throttled": sum(1 for t in throttles if t >= now - _THROTTLE_WINDOW_S),
+            }
+        return groups
+
+    @contextlib.asynccontextmanager
+    async def _admitted(self, host: str, pace: _HostPace, *, validation: bool = False) -> AsyncIterator[float]:
+        """Hold one attempt's vendor-wide admission; yields seconds waited for it.
+
+        Nothing here sleeps while holding a vendor slot. The host's own pacing
+        and any 429 cooldown are waited out first, then the host's and the
+        vendor's rate budgets, and only then is a `_VENDOR_CAPS` slot taken -- for the wire
+        call alone, released before any retry backoff. `_request` used to take
+        the slot first and hold it across all of that, so one large tenant in
+        cooldown parked every slot of its vendor: on 2026-10-05 a 2-request
+        Workday board waited 267s behind Target's partitioned poll, and
+        Salesforce 125s behind RTX's. The order is still fixed -- host
+        semaphore, then vendor slot -- so it cannot deadlock.
+        """
+        vendor = self._vendor_semaphore(host)
+        host_budget = self._host_budget(host)
+        budget = self._vendor_budget(host)
+        waited = 0.0
+        while True:
+            waited += await pace.reserve()
+            if host_budget is not None:
+                waited += await host_budget.take()
+            if budget is not None:
+                waited += await budget.take()
+            if vendor is None:
+                break
+            await vendor.acquire()
+            if not pace.cooling():
+                break
+            # A sibling's 429 opened a cooldown while this attempt queued for
+            # the slot; sending now would walk into the wall it just found.
+            vendor.release()
+        try:
+            try:
+                waited += await workable_policy.before_request(host, validation=validation)
+            except workable_policy.CoolingDown as exc:
+                raise NetError(str(exc), url="https://" + host, status=429) from exc
+            self._record(self._group_starts, host, _RATE_WINDOW_S)
+            yield waited
+        finally:
+            if vendor is not None:
+                vendor.release()
+
     async def _request(self, method: str, url: str, *, concurrency: int = 1, **kwargs: Any) -> Response:
         if self._client is None:
             raise RuntimeError("Net must be used as an async context manager")
         host = urlsplit(url).netloc
-        vendor = self._vendor_semaphore(host)
-        # Acquisition order is always vendor -> host, never the reverse, so
-        # nesting can never deadlock. The vendor semaphore is held for the
-        # whole request including retries, exactly like the host semaphore
-        # and throttle below -- see `_request_one`.
+        # Host limits only. The vendor-wide slot and rate budget are taken per
+        # attempt, inside `_request_one` -- see `_admitted`.
         if concurrency > 1:
             semaphore = self._host_semaphores.setdefault(
                 (host, concurrency), asyncio.Semaphore(concurrency)
             )
-            if vendor is None:
-                async with semaphore:
-                    return await self._request_one(method, url, host, throttled=False, **kwargs)
-            async with vendor, semaphore:
+            async with semaphore:
                 return await self._request_one(method, url, host, throttled=False, **kwargs)
-        if vendor is None:
-            return await self._request_one(method, url, host, throttled=True, **kwargs)
-        async with vendor:
-            return await self._request_one(method, url, host, throttled=True, **kwargs)
+        return await self._request_one(method, url, host, throttled=True, **kwargs)
 
     async def _request_one(
         self, method: str, url: str, host: str, *, throttled: bool, **kwargs: Any
@@ -413,9 +641,9 @@ class Net:
             # would just serialize it again.
             if throttled:
                 await self._throttle(host)
-            await pace.reserve()
             try:
-                r = await self._client.request(method, url, **kwargs)
+                async with self._admitted(host, pace, validation=workable_policy.verification(url, kwargs.get("params"))):
+                    r = await self._client.request(method, url, **kwargs)
             except httpx.TransportError as exc:
                 if attempt >= self._max_retries:
                     raise NetError(str(exc), url=url) from exc
@@ -428,12 +656,20 @@ class Net:
                 return _to_response(r)
 
             if r.status_code == 429:
+                if await workable_policy.note_response(r):
+                    # Persist the full vendor cooldown and return the refusal
+                    # immediately. Other clients fail locally without wire I/O.
+                    raise NetError("HTTP 429", url=str(r.url), status=429, response=_to_response(r))
                 # Host-wide: the next reserve() waits the cooldown out, and so
                 # does every sibling slot, instead of each sleeping alone.
                 pace.throttled(_retry_after_seconds(r.headers.get("retry-after")))
+                self._record(self._group_throttles, host, _THROTTLE_WINDOW_S)
 
             if r.status_code not in RETRYABLE_STATUS or attempt >= self._max_retries:
-                raise NetError(f"HTTP {r.status_code}", url=str(r.url), status=r.status_code)
+                raise NetError(
+                    f"HTTP {r.status_code}", url=str(r.url), status=r.status_code,
+                    response=_to_response(r),
+                )
 
             if r.status_code != 429:
                 await self._sleep_before_retry(attempt, r.headers.get("retry-after"))
@@ -463,14 +699,14 @@ class Net:
         merged.update(conditional(etag))
         return await self._request("GET", url, params=params, headers=merged, concurrency=concurrency)
 
-    async def head(self, url: str) -> Response:
+    async def head(self, url: str, *, headers: dict | None = None, concurrency: int = 1) -> Response:
         """HEAD, for a vendor that publishes a validator header but not an
         ETag (Trakstar's Last-Modified). Shares `get`'s retry/pacing policy
         via `_request`; body is always empty. Not conditional -- a source
         that wants that compares the header itself, since a server may honor
         HEAD while ignoring If-Modified-Since entirely.
         """
-        return await self._request("HEAD", url)
+        return await self._request("HEAD", url, headers=headers, concurrency=concurrency)
 
     async def post(
         self,
@@ -502,19 +738,26 @@ class Net:
 
 
 def _retry_after_seconds(retry_after: str | None) -> float | None:
-    """Parse a Retry-After header (delta-seconds or HTTP-date); None if absent."""
+    """Parse a Retry-After header (delta-seconds or HTTP-date).
+
+    None when absent or when it asks for no wait at all: Workable's 429 carries
+    `Retry-After: 0`, and honoring that literally retried at once, spent every
+    retry in a burst, and handed the sweep a 429 it then cooled a minute on.
+    No usable hint means the computed backoff applies instead.
+    """
     if not retry_after:
         return None
     try:
-        return float(retry_after)
+        seconds = float(retry_after)
     except ValueError:
         try:
             when = email.utils.parsedate_to_datetime(retry_after)
             if when.tzinfo is None:
                 when = when.replace(tzinfo=timezone.utc)
-            return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+            seconds = (when - datetime.now(timezone.utc)).total_seconds()
         except (TypeError, ValueError):
-            return 0.0
+            return None
+    return seconds if seconds > 0 else None
 
 
 def conditional(value: str | None) -> dict[str, str]:

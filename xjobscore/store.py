@@ -12,6 +12,7 @@ import orjson
 
 from xjobscore.feed_identity import canonical_feed_identity
 from xjobscore.records import Feed
+from xjobscore.source_policy import require_source_allowed
 
 if TYPE_CHECKING:
     from asyncpg import Connection, Pool
@@ -23,12 +24,14 @@ __all__ = [
     "append_poll_log",
     "claim_due_feeds",
     "claim_feed",
+    "due_key_parts",
     "due_sources",
     "close_posting_by_key",
     "connect",
     "dedup_candidates",
     "dedup_descriptions",
     "due_feeds",
+    "ensure_token_company",
     "fetchable_feeds",
     "finish_schedule_failure",
     "finish_schedule_success",
@@ -37,6 +40,8 @@ __all__ = [
     "latest_raw",
     "load_alias_map",
     "mark_checked",
+    "mint_company",
+    "raw_candidates",
     "replace_dup_groups",
     "replay_feeds",
     "resolve_company",
@@ -45,9 +50,11 @@ __all__ = [
     "set_schedule_interval",
     "set_schedule_paused",
     "source_instance",
+    "token_slug",
     "touch_source_postings",
     "upsert_job_posting",
     "upsert_keyscan_token",
+    "write_company_aliases",
 ]
 
 
@@ -84,7 +91,10 @@ async def connect(dsn: str, *, search_path: str | None = None) -> Pool:
     return await asyncpg.create_pool(
         dsn,
         min_size=1,
-        max_size=20,
+        # Sized for concurrent vendor lanes (greenhouse 30, ashby 44, lever 40
+        # workers, plus ~25 single-width vendors) holding a connection only for
+        # claim, bronze, silver and finish. PostgreSQL allows 100.
+        max_size=40,
         init=_install_jsonb_codec,
         **({"server_settings": {"search_path": search_path}} if search_path else {}),
     )
@@ -133,6 +143,24 @@ _FEED_SELECT = """
 """
 
 
+# A filter on one '/'-separated part of `feed.key`: (1-based part index,
+# values, exclude). `(2, ("wd1",), False)` keeps Workday keys whose data
+# center is wd1; `(2, ("wd1", "wd3"), True)` keeps every other data center.
+KeyPart = tuple[int, tuple[str, ...], bool]
+
+
+def _key_part_clause(part: KeyPart | None, first: int) -> tuple[str, list[Any]]:
+    """SQL for `part` with its parameters numbered from `$first`."""
+    if part is None:
+        return "", []
+    index, values, exclude = part
+    test = "<> ALL" if exclude else "= ANY"
+    return (
+        f"AND split_part(f.key, '/', ${first}) {test}(${first + 1}::text[])",
+        [index, list(values)],
+    )
+
+
 async def claim_due_feeds(
     conn: Connection,
     now: datetime,
@@ -140,6 +168,7 @@ async def claim_due_feeds(
     *,
     lease_seconds: int = 3600,
     source: str | None = None,
+    part: KeyPart | None = None,
 ) -> list[Feed]:
     """Lease due feed rows atomically for horizontally safe workers.
 
@@ -148,9 +177,11 @@ async def claim_due_feeds(
     a slow vendor's backlog crowding out a fast one. Spelled as a conditional
     clause rather than `($4 IS NULL OR f.source = $4)` so the unfiltered claim
     still plans on `feed_due_idx` and the filtered one on `feed_source_due_idx`.
+    `part` narrows that vendor's queue to one lane (`sources.lane_filter`).
     """
     lease_until = now + timedelta(seconds=max(60, lease_seconds))
     source_clause = "AND f.source = $4" if source is not None else ""
+    part_clause, part_args = _key_part_clause(part, 5 if source is not None else 4)
     rows = await conn.fetch(
         f"""
         WITH picked AS (
@@ -161,6 +192,7 @@ async def claim_due_feeds(
               AND f.due_at <= $1
               AND (f.hold_until IS NULL OR f.hold_until <= $1)
               {source_clause}
+              {part_clause}
             -- Oldest due first, within the vendor as well as across all of
             -- them: policy.poll_now backdates due_at by 3650 days so an
             -- express poll sorts to the front, and it must still do so here.
@@ -198,6 +230,7 @@ async def claim_due_feeds(
         max(1, limit),
         lease_until,
         *([source] if source is not None else []),
+        *part_args,
     )
     return [_feed_from_row(row) for row in rows]
 
@@ -288,12 +321,39 @@ async def due_sources(conn: Connection, now: datetime) -> list[str]:
     return [row["source"] for row in rows]
 
 
+async def due_key_parts(
+    conn: Connection, now: datetime, source: str, index: int
+) -> list[str]:
+    """Distinct values of key part `index` among `source`'s claimable feeds.
+
+    `run.due_lanes` turns these into lanes, so the predicate is the same one
+    `claim_due_feeds` and `due_sources` use.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT split_part(f.key, '/', $3) AS part
+        FROM feed f
+        WHERE f.polling
+          AND f.paused_at IS NULL
+          AND f.due_at <= $1
+          AND (f.hold_until IS NULL OR f.hold_until <= $1)
+          AND f.source = $2
+        ORDER BY part
+        """,
+        now,
+        source,
+        index,
+    )
+    return [row["part"] for row in rows]
+
+
 async def due_feeds(
     conn: Connection,
     now: datetime,
     limit: int | None = None,
     *,
     source: str | None = None,
+    part: KeyPart | None = None,
 ) -> list[Feed]:
     """Read the claimable queue without taking leases, for dry runs.
 
@@ -303,7 +363,10 @@ async def due_feeds(
     work.
     """
     source_clause = "AND f.source = $2" if source is not None else ""
-    limit_clause = "" if limit is None else f"LIMIT ${2 + (source is not None)}"
+    part_clause, part_args = _key_part_clause(part, 2 + (source is not None))
+    limit_clause = (
+        "" if limit is None else f"LIMIT ${2 + (source is not None) + len(part_args)}"
+    )
     rows = await conn.fetch(
         _FEED_SELECT
         + f"""
@@ -312,11 +375,13 @@ async def due_feeds(
           AND f.due_at <= $1
           AND (f.hold_until IS NULL OR f.hold_until <= $1)
           {source_clause}
+          {part_clause}
         ORDER BY f.due_at, f.id
         {limit_clause}
         """,
         now,
         *([source] if source is not None else []),
+        *part_args,
         *([max(1, limit)] if limit is not None else []),
     )
     return [_feed_from_row(row) for row in rows]
@@ -370,21 +435,35 @@ async def finish_schedule_success(
     list_total: int | None = None,
     full_listing: bool = False,
     last_modified: str | None = None,
+    forget_snapshot: bool = False,
+    reused_detail: bool = False,
 ) -> bool:
-    """Complete a claimed poll without overwriting a reclaimed worker's lease."""
+    """Complete a claimed poll without overwriting a reclaimed worker's lease.
+
+    ``forget_snapshot`` clears etag, last_modified, and res_hash so the next
+    poll cannot short-circuit (304 or matching hash) past silver. Used when
+    silver left postings unresolved: a later poll may be able to resolve them.
+
+    ``full_listing`` records the board's total, but only a listing that also
+    fetched every detail fresh (``reused_detail`` false) advances
+    ``last_full_poll_at``. That column is the clock `sources.reusing` bounds
+    detail reuse by; a count-probe source enumerates its whole board on most
+    polls, so advancing it on every listing kept reuse "fresh" forever and a
+    description-only edit was never refetched.
+    """
     result = await conn.execute(
         """
         UPDATE feed SET
-            etag = $3,
-            res_hash = COALESCE($4, res_hash),
+            etag = CASE WHEN $11 THEN NULL ELSE $3 END,
+            res_hash = CASE WHEN $11 THEN NULL ELSE COALESCE($4, res_hash) END,
             strikes = 0,
             due_at = $5,
             hold_until = NULL,
             last_poll_at = $2,
             last_change_at = CASE WHEN $6 THEN $2 ELSE last_change_at END,
             list_total = CASE WHEN $9 THEN $8 ELSE list_total END,
-            last_full_poll_at = CASE WHEN $9 THEN $2 ELSE last_full_poll_at END,
-            last_modified = $10
+            last_full_poll_at = CASE WHEN $9 AND NOT $12 THEN $2 ELSE last_full_poll_at END,
+            last_modified = CASE WHEN $11 THEN NULL ELSE $10 END
         WHERE id = $1 AND hold_until = $7
         """,
         feed.id,
@@ -397,6 +476,8 @@ async def finish_schedule_success(
         list_total,
         full_listing,
         last_modified,
+        forget_snapshot,
+        reused_detail,
     )
     return result == "UPDATE 1"
 
@@ -552,6 +633,29 @@ async def save_raw(
     return int(raw_id), False
 
 
+async def raw_candidates(
+    conn: Connection, source: str, keys: list[str], hashes: list[str]
+) -> list[asyncpg.Record]:
+    """Find exact hashes first, otherwise the latest raw for hash-rule compatibility."""
+    return await conn.fetch(
+        """
+        SELECT wanted.source_key, wanted.data_hash AS requested_hash,
+               COALESCE(stored.id, prior.id) AS id,
+               COALESCE(stored.data_hash, prior.data_hash) AS data_hash,
+               prior.data
+        FROM unnest($2::text[], $3::text[]) AS wanted(source_key, data_hash)
+        LEFT JOIN raw_posting stored ON stored.source = $1
+            AND stored.source_key = wanted.source_key AND stored.data_hash = wanted.data_hash
+        LEFT JOIN LATERAL (
+            SELECT id, data_hash, data FROM raw_posting
+            WHERE stored.id IS NULL AND source = $1 AND source_key = wanted.source_key
+            ORDER BY fetched_at DESC, id DESC LIMIT 1
+        ) prior ON true
+        """,
+        source, keys, hashes,
+    )
+
+
 async def latest_raw(conn: Connection, source: str) -> list[asyncpg.Record]:
     """Return the newest bronze revision per source-local posting identity."""
     return await conn.fetch(
@@ -570,6 +674,8 @@ async def set_feed_enabled(
 ) -> int | None:
     """Operator on/off switch for one feed; None when the feed is unknown."""
     source, key = canonical_feed_identity(source, key)
+    if enabled:
+        require_source_allowed(source)
     return await conn.fetchval(
         "UPDATE feed SET polling = $3 WHERE source = $1 AND key = $2 RETURNING id",
         source,
@@ -599,6 +705,9 @@ async def set_feeds_enabled(
     identities = list(
         dict.fromkeys(canonical_feed_identity(*row) for row in identities)
     )
+    if enabled:
+        for source, _ in identities:
+            require_source_allowed(source)
     sources = [source for source, _ in identities]
     keys = [key for _, key in identities]
     if not enabled:
@@ -715,6 +824,123 @@ async def resolve_company(
     return row["company_id"] if row is not None else None
 
 
+# Vendors whose token is `tenant/host/site` (or Avature's `company/board`);
+# only the tenant reads like a name.
+_TENANT_PREFIXED_ATS = {"workday", "oracle", "avature"}
+
+
+def token_slug(ats: str, token: str) -> str:
+    """The name-like substring of `token` to resolve a company against."""
+    if ats in _TENANT_PREFIXED_ATS:
+        return token.split("/", 1)[0]
+    if ats == "eightfold" and "/" in token:
+        # `host/domain`; the host is often shared (app.eightfold.ai), the
+        # domain's first label is the employer.
+        return token.split("/", 1)[1].split(".", 1)[0]
+    return token
+
+
+async def mint_company(
+    conn: Connection,
+    name: str,
+    *,
+    discovered_from: str,
+    tags: dict[str, Any] | None = None,
+) -> int:
+    """Insert a ``pending`` company named `name`; returns its id.
+
+    No domain: nothing that mints knows one, and a guess in a UNIQUE column
+    blocks the real owner. ``name_machine`` keeps the guess after an operator
+    renames the row on the Companies page.
+    """
+    return int(
+        await conn.fetchval(
+            """
+            INSERT INTO company (name, discovered_from, tags)
+            VALUES ($1, $2, $3::jsonb)
+            RETURNING id
+            """,
+            name,
+            discovered_from,
+            {"name_machine": name, **(tags or {})},
+        )
+    )
+
+
+async def write_company_aliases(conn: Connection, company_id: int, *raw: str) -> None:
+    """Point every spelling of *raw* at ``company_id``, never stealing one.
+
+    The slug matters as much as the name: silver sees the slug on the wire for
+    vendors whose postings carry no company name, and a name-only alias set
+    would leave those postings unresolvable.
+    """
+    seen: dict[str, str] = {}
+    for value in raw:
+        if not value:
+            continue
+        for candidate in alias_candidates(value):
+            seen.setdefault(candidate, value)
+    if not seen:
+        return
+    await conn.execute(
+        """
+        INSERT INTO company_alias (alias_norm, company_id, alias)
+        SELECT norm, $2, raw FROM unnest($1::text[], $3::text[]) AS t(norm, raw)
+        ON CONFLICT (alias_norm) DO NOTHING
+        """,
+        list(seen.keys()),
+        company_id,
+        list(seen.values()),
+    )
+
+
+async def ensure_token_company(
+    conn: Connection, *, ats: str, token: str, name: str | None
+) -> tuple[int, bool]:
+    """Resolve or mint the company for a token that has none; link the token.
+
+    Returns ``(company_id, minted)``. Called from silver when a polled ATS
+    feed's postings resolve to nothing, so a bulk-promoted token stops dropping
+    every posting it fetches.
+
+    Concurrent feeds naming the same employer must land on one company, and
+    ``company.name`` is not unique, so the alias keys are the only shared
+    identity. Each key is taken as a transaction-scoped advisory lock, in
+    sorted order so two callers holding overlapping keys cannot deadlock, and
+    the alias lookup is repeated under the lock: the first caller mints and
+    writes the aliases, every later one finds them. The lock lives until the
+    caller's transaction commits, which is also when those aliases become
+    visible -- so the caller must be inside one (silver's poll path is).
+    """
+    ats, token = canonical_feed_identity(ats, token)
+    slug = token_slug(ats, token)
+    name = (name or "").strip() or slug
+    keys = sorted({*alias_candidates(name), *alias_candidates(slug)})
+    async with conn.transaction():
+        for key in keys:
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"company_alias:{key}",
+            )
+        company_id = await resolve_company(conn, name)
+        if company_id is None:
+            company_id = await resolve_company(conn, slug)
+        minted = company_id is None
+        if company_id is None:
+            company_id = await mint_company(conn, name, discovered_from="feed")
+        await write_company_aliases(conn, company_id, name, slug)
+        await conn.execute(
+            """
+            UPDATE token SET company_id = $1
+             WHERE ats = $2 AND token = $3 AND company_id IS NULL
+            """,
+            company_id,
+            ats,
+            token,
+        )
+    return company_id, minted
+
+
 async def touch_source_postings(
     conn: Connection, source: str, now: datetime, *, feed_id: int | None = None
 ) -> int:
@@ -767,7 +993,7 @@ async def upsert_job_posting(
     raw_id: int,
     seen_at: datetime,
     touch_seen: bool = True,
-    vendor_closed_at: datetime | None = None,
+    ats_closed_at: datetime | None = None,
 ) -> tuple[int, bool, bool]:
     """Upsert the exact canonical projection declared by ``job_posting``.
 
@@ -798,7 +1024,7 @@ async def upsert_job_posting(
                 source, source_key, company_id, title, description, location_text,
                 source_url, apply_url, posted_at, job_type, remote, part_time,
                 locations, attributes, status, last_seen_at, content_hash, raw_id,
-                vendor_closed_at
+                ats_closed_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $20, $12, $13,
                       $14, $15, $16, $17, $19)
             ON CONFLICT (source, source_key) DO UPDATE SET
@@ -834,20 +1060,27 @@ async def upsert_job_posting(
                     ELSE job_posting.job_domain_version
                 END,
                 -- Skills consume only description; degree fields and summaries
-                -- consume title and description. Comparing those inputs avoids
-                -- invalidating them when unrelated stable fields change, or when
-                -- the content-hash recipe itself changes.
+                -- consume title and description; focus chips also consume the
+                -- employer and only exist on typed postings. Comparing those
+                -- inputs avoids invalidating them when unrelated stable fields
+                -- change, or when the content-hash recipe itself changes.
                 attributes = CASE
                     WHEN job_posting.description IS DISTINCT FROM EXCLUDED.description
                     THEN (job_posting.attributes
                           - 'skills' - 'skills_meta'
                           - 'degree' - 'degree_meta'
-                          - 'summary' - 'summary_meta')
+                          - 'summary' - 'summary_meta'
+                          - 'focus' - 'focus_meta')
                          || EXCLUDED.attributes
                     WHEN job_posting.title IS DISTINCT FROM EXCLUDED.title
                     THEN (job_posting.attributes
                           - 'degree' - 'degree_meta'
-                          - 'summary' - 'summary_meta')
+                          - 'summary' - 'summary_meta'
+                          - 'focus' - 'focus_meta')
+                         || EXCLUDED.attributes
+                    WHEN job_posting.company_id IS DISTINCT FROM EXCLUDED.company_id
+                        OR job_posting.job_type IS DISTINCT FROM EXCLUDED.job_type
+                    THEN (job_posting.attributes - 'focus' - 'focus_meta')
                          || EXCLUDED.attributes
                     ELSE job_posting.attributes || EXCLUDED.attributes
                 END,
@@ -882,8 +1115,8 @@ async def upsert_job_posting(
                 END,
                 -- First statement wins: the earliest poll that saw the vendor's
                 -- own flag flip is the tightest bound we have on when it did.
-                vendor_closed_at = COALESCE(
-                    job_posting.vendor_closed_at, EXCLUDED.vendor_closed_at
+                ats_closed_at = COALESCE(
+                    job_posting.ats_closed_at, EXCLUDED.ats_closed_at
                 ),
                 content_hash = EXCLUDED.content_hash,
                 raw_id = EXCLUDED.raw_id
@@ -913,7 +1146,7 @@ async def upsert_job_posting(
         content_hash,
         raw_id,
         touch_seen,
-        vendor_closed_at,
+        ats_closed_at,
         values.get("part_time", "unknown"),
     )
     return row["id"], row["changed"], row["created"]
@@ -954,58 +1187,76 @@ async def absent_postings(
     )
 
 
-async def mark_missing_postings(conn: Connection, source: str, polled_at: datetime) -> int:
-    """Stamp active postings the complete poll at ``polled_at`` did not list.
+async def mark_missing_postings(
+    conn: Connection, source: str, polled_at: datetime, *, listed_keys: list[str] | None = None
+) -> int:
+    """Stamp postings the complete poll at ``polled_at`` did not list.
 
-    Called only after a whole, non-truncated fetch was projected: silver has
-    just set ``last_seen_at = polled_at`` on every posting the board listed, so
-    anything older is absent from this listing. The first poll to find a
-    posting absent is the one recorded; later polls leave the stamp alone, and
-    a posting listed again is cleared by the upsert or the touch.
+    Call only after a whole, non-truncated poll. Supplied list IDs refresh
+    presence even for items silver skipped. Older postings are absent; keep
+    their first absence timestamp until they appear again.
 
     A signal only -- ``status`` is not changed.
     """
-    result = await conn.execute(
-        """
-        UPDATE job_posting SET missing_since = $2
-        WHERE source = $1
-          AND status = 'active'
-          AND missing_since IS NULL
-          AND last_seen_at < $2
-        """,
-        source,
-        polled_at,
-    )
-    return int(result.rsplit(" ", 1)[-1])
+    from xjobscore.reconcile import enqueue
+
+    async with conn.transaction():
+        # List presence is independent of whether silver could parse the item.
+        if listed_keys is not None:
+            await conn.execute(
+                """
+                UPDATE job_posting SET last_seen_at = $2, missing_since = NULL
+                WHERE source = $1 AND source_key = ANY($3::text[])
+                  AND last_seen_at < $2
+                """,
+                source, polled_at, listed_keys,
+            )
+        rows = await conn.fetch(
+            """
+            UPDATE job_posting SET missing_since = $2
+            WHERE source = $1
+              AND missing_since IS NULL
+              AND last_seen_at < $2
+            RETURNING id
+            """,
+            source,
+            polled_at,
+        )
+        await enqueue(conn, [row["id"] for row in rows])
+        return len(rows)
 
 
 async def close_posting_by_key(
-    conn: Connection, *, source: str, source_key: str, closed_at: datetime
+    conn: Connection, *, source: str, source_key: str, closed_at: datetime,
+    closure_kind: str = "link",
 ) -> bool:
-    """Record a probed dead link. True when this call is what closed the row.
+    """Record link or page closure. True when this call closed an active row.
 
     Deliberately not routed through ``upsert_job_posting``: that refreshes every
     canonical column from the projection it is handed, and a probe carries no
     title, body, or URL to refresh them with. Running a tombstone through it
     would blank the very row we are trying to annotate.
 
-    ``link_closed_at`` keeps the *first* death. Re-probing an already-dead link
-    says nothing new about when it died, and moving the timestamp forward would
-    discard resolution already paid for.
+    Each channel keeps its first detection independently. A later observation
+    in another channel may add its own timestamp, including on a closed row.
 
     Keyed by ``(source, source_key)`` rather than id so replay can reach it: a
     reparse of a stored tombstone knows the posting's source identity, not the
     row id silver assigned it.
     """
+    try:
+        column = {"link": "linked_dead_at", "page": "paged_closed_at"}[closure_kind]
+    except KeyError:
+        raise ValueError(f"unknown closure kind: {closure_kind}") from None
     row = await conn.fetchrow(
-        """
+        f"""
         WITH prev AS (
             SELECT status FROM job_posting
             WHERE source = $1 AND source_key = $2
         ), upd AS (
             UPDATE job_posting
             SET status = 'closed',
-                link_closed_at = COALESCE(link_closed_at, $3),
+                {column} = COALESCE({column}, $3),
                 link_checked_at = $3
             WHERE source = $1 AND source_key = $2
             RETURNING id
@@ -1170,6 +1421,37 @@ async def upsert_keyscan_token(
     return result != "INSERT 0 0"
 
 
+async def insert_discovered_tokens(
+    conn: Connection,
+    rows: list[tuple[str, str, datetime]],
+) -> int:
+    """Add keyscan discoveries to ``token`` as unvalidated. Returns rows added.
+
+    Insert-only: an existing ``(ats, token)`` -- whatever its source, status or
+    company -- is never touched, so a re-sighting can't duplicate a row or
+    reset a validated one. A new row is ``status = 'unknown'`` with
+    ``checked_at IS NULL``, which is what "never validated" means in this
+    table; the first probe sets ``checked_at`` and the real status.
+    ``company_id`` stays NULL until `keyscan_import` resolves one -- its
+    upsert owns ``source = 'keyscan'`` rows, so it picks these up unchanged.
+    """
+    if not rows:
+        return 0
+    identities = {canonical_feed_identity(ats, token): discovered for ats, token, discovered in rows}
+    result = await conn.execute(
+        """
+        INSERT INTO token(ats, token, status, source, discovered_at)
+        SELECT ats, token, 'unknown', 'keyscan', discovered_at
+          FROM unnest($1::text[], $2::text[], $3::timestamptz[]) AS t(ats, token, discovered_at)
+        ON CONFLICT (ats, token) DO NOTHING
+        """,
+        [ats for ats, _ in identities],
+        [token for _, token in identities],
+        list(identities.values()),
+    )
+    return int(result.rsplit(" ", 1)[-1])
+
+
 async def import_feed(
     conn: Connection, *, source: str, key: str, enabled: bool
 ) -> int:
@@ -1180,6 +1462,7 @@ async def import_feed(
     untouched while still returning the existing row's id.
     """
     source, key = canonical_feed_identity(source, key)
+    require_source_allowed(source)
     feed_id = await conn.fetchval(
         """
         WITH upserted AS (
@@ -1220,6 +1503,8 @@ async def import_feeds(
     identities = list(
         dict.fromkeys(canonical_feed_identity(*row) for row in identities)
     )
+    for source, _ in identities:
+        require_source_allowed(source)
     rows = await conn.fetch(
         """
         WITH upserted AS (

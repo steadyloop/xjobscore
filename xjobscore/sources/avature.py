@@ -23,7 +23,30 @@ from xjobscore.records import Canonical, Feed, Item, Posting, Record
 # the same number the requests use.
 CONCURRENCY = 5
 
-_DETAIL = re.compile(r"/(?:[A-Za-z_]+/)?careers/JobDetail/[^?#]+/(?P<id>\d+)(?:[?#]|$)")
+_BANNER_TITLE = re.compile(
+    r"<h[1-6]\b[^>]*\bclass=[\"'][^\"']*\bbanner__text__title\b[^>]*>(.*?)</h[1-6]\s*>",
+    re.I | re.S,
+)
+
+def _board(feed: Feed) -> tuple[str, str]:
+    """``(company, board path)`` from a ``company`` or ``company/board`` key.
+
+    One Avature subdomain hosts several boards at paths the customer names
+    (``bupaanz/careersau``, ``astellasjapan/ja_JP/careers``); a bare key is
+    the ``careers`` board, which is all this adapter used to read.
+    """
+    company, _, board = feed.key.partition("/")
+    return company, board or "careers"
+
+
+def _detail(feed: Feed) -> re.Pattern[str]:
+    """Job-detail links of this feed's board only, not its sibling boards."""
+    _, board = _board(feed)
+    # The title slug is optional: some boards link `.../JobDetail/3869`.
+    return re.compile(
+        rf"/(?:[A-Za-z_]+/)?{re.escape(board)}/JobDetail/(?:[^?#]+/)?(?P<id>\d+)(?:[?#]|$)",
+        re.I,
+    )
 
 
 class _Document(HTMLParser):
@@ -31,6 +54,7 @@ class _Document(HTMLParser):
         super().__init__()
         self.links: list[str] = []
         self.canonical: str | None = None
+        self.og_title: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name.lower(): value for name, value in attrs}
@@ -42,6 +66,12 @@ class _Document(HTMLParser):
             and values.get("href")
         ):
             self.canonical = str(values["href"])
+        if (
+            tag.lower() == "meta"
+            and (values.get("property") or "").lower() == "og:title"
+            and values.get("content")
+        ):
+            self.og_title = " ".join(unescape(str(values["content"])).split())
 
 
 class _Text(HTMLParser):
@@ -120,9 +150,10 @@ def _fields(text: str) -> tuple[list[str], dict[str, str], str | None]:
 
 
 def _search_url(feed: Feed) -> str:
+    company, board = _board(feed)
     return str(
         feed.config.get(
-            "url", f"https://{feed.key}.avature.net/careers/SearchJobs"
+            "url", f"https://{company}.avature.net/{board}/SearchJobs"
         )
     )
 
@@ -141,6 +172,8 @@ async def harvest(feed: Feed, net: Net) -> Record:
     if first.not_modified:
         return Record(http_status=304, etag=etag(first))
 
+    detail = _detail(feed)
+    search_path = f"/{_board(feed)[1]}/SearchJobs".lower()
     pending: list[tuple[str, object]] = [(first.url, first)]
     seen_pages: set[str] = set()
     details: dict[str, str] = {}
@@ -156,13 +189,13 @@ async def harvest(feed: Feed, net: Net) -> Record:
         document = _document(response.text)
         for href in document.links:
             absolute = urljoin(response.url, href)
-            if match := _DETAIL.search(absolute):
+            if match := detail.search(absolute):
                 details.setdefault(match.group("id"), absolute)
                 continue
             parsed = urlsplit(absolute)
             if (
                 parsed.netloc == urlsplit(first.url).netloc
-                and "/careers/SearchJobs" in parsed.path
+                and search_path in parsed.path.lower()
                 and "jobOffset=" in parsed.query
                 and _normalized_page(absolute) not in seen_pages
             ):
@@ -198,11 +231,12 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     assert isinstance(item.payload, str)
     document = _document(item.payload)
     unlabeled, fields, description = _fields(item.payload)
+    detail = _detail(feed)
     url = document.canonical or next(
         (
             urljoin(_search_url(feed), href)
             for href in document.links
-            if _DETAIL.search(href)
+            if detail.search(href)
         ),
         "",
     )
@@ -226,7 +260,14 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         ),
         None,
     )
-    title = unlabeled[0] if unlabeled else ""
+    # The page banner carries the posting title; the first unlabeled field is
+    # only a fallback because some boards lead with the description there.
+    banner = _BANNER_TITLE.search(item.payload)
+    title = (
+        document.og_title
+        or (banner and _text(banner.group(1)))
+        or (unlabeled[0] if unlabeled else "")
+    )
     # Co-op before intern: a title can satisfy both ("Summer Intern Co-Op
     # Conversion"), and co-op is the more specific claim.
     job_type = (

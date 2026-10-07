@@ -745,7 +745,16 @@ SIMPLE: dict[str, dict] = {
         "extra": {"internal_job_id": "@internal_job_id", "departments": "@departments", "metadata": "@metadata", "language": "@language"},
     },
     "lever": {
-        "list": {"url": "https://api.lever.co/v0/postings/{key}?mode=json", "items": "", "id": "@id"},
+        # concurrency: single shared host (api.lever.co) for every tenant, so
+        # this per-host semaphore is the vendor-wide cap -- same shape as
+        # greenhouse and ashby. Lever documents a limit only for application
+        # POSTs (2/s), none for this GET. Measured 2026-10-05 over ~6,700
+        # requests: zero 429s at widths 10-160 and no rate-limit headers; width
+        # 80 peaked at ~114 req/s and 160 fell to ~62 on server-side queueing,
+        # so 40 sits at half the knee. ~2,400 sustained requests at 40 drew no
+        # errors. Full first polls are bandwidth-bound (~110 Mbps at width
+        # 10-20; median board 108 KB, p95 1.3 MB); steady state is ~91% 304s.
+        "list": {"url": "https://api.lever.co/v0/postings/{key}?mode=json", "items": "", "id": "@id", "concurrency": 40},
         "fields": {
             "title": "@text", "url_posting": "@hostedUrl", "apply_url": "@applyUrl", "company_raw": "$key",
             "location_raw": "@categories.location", "description_html": {"fallback": ["@descriptionBody", "@description"]},
@@ -999,8 +1008,17 @@ SIMPLE: dict[str, dict] = {
             "part_time": {"classify": [
                 {"from": "@employment_type_code", "re": "part.?time", "is": "yes"},  # 3, md:43-45
             ], "default": "unknown"},
-            "source_active": {"eq": ["@status", "published"]},
+            "source_active": {"lookup": [{"published": True, "closed": False, "archived": False}, "@status"]},
             "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
+            # A Dutch primary location can coexist with genuine US offices.
+            # Keep each explicit US address as independent normalization input;
+            # fixing Nederland/Noord-Holland must not hide these mixed jobs.
+            # Append only positive US evidence so other vendors and foreign
+            # secondary-location presentation retain their existing behavior.
+            "location_normalization_extra": {
+                "map": "@locations", "where": {"eq": ["@country_code", "US"]},
+                "value": {"join": ["@city", "@state", "United States"]},
+            },
             "workplace_type_raw": {
                 "fallback": [
                     {"lookup": [{"True": "remote"}, "@remote"]},
@@ -1100,7 +1118,7 @@ SIMPLE: dict[str, dict] = {
             "workplace_type_raw": "@region",
             "published_at": {"date": "@regnRequirements.start_regn_dt"}, "published_at_precision": "exact",
             "deadline_at": {"date": "@end_date"}, "source_updated_at": {"date": "@updated_at"},
-            "source_active": {"eq": ["@status", "LIVE"]},
+            "source_active": {"lookup": [{"LIVE": True, "CLOSED": False}, "@status"]},
         },
         "extra": {
             "short_id": "@short_id", "public_url": "@public_url", "type": "@type", "subtype": "@subtype",
@@ -1544,17 +1562,24 @@ SIMPLE: dict[str, dict] = {
             # 2,000-row result window -- a property of the endpoint, not of the
             # detail leg, so partitioning stays.
             "partition": {"window": 2000, "facets": "facets"},
-            # Measured optimum. Retries track total request volume against
-            # Workday's sustained limiter rather than fan-out width.
-            # Re-measure through the inspector before raising it.
-            "page": {"total": "@total", "size": 20, "step": 20, "concurrency": 10},
+            # 10 was the measured optimum when nothing but the host's own 429s
+            # bounded rate (retries tracked total volume against Workday's
+            # sustained limiter, not fan-out width). Rate is now set per data
+            # center by net._VENDOR_RATES and per tenant by net._HOST_RATES
+            # (2 req/s), and 4 in flight at Workday's ~0.6s replies already
+            # outruns the tenant budget, so a wider fan-out buys nothing per
+            # feed. What the narrower one buys is feeds: `sources.width`
+            # divides each data center's cap by this, so a 24-slot lane runs
+            # six Workday polls at once where 10 ran two.
+            "page": {"total": "@total", "size": 20, "step": 20, "concurrency": 4},
         },
         # GATED detail. An ungated leg is one GET per posting and was ~91% of
         # the run -- that is why it was removed on 2026-08-22. Gated to the rows
         # the job_type table already types, it costs 2,518 requests over the
         # whole 153,325-row corpus (1.6%, a 98.4% cut): median 9 per feed, max
-        # 148 (micron/wd1/external). At concurrency 10 that is under a second of
-        # fan-out on almost every feed.
+        # 148 (micron/wd1/external). Its concurrency matches the page leg's so
+        # both share one per-host semaphore (`_host_semaphores` is keyed by
+        # width).
         #
         # `merge` is load-bearing, not an optimisation. Without it a detail row
         # loses `externalPath` -- which is the LIST leg's `id`, so identity
@@ -1575,7 +1600,7 @@ SIMPLE: dict[str, dict] = {
             "dedupe": "@externalPath",
             "merge": True,
             "only": {"classify": _WORKDAY_DETAIL_ONLY},
-            "concurrency": 10,
+            "concurrency": 4,
         },
         "last_status": True,
         "fields": {
@@ -1859,6 +1884,11 @@ DETAIL_A: dict[str, dict] = {
         # Eightfold's PCS-X public board API uses a board domain as its
         # discriminator.  Keep the local key human-readable and supply that
         # public domain from the catalog entry.
+        #
+        # Newer tokens carry both in the key as `host/domain` with an empty
+        # config; legacy keys (`microsoft`) still get them from feed.config,
+        # which harvest applies after key_parts and so overrides the split.
+        "key_parts": ("host", "domain"),
         "list": {
             "url": "https://{host}/api/pcsx/search",
             "params": {
@@ -2065,7 +2095,10 @@ DETAIL_A: dict[str, dict] = {
             ], "default": "unknown"},
             "published_at": {"date": "@datePosted"},
             "published_at_precision": "date",
-            "source_active": {"eq": ["@jobOpeningStatus", "Open"]},
+            "source_active": {"lookup": [
+                {"Open": True, "Filled": False, "Canceled": False, "Deleted": False},
+                "@jobOpeningStatus",
+            ]},
             "workplace_type_raw": {"lookup": [{"True": "remote"}, "@isRemote"]},
         },
         "extra": {
@@ -2107,8 +2140,12 @@ DETAIL_A: dict[str, dict] = {
             # runs, cummins/963 items and mayo/1366 items): zero retries,
             # zero 429s at any width, and 5-vs-8 A/B runs interleaved with no
             # reproducible per-request slowdown, so that queueing point did
-            # not reproduce. Left at 8 -- widest measured, still error-free.
-            "page": {"total": "@items.0.TotalJobsCount", "size": 200, "step": 200, "max": 30, "concurrency": 8},
+            # not reproduce. 8 was the widest measured, still error-free; 4
+            # since 2026-10-05, because `sources.width` divides the vendor cap
+            # by this fan-out and most boards are one or two pages (1,203 of
+            # 1,810 hold <= 100 jobs), so 8 bought little but cost width.
+            # max 60 (12,000 jobs): at 30 jpmc's 7,347-job board truncated.
+            "page": {"total": "@items.0.TotalJobsCount", "size": 200, "step": 200, "max": 60, "concurrency": 4},
         },
         "detail": {
             # Ids are comma-joined into one quoted finder value -- {id} here
@@ -2126,8 +2163,8 @@ DETAIL_A: dict[str, dict] = {
             "batch": 200,
             # ~11s of server think time per 200-id batch dominates the poll;
             # same measured parallelism headroom as the list pages -- see the
-            # width-8 re-probe note there.
-            "concurrency": 8,
+            # width-8 re-probe note there, and why 4 since 2026-10-05.
+            "concurrency": 4,
             "match": "@Id",
             "payload": "items",
             "merge": True,
@@ -2236,6 +2273,17 @@ DETAIL_A: dict[str, dict] = {
             "url": "https://api.rippling.com/platform/api/ats/v1/board/{key}/jobs",
             "items": None,
             "id": {"fallback": ["@uuid", "@id"]},
+            # concurrency: single shared host (api.rippling.com, behind
+            # Cloudflare) for list and detail alike, so this and the detail
+            # width below are the vendor-wide caps -- `net` keys a semaphore per
+            # (host, width), so the two never exceed 8 + 24 = 32 in flight.
+            # Rippling publishes no limit for the public board API. Measured
+            # 2026-10-05 over ~12,000 requests: zero 429/403/challenges; list
+            # flat at p50 0.11s from width 5 to 40 (~315 req/s); detail linear
+            # to 32 (~215 req/s) and 6,000 sustained requests at 32 clean;
+            # detail at 64 fell to ~90 req/s on server-side queueing. No ETag
+            # and `no-store`, so every poll is a full (gzip, small) list.
+            "concurrency": 8,
         },
         "detail": {
             "url": "https://api.rippling.com/platform/api/ats/v1/board/{key}/jobs/{id}",
@@ -2247,8 +2295,9 @@ DETAIL_A: dict[str, dict] = {
             # heads-up-technologies (21 postings, 22 requests): width 1 21.2s,
             # 2 1.9s, 4 1.2s, 8 0.9s, all clean. Same reasoning as bamboohr --
             # 22 requests establishes tolerance, not the best width, so take the
-            # house ceiling rather than the probe's favourite.
-            "concurrency": 4,
+            # house ceiling rather than the probe's favourite. Raised to 24 by the
+            # 2026-10-05 vendor-wide measurement on the list leg above.
+            "concurrency": 24,
         },
         "fields": {
             "title": "@name",
@@ -2349,6 +2398,14 @@ DETAIL_B: dict[str, dict] = {
                 "variables": {"boardId": "$key"},
             }],
             "items": "0.data.oatsExternalJobPostings.jobPostings", "id": "@extId",
+            # concurrency: single shared host (jobs.gem.com) for every tenant,
+            # so this is the vendor-wide list width. Measured 2026-10-05 over
+            # ~12,000 requests: no 429s, no rate-limit headers and no ETag at
+            # any width, but the Heroku backend queues past ~40 in flight --
+            # list and detail both held ~200 req/s at p95 0.27s at 40 and fell
+            # to ~87 req/s at p95 2.5s at 80. 20 here plus detail's 4 (one
+            # semaphore shared by every gem feed) keeps the vendor at <= 24.
+            "concurrency": 20,
         },
         "detail": {
             "method": "POST",
@@ -2502,9 +2559,21 @@ DETAIL_B: dict[str, dict] = {
             "params": {"limit": 100, "offset": "$cursor"},
             "items": "content",
             "id": "@id",
-            # Some boards return fewer than the requested limit.  Advancing by
-            # the returned count avoids both gaps and duplicate summaries.
-            "page": {"total": "@totalFound", "size": 100, "step": "count"},
+            # Every board shares api.smartrecruiters.com, so this is both the
+            # worker-pool width (`sources.width`) and the vendor-wide cap on
+            # list requests in flight -- `page` shares the same (host, 16)
+            # semaphore in Net. The public Posting API is Cloudflare-fronted
+            # and sends no X-RateLimit-* headers; the documented 10 req/s / 8
+            # concurrent is the authenticated SmartAPI policy, per credential.
+            # Measured 2026-10-05: 0 429s at 64 concurrent list requests
+            # (~104 req/s), ~480ms flat latency. Without this, every board
+            # ran one at a time with pages 2+ on Net's 1 req/s throttle.
+            "concurrency": 16,
+            # A fixed integer step makes pagination parallel-eligible. Measured
+            # 2026-10-05: offset+100 across 40 boards / 330 pages returned no
+            # short pages, gaps or duplicates, so the old `step: "count"`
+            # (which forced sequential paging) bought nothing.
+            "page": {"total": "@totalFound", "size": 100, "step": 100, "concurrency": 16},
         },
         "detail": {
             "url": "https://api.smartrecruiters.com/v1/companies/{key}/postings/{id}",
@@ -2513,17 +2582,18 @@ DETAIL_B: dict[str, dict] = {
             "dedupe": "@id",
             "item_id": "@id",
             # Descriptions live only in the detail payload, so it's one
-            # request per posting. SmartRecruiters documents 10 req/s and 8
-            # concurrent requests (429 on excess); every feed shares one
-            # per-host semaphore in Net (all 18 boards are one hostname), so
-            # this is the vendor-wide cap, not a per-board one.
+            # request per posting. Every feed shares one (host, 32) semaphore
+            # in Net, so this is the vendor-wide detail cap, not a per-board
+            # one -- and deliberately a different width from the list's 16 so
+            # the two legs get separate semaphores: a cold 10k-posting board's
+            # detail flood never queues other boards' list requests behind it.
             #
-            # 6, not 8: at the documented ceiling a single co-running request
-            # tips us over, and sustained 429s drive _HostPace toward its 2.0s
-            # spacing ceiling -- net slower than staying under. Most postings
-            # now skip detail entirely via revision reuse (REVISION_FIELDS in
-            # sources/__init__.py), so width matters less than it used to.
-            "concurrency": 6,
+            # Measured 2026-10-05: 0 429s at 96 concurrent detail requests
+            # (~125 req/s). 16 + 32 = 48 in flight (~100 req/s) leaves
+            # headroom under that; _HostPace still backs the whole host off on
+            # any 429. Sustained (minutes-long) load is unmeasured -- if 429s
+            # show up in poll_log, halve both widths.
+            "concurrency": 32,
         },
         "fields": {
             "title": "@name",

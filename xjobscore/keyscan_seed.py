@@ -115,56 +115,16 @@ async def _mint(
 ) -> int:
     """Create the company row for a token nothing else resolves.
 
-    No domain: keyscan stores none, and inventing one from the name would put a
-    guess into a UNIQUE column where a wrong value blocks the real owner.
-
     *tag* marks a batch for later removal. It is a jsonb key on `tags` rather
     than a column because it is temporary by construction -- a recon batch that
     gets torn down should leave no trace in the schema once it is gone, and
     `tags ? 'recon'` is both the UI's exclusion filter and the teardown's
     selector.
     """
-    tags: dict[str, Any] = {"name_machine": name}
+    tags: dict[str, Any] = {}
     if tag:
         tags[tag] = datetime.now(timezone.utc).date().isoformat()
-    return int(
-        await conn.fetchval(
-            """
-            INSERT INTO company (name, discovered_from, tags)
-            VALUES ($1, 'keyscan', $2::jsonb)
-            RETURNING id
-            """,
-            name,
-            tags,
-        )
-    )
-
-
-async def _write_aliases(conn: Connection, company_id: int, *raw: str) -> None:
-    """Point every spelling of *raw* at ``company_id``, never stealing one.
-
-    The slug matters as much as the name here: ``silver`` sees the slug on the
-    wire, and a name-only alias set would leave the very postings this import
-    collects unresolvable.
-    """
-    seen: dict[str, str] = {}
-    for value in raw:
-        if not value:
-            continue
-        for candidate in store.alias_candidates(value):
-            seen.setdefault(candidate, value)
-    if not seen:
-        return
-    await conn.execute(
-        """
-        INSERT INTO company_alias (alias_norm, company_id, alias)
-        SELECT norm, $2, raw FROM unnest($1::text[], $3::text[]) AS t(norm, raw)
-        ON CONFLICT (alias_norm) DO NOTHING
-        """,
-        list(seen.keys()),
-        company_id,
-        list(seen.values()),
-    )
+    return await store.mint_company(conn, name, discovered_from="keyscan", tags=tags)
 
 
 def _mark_imported(db_path: Path, rows: list[Candidate], *, now: str) -> int:
@@ -227,7 +187,7 @@ async def seed_keyscan_tokens(
                 if dry_run:
                     continue
 
-                await _write_aliases(
+                await store.write_company_aliases(
                     conn, company_id, name, resolve_key(candidate.ats, candidate.token)
                 )
                 for key in store.alias_candidates(

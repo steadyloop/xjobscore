@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   AUTO_EXPAND_ROWS,
+  UNGROUPED,
+  addSection,
   autoExpand,
   dueInfo,
   formatRequestRate,
@@ -13,8 +15,18 @@ import {
   intervalSeconds,
   jobsToday,
   matchesFeed,
+  moveSection,
+  moveSource,
+  parseSearch,
+  removeSection,
+  renameSection,
+  sectionGroups,
+  sectionMatcher,
+  sectionOf,
+  sectionRollup,
   sortFeeds,
   summaryCounts,
+  uniqueSectionName,
 } from "./model.mjs";
 
 function feed(source, state, interval = 900, options = {}) {
@@ -71,6 +83,8 @@ test("groups drop providers with no matching rows but keep the full total", () =
   assert.deepEqual(groups.map((group) => group.source), ["ashby"]);
   assert.equal(groups[0].rows.length, 1);
   assert.equal(groups[0].total, 2);
+  // Provider pause/resume must include the row hidden by the status filter.
+  assert.deepEqual(groups[0].allRows, rows.slice(0, 2));
   assert.deepEqual(groupFeeds(rows, { view: "all", search: "zzz" }), []);
 });
 
@@ -226,4 +240,96 @@ test("request rates remain legible below one request per day", () => {
   assert.equal(formatRequestRate(1.5), "1.5");
   assert.equal(formatRequestRate(1 / 7), "0.14");
   assert.equal(formatRequestRate(null), "—");
+});
+
+const LAYOUT = [
+  { id: 1, name: "Watchlist", sources: ["workday", "lever"] },
+  { id: 2, name: "Banks & Funds", sources: ["avature"] },
+];
+
+test("sections follow the layout order, with every unfiled provider in Ungrouped last", () => {
+  const rows = [
+    feed("teamtailor", "backing_off"),
+    feed("workday", "healthy"),
+    feed("lever", "backing_off"),
+    feed("gem", "healthy"),
+  ];
+  const sections = sectionGroups(groupFeeds(rows, ALL), LAYOUT);
+  assert.deepEqual(
+    sections.map((section) => [section.id, section.groups.map((group) => group.source)]),
+    [["1", ["lever", "workday"]], ["2", []], [UNGROUPED, ["teamtailor", "gem"]]]
+  );
+  assert.equal(sections.at(-1).ungrouped, true);
+});
+
+test("section rollups sum their providers and keep unknown sums null", () => {
+  const rows = [
+    feed("workday", "backing_off", 900, { spark: [0, 4], telemetry: { error_count_7d: 2 } }),
+    feed("workday", "healthy"),
+    feed("lever", "stale", 900, { spark: [1] }),
+  ];
+  const [watch, banks] = sectionGroups(groupFeeds(rows, ALL), LAYOUT);
+  assert.deepEqual(sectionRollup(watch), {
+    worst: "backing_off",
+    counts: [["backing_off", 1], ["stale", 1], ["healthy", 1]],
+    providers: 2,
+    feeds: 3,
+    jobs: 5,
+    errors: 2,
+  });
+  assert.deepEqual(sectionRollup(banks), {
+    worst: null, counts: [], providers: 0, feeds: 0, jobs: null, errors: null,
+  });
+});
+
+test("group: in the search box narrows to sections by name, Ungrouped included", () => {
+  assert.deepEqual(parseSearch('acme group:"banks & f" '), { text: "acme", group: "banks & f" });
+  assert.deepEqual(parseSearch("group:watch"), { text: "", group: "watch" });
+  assert.deepEqual(parseSearch("plain"), { text: "plain", group: null });
+
+  assert.equal(sectionMatcher(LAYOUT, null), null);
+  const watch = sectionMatcher(LAYOUT, "watch");
+  assert.deepEqual(["workday", "avature", "gem"].map(watch), [true, false, false]);
+  const loose = sectionMatcher(LAYOUT, "ungr");
+  assert.deepEqual(["workday", "gem"].map(loose), [false, true]);
+
+  const rows = [feed("workday", "healthy"), feed("gem", "healthy")];
+  const filters = { ...ALL, inSection: watch };
+  assert.deepEqual(rows.filter((row) => matchesFeed(row, filters)).map((row) => row.source), ["workday"]);
+});
+
+test("layout edits return a new layout and leave the old one for undo", () => {
+  const moved = moveSource(LAYOUT, "lever", "2");
+  assert.deepEqual(moved.map((group) => group.sources), [["workday"], ["avature", "lever"]]);
+  assert.deepEqual(LAYOUT[0].sources, ["workday", "lever"]);
+  assert.equal(sectionOf(moved, "lever"), "2");
+
+  assert.deepEqual(moveSource(LAYOUT, "workday", UNGROUPED)[0].sources, ["lever"]);
+  assert.equal(sectionOf(LAYOUT, "gem"), UNGROUPED);
+
+  const added = addSection(LAYOUT, "Startups", ["lever"]);
+  assert.deepEqual(added.at(-1), { id: null, name: "Startups", sources: ["lever"] });
+  assert.deepEqual(added[0].sources, ["workday"]);
+
+  assert.equal(renameSection(LAYOUT, "2", "Banks")[1].name, "Banks");
+  assert.deepEqual(removeSection(LAYOUT, "1").map((group) => group.id), [2]);
+  assert.deepEqual(moveSection(LAYOUT, "2", 0).map((group) => group.id), [2, 1]);
+  assert.deepEqual(moveSection(LAYOUT, "1", 99).map((group) => group.id), [2, 1]);
+});
+
+test("new group names never collide, ignoring case", () => {
+  assert.equal(uniqueSectionName(LAYOUT), "New group");
+  const taken = [...LAYOUT, { id: 3, name: "new group", sources: [] }];
+  assert.equal(uniqueSectionName(taken), "New group 2");
+});
+
+import { queueSummary } from "./model.mjs";
+test("link-check summary keeps worker and scheduler state separate", () => {
+  const view = {control: {running: true}, worker: {alive: true},
+    queue: {ready: 12, checking: 5, waiting: 30, completed: 2, cancelled: 1}};
+  assert.match(queueSummary(view), /^running · 12 ready · 5 checking · 30 waiting · 2 completed · 1 cancelled/);
+  view.control.running = false;
+  assert.match(queueSummary(view), /^paused/);
+  view.worker.alive = false;
+  assert.match(queueSummary(view), /^offline/);
 });

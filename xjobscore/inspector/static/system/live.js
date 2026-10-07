@@ -11,6 +11,7 @@
 
 import { api } from "/static/shared/api.js";
 import { el, formatCount } from "/static/shared/format.js";
+import { setEnrichmentWorker, setRunActivity, setServerActivity } from "/static/system/activity.js";
 
 const LIVE_REFRESH_MS = 2000;
 const HISTORY_REFRESH_MS = 5000;
@@ -31,9 +32,6 @@ const live = {
 
 const stripFeedsEl = document.getElementById("strip-feeds");
 const stripFeedsWindowEl = document.getElementById("strip-feeds-window");
-const stripGoldEl = document.getElementById("strip-gold");
-const eventsEl = document.getElementById("system-events-lines");
-const serverLogEl = document.getElementById("server-log-lines");
 const tableEl = document.getElementById("sched-table");
 const schedulerHeadEl = document.getElementById("scheduler-head");
 const spinnerEl = document.getElementById("scheduler-spinner");
@@ -105,43 +103,6 @@ function paintFeedsLine() {
   );
 }
 
-function paintGoldLine() {
-  const run = live.goldLast;
-  if (!run) {
-    stripGoldEl.replaceChildren(
-      el("span", { class: "wk-dim" }, live.eventsAvailable ? "no finished run yet" : "history unavailable")
-    );
-    return;
-  }
-  const now = Date.now();
-  const finished = new Date(run.finished_at).getTime();
-  const started = new Date(run.started_at).getTime();
-  const gold = run.detail?.gold ?? {};
-  const counts = Object.entries(gold.counts ?? {}).filter(([, count]) => count.postings);
-  const total = counts.reduce((sum, [, count]) => sum + count.postings, 0);
-  const errors = Object.keys(gold.errors ?? {}).length;
-  const parts = [
-    "last run ", el("b", {}, `${ago((now - finished) / 1000)} ago`), sep(),
-    duration((finished - started) / 1000),
-  ];
-  if (run.state !== "complete") {
-    parts.push(sep(), el("span", {
-      class: "ops-st",
-      "data-state": run.state === "failed" ? "backing_off" : "stale",
-    }, run.state));
-  }
-  parts.push(sep(), el("b", {}, `${formatCount(total)} postings enriched`));
-  if (counts.length) {
-    parts.push(" ", el("span", { class: "wk-dim" },
-      `(${counts.map(([step, count]) => `${step} ${formatCount(count.postings)}`).join(" · ")})`));
-  }
-  parts.push(sep(), counted(errors, "errors", "backing_off"));
-  if (run.error) {
-    parts.push(sep(), el("span", { class: "wk-dim", title: run.error }, run.error.split("\n")[0]));
-  }
-  stripGoldEl.replaceChildren(...parts);
-}
-
 /* ---------- worker cells ---------- */
 
 function workerBar(source, pool) {
@@ -170,13 +131,104 @@ function workerBar(source, pool) {
   ];
 }
 
+/* A vendor whose limiter counts per partition (Workday: per data center) runs
+   one pool per lane. The row keeps one bar, split into a labelled segment per
+   lane; a segment turns amber once Cloudflare starts answering its lane 429. */
+
+// Per-lane counts from the board's feed list: feeds never polled, and the
+// distinct partitions sharing each `other` lane. Recounted when the feed list
+// changes (`setFeeds`) or a snapshot first names a partitioned vendor.
+let boardFeeds = [];
+let laneCounts = null;
+
+export function setFeeds(feeds) {
+  boardFeeds = feeds;
+  laneCounts = null;
+}
+
+function countLanes(workers) {
+  const never = new Map();
+  const shared = new Map();
+  for (const [source, pool] of Object.entries(workers)) {
+    if (!pool.lanes) continue;
+    const others = new Set();
+    for (const feed of boardFeeds) {
+      if (feed.source !== source) continue;
+      const value = (feed.key.split("/")[pool.partition.index - 1] ?? "").toLowerCase();
+      const named = pool.partition.named.includes(value);
+      if (!named) others.add(value);
+      if (!feed.policy?.last_poll_at) {
+        const lane = `${source}:${named ? value : "other"}`;
+        never.set(lane, (never.get(lane) ?? 0) + 1);
+      }
+    }
+    shared.set(source, others.size);
+  }
+  return { never, shared };
+}
+
+function laneTip(lane) {
+  const parts = [`${lane.label} · ${lane.busy.length}/${lane.width} busy`];
+  if (lane.budget != null) {
+    parts.push(lane.rate != null ? `${lane.rate} of ${lane.budget} req/s` : `${lane.budget} req/s budget`);
+  }
+  const never = laneCounts?.never.get(lane.lane);
+  if (never) parts.push(`${formatCount(never)} never polled`);
+  if (lane.throttled != null) parts.push(`${formatCount(lane.throttled)} 429s in 1h`);
+  if (lane.label === "other") parts.push("shared by data centers without their own budget");
+  return parts.join(" · ");
+}
+
+function splitBar(source, pool) {
+  const busy = pool.lanes.reduce((sum, lane) => sum + lane.busy.length, 0);
+  const segments = pool.lanes.map((lane) => {
+    const ticks = [];
+    for (let index = 0; index < lane.width; index += 1) {
+      const run = lane.busy[index];
+      ticks.push(run
+        ? el("i", { "data-s": slotState(run.age_s), title: `${source}:${run.key} · ${duration(run.age_s)}` })
+        : el("i", { "data-s": "idle" }));
+    }
+    return el("span", {
+      class: "sys-lane",
+      "data-throttled": lane.throttled ? "true" : null,
+      title: laneTip(lane),
+    }, el("span", { class: "sys-lane-k" }, lane.label === "other"
+      ? `+${laneCounts?.shared.get(source) ?? ""}`
+      : lane.label), ticks);
+  });
+  return [
+    el("span", { class: "sys-bar sys-bar-split" }, segments),
+    el("span", { class: "sys-busy", title: `${busy} of ${pool.width} workers busy` },
+      el("b", {}, String(busy)), `/${pool.width}`),
+  ];
+}
+
 export function paintWorkers() {
   const workers = live.snapshot?.workers;
   if (!workers || !tableEl) return;
+  if (!laneCounts && boardFeeds.length) laneCounts = countLanes(workers);
   for (const cell of tableEl.querySelectorAll("td[data-worker-source]")) {
+    const pool = workers[cell.dataset.workerSource];
     // replaceChildren prints null as text, unlike el(): drop the absent age flag.
     cell.replaceChildren(
-      ...workerBar(cell.dataset.workerSource, workers[cell.dataset.workerSource]).filter(Boolean)
+      ...(pool?.lanes ? splitBar(cell.dataset.workerSource, pool) : workerBar(cell.dataset.workerSource, pool))
+        .filter(Boolean)
+    );
+  }
+  // Section headings sum their providers' slots; the empty bar keeps the
+  // count aligned under the provider rows' counts.
+  for (const cell of tableEl.querySelectorAll("td[data-worker-sources]")) {
+    let busy = 0;
+    let width = 0;
+    for (const source of cell.dataset.workerSources.split(" ").filter(Boolean)) {
+      busy += workers[source]?.busy.length ?? 0;
+      width += workers[source]?.width ?? 1;
+    }
+    cell.replaceChildren(
+      el("span", { class: "sys-bar", "aria-hidden": "true" }),
+      el("span", { class: "sys-busy", title: `${busy} of ${width} workers busy` },
+        el("b", {}, String(busy)), `/${width}`)
     );
   }
   const running = new Map();
@@ -191,64 +243,6 @@ export function paintWorkers() {
   }
 }
 
-/* ---------- system events ---------- */
-
-const EVENT_LABEL = { gold_catchup: "GOLD", dedup: "DEDUP", token_heartbeat: "BEAT", feed: "FEED" };
-const EVENT_STATUS = {
-  running: "running", complete: "ok", failed: "error", degraded: "partial", interrupted: "partial",
-};
-
-function renderEvents() {
-  if (!live.events.length) {
-    eventsEl.replaceChildren(el("div", { class: "ops-log-empty" },
-      live.eventsAvailable ? "no runs yet" : "history unavailable"));
-    return;
-  }
-  eventsEl.replaceChildren(...live.events.map((run) => {
-    const started = new Date(run.started_at).getTime();
-    const finished = run.finished_at ? new Date(run.finished_at).getTime() : null;
-    const what = run.job_type === "feed"
-      ? run.identity
-      : run.job_type === "dedup" && run.identity ? `dedup #${run.identity}` : run.job_type;
-    const note = finished == null
-      ? "running"
-      : `${run.state} · ${duration((finished - started) / 1000)}`;
-    return el("div", { class: "ops-log-line", title: run.error ?? "" },
-      el("time", {}, clockTime(run.started_at)),
-      el("span", { class: "ops-log-st sys-ev-st", "data-status": EVENT_STATUS[run.state] ?? "partial" },
-        EVENT_LABEL[run.job_type] ?? run.job_type),
-      el("span", { class: "ops-log-feed", title: run.identity ?? "" }, what ?? ""),
-      el("span", { class: "ops-log-note" }, note));
-  }));
-}
-
-/* ---------- server log ---------- */
-
-const LEVEL_CLASS = { WARNING: "warn", ERROR: "error", CRITICAL: "error" };
-
-function renderServerLog(fresh) {
-  if (!live.logLines.length) {
-    serverLogEl.replaceChildren(el("div", { class: "ops-log-empty" },
-      live.logAvailable ? "no log lines yet" : "server log unavailable"));
-    return;
-  }
-  if (!fresh.length && serverLogEl.querySelector(".sys-slog-line")) return;
-  const pinned = serverLogEl.scrollHeight - serverLogEl.scrollTop - serverLogEl.clientHeight < 12;
-  serverLogEl.replaceChildren(...live.logLines.map((line) => {
-    const level = LEVEL_CLASS[line.level] ?? "info";
-    return el("div", { class: "sys-slog-entry" },
-      el("div", { class: "sys-slog-line", "data-level": level },
-        el("time", {}, clockTime(line.ts)),
-        el("span", { class: "sys-slog-lvl" }, line.level === "WARNING" ? "WARN" : line.level),
-        el("span", { class: "sys-slog-name", title: line.name }, line.name),
-        el("span", { class: "sys-slog-msg", title: line.msg }, line.msg)),
-      line.exc
-        ? el("details", { class: "sys-slog-exc" }, el("summary", {}, "traceback"), el("pre", {}, line.exc))
-        : null);
-  }));
-  if (pinned) serverLogEl.scrollTop = serverLogEl.scrollHeight;
-}
-
 /* ---------- loaders ---------- */
 
 async function loadLive() {
@@ -259,7 +253,7 @@ async function loadLive() {
   }
   measurePollRate(live.snapshot);
   paintFeedsLine();
-  paintGoldLine();
+  setEnrichmentWorker(live.snapshot?.enrichment ?? null);
   paintWorkers();
 }
 
@@ -268,12 +262,11 @@ async function loadEvents() {
     const view = await api("/api/system/events?limit=20");
     live.events = view.events ?? [];
     live.goldLast = view.gold_last ?? null;
-    live.eventsAvailable = true;
+    live.eventsAvailable = view.telemetry_available !== false;
   } catch {
     live.eventsAvailable = false;
   }
-  renderEvents();
-  paintGoldLine();
+  setRunActivity(live.events, live.goldLast, live.eventsAvailable);
 }
 
 async function loadServerLog() {
@@ -293,7 +286,7 @@ async function loadServerLog() {
   } catch {
     live.logAvailable = false;
   }
-  renderServerLog(fresh);
+  setServerActivity(live.logLines, live.logAvailable, live.logBoot);
 }
 
 /* ---------- spinner ---------- */

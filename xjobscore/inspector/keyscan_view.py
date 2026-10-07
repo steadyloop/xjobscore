@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 import sqlite3
 from typing import Any
+from xjobscore.source_policy import source_disabled, visible_source_sql
 
 __all__ = [
     "DEFAULT_DB_PATH",
@@ -114,10 +115,11 @@ def status() -> dict[str, Any] | None:
 def runs(limit: int = 20, *, only_productive: bool = True) -> list[dict[str, Any]]:
     """Run history, newest first, with each run's own counts.
 
-    ``only_productive`` drops runs that found nothing -- the 4-second failures
-    where Common Crawl refused us, and cancels that never got going. They are
-    noise in a history whose point is "what did each scan turn up"; the rows
-    stay in the database, this only stops listing them.
+    ``only_productive`` drops runs that ended early with nothing to show --
+    the 4-second failures where Common Crawl refused us, and cancels that
+    never got going. A run that *completed* is always listed, zero found or
+    not: "scanned and found nothing" is a result, and it is the row that says
+    the pair is done. The rows stay in the database either way.
     """
     rows = _rows(
         """
@@ -132,7 +134,10 @@ def runs(limit: int = 20, *, only_productive: bool = True) -> list[dict[str, Any
         row["methods"] = json.loads(row.pop("methods_json") or "[]")
         row["counts"] = json.loads(row.pop("counts_json") or "{}")
     if only_productive:
-        rows = [row for row in rows if (row["counts"].get("found") or 0) > 0]
+        rows = [
+            row for row in rows
+            if row["status"] in ("completed", "running") or (row["counts"].get("found") or 0) > 0
+        ]
     return rows
 
 
@@ -182,10 +187,11 @@ def found(limit: int = 30) -> list[dict[str, Any]]:
     because this view answers "what has the running scan just turned up".
     """
     return _rows(
-        """
+        f"""
         SELECT ats, key, status, method, discovered_at, checked_at,
                json_extract(details, '$.url_count') AS url_count
           FROM tenants
+         WHERE {visible_source_sql('ats')}
          ORDER BY discovered_at DESC
          LIMIT ?
         """,
@@ -203,7 +209,7 @@ def candidates(
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     """The candidates table: one row per discovered token."""
-    clauses, params = ["1 = 1"], []
+    clauses, params = [visible_source_sql('ats')], []
     if imported == "pending":
         clauses.append(f"({PENDING_SQL})")
     elif imported == "imported":
@@ -248,7 +254,7 @@ def candidate_count(
     Without this the table says "200 shown" and cannot say out of what, which
     reads as "that is all of them".
     """
-    clauses, params = ["1 = 1"], []
+    clauses, params = [visible_source_sql('ats')], []
     if imported == "pending":
         clauses.append(f"({PENDING_SQL})")
     elif imported == "imported":
@@ -280,15 +286,16 @@ def tally() -> dict[str, int]:
     ``pending`` is what ``keyscan_import`` would write on its next run, counted
     with that module's own predicate rather than an approximation of it.
     """
-    rows = _rows("SELECT status, count(*) AS n FROM tenants GROUP BY status")
+    visible = visible_source_sql('ats')
+    rows = _rows(f"SELECT status, count(*) AS n FROM tenants WHERE {visible} GROUP BY status")
     counts = {row["status"]: row["n"] for row in rows}
-    pending = _rows(f"SELECT count(*) AS n FROM tenants WHERE {PENDING_SQL}")
+    pending = _rows(f"SELECT count(*) AS n FROM tenants WHERE ({PENDING_SQL}) AND {visible}")
     return {
         "found": sum(counts.values()),
         "live": counts.get("live", 0),
         "dead": counts.get("dead", 0),
         "unknown": counts.get("unknown", 0),
-        "imported": _rows("SELECT count(*) AS n FROM tenants WHERE imported_at IS NOT NULL")[0]["n"],
+        "imported": _rows(f"SELECT count(*) AS n FROM tenants WHERE imported_at IS NOT NULL AND {visible}")[0]["n"],
         "pending": pending[0]["n"],
     }
 
@@ -316,7 +323,29 @@ def _coverage_vendors() -> list[Any]:
     from keyscan.rules import BY_SOURCE, SOURCE_GROUPS
 
     names = SOURCE_GROUPS.get("tier1", ())
-    return [BY_SOURCE[name] for name in names if BY_SOURCE[name].domains]
+    return [BY_SOURCE[name] for name in names if BY_SOURCE[name].domains and not source_disabled(name)]
+
+
+def footer_status() -> dict[str, dict[str, Any]]:
+    """Per crawl: how many parts have harvested footers, and whether all do.
+
+    ``full`` comes from `footer_crawls`, which the harvester writes only once a
+    crawl's whole manifest is covered -- the same condition the scan planner
+    needs before it trusts the table. A crawl with rows but no completion is
+    partial: its scans still read every file.
+    """
+    try:
+        complete = {
+            row["crawl"]: row["parts"]
+            for row in _rows("SELECT crawl, parts FROM footer_crawls")
+        }
+    except sqlite3.OperationalError:
+        # A database from before the table existed: nothing is known complete.
+        complete = {}
+    return {
+        row["crawl"]: {"parts": row["parts"], "full": row["crawl"] in complete}
+        for row in _rows("SELECT crawl, count(DISTINCT part) AS parts FROM footers GROUP BY crawl")
+    }
 
 
 def coverage() -> dict[str, Any]:
@@ -338,9 +367,15 @@ def coverage() -> dict[str, Any]:
         rule.source: [surt_range(domain) for domain in rule.domains]
         for rule in vendors
     }
+    # Only a pair scanned with the vendor's rule as it is now counts: keyscan
+    # itself re-scans the rest, so the matrix must show them as pending too.
+    from keyscan.rules import rule_fingerprint
+
+    current = {rule.source: rule_fingerprint(rule) for rule in vendors}
     done = {
         (row["ats"], row["crawl"]): row["scanned_at"]
-        for row in _rows("SELECT ats, crawl, scanned_at FROM scanned")
+        for row in _rows("SELECT * FROM scanned")
+        if row.get("rule_hash") is not None and row["rule_hash"] == current.get(row["ats"])
     }
     crawls = _rows(
         """

@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from xjobscore import router, sources, store
+from xjobscore import probe, router, sources, store
 from xjobscore.location_normalizer import normalize_location
-from xjobscore.records import LINK_DEAD, Feed, Item, Posting, Unparseable
+from xjobscore.records import LINK_DEAD, PAGE_CLOSED, Feed, Item, Posting, Unparseable
 
 if TYPE_CHECKING:
     from asyncpg import Connection
@@ -167,6 +167,9 @@ class Counts:
     # the only channel that tells an operator a feed's detail pages have gone
     # from requisitions to session walls.
     unparseable: int = 0
+    # Companies created for a token that had none (see ``_mint_for_feed``).
+    # A token linked to an existing company is not counted.
+    minted: int = 0
     # Identity side of the result used by the unified incremental Gold path.
     # ``compare=False`` preserves the value semantics of historical counter
     # assertions while making the changed rows explicit to new callers.
@@ -186,6 +189,7 @@ class Counts:
             unsupported=self.unsupported + other.unsupported,
             secondhand=self.secondhand + other.secondhand,
             unparseable=self.unparseable + other.unparseable,
+            minted=self.minted + other.minted,
             changed_posting_ids=self.changed_posting_ids
             | other.changed_posting_ids,
             affected_company_ids=self.affected_company_ids
@@ -231,6 +235,32 @@ async def _company_id(
     return None
 
 
+async def _mint_for_feed(
+    conn: Connection, feed: Feed, posting: Posting
+) -> tuple[int, bool]:
+    """Give a company-less ATS token its company, from this posting's name.
+
+    An ATS feed's token *is* the employer, so a posting that resolves to
+    nothing names a company we have not met yet, not one to park. The name is
+    the posting's ``company_raw`` (Greenhouse and Comeet carry a real one;
+    Ashby and Lever map the slug) and the slug otherwise. The row lands
+    ``pending`` for the Companies page to confirm. Returns
+    ``(company_id, minted)``; an existing company found by name or slug is
+    linked, not duplicated.
+    """
+    company_id, minted = await store.ensure_token_company(
+        conn, ats=feed.source, token=feed.key, name=posting.company_raw
+    )
+    logger.info(
+        "%s company source=%s company_id=%d name=%r",
+        "minted" if minted else "linked",
+        store.source_instance(feed),
+        company_id,
+        posting.company_raw,
+    )
+    return company_id, minted
+
+
 async def process(
     conn: Connection,
     feed: Feed,
@@ -266,6 +296,10 @@ async def process(
     total = Counts()
     source = store.source_instance(feed)
     refused: Unparseable | None = None
+    # Mint only on the live poll path. ``dry_run`` writes nothing, and a caller
+    # passing an alias snapshot declared that nothing writes aliases mid-pass.
+    can_mint = feed.type == "ATS" and not dry_run and aliases is None
+    minted_id: int | None = None
     for raw in stored:
         item = raw.item
         item_envelope = envelope
@@ -277,7 +311,10 @@ async def process(
                 kind=reconstructed.kind,
             )
         try:
-            canonicals = parse(feed, item, item_envelope)
+            if isinstance(item.payload, dict) and "_probe" in item.payload:
+                canonicals = probe.parse_tombstone(item, item.payload["_probe"])
+            else:
+                canonicals = parse(feed, item, item_envelope)
         except Unparseable as error:
             refused = error
             logger.warning(
@@ -301,19 +338,34 @@ async def process(
             # creates one and carries nothing to project. Routing it through the
             # canonical upsert would overwrite title, description, and URLs with
             # the empty fields a tombstone necessarily has.
-            if posting.closed_evidence == LINK_DEAD:
+            if posting.closed_evidence in {LINK_DEAD, PAGE_CLOSED}:
                 if dry_run:
                     total += Counts(postings=1)
                     continue
+                closure_at = seen_at
+                evidence = item.payload.get("_probe", {}) if isinstance(item.payload, dict) else {}
+                if evidence.get("probed_at"):
+                    observed = datetime.fromisoformat(evidence["probed_at"].replace("Z", "+00:00"))
+                    if observed.tzinfo is not None:
+                        closure_at = observed
                 closed = await store.close_posting_by_key(
                     conn,
                     source=source,
                     source_key=posting.external_id,
-                    closed_at=seen_at,
+                    closed_at=closure_at,
+                    **({"closure_kind": "page"} if posting.closed_evidence == PAGE_CLOSED else {}),
                 )
                 total += Counts(postings=1) if closed else Counts(unchanged=1)
                 continue
             company_id = await _company_id(conn, feed, posting, aliases=aliases)
+            if company_id is None:
+                # Once minted, the rest of the batch falls back to it exactly
+                # as it would to the token's company on the next poll.
+                company_id = minted_id
+            if company_id is None and can_mint:
+                company_id, minted = await _mint_for_feed(conn, feed, posting)
+                minted_id = company_id
+                total += Counts(minted=int(minted))
             if company_id is None:
                 logger.warning(
                     "unresolved company source=%s source_key=%s company_raw=%r",
@@ -327,7 +379,7 @@ async def process(
             if dry_run:
                 total += Counts(postings=1)
                 continue
-            # vendor_closed_at is the stated channel only. No link_checked_at
+            # ats_closed_at is the stated channel only. No link_checked_at
             # here: a stated closure arrives with the listing, and that moment
             # is already last_seen_at -- link_checked_at belongs to the probe
             # channel alone, a fetch of the posting's own URL.
@@ -342,7 +394,7 @@ async def process(
                 raw_id=raw.raw_id,
                 seen_at=seen_at,
                 touch_seen=touch_seen,
-                vendor_closed_at=seen_at if closed else None,
+                ats_closed_at=seen_at if closed else None,
             )
             if changed and changes is not None:
                 changes.add(posting_id, company_id)
@@ -381,6 +433,7 @@ async def replay(
     the ones it returns today, so this pass says nothing about what is still
     listed. It therefore never touches ``last_seen_at``: doing so would stamp
     every vanished posting as freshly seen and erase the absence signal.
+    ATS closure timestamps use the raw observation's ``fetched_at``.
     """
     total = Counts()
     sources.parser(feed.source)  # fail before writing any replayed rows
@@ -401,7 +454,7 @@ async def replay(
         # all-unparseable check for us without failing the feed on the first
         # skippable page; the same check runs once below, over the whole feed.
         total += await process(
-            conn, feed, [stored], envelope, seen_at=seen_at, dry_run=dry_run,
+            conn, feed, [stored], envelope, seen_at=row["fetched_at"], dry_run=dry_run,
             aliases=aliases, touch_seen=False, whole_batch=False,
         )
     if rows and total.unparseable == len(rows):

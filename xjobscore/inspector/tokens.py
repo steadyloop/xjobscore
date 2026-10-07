@@ -18,9 +18,12 @@ from typing import Any
 
 import asyncpg
 
+from xjobscore import sources
+from xjobscore.source_policy import require_source_allowed, source_disabled, visible_source_sql
+
 # These are the operator-facing views for the token table.  Keep the tuple in
 # the same order as the status filter in the page.
-FILTERS = ("inactive", "muted", "dead", "all")
+FILTERS = ("inactive", "unknown", "muted", "dead", "all")
 PROMOTION_BATCH = 20
 
 _INACTIVE = "t.status = 'live' AND (f.id IS NULL OR NOT f.polling)"
@@ -28,10 +31,16 @@ _INACTIVE = "t.status = 'live' AND (f.id IS NULL OR NOT f.polling)"
 _FILTER_PREDICATES = {
     "inactive": _INACTIVE,
     "muted": "t.muted",
+    # Never checked, or checked without a verdict -- the sweep's territory.
+    "unknown": "t.status = 'unknown'",
     "dead": "t.status = 'dead'",
     # Unlike the focused views above, this is the complete inventory,
     # including live tokens that are actively polled.
     "all": "TRUE",
+}
+_FILTER_PREDICATES = {
+    name: f"{predicate} AND {visible_source_sql('t.ats')}"
+    for name, predicate in _FILTER_PREDICATES.items()
 }
 
 _SELECT = """
@@ -48,13 +57,86 @@ FROM token AS t
 LEFT JOIN company AS c ON c.id = t.company_id
 LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
 WHERE {where_clause}
-ORDER BY t.ats, t.token
+ORDER BY {order}
 LIMIT $1 OFFSET $2
+"""
+
+# Row order within a vendor group. Keys are the page's sort menu; values are
+# fixed SQL, so the menu can never inject. `t.token` last keeps paging stable.
+ORDERS = {
+    "token": "t.ats, t.token",
+    "discovered": "t.discovered_at DESC NULLS LAST, t.ats, t.token",
+    "checked": "t.checked_at DESC NULLS LAST, t.ats, t.token",
+    "company": "c.name NULLS LAST, t.ats, t.token",
+}
+
+# The board a token polls. Comeet's key is `slug/board-id`, and the same
+# board arrives under several slugs (renames: tabtale/crazylabs) and both
+# board-id cases (arbe/C6.001, arbe/c6.001) -- measured 2026-10-05: 97 boards
+# held by 200 feeds, every pair an identical payload. The API ignores board-id
+# case, so the upper-cased board id is the identity. Registry rows key on the
+# bare board id. Every other vendor's board is its token.
+_BOARD = (
+    "CASE WHEN {t}.ats = 'comeet' "
+    "THEN upper(coalesce({t}.config->>'company', split_part({t}.token, '/', 2), {t}.token)) "
+    "ELSE {t}.token END"
+)
+
+# Comeet polls only with the per-board API token that validation writes to
+# `token.config`; without it the adapter reads the slug as the board and every
+# poll is an HTTP 400 (2026-10-05: 392 of them). A slugged key also needs the
+# resolved board id. And a board already in the feed under another spelling
+# is not addable again.
+_COMEET_READY = f"""(t.ats <> 'comeet' OR (
+    t.config ? 'token'
+    AND (t.config ? 'company' OR strpos(t.token, '/') = 0)
+    AND NOT EXISTS (
+        SELECT 1
+          FROM feed AS fb
+          JOIN token AS tb ON tb.ats = fb.source AND tb.token = fb.key
+         WHERE fb.source = 'comeet'
+           AND {_BOARD.format(t="tb")} = {_BOARD.format(t="t")}
+    )
+))"""
+
+# A live board is not necessarily implemented by the polling engine. These
+# names come only from the trusted source registry, never from a request.
+_POLLING_SUPPORTED = "t.ats IN ({})".format(
+    ", ".join(
+        "'" + name.replace("'", "''") + "'"
+        for name in sorted(sources.SOURCES) if not source_disabled(name)
+    )
+)
+
+# What "Add to feed" will accept: the same guard both insert paths use.
+_ADDABLE = (
+    f"t.status = 'live' AND NOT t.muted AND f.id IS NULL"
+    f" AND {_POLLING_SUPPORTED} AND {_COMEET_READY}"
+)
+
+# One row per board within a single insert: two spellings of one Comeet board
+# arriving together would both pass the NOT EXISTS above, which only sees
+# feeds that already existed when the statement began.
+_FIRST_PER_BOARD = (
+    f"row_number() OVER (PARTITION BY t.ats, {_BOARD.format(t='t')} ORDER BY t.token) = 1"
+)
+
+# Per-vendor sizes for the current filter, so the page can draw every vendor
+# group without shipping every row -- rows load when a group is opened.
+_GROUPS = """
+SELECT t.ats, count(*)::int AS count,
+       count(*) FILTER (WHERE {addable})::int AS addable
+FROM token AS t
+LEFT JOIN company AS c ON c.id = t.company_id
+LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
+WHERE {where_clause}
+GROUP BY t.ats
+ORDER BY count DESC, t.ats
 """
 
 # Deliberately unfiltered: the header reports the shape of the whole inventory,
 # so the backlog number does not move when someone narrows the table.
-_COUNTS = """
+_COUNTS = f"""
 SELECT count(*)::int AS total,
        count(*) FILTER (WHERE t.status = 'live')::int AS live,
        count(*) FILTER (WHERE t.status = 'dead')::int AS dead,
@@ -63,6 +145,7 @@ SELECT count(*)::int AS total,
        count(*) FILTER (WHERE f.id IS NULL)::int AS unpromoted,
        count(*) FILTER (
            WHERE t.status = 'live' AND NOT t.muted AND f.id IS NULL
+             AND {_POLLING_SUPPORTED}
        )::int
            AS promotable,
        count(DISTINCT t.ats)::int AS vendors,
@@ -73,6 +156,7 @@ SELECT count(*)::int AS total,
            AS checked_24h
 FROM token AS t
 LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
+WHERE {visible_source_sql('t.ats')}
 """
 
 
@@ -81,14 +165,20 @@ LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
 PROBE_STATUSES = ("unknown", "live", "dead")
 FEED_EVENTS = ("feed_entered", "feed_exited")
 
-_RECENT = """
+_RECENT = f"""
 SELECT l.id, l.checked_at, l.ats, l.token, l.status
   FROM token_log AS l
  WHERE l.status = ANY($2::text[])
+   AND {visible_source_sql('l.ats')}
  ORDER BY l.id DESC
  LIMIT $1
 """
 
+
+
+def _like(q: str) -> str:
+    """`q` as a literal ILIKE substring: its own % and _ match themselves."""
+    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def _validate(name: str, value: str, allowed: tuple[str, ...]) -> None:
@@ -108,6 +198,7 @@ def _shape(record: Any) -> dict[str, Any]:
     # token is exclusively the ATS discovery inventory. Direct and board
     # feeds are created directly in `feed`, never through this page.
     row["category"] = "ATS"
+    row["polling_supported"] = row["ats"] in sources.SOURCES and not source_disabled(row["ats"])
     return row
 
 
@@ -117,27 +208,61 @@ async def query(
     filter: str = "inactive",
     limit: int = 50,
     offset: int = 0,
+    ats: str | None = None,
+    groups: bool = False,
+    q: str | None = None,
+    order: str = "token",
 ) -> dict[str, Any]:
-    """One page of token rows with each row's feed state derived."""
+    """One page of token rows with each row's feed state derived.
+
+    `ats` narrows the page to one vendor and `q` to tokens or companies
+    containing it -- both bind values, never interpolated. `groups` adds every
+    vendor's row count under the same filter and search -- the page's group
+    headers -- without fetching those rows.
+    """
     _validate("filter", filter, FILTERS)
+    _validate("order", order, tuple(ORDERS))
     limit = max(1, min(limit, 5000))
     offset = max(0, offset)
+    q = (q or "").strip() or None
 
     where_clause = _FILTER_PREDICATES.get(filter, "TRUE")
-    select_query = _SELECT.format(where_clause=where_clause)
+    # Search binds after the page window ($1, $2) and before the vendor.
+    page_args: list[Any] = [limit, offset]
+    page_where = where_clause
+    group_where = where_clause
+    group_args: list[Any] = []
+    if q:
+        pattern = _like(q)
+        page_args.append(pattern)
+        page_where = f"({page_where}) AND (t.token ILIKE ${len(page_args)} OR c.name ILIKE ${len(page_args)})"
+        group_args.append(pattern)
+        group_where = f"({group_where}) AND (t.token ILIKE $1 OR c.name ILIKE $1)"
+    if ats:
+        page_args.append(ats)
+        page_where = f"({page_where}) AND t.ats = ${len(page_args)}"
+    select_query = _SELECT.format(where_clause=page_where, order=ORDERS[order])
 
     async with pool.acquire() as conn:
         counts = await conn.fetchrow(_COUNTS)
-        records = await conn.fetch(
-            select_query, limit, offset
+        group_rows = (
+            await conn.fetch(
+                _GROUPS.format(where_clause=group_where, addable=_ADDABLE), *group_args
+            )
+            if groups else None
         )
-    return {
+        records = await conn.fetch(select_query, *page_args)
+    result = {
         "counts": dict(counts) if counts else {},
         "total": records[0]["total"] if records else 0,
         "offset": offset,
         "limit": limit,
         "rows": [_shape(record) for record in records],
     }
+    if group_rows is not None:
+        result["groups"] = [dict(row) for row in group_rows]
+        result["total"] = sum(row["count"] for row in result["groups"])
+    return result
 
 
 async def _recent(
@@ -241,6 +366,8 @@ async def set_muted(
     token: str,
     muted: bool,
 ) -> dict[str, Any] | None:
+    if not muted:
+        require_source_allowed(ats)
     async with pool.acquire() as conn:
         record = await conn.fetchrow(
             """
@@ -313,27 +440,33 @@ async def promotion_candidates(
 async def promote_verified(
     pool,
     identities: list[tuple[str, str]],
+    *,
+    interval_s: int | None = None,
 ) -> int:
+    """Add these exact tokens to ``feed`` -- the live, unmuted, absent ones.
+
+    `interval_s` sets the new feeds' poll interval; None keeps the column
+    default. Returns how many were added.
+    """
     identities = list(dict.fromkeys(identities))
     if not identities:
         return 0
     async with pool.acquire() as conn:
         records = await conn.fetch(
-            """
+            f"""
             WITH incoming(ats, token) AS (
                 SELECT * FROM unnest($1::text[], $2::text[])
-            ), promoted AS (
-                INSERT INTO feed(source, key, polling)
-                SELECT t.ats, t.token, true
+            ), candidates AS (
+                SELECT t.ats, t.token, {_FIRST_PER_BOARD} AS first_of_board
                   FROM incoming AS i
                   JOIN token AS t USING (ats, token)
-                 WHERE t.status = 'live'
-                   AND NOT t.muted
-                   AND NOT EXISTS (
-                       SELECT 1
-                         FROM feed AS f
-                        WHERE f.source = t.ats AND f.key = t.token
-                   )
+                  LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
+                 WHERE {_ADDABLE}
+            ), promoted AS (
+                INSERT INTO feed(source, key, polling, interval_s)
+                SELECT ats, token, true, coalesce($3::int, 900)
+                  FROM candidates
+                 WHERE first_of_board
                 ON CONFLICT (source, key) DO NOTHING
                 RETURNING source, key
             ), logged AS (
@@ -344,5 +477,58 @@ async def promote_verified(
             """,
             [ats for ats, _ in identities],
             [token for _, token in identities],
+            interval_s,
         )
     return len(records)
+
+
+async def add_vendors_to_feed(
+    pool,
+    vendors: list[str],
+    *,
+    filter: str = "inactive",
+    q: str | None = None,
+    interval_s: int | None = None,
+) -> int:
+    """Add every addable token of `vendors` under the page's filter and search.
+
+    The bulk twin of `promote_verified`: the page sends vendor names, not
+    thousands of identities, and the server resolves the same rows the page
+    is showing. The insert guard is identical, so a vendor tick can never add
+    a dead, muted, or already-present token.
+    """
+    _validate("filter", filter, FILTERS)
+    vendors = list(dict.fromkeys(vendors))
+    if not vendors:
+        return 0
+    q = (q or "").strip() or None
+    where = f"({_FILTER_PREDICATES[filter]}) AND t.ats = ANY($1::text[])"
+    args: list[Any] = [vendors, interval_s]
+    if q:
+        args.append(_like(q))
+        where += f" AND (t.token ILIKE ${len(args)} OR c.name ILIKE ${len(args)})"
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            f"""
+            WITH candidates AS (
+                SELECT t.ats, t.token, {_FIRST_PER_BOARD} AS first_of_board
+                  FROM token AS t
+                  LEFT JOIN company AS c ON c.id = t.company_id
+                  LEFT JOIN feed AS f ON f.source = t.ats AND f.key = t.token
+                 WHERE {where} AND {_ADDABLE}
+            ), promoted AS (
+                INSERT INTO feed(source, key, polling, interval_s)
+                SELECT ats, token, true, coalesce($2::int, 900)
+                  FROM candidates
+                 WHERE first_of_board
+                ON CONFLICT (source, key) DO NOTHING
+                RETURNING source, key
+            ), logged AS (
+                INSERT INTO token_log (checked_at, ats, token, status)
+                SELECT now(), source, key, 'feed_entered' FROM promoted
+            )
+            SELECT count(*)::int AS added FROM promoted
+            """,
+            *args,
+        )
+    return records[0]["added"] if records else 0

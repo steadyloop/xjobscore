@@ -96,6 +96,7 @@ export function matchesFeed(feed, filters) {
   if (filters.view === "failing" && status !== "backing_off") return false;
   if (filters.view === "paused" && status !== "paused") return false;
   if (filters.provider && feed.source !== filters.provider) return false;
+  if (filters.inSection && !filters.inSection(feed.source)) return false;
   if (!filters.search) return true;
   const needle = filters.search.toLowerCase();
   return [feed.company_name, feed.source, feed.key]
@@ -148,16 +149,18 @@ export function sortFeeds(feeds, sort = { key: "due", direction: "asc" }, nowMs 
 /* Provider grouping. A group's rows are the feeds that pass the current
    filters, sorted by the active column; the group order is fixed by concern —
    most failing feeds first, then size — so a column sort never moves the group
-   an operator is looking at. Groups with no matching rows are dropped. */
+   an operator is looking at. allRows retains the complete provider for its
+   pause/resume control. Groups with no matching rows are dropped. */
 export function groupFeeds(feeds, filters, sort = { key: "due", direction: "asc" }, nowMs = 0) {
   const groups = new Map();
   for (const feed of feeds) {
     let group = groups.get(feed.source);
     if (!group) {
-      group = { source: feed.source, total: 0, rows: [] };
+      group = { source: feed.source, total: 0, rows: [], allRows: [] };
       groups.set(feed.source, group);
     }
     group.total += 1;
+    group.allRows.push(feed);
     if (matchesFeed(feed, filters)) group.rows.push(feed);
   }
   const result = [];
@@ -226,4 +229,146 @@ export function autoExpand(groups, filters) {
   if (filters.view === "all" && !filters.search) return false;
   const rows = groups.reduce((sum, group) => sum + group.rows.length, 0);
   return rows <= AUTO_EXPAND_ROWS;
+}
+
+/* ---------- board sections (operator-named provider groups) ----------
+
+   The server stores a layout: groups in board order, each with the providers
+   ("sources") filed in it. Anything not filed is Ungrouped, which is not a
+   stored group -- it is always last and cannot be renamed, moved or deleted,
+   so a provider that appears tomorrow lands somewhere visible on its own.
+   Layout edits below return a new layout and never mutate, so the previous
+   one stays intact for undo. */
+
+export const UNGROUPED = "ungrouped";
+export const UNGROUPED_NAME = "Ungrouped";
+
+export const sectionKey = (id) => (id == null ? null : String(id));
+
+/* `group:finance` -- or group:"long tail" -- narrows the board to sections
+   whose name contains the needle; the rest of the box is the usual search. */
+export function parseSearch(raw = "") {
+  let group = null;
+  const text = raw
+    .replace(/group:(?:"([^"]*)"|(\S*))/i, (_, quoted, word) => {
+      group = (quoted ?? word).toLowerCase();
+      return "";
+    })
+    .trim();
+  return { text, group };
+}
+
+export function sectionOf(layout, source) {
+  const owner = layout.find((group) => group.sources.includes(source));
+  return owner ? sectionKey(owner.id) : UNGROUPED;
+}
+
+/* A source predicate for a `group:` needle, or null when there is none. */
+export function sectionMatcher(layout, needle) {
+  if (needle == null) return null;
+  const named = new Set(
+    layout
+      .filter((group) => group.name.toLowerCase().includes(needle))
+      .flatMap((group) => group.sources)
+  );
+  const filed = new Set(layout.flatMap((group) => group.sources));
+  const ungrouped = UNGROUPED_NAME.toLowerCase().includes(needle);
+  return (source) => named.has(source) || (ungrouped && !filed.has(source));
+}
+
+/* Buckets provider groups (from groupFeeds, already in concern order) into
+   the layout's sections, Ungrouped last. Empty sections are kept; the caller
+   decides whether an empty one is worth a heading. */
+export function sectionGroups(providerGroups, layout) {
+  const sections = layout.map((group) => ({
+    id: sectionKey(group.id),
+    name: group.name,
+    ungrouped: false,
+    groups: [],
+  }));
+  const ungrouped = { id: UNGROUPED, name: UNGROUPED_NAME, ungrouped: true, groups: [] };
+  const byId = new Map(sections.map((section) => [section.id, section]));
+  for (const group of providerGroups) {
+    (byId.get(sectionOf(layout, group.source)) ?? ungrouped).groups.push(group);
+  }
+  return [...sections, ungrouped];
+}
+
+/* Section heading aggregates, summed from its providers' rollups. Sums stay
+   null when no provider carries the observation, matching groupRollup. */
+export function sectionRollup(section) {
+  const counts = {};
+  let jobs = null;
+  let errors = null;
+  let feeds = 0;
+  for (const group of section.groups) {
+    feeds += group.rows.length;
+    for (const [state, count] of group.rollup.counts) counts[state] = (counts[state] ?? 0) + count;
+    if (group.rollup.jobs != null) jobs = (jobs ?? 0) + group.rollup.jobs;
+    if (group.rollup.errors != null) errors = (errors ?? 0) + group.rollup.errors;
+  }
+  const states = Object.keys(counts).sort(
+    (a, b) => (STATUS_PRIORITY[a] ?? 99) - (STATUS_PRIORITY[b] ?? 99)
+  );
+  return {
+    worst: states[0] ?? null,
+    counts: states.map((state) => [state, counts[state]]),
+    providers: section.groups.length,
+    feeds,
+    jobs,
+    errors,
+  };
+}
+
+function withoutSource(layout, source) {
+  return layout.map((group) => ({
+    ...group,
+    sources: group.sources.filter((item) => item !== source),
+  }));
+}
+
+export function moveSource(layout, source, target) {
+  const next = withoutSource(layout, source);
+  if (target === UNGROUPED) return next;
+  return next.map((group) =>
+    sectionKey(group.id) === target ? { ...group, sources: [...group.sources, source] } : group
+  );
+}
+
+/* A new group is appended with a null id; the server assigns one. */
+export function addSection(layout, name, sources = []) {
+  const cleared = sources.reduce(withoutSource, layout);
+  return [...cleared, { id: null, name, sources: [...sources] }];
+}
+
+export function renameSection(layout, id, name) {
+  return layout.map((group) => (sectionKey(group.id) === id ? { ...group, name } : group));
+}
+
+export function removeSection(layout, id) {
+  return layout.filter((group) => sectionKey(group.id) !== id);
+}
+
+/* Moves a group to `index` in the board order (clamped). */
+export function moveSection(layout, id, index) {
+  const from = layout.findIndex((group) => sectionKey(group.id) === id);
+  if (from < 0) return layout;
+  const next = [...layout];
+  const [group] = next.splice(from, 1);
+  next.splice(Math.max(0, Math.min(index, next.length)), 0, group);
+  return next;
+}
+
+export function uniqueSectionName(layout, base = "New group") {
+  const taken = new Set(layout.map((group) => group.name.toLowerCase()));
+  let name = base;
+  for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${base} ${n}`;
+  return name;
+}
+
+export function queueSummary(view) {
+  const q = view.queue;
+  const state = !view.worker.alive ? "offline" : view.control.running ? "running" : "paused";
+  const oldest = q.oldest_ready_at ? ` · oldest ready ${new Date(q.oldest_ready_at).toLocaleString()}` : "";
+  return `${state} · ${q.ready.toLocaleString()} ready · ${q.checking} checking · ${q.waiting.toLocaleString()} waiting · ${q.completed.toLocaleString()} completed · ${q.cancelled.toLocaleString()} cancelled${oldest}`;
 }

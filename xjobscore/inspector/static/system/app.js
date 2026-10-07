@@ -1,3 +1,4 @@
+import { loadReconcile } from "/static/system/reconcile.js";
 /* System page — scheduler board (fleet view) plus the live panels in live.js.
  *
  * Cadence is entirely operator-owned: this page reads and writes interval_s,
@@ -13,12 +14,15 @@ import {
   relativeTime,
   statusChip,
 } from "/static/shared/format.js";
-import { dropFeed, muteFeed } from "/static/shared/feed-policy.js";
+import { dropFeed, muteFeed, setProviderPaused } from "/static/shared/feed-policy.js";
 import { renderNav } from "/static/shared/nav.js";
 import { sparkBars } from "/static/shared/spark.js";
 import {
   ATTENTION_STATES,
   INTERVAL_PRESETS,
+  UNGROUPED,
+  UNGROUPED_NAME,
+  addSection,
   autoExpand,
   dueInfo,
   formatRequestRate,
@@ -28,10 +32,22 @@ import {
   intervalSeconds,
   jobsToday,
   matchesFeed,
+  moveSection,
+  moveSource,
+  parseSearch,
+  removeSection,
+  renameSection,
+  sectionGroups,
+  sectionKey,
+  sectionMatcher,
+  sectionOf,
+  sectionRollup,
   sortFeeds,
   summaryCounts,
+  uniqueSectionName,
 } from "/static/system/model.mjs";
-import { clockTime, paintWorkers, startLive } from "/static/system/live.js";
+import { clockTime, paintWorkers, setFeeds, startLive } from "/static/system/live.js";
+import { setPollActivity } from "/static/system/activity.js";
 
 renderNav("System");
 
@@ -42,8 +58,8 @@ const FEEDS_REFRESH_MS = 60_000;
 const LOG_REFRESH_MS = 5000;
 const COUNTDOWN_TICK_MS = 15_000;
 const BULK_FETCH_CONCURRENCY = 8;
-const BULK_POLICY_CONCURRENCY = 8;
 const EXPANDED_STORAGE_KEY = "scheduler-expanded-providers";
+const FOLDED_STORAGE_KEY = "scheduler-folded-groups";
 
 const state = {
   feeds: [],
@@ -65,8 +81,18 @@ const state = {
   sort: { key: "due", direction: "asc" },
   bulk: null,
   bulkScope: null,
+  pausingProviders: new Set(),
   logEvents: [],
   logAvailable: false,
+  // Board groups: the server's layout, plus per-browser fold state.
+  layout: [],
+  groupsAvailable: false,
+  groupsError: null,
+  savingGroups: false,
+  folded: loadFolded(),
+  groupsPanelOpen: false,
+  renaming: null,
+  moveMenu: null,
 };
 
 const alertEl = document.getElementById("system-alert");
@@ -79,12 +105,13 @@ const summaryEl = document.getElementById("summary-line");
 const emptyEl = document.getElementById("sched-empty");
 const countEl = document.getElementById("row-count");
 const panelEl = document.getElementById("detail-panel");
-const logLinesEl = document.getElementById("live-log-lines");
-const logDotEl = document.getElementById("live-log-dot");
 const fetchMatchingEl = document.getElementById("fetch-matching");
 const bulkDialogEl = document.getElementById("bulk-dialog");
 const removeDialogEl = document.getElementById("remove-dialog");
 const toastEl = document.getElementById("toast");
+const groupsPanelEl = document.getElementById("groups-panel");
+const moveMenuEl = document.getElementById("move-menu");
+const editGroupsEl = document.getElementById("edit-groups");
 const tableEl = document.getElementById("sched-table");
 let renderToken = 0;
 const tableWrapEl = document.querySelector(".ops-table-wrap");
@@ -143,14 +170,34 @@ function formatIvl(seconds) {
   return formatInterval(seconds).replace(/\s+/g, "");
 }
 
-function showToast(message, tone = "ok") {
+/* `action` adds one inline button, e.g. { label: "undo", run }. */
+function showToast(message, tone = "ok", action = null) {
   clearTimeout(toastTimer);
-  toastEl.textContent = message;
+  toastEl.replaceChildren(
+    message,
+    ...(action
+      ? [
+          el("span", { class: "wk-sep", "aria-hidden": "true" }, "·"),
+          el(
+            "button",
+            {
+              class: "ops-linkish",
+              type: "button",
+              onclick: () => {
+                toastEl.hidden = true;
+                action.run();
+              },
+            },
+            action.label
+          ),
+        ]
+      : [])
+  );
   toastEl.dataset.tone = tone;
   toastEl.hidden = false;
   toastTimer = setTimeout(() => {
     toastEl.hidden = true;
-  }, 4200);
+  }, action ? 6000 : 4200);
 }
 
 const CLOCK_FORMAT = new Intl.DateTimeFormat(undefined, {
@@ -261,6 +308,31 @@ function persistExpanded() {
   }
 }
 
+/* Board sections start unfolded; only the ones folded here are remembered. */
+function loadFolded() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(FOLDED_STORAGE_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistFolded() {
+  try {
+    localStorage.setItem(FOLDED_STORAGE_KEY, JSON.stringify([...state.folded]));
+  } catch {
+    /* folds just will not survive a reload */
+  }
+}
+
+function toggleSection(id) {
+  if (state.folded.has(id)) state.folded.delete(id);
+  else state.folded.add(id);
+  persistFolded();
+  renderTable({ preserveScroll: true });
+}
+
 function toggleGroup(source) {
   if (state.expanded.has(source)) state.expanded.delete(source);
   else state.expanded.add(source);
@@ -271,6 +343,10 @@ function toggleGroup(source) {
 function setAllExpanded(expanded) {
   state.expanded = new Set(expanded ? state.feeds.map((feed) => feed.source) : []);
   persistExpanded();
+  if (expanded) {
+    state.folded = new Set();
+    persistFolded();
+  }
   renderTable();
 }
 
@@ -297,7 +373,7 @@ function renderSystem() {
 
 async function loadOverview() {
   try {
-    const view = await api("/api/scheduler/overview");
+    const [view] = await Promise.all([api("/api/scheduler/overview"), loadReconcile()]);
     state.overview = view;
     state.connected = Boolean(view.postgres?.connected);
     state.telemetryAvailable = Boolean(view.telemetry_available);
@@ -315,6 +391,7 @@ async function loadFeeds() {
   try {
     const view = await api("/api/scheduler/feeds");
     state.feeds = view.feeds ?? [];
+    setFeeds(state.feeds);
     state.connected = Boolean(view.postgres?.connected);
     state.telemetryAvailable = Boolean(view.telemetry_available);
     state.feedsError = null;
@@ -337,19 +414,6 @@ async function loadFeeds() {
 // The fallback only appears when there is no code to show (a transport error,
 // or any row written before poll_log.status_code existed), where the word is
 // the only signal left.
-const LOG_STATUS = {
-  ok: "OK",
-  unchanged: "OK",
-  partial: "OK",
-  error: "ERR",
-};
-
-function logMark(status, statusCode) {
-  return statusCode && (status === "error" || status === "partial")
-    ? String(statusCode)
-    : LOG_STATUS[status] ?? status;
-}
-
 // ok is spelled out -- "ok" is already the shortest word for it, so a glyph
 // would not save space, only meaning. unchanged/partial share a checkmark
 // (both mean the poll succeeded) and error gets the ballot X.
@@ -374,32 +438,7 @@ function eventMark(status, statusCode) {
 }
 
 function renderLiveLog() {
-  logDotEl.dataset.state = state.logAvailable ? "live" : "off";
-  if (!state.logEvents.length) {
-    logLinesEl.replaceChildren(
-      el("div", { class: "ops-log-empty" },
-        state.logAvailable ? "waiting for polls…" : "telemetry unavailable")
-    );
-    return;
-  }
-  const pinned = logLinesEl.scrollHeight - logLinesEl.scrollTop - logLinesEl.clientHeight < 12;
-  logLinesEl.replaceChildren(
-    ...[...state.logEvents].reverse().map((event) =>
-      el(
-        "div",
-        { class: "ops-log-line" },
-        el("time", { title: exactTime(event.polled_at) }, clockTime(event.polled_at)),
-        el("span", { class: "ops-log-st", "data-status": event.status },
-          logMark(event.status, event.status_code)),
-        el("span", { class: "ops-log-feed", title: `${event.source}:${event.key}` }, event.key),
-        el("span", { class: "ops-log-note" },
-          event.new_postings
-            ? `${formatCount(event.new_postings)} new`
-            : event.status === "unchanged" ? "unchanged" : "no new")
-      )
-    )
-  );
-  if (pinned) logLinesEl.scrollTop = logLinesEl.scrollHeight;
+  setPollActivity(state.logEvents, state.logAvailable);
 }
 
 async function loadLog() {
@@ -414,9 +453,11 @@ async function loadLog() {
 }
 
 function filters() {
+  const { text, group } = parseSearch(state.search);
   return {
-    search: state.search,
+    search: text,
     view: state.view,
+    inSection: sectionMatcher(state.layout, group),
   };
 }
 
@@ -545,12 +586,12 @@ function intervalsCell(intervals) {
   return el("td", { class: "num secondary" }, text);
 }
 
-/* Group-level actions mirror the row pair. "fetch" reuses the bulk fetch
-   dialog scoped to this provider; pause/resume fans out the per-feed policy
-   write and reports one outcome. Both are gated on PostgreSQL like the rows. */
+/* Fetch follows the visible rows. Pause/resume covers the whole provider in
+   one transaction, including feeds hidden by the current search or filter. */
 function groupActionCell(group) {
-  const editable = group.rows.filter((feed) => feed.policy?.in_postgres);
+  const editable = group.allRows.filter((feed) => feed.policy?.in_postgres);
   const allPaused = editable.length > 0 && editable.every(isHeld);
+  const pausing = state.pausingProviders.has(group.source);
   const pollable = group.rows.filter((feed) => !isHeld(feed));
   return el(
     "td",
@@ -573,13 +614,13 @@ function groupActionCell(group) {
       {
         class: "ops-row-btn",
         type: "button",
-        disabled: state.connected && editable.length ? null : "",
+        disabled: state.connected && editable.length && !pausing ? null : "",
         title: state.connected
           ? `${allPaused ? "Resume" : "Pause"} all ${formatCount(editable.length)} ${group.source} feeds`
           : "PostgreSQL is unavailable.",
         onclick: (event) => setPausedMany(editable, !allPaused, group.source, event.currentTarget),
       },
-      allPaused ? "resume" : "pause"
+      pausing ? "applying…" : allPaused ? "resume" : "pause"
     )
   );
 }
@@ -607,6 +648,7 @@ function groupRow(group, open, nowMs) {
     el(
       "td",
       { class: "ops-group-cell" },
+      moveHandle(group.source),
       el(
         "button",
         {
@@ -652,6 +694,109 @@ function groupRow(group, open, nowMs) {
   );
 }
 
+/* ---------- board sections ---------- */
+
+function sectionName(id) {
+  if (id === UNGROUPED) return UNGROUPED_NAME;
+  return state.layout.find((group) => sectionKey(group.id) === id)?.name ?? UNGROUPED_NAME;
+}
+
+function groupsBlocked() {
+  if (state.groupsAvailable) return null;
+  return state.groupsError ? `Groups unavailable: ${state.groupsError}` : "Groups unavailable.";
+}
+
+/* The row handle: hidden until its row is hovered, it opens the move menu. */
+function moveHandle(source) {
+  const name = sectionName(sectionOf(state.layout, source));
+  const blocked = groupsBlocked();
+  return el(
+    "button",
+    {
+      class: "ops-row-handle",
+      type: "button",
+      dataset: { moveSource: source },
+      "aria-haspopup": "menu",
+      "aria-expanded": String(state.moveMenu?.source === source),
+      "aria-label": `Move ${source} to another group (now in ${name})`,
+      title: blocked ?? `In ${name} · move to another group`,
+      disabled: Boolean(blocked),
+      onclick: (event) => {
+        event.stopPropagation();
+        if (state.moveMenu?.source === source) closeMoveMenu();
+        else openMoveMenu(source, event.currentTarget);
+      },
+    },
+    "⠿"
+  );
+}
+
+/* A section heading: its name, a provider/feed breakdown, and the same
+   aggregate columns as a provider row. Folded, it is one row that size. */
+function sectionRow(section, open) {
+  const rollup = sectionRollup(section);
+  const breakdown = rollup.counts.flatMap(([state, count]) => [
+    el("span", {}, `${formatCount(count)} `),
+    statusMark({ state, detail: null }),
+    el("span", { class: "ops-group-sep", "aria-hidden": "true" }, "/"),
+  ]);
+  const count = rollup.providers
+    ? [
+        el("b", {}, formatCount(rollup.providers)),
+        rollup.providers === 1 ? " provider" : " providers",
+        el("span", { class: "ops-group-sep", "aria-hidden": "true" }, "·"),
+        ...breakdown,
+        el("b", {}, formatCount(rollup.feeds)),
+        " feeds",
+      ]
+    : ["empty · move providers here with ⠿"];
+  return el(
+    "tbody",
+    {
+      class: "ops-section-body",
+      dataset: { open: String(open), ungrouped: String(section.ungrouped) },
+    },
+    el(
+      "tr",
+      { class: "ops-section", onclick: () => toggleSection(section.id) },
+      el("td", { class: "ops-status-cell" }, rollup.worst ? statusMark({ state: rollup.worst, detail: null }) : null),
+      el(
+        "td",
+        { class: "ops-group-cell" },
+        el(
+          "button",
+          {
+            class: "ops-section-toggle",
+            type: "button",
+            "aria-expanded": String(open),
+            onclick: (event) => {
+              event.stopPropagation();
+              toggleSection(section.id);
+            },
+          },
+          el("span", { class: "ops-chevron", "aria-hidden": "true" }, "▶"),
+          el("span", { class: "ops-section-name" }, section.name),
+          el("span", { class: "ops-group-count" }, ...count)
+        )
+      ),
+      el("td", {
+        class: "sys-workers-cell",
+        dataset: { workerSources: section.groups.map((group) => group.source).join(" ") },
+      }),
+      el("td", {}),
+      el("td", {}),
+      el("td", {}),
+      el("td", { class: "num ops-section-sum" }, rollup.jobs != null ? formatCount(rollup.jobs) : null),
+      el(
+        "td",
+        { class: "num ops-errors-cell" },
+        rollup.errors ? el("span", { class: "ops-err" }, `x${formatCount(rollup.errors)}`) : null
+      ),
+      el("td", {})
+    )
+  );
+}
+
 function syncSelectedRow() {
   for (const row of tableEl.querySelectorAll("tr[data-feed-ref]")) {
     row.setAttribute("aria-selected", String(row.dataset.feedRef === state.selectedRef));
@@ -672,9 +817,11 @@ function renderTable({ preserveScroll = false } = {}) {
   if (!groups.length) {
     emptyEl.textContent = state.feedsError
       ? `Could not load feeds: ${state.feedsError}`
-      : state.feeds.length
-        ? "No feeds match the current view. Clear the search and view filters to see the full fleet."
-        : "No feeds are enabled. Enable a feed from the Feeds page to schedule it.";
+      : !state.lastFeedUpdate
+        ? "Loading feeds…"
+        : state.feeds.length
+          ? "No feeds match the current view. Clear the search and view filters to see the full fleet."
+          : "No feeds are enabled. Enable a feed from the Feeds page to schedule it.";
   }
 
   const scrollState = preserveScroll ? {
@@ -689,16 +836,40 @@ function renderTable({ preserveScroll = false } = {}) {
   /* Collapsed groups cost one row each; feed rows render lazily, in chunks,
      only for the groups that are open. */
   const pending = [];
-  for (const group of groups) {
+  function appendGroup(group, ungrouped) {
     const open = opened || state.expanded.has(group.source);
     const body = el("tbody", {
       id: groupId(group.source),
       class: "ops-group-body",
       "data-expanded": String(open),
+      "data-ungrouped": String(ungrouped),
     });
     body.append(groupRow(group, open, now));
     tableEl.append(body);
     if (open) pending.push({ body, rows: group.rows });
+  }
+  if (state.layout.length) {
+    // Sections in the operator's order. A narrowing filter unfolds them all
+    // and drops the empty ones; unfiltered, an empty named group still shows
+    // so a group just created has somewhere visible to fill.
+    const narrowed = active.view !== "all" || Boolean(state.search);
+    for (const section of sectionGroups(groups, state.layout)) {
+      if (!section.groups.length && (narrowed || section.ungrouped)) continue;
+      const open = narrowed || !state.folded.has(section.id);
+      tableEl.append(sectionRow(section, open));
+      if (open) for (const group of section.groups) appendGroup(group, section.ungrouped);
+    }
+  } else {
+    // No groups yet: the board is the plain provider list it always was.
+    for (const group of groups) appendGroup(group, false);
+  }
+  // A refresh rebuilt the rows; keep an open move menu on its new handle.
+  if (state.moveMenu) {
+    const handle = tableEl.querySelector(
+      `[data-move-source="${CSS.escape(state.moveMenu.source)}"]`
+    );
+    if (handle) state.moveMenu.anchor = handle;
+    else closeMoveMenu();
   }
   tableEl.style.setProperty("--ops-thead-h", `${tableEl.tHead.offsetHeight}px`);
   paintWorkers();
@@ -1190,6 +1361,8 @@ function selectFeed(ref, trigger = null) {
   state.detailEvents = changed ? null : state.detailEvents;
   const feed = state.feeds.find((item) => item.feed_ref === ref);
   if (changed && feed) state.intervalDraft = makeIntervalDraft(feed.policy?.interval_s);
+  // One drawer at a time: the feed details replace the groups editor.
+  if (state.groupsPanelOpen) closeGroupsPanel({ restoreFocus: false });
   panelEl.hidden = false;
   syncSelectedRow();
   if (feed) renderDetailPanel(feed, state.detailEvents);
@@ -1290,36 +1463,34 @@ async function fetchFeedNow(feed, button) {
 
 async function setPausedMany(feeds, paused, label, button) {
   const verb = paused ? "Pause" : "Resume";
-  const targets = feeds.filter((feed) => isHeld(feed) !== paused);
-  if (!targets.length) return;
+  const targets = feeds;
+  if (!targets.length || state.pausingProviders.has(label)) return;
   if (!window.confirm(`${verb} all ${formatCount(targets.length)} ${label} feeds?`)) return;
   const original = button.textContent;
+  state.pausingProviders.add(label);
   button.disabled = true;
   button.textContent = paused ? "pausing…" : "resuming…";
-  let cursor = 0;
-  let failed = 0;
-  async function worker() {
-    while (cursor < targets.length) {
-      const feed = targets[cursor++];
-      try {
-        await api(`/api/feeds/${feed.feed_ref}/policy`, { body: { enabled: !paused } });
-      } catch {
-        failed += 1;
-      }
+  try {
+    const result = await setProviderPaused(label, paused);
+    for (const feed of targets) {
+      feed.policy.enabled = !paused;
+      feed.sched.status = paused
+        ? { state: "paused", detail: "feed.polling is false" }
+        : { state: "unknown", detail: "Refreshing polling status" };
     }
+    showToast(`${verb}d all ${formatCount(result.affected)} ${label} feeds.`);
+  } catch (error) {
+    showToast(`Could not ${verb.toLowerCase()} ${label}: ${error.message}`, "error");
+  } finally {
+    state.pausingProviders.delete(label);
+    button.disabled = false;
+    button.textContent = original;
+    // Settle the button immediately; telemetry refresh can be much slower
+    // than the policy write on a large fleet.
+    renderTable({ preserveScroll: true });
+    await Promise.allSettled([loadOverview(), loadFeeds()]);
+    if (state.selectedRef) await loadDetail(state.selectedRef, true);
   }
-  await Promise.all(Array.from({ length: Math.min(BULK_POLICY_CONCURRENCY, targets.length) }, worker));
-  await Promise.allSettled([loadOverview(), loadFeeds()]);
-  if (state.selectedRef) await loadDetail(state.selectedRef, true);
-  const done = targets.length - failed;
-  showToast(
-    failed
-      ? `${verb}d ${formatCount(done)} of ${formatCount(targets.length)} ${label} feeds; ${formatCount(failed)} failed.`
-      : `${verb}d ${formatCount(done)} ${label} feeds.`,
-    failed ? "error" : "ok"
-  );
-  button.disabled = false;
-  button.textContent = original;
 }
 
 /* Bulk fetch targets: the provider group behind its "fetch" button, otherwise every
@@ -1448,11 +1619,473 @@ async function refreshAll(button = null) {
     button.textContent = "Refreshing…";
   }
   const ref = state.selectedRef;
-  await Promise.allSettled([loadOverview(), loadFeeds()]);
+  await Promise.allSettled([loadOverview(), loadFeeds(), loadGroups()]);
   if (ref && state.selectedRef === ref) await loadDetail(ref, false);
   if (button) {
     button.disabled = false;
     button.textContent = "Refresh";
+  }
+}
+
+/* ---------- board groups: load, save, move menu, edit panel ---------- */
+
+async function loadGroups() {
+  try {
+    const view = await api("/api/scheduler/groups");
+    state.layout = view.groups ?? [];
+    state.groupsAvailable = Boolean(view.available);
+    state.groupsError = view.error ?? null;
+  } catch (error) {
+    state.groupsAvailable = false;
+    state.groupsError = error.message;
+  }
+  renderTable({ preserveScroll: true });
+  renderGroupsPanel();
+}
+
+/* Every edit writes the whole layout; the previous one is the undo. */
+async function saveLayout(next, message = null, { undoable = true } = {}) {
+  if (state.savingGroups) return null;
+  const previous = state.layout;
+  state.savingGroups = true;
+  try {
+    const view = await api("/api/scheduler/groups", {
+      method: "PUT",
+      body: { groups: next.map(({ id, name, sources }) => ({ id, name, sources })) },
+    });
+    state.layout = view.groups ?? [];
+    state.groupsAvailable = true;
+    state.groupsError = null;
+    if (message) {
+      showToast(message, "ok", undoable
+        ? { label: "undo", run: () => saveLayout(previous, "Undone.", { undoable: false }) }
+        : null);
+    }
+    return state.layout;
+  } catch (error) {
+    if (isDegraded(error)) {
+      state.groupsAvailable = false;
+      state.groupsError = error.message;
+    }
+    showToast(`Could not save groups: ${error.message}`, "error");
+    return null;
+  } finally {
+    state.savingGroups = false;
+    renderTable({ preserveScroll: true });
+    renderGroupsPanel();
+  }
+}
+
+function moveTo(source, target) {
+  if (sectionOf(state.layout, source) === target) return;
+  saveLayout(moveSource(state.layout, source, target), `${source} moved to ${sectionName(target)}.`);
+}
+
+function nameTaken(name, exceptId = null) {
+  const folded = name.toLowerCase();
+  return folded === UNGROUPED_NAME.toLowerCase() || state.layout.some(
+    (group) => sectionKey(group.id) !== exceptId && group.name.toLowerCase() === folded
+  );
+}
+
+/* Move menu: the row handle's popup listing every section, plus a new one. */
+function openMoveMenu(source, anchor) {
+  closeMoveMenu();
+  state.moveMenu = { source, anchor, creating: false };
+  anchor.setAttribute("aria-expanded", "true");
+  renderMoveMenu();
+}
+
+function closeMoveMenu({ restoreFocus = false } = {}) {
+  if (!state.moveMenu) return;
+  const { anchor } = state.moveMenu;
+  state.moveMenu = null;
+  moveMenuEl.hidden = true;
+  anchor.setAttribute("aria-expanded", "false");
+  if (restoreFocus && anchor.isConnected) anchor.focus();
+}
+
+function renderMoveMenu() {
+  const menu = state.moveMenu;
+  const current = sectionOf(state.layout, menu.source);
+  const targets = [
+    ...state.layout.map((group) => [sectionKey(group.id), group.name]),
+    [UNGROUPED, UNGROUPED_NAME],
+  ];
+  const items = targets.map(([id, name]) => el(
+    "button",
+    {
+      class: "ops-move-item",
+      type: "button",
+      role: "menuitemradio",
+      "aria-checked": String(id === current),
+      onclick: () => {
+        closeMoveMenu({ restoreFocus: true });
+        moveTo(menu.source, id);
+      },
+    },
+    el("span", { class: "ops-move-check", "aria-hidden": "true" }, id === current ? "✓" : ""),
+    name
+  ));
+  const create = menu.creating
+    ? el("input", {
+        class: "ops-move-input",
+        placeholder: "new group name",
+        maxlength: "64",
+        "aria-label": "New group name",
+        oninput: (event) => event.target.removeAttribute("aria-invalid"),
+        onkeydown: (event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            closeMoveMenu({ restoreFocus: true });
+            return;
+          }
+          if (event.key !== "Enter") return;
+          const name = event.target.value.trim();
+          if (!name || nameTaken(name)) {
+            event.target.setAttribute("aria-invalid", "true");
+            return;
+          }
+          closeMoveMenu({ restoreFocus: true });
+          saveLayout(addSection(state.layout, name, [menu.source]), `${menu.source} moved to new group ${name}.`);
+        },
+      })
+    : el(
+        "button",
+        {
+          class: "ops-move-item",
+          type: "button",
+          role: "menuitem",
+          onclick: (event) => {
+            // Re-rendering detaches this button; keep the outside-click
+            // handler from reading that as a click elsewhere.
+            event.stopPropagation();
+            menu.creating = true;
+            renderMoveMenu();
+          },
+        },
+        el("span", { class: "ops-move-check", "aria-hidden": "true" }, "+"),
+        "New group…"
+      );
+  moveMenuEl.replaceChildren(
+    el("div", { class: "ops-move-title" }, `move ${menu.source} to`),
+    ...items,
+    el("hr"),
+    create
+  );
+  moveMenuEl.hidden = false;
+  // Below the handle, left edges aligned; above it near the window bottom.
+  const rect = menu.anchor.getBoundingClientRect();
+  const height = moveMenuEl.offsetHeight;
+  const top = rect.bottom + 4 + height > innerHeight ? rect.top - 4 - height : rect.bottom + 4;
+  moveMenuEl.style.top = `${Math.max(8, top)}px`;
+  moveMenuEl.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - moveMenuEl.offsetWidth - 8))}px`;
+  (moveMenuEl.querySelector("input") ?? moveMenuEl.querySelector('[aria-checked="true"]'))?.focus();
+}
+
+moveMenuEl.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  const items = [...moveMenuEl.querySelectorAll(".ops-move-item")];
+  const index = items.indexOf(document.activeElement);
+  items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+});
+
+/* Edit panel: the whole layout as blocks of provider chips. Drag ⠿ (or use
+   the arrows) to reorder groups; drag a chip, use "+ add…", or × to refile. */
+function openGroupsPanel() {
+  if (state.selectedRef) closePanel();
+  state.groupsPanelOpen = true;
+  groupsPanelEl.hidden = false;
+  editGroupsEl.setAttribute("aria-expanded", "true");
+  renderGroupsPanel();
+  requestAnimationFrame(() => groupsPanelEl.querySelector(".ops-close")?.focus());
+}
+
+function closeGroupsPanel({ restoreFocus = true } = {}) {
+  state.groupsPanelOpen = false;
+  state.renaming = null;
+  groupsPanelEl.hidden = true;
+  editGroupsEl.setAttribute("aria-expanded", "false");
+  if (restoreFocus) editGroupsEl.focus();
+}
+
+function finishRename(id, value) {
+  if (state.renaming !== id) return;
+  const name = value.trim();
+  if (name && name !== sectionName(id) && nameTaken(name, id)) {
+    showToast(`There is already a group named ${name}.`, "error");
+    return;
+  }
+  state.renaming = null;
+  if (!name || name === sectionName(id)) {
+    renderGroupsPanel();
+    return;
+  }
+  saveLayout(renameSection(state.layout, id, name));
+}
+
+function clearDropHints() {
+  for (const node of groupsPanelEl.querySelectorAll("[data-drop]")) delete node.dataset.drop;
+}
+
+function onBlockDragOver(event, id) {
+  const types = event.dataTransfer.types;
+  let kind = null;
+  if (types.includes("text/x-provider")) kind = "into";
+  else if (types.includes("text/x-group")) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    kind = id === UNGROUPED || event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+  }
+  if (!kind) return;
+  event.preventDefault();
+  if (event.currentTarget.dataset.drop !== kind) {
+    clearDropHints();
+    event.currentTarget.dataset.drop = kind;
+  }
+}
+
+function onBlockDrop(event, id) {
+  event.preventDefault();
+  const where = event.currentTarget.dataset.drop;
+  const source = event.dataTransfer.getData("text/x-provider");
+  const moving = event.dataTransfer.getData("text/x-group");
+  clearDropHints();
+  if (source) {
+    moveTo(source, id);
+    return;
+  }
+  if (!moving || moving === id) return;
+  const rest = state.layout.filter((group) => sectionKey(group.id) !== moving);
+  const index = id === UNGROUPED
+    ? rest.length
+    : rest.findIndex((group) => sectionKey(group.id) === id) + (where === "after" ? 1 : 0);
+  saveLayout(moveSection(state.layout, moving, index));
+}
+
+function memberChip(source, id, worst) {
+  return el(
+    "span",
+    {
+      class: "ops-member",
+      draggable: "true",
+      title: `${source} · drag to another group`,
+      ondragstart: (event) => {
+        event.stopPropagation();
+        event.dataTransfer.setData("text/x-provider", source);
+        event.dataTransfer.effectAllowed = "move";
+        event.currentTarget.classList.add("ops-dragging");
+      },
+      ondragend: (event) => {
+        event.currentTarget.classList.remove("ops-dragging");
+        clearDropHints();
+      },
+    },
+    worst === "backing_off" || worst === "stale"
+      ? el("span", { class: "ops-member-dot", dataset: { state: worst } })
+      : null,
+    source,
+    id === UNGROUPED
+      ? null
+      : el(
+          "button",
+          {
+            class: "ops-member-remove",
+            type: "button",
+            title: `Move to ${UNGROUPED_NAME}`,
+            "aria-label": `Move ${source} to ${UNGROUPED_NAME}`,
+            onclick: () => moveTo(source, UNGROUPED),
+          },
+          "×"
+        )
+  );
+}
+
+function addInput(id, name) {
+  const tryAdd = (input) => {
+    const source = input.value.trim();
+    if (!knownSources().includes(source)) {
+      input.setAttribute("aria-invalid", "true");
+      return;
+    }
+    input.value = "";
+    moveTo(source, id);
+  };
+  return el("input", {
+    class: "ops-member-add",
+    list: "groups-sources",
+    placeholder: "+ add…",
+    autocomplete: "off",
+    "aria-label": `Add a provider to ${name}`,
+    onkeydown: (event) => {
+      if (event.key === "Enter") tryAdd(event.target);
+    },
+    // Picking from the suggestion list files the provider straight away.
+    oninput: (event) => {
+      event.target.removeAttribute("aria-invalid");
+      if ((!event.inputType || event.inputType === "insertReplacementText") &&
+          knownSources().includes(event.target.value)) {
+        tryAdd(event.target);
+      }
+    },
+  });
+}
+
+function knownSources() {
+  return [...new Set([
+    ...state.feeds.map((feed) => feed.source),
+    ...state.layout.flatMap((group) => group.sources),
+  ])].sort();
+}
+
+function groupBlock(section, index, count, worstBySource) {
+  const { id, name, ungrouped } = section;
+  const iconButton = (label, title, text, onclick, disabled = false) => el(
+    "button",
+    { class: "ops-icon-btn", type: "button", title, "aria-label": label, disabled, onclick },
+    text
+  );
+  const title = state.renaming === id
+    ? el("input", {
+        class: "ops-groups-name-input",
+        value: name,
+        maxlength: "64",
+        "aria-label": "Group name",
+        onkeydown: (event) => {
+          if (event.key === "Enter") finishRename(id, event.target.value);
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            state.renaming = null;
+            renderGroupsPanel();
+          }
+        },
+        onblur: (event) => finishRename(id, event.target.value),
+      })
+    : el("span", { class: "ops-groups-name" }, name);
+  const head = el(
+    "div",
+    { class: "ops-groups-head" },
+    ungrouped
+      ? el("span", { class: "ops-groups-grip", "aria-hidden": "true" })
+      : el(
+          "span",
+          {
+            class: "ops-groups-grip",
+            draggable: "true",
+            title: "Drag to reorder",
+            "aria-hidden": "true",
+            ondragstart: (event) => {
+              const block = event.currentTarget.closest(".ops-groups-block");
+              event.dataTransfer.setData("text/x-group", id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setDragImage(block, 12, 12);
+              block.classList.add("ops-dragging");
+            },
+            ondragend: (event) => {
+              event.currentTarget.closest(".ops-groups-block")?.classList.remove("ops-dragging");
+              clearDropHints();
+            },
+          },
+          "⠿"
+        ),
+    title,
+    el("span", { class: "ops-groups-count" }, formatCount(section.sources.length)),
+    ungrouped ? el("span", { class: "ops-groups-note" }, "· new providers land here") : null,
+    ungrouped
+      ? null
+      : el(
+          "span",
+          { class: "ops-groups-tools" },
+          iconButton(`Rename ${name}`, "Rename", "✎", () => {
+            state.renaming = id;
+            renderGroupsPanel();
+          }),
+          iconButton(`Move ${name} up`, "Move up", "↑",
+            () => saveLayout(moveSection(state.layout, id, index - 1)), index === 0),
+          iconButton(`Move ${name} down`, "Move down", "↓",
+            () => saveLayout(moveSection(state.layout, id, index + 1)), index === count - 1),
+          iconButton(`Delete ${name}`, `Delete group (its providers go to ${UNGROUPED_NAME})`, "✕",
+            () => saveLayout(
+              removeSection(state.layout, id),
+              `Deleted ${name}; ${formatCount(section.sources.length)} providers moved to ${UNGROUPED_NAME}.`
+            ))
+        )
+  );
+  return el(
+    "section",
+    {
+      class: "ops-groups-block",
+      dataset: { id },
+      ondragover: (event) => onBlockDragOver(event, id),
+      ondragleave: (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) delete event.currentTarget.dataset.drop;
+      },
+      ondrop: (event) => onBlockDrop(event, id),
+    },
+    head,
+    el(
+      "div",
+      { class: "ops-groups-members" },
+      ...section.sources.map((source) => memberChip(source, id, worstBySource.get(source))),
+      ungrouped ? null : addInput(id, name)
+    )
+  );
+}
+
+function renderGroupsPanel() {
+  if (!state.groupsPanelOpen) return;
+  const providers = groupFeeds(state.feeds, { view: "all", search: "" });
+  const worstBySource = new Map(providers.map((group) => [group.source, group.rollup.worst]));
+  const filed = new Set(state.layout.flatMap((group) => group.sources));
+  const sections = [
+    ...state.layout.map((group) => ({ id: sectionKey(group.id), name: group.name, ungrouped: false, sources: group.sources })),
+    // Ungrouped lists biggest first, the same order the board uses.
+    { id: UNGROUPED, name: UNGROUPED_NAME, ungrouped: true,
+      sources: providers.map((group) => group.source).filter((source) => !filed.has(source)) },
+  ];
+  const blocked = groupsBlocked();
+  groupsPanelEl.replaceChildren(
+    el(
+      "header",
+      { class: "ops-panel-header" },
+      el(
+        "div",
+        { class: "ops-panel-title" },
+        el("div", { class: "ops-panel-title-row" }, el("h2", { id: "groups-title" }, "Groups")),
+        el("p", {}, "top to bottom is the order on the board")
+      ),
+      el("button", { class: "ops-close", type: "button", "aria-label": "Close groups", onclick: () => closeGroupsPanel() }, "×")
+    ),
+    ...(blocked
+      ? [el("p", { class: "ops-inline-message" }, blocked)]
+      : [
+          ...sections.map((section, index) => groupBlock(section, index, state.layout.length, worstBySource)),
+          el(
+            "div",
+            { class: "ops-groups-foot" },
+            el(
+              "button",
+              {
+                class: "ops-linkish",
+                type: "button",
+                onclick: async () => {
+                  const saved = await saveLayout(addSection(state.layout, uniqueSectionName(state.layout)));
+                  if (!saved) return;
+                  state.renaming = sectionKey(saved.at(-1).id);
+                  renderGroupsPanel();
+                },
+              },
+              "+ new group"
+            )
+          ),
+          el("datalist", { id: "groups-sources" },
+            ...knownSources().map((source) => el("option", { value: source }, sectionName(sectionOf(state.layout, source))))),
+        ])
+  );
+  const input = groupsPanelEl.querySelector(".ops-groups-name-input");
+  if (input) {
+    input.focus();
+    input.select();
   }
 }
 
@@ -1487,6 +2120,15 @@ document.getElementById("refresh").addEventListener("click", (event) => refreshA
 fetchMatchingEl.addEventListener("click", () => openBulkDialog());
 document.getElementById("expand-all").addEventListener("click", () => setAllExpanded(true));
 document.getElementById("collapse-all").addEventListener("click", () => setAllExpanded(false));
+editGroupsEl.addEventListener("click", () => (state.groupsPanelOpen ? closeGroupsPanel() : openGroupsPanel()));
+
+document.addEventListener("click", (event) => {
+  if (state.moveMenu && !moveMenuEl.contains(event.target)) closeMoveMenu();
+});
+// The menu is positioned against the viewport; anything that moves the page
+// would leave it pointing at the wrong row.
+addEventListener("scroll", () => closeMoveMenu(), true);
+addEventListener("resize", () => closeMoveMenu());
 
 bulkDialogEl.addEventListener("cancel", (event) => {
   if (state.bulk?.phase === "running") {
@@ -1510,13 +2152,19 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     document.getElementById("search").focus();
   }
-  if (event.key === "Escape" && state.selectedRef && !bulkDialogEl.open) closePanel();
+  if (event.key !== "Escape" || bulkDialogEl.open) return;
+  if (state.moveMenu) closeMoveMenu({ restoreFocus: true });
+  else if (state.groupsPanelOpen) closeGroupsPanel();
+  else if (state.selectedRef) closePanel();
 });
 
 renderClock();
 renderLiveLog();
 
 startLive();
+// Groups never reject (unavailable reads as "no groups"), so they stay out
+// of the all-failed check below.
+loadGroups();
 const initial = await Promise.allSettled([loadOverview(), loadFeeds(), loadLog()]);
 if (initial.every((result) => result.status === "rejected")) {
   emptyEl.hidden = false;
