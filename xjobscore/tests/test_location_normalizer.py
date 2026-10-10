@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from xjobscore.location_normalizer import _normalize_location, main, normalize_location
 
 
@@ -163,3 +165,95 @@ def test_a_suppressed_state_is_appended_not_dropped() -> None:
     assert _states("Atlanta; Florida; North Carolina; South Carolina") == [
         ("US", "GA", "Atlanta"), ("US", "NC", None), ("US", "SC", None),
     ]
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    ("Amsterdam, Noord-Holland, Nederland", ("NL", "07", "Amsterdam")),
+    ("Amsterdam, Noord-Holland, Netherlands", ("NL", "07", "Amsterdam")),
+    ("Amsterdam, Noord-Holland, NL", ("NL", "07", "Amsterdam")),
+    ("AMSTERDAM, NOORD HOLLAND, Nederland", ("NL", "07", "Amsterdam")),
+    ("Amsterdam, Noord Holland", ("NL", "07", "Amsterdam")),
+    ("Rijssen, Overijssel, Nederland", ("NL", "15", "Rijssen")),
+    ("Rijssen, Nederland", ("NL", "15", "Rijssen")),
+    ("Rotterdam, Zuid-Holland, Nederland", ("NL", "11", "Rotterdam")),
+    ("Eindhoven, Noord-Brabant, Nederland", ("NL", "06", "Eindhoven")),
+    ("Utrecht, Utrecht, Nederland", ("NL", "09", "Utrecht")),
+    # This locality is absent from the city dictionary. Its province/country
+    # still supplies reliable foreign evidence instead of an invented US city.
+    ("Koudekerk aan den Rijn, Zuid-Holland, Nederland", ("NL", "11", None)),
+])
+def test_dutch_country_and_provinces_do_not_invent_us_cities(value, expected):
+    assert _states(value) == [expected]
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    ("Nederland", ("US", "TX", "Nederland")),
+    ("Nederland, TX", ("US", "TX", "Nederland")),
+    ("Nederland, Texas", ("US", "TX", "Nederland")),
+    ("Nederland, TX, United States", ("US", "TX", "Nederland")),
+    ("Nederland, TX, USA", ("US", "TX", "Nederland")),
+    ("Nederland, CO", ("US", "CO", "Nederland")),
+    ("Nederland, Colorado", ("US", "CO", "Nederland")),
+    ("Nederland, CO, United States", ("US", "CO", "Nederland")),
+    ("Holland, MI", ("US", "MI", "Holland")),
+    ("South Holland, IL", ("US", "IL", "South Holland")),
+    ("Amsterdam, NY", ("US", "NY", "Amsterdam")),
+    ("Unknown town, Nederland", ("US", "TX", "Nederland")),
+    ("NLD - Groningen", ("NL", "04", "Groningen")),
+    ("Utrecht, Netherlands", ("NL", "09", "Utrecht")),
+])
+def test_existing_city_and_ambiguous_location_results_are_preserved(value, expected):
+    assert _states(value) == [expected]
+
+
+@pytest.mark.parametrize("separator", ["; ", " | ", " / "])
+@pytest.mark.parametrize("dutch", [
+    "Amsterdam, Noord-Holland, Nederland",
+    "Rijssen, Overijssel, Nederland",
+    "Koudekerk aan den Rijn, Zuid-Holland, Nederland",
+])
+@pytest.mark.parametrize(("us", "expected"), [
+    ("Nederland, TX", ("US", "TX", "Nederland")),
+    ("Nederland, CO", ("US", "CO", "Nederland")),
+    ("Holland, MI", ("US", "MI", "Holland")),
+    ("South Holland, IL", ("US", "IL", "South Holland")),
+    ("Amsterdam, NY", ("US", "NY", "Amsterdam")),
+    ("Austin, TX", ("US", "TX", "Austin")),
+    ("Seattle, WA", ("US", "WA", "Seattle")),
+    ("San Francisco, CA", ("US", "CA", "San Francisco")),
+    ("San Mateo", ("US", "CA", "San Mateo")),
+    ("New Jersey", ("US", "NJ", None)),
+    ("Remote, United States", ("US", None, None)),
+])
+@pytest.mark.parametrize("us_first", [False, True])
+def test_dutch_address_never_removes_a_separate_us_office(separator, dutch, us, expected, us_first):
+    parts = [us, dutch] if us_first else [dutch, us]
+    result = normalize_location(separator.join(parts))
+    assert expected in [(p['country'], p['state'], p['city']) for p in result['locations']]
+    assert result['remote'] == ('Remote' in us)
+
+
+@pytest.mark.parametrize("value", [
+    "Amsterdam, Noord-Holland, United States",
+    "Amsterdam, Nederland, Austin, TX",
+    "Amsterdam, Noord-Holland, Nederland, Austin, TX",
+    "Nederland, Texas, Nederland",
+])
+def test_conflicting_us_evidence_keeps_the_posting_us_eligible(value):
+    assert any(p['country'] == 'US' for p in normalize_location(value)['locations'])
+
+
+@pytest.mark.parametrize(("us", "expected"), [
+    ("Seattle", ("US", "WA", "Seattle")),
+    ("San Francisco", ("US", "CA", "San Francisco")),
+    ("Austin", ("US", "TX", "Austin")),
+    ("Boston", ("US", "MA", "Boston")),
+])
+@pytest.mark.parametrize("dutch", [
+    "Amsterdam, Noord-Holland, Nederland", "Rijssen, Overijssel, Nederland",
+])
+@pytest.mark.parametrize("separator", [", ", " or "])
+@pytest.mark.parametrize("us_first", [True, False])
+def test_city_only_us_office_survives_an_ambiguous_combined_address(us, expected, dutch, separator, us_first):
+    parts = [us, dutch] if us_first else [dutch, us]
+    assert expected in _states(separator.join(parts))

@@ -50,6 +50,21 @@ CREATE TABLE company (
     tags               jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(tags) = 'object') -- ck_list, bio_eng
 );
 
+
+CREATE TABLE IF NOT EXISTS company_edit (
+    company_id bigint PRIMARY KEY REFERENCES company(id) ON DELETE CASCADE,
+    changes jsonb NOT NULL CHECK (
+        jsonb_typeof(changes) = 'object'
+        AND changes <> '{}'::jsonb
+        AND changes - ARRAY['name', 'domain', 'description', 'tags'] = '{}'::jsonb
+    ),
+    edited_by uuid NOT NULL,
+    revision uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    sync_error text
+);
+
+
 -- The 40px mark on an opportunity card, harvested from the company's own site
 -- and stored exactly as that site served it: ico, png, svg and webp all decode
 -- in an <img>, so the serving route sniffs the type and nothing is converted.

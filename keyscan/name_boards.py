@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-__all__ = ["name_from_html", "name_from_title", "name_boards", "SUPPORTED"]
+__all__ = ["name_from_title", "name_boards", "SUPPORTED"]
 
 # The vendors whose board is HTML and whose API withholds the name. Greenhouse
 # and workable are absent because they answer with one; workday is absent
@@ -153,12 +153,6 @@ def name_from_title(title: str, ats: str) -> tuple[str | None, str]:
     if not _plausible(stripped):
         return None, "none"
     return stripped, "exact" if stripped == text else "stripped"
-
-
-def name_from_html(html: str, ats: str) -> str | None:
-    """The employer's name from a board page, or None if the title names none."""
-    found = TITLE.search(html or "")
-    return name_from_title(found.group(1), ats)[0] if found else None
 
 
 def unnamed(

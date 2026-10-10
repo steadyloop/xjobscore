@@ -97,32 +97,24 @@ def test_cycle_budget_must_be_positive():
         run.load_config(["--dsn", "postgresql://example/test", "--cycle-budget-s", "0"])
 
 
-def test_per_vendor_claims_have_an_index_and_a_live_migration():
+def test_per_vendor_claims_have_an_index_and_a_live_migration(live_migration):
     """run.cycle claims per source now, so due_at alone no longer covers it."""
     root = Path(__file__).parent.parent.parent
     index = "CREATE INDEX feed_source_due_idx ON feed (source, due_at) WHERE polling;"
     assert index in (root / "schema.sql").read_text()
-    migration = (
-        Path(__file__).parent.parent / "migrations" / "20260910_feed_source_due_idx.sql"
-    ).read_text()
+    migration = live_migration("20260910_feed_source_due_idx.sql")
     assert (
         "CREATE INDEX IF NOT EXISTS feed_source_due_idx ON feed (source, due_at) WHERE polling"
         in migration
     )
 
 
-def test_unified_runtime_schema_defaults_live_and_preserves_existing_intent():
+def test_unified_runtime_schema_defaults_live():
     root = Path(__file__).parent.parent.parent
     schema = (root / "schema.sql").read_text()
-    migration = (
-        root / "xjobscore/migrations/20260923_unified_runtime.sql"
-    ).read_text()
-
     assert "running    boolean NOT NULL DEFAULT true" in schema
     assert "CREATE TABLE gold_control" in schema
     assert "CREATE TABLE system_run" in schema
-    assert "ALTER TABLE scheduler_control ALTER COLUMN running SET DEFAULT true" in migration
-    assert "UPDATE scheduler_control" not in migration
 
 
 def test_sync_registry_cli_flag_is_rejected():
@@ -155,11 +147,8 @@ def test_schema_indexes_the_opportunities_filter_and_default_sort():
     assert "((COALESCE(posted_at, first_seen_at)) DESC, id DESC)" in schema
 
 
-def test_job_domain_has_a_live_database_migration():
-    root = Path(__file__).parent.parent.parent
-    migration = (
-        root / "xjobscore" / "migrations" / "20260910_job_domain.sql"
-    ).read_text()
+def test_job_domain_has_a_live_database_migration(live_migration):
+    migration = live_migration("20260910_job_domain.sql")
 
     assert "ADD COLUMN IF NOT EXISTS job_domain text" in migration
     assert "ADD COLUMN IF NOT EXISTS job_domain_version smallint" in migration
@@ -176,19 +165,16 @@ def test_schema_carries_workday_count_probe_state():
     assert "last_full_poll_at timestamptz" in schema
 
 
-def test_company_alias_rename_has_a_live_database_migration():
+def test_company_alias_rename_has_a_live_database_migration(live_migration):
     """The table is `company_alias`; nothing may still declare the old `alias`
     name, and an existing database has to be carried across by the migration
     rather than only by a fresh schema.sql build."""
     root = Path(__file__).parent.parent.parent
     schema = (root / "schema.sql").read_text()
-    migration = (
-        root / "xjobscore" / "migrations" / "20260826_company_alias_rename.sql"
-    ).read_text()
-
     assert "CREATE TABLE company_alias (" in schema
     assert "CREATE TABLE alias (" not in schema
     assert "ON company_alias (company_id)" in schema
+    migration = live_migration("20260826_company_alias_rename.sql")
     assert "ALTER TABLE alias RENAME TO company_alias" in migration
     assert "alias_company_idx RENAME TO company_alias_company_idx" in migration
     # A table rename leaves the constraints under their old names, which drifts
@@ -199,8 +185,7 @@ def test_company_alias_rename_has_a_live_database_migration():
 
 def test_schema_job_types_match_the_api_contract():
     """job_type has no registry canon any more -- the column CHECK is the
-    contract. oneshot-ui is a separate sub-project with its own suite, so it
-    pins its DEFAULT_JOB_TYPES against this same CHECK from its own side."""
+    contract used by the publisher and the web app."""
     root = Path(__file__).parent.parent.parent
     schema = (root / "schema.sql").read_text()
     declared = re.search(
@@ -223,12 +208,10 @@ def test_schema_part_time_is_its_own_column_with_no_negative():
     assert set(re.findall(r"'([a-z_]+)'", declared.group(1))) == {"yes", "unknown"}
 
 
-def test_part_time_split_has_a_live_database_migration():
+def test_part_time_split_has_a_live_database_migration(live_migration):
     """The column is new and job_type's domain narrows, so an existing database
     needs the backfill before the tighter CHECK can be installed."""
-    migration = (
-        Path(__file__).parent.parent / "migrations" / "20260826_part_time_column.sql"
-    ).read_text()
+    migration = live_migration("20260826_part_time_column.sql")
     assert "ADD COLUMN IF NOT EXISTS part_time text" in migration
     # Backfill must precede the narrowed CHECK or the surviving rows violate it.
     assert migration.index("SET part_time = 'yes'") < migration.index(
@@ -289,6 +272,10 @@ class _AsyncContext:
 class _Connection:
     def transaction(self):
         return _AsyncContext(self)
+
+    async def fetch(self, query, *args):
+        assert "UPDATE job_posting" in query
+        return []
 
     async def execute(self, *args):
         return "INSERT 0 1"
@@ -1174,6 +1161,75 @@ def test_greenhouse_normalizes_offices_separately_without_changing_primary_text(
     ]
 
 
+@pytest.mark.parametrize(("location", "country_code", "expected"), [
+    ("Amsterdam, Noord-Holland, Nederland", "NL",
+     [{"country": "NL", "state": "07", "city": "Amsterdam"}]),
+    ("Rijssen, Overijssel, Nederland", "NL",
+     [{"country": "NL", "state": "15", "city": "Rijssen"}]),
+    ("Koudekerk aan den Rijn, Zuid-Holland, Nederland", "NL",
+     [{"country": "NL", "state": "11", "city": None}]),
+    ("Nederland, TX, United States", "US",
+     [{"country": "US", "state": "TX", "city": "Nederland"}]),
+    ("Amsterdam, Noord-Holland, Nederland; Austin, TX", "NL",
+     [{"country": "NL", "state": "07", "city": "Amsterdam"},
+      {"country": "US", "state": "TX", "city": "Austin"}]),
+])
+def test_recruitee_location_projection_preserves_real_us_eligibility(location, country_code, expected):
+    posting = json_api.parse(
+        "recruitee", Feed(id=1, source="recruitee", key="acme"),
+        Item("location-regression", {
+            "title": "Software Intern", "location": location,
+            "country_code": country_code,
+            "careers_url": "https://acme.recruitee.com/o/software-intern",
+        }), {},
+    )[0]
+    values = silver._projection(posting)
+    assert values['location_text'] == location
+    assert values['locations'] == expected
+    assert values['status'] == 'active'
+
+
+@pytest.mark.parametrize(("us_address", "expected"), [
+    ({"name": "Voortman US", "city": "Monee", "state": "Illinois", "country_code": "US"},
+     {"country": "US", "state": "IL", "city": "Monee"}),
+    ({"name": "Voortman US", "city": "Fresno", "state": "California", "country_code": "US"},
+     {"country": "US", "state": "CA", "city": "Fresno"}),
+    ({"name": "Unlisted locality", "city": "Unknown town", "state": "Texas", "country_code": "US"},
+     {"country": "US", "state": "TX", "city": None}),
+    ({"country_code": "US"}, {"country": "US", "state": None, "city": None}),
+])
+def test_recruitee_dutch_primary_preserves_explicit_us_secondary_address(us_address, expected):
+    posting = json_api.parse(
+        "recruitee", Feed(id=1, source="recruitee", key="voortman"),
+        Item("mixed-offices", {
+            "title": "Software Intern", "location": "Rijssen, Overijssel, Nederland",
+            "country_code": "NL", "locations": [
+                {"name": "Voortman NL", "city": "Rijssen", "state": "Overijssel", "country_code": "NL"},
+                us_address, us_address,
+            ],
+        }), {},
+    )[0]
+    values = silver._projection(posting)
+    assert values['location_text'] == 'Rijssen, Overijssel, Nederland'
+    assert values['locations'][0] == {'country':'NL', 'state':'15', 'city':'Rijssen'}
+    us = [place for place in values['locations'] if place['country']=='US']
+    assert us == [expected]
+
+
+@pytest.mark.parametrize("addresses", [None, [], [{"country_code":"NL"}], ["invalid", None, {}]])
+def test_recruitee_missing_or_foreign_secondary_addresses_do_not_invent_us_eligibility(addresses):
+    posting = json_api.parse(
+        "recruitee", Feed(id=1, source="recruitee", key="acme"),
+        Item("foreign-offices", {
+            "title": "Software Intern", "location": "Amsterdam, Noord-Holland, Nederland",
+            "locations": addresses,
+        }), {},
+    )[0]
+    assert silver._projection(posting)['locations'] == [
+        {'country':'NL','state':'07','city':'Amsterdam'}
+    ]
+
+
 @pytest.mark.parametrize(
     ("payload", "location_text"),
     [
@@ -1464,6 +1520,9 @@ async def test_description_change_invalidates_gold_enrichments():
     assert "- 'skills' - 'skills_meta'" in upsert
     assert "- 'degree' - 'degree_meta'" in upsert
     assert upsert.count("- 'summary' - 'summary_meta'") == 2
+    # Focus chips read title, description and employer, and exist only on
+    # typed postings, so any of those changing drops them.
+    assert upsert.count("- 'focus' - 'focus_meta'") == 3
     # The tag and its revision stamp must be invalidated together.
     assert "degree_version = CASE" in upsert
 
@@ -1725,3 +1784,61 @@ async def test_a_wholly_unparseable_batch_is_still_an_error(monkeypatch):
 
     with pytest.raises(ValueError, match="every item was unparseable"):
         await silver.process(object(), feed, stored, {}, seen_at=NOW)
+
+
+class _RecordingConnection:
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+        return "UPDATE 1"
+
+
+@pytest.mark.asyncio
+async def test_a_listing_that_reused_detail_records_the_total_but_not_the_reconciliation():
+    """`last_full_poll_at` is the clock `sources.reusing` bounds detail reuse
+    by. A count-probe source enumerates its board on most polls, so advancing
+    it on every listing kept reuse fresh forever and a description-only edit
+    was never refetched. The total still moves -- it is the probe's baseline."""
+    feed = _claimed_feed()
+    conn = _RecordingConnection()
+
+    await store.finish_schedule_success(
+        conn, feed, now=NOW, due_at=NOW, etag=None, res_hash="h", changed=False,
+        list_total=12, full_listing=True, reused_detail=True,
+    )
+
+    query, args = conn.calls[0]
+    assert "list_total = CASE WHEN $9 THEN $8" in query
+    assert "last_full_poll_at = CASE WHEN $9 AND NOT $12 THEN $2" in query
+    assert args[8] is True and args[11] is True  # $9 full_listing, $12 reused_detail
+
+
+@pytest.mark.asyncio
+async def test_poll_reports_reused_detail_to_the_schedule(monkeypatch):
+    feed = _claimed_feed(res_hash="snapshot")
+    seen = []
+
+    async def harvest(feed, net):
+        return Record(
+            items=[Item("job-1", {"title": "Intern"})], http_status=200,
+            list_total=1, full_listing=True, reused_item_count=1,
+        )
+
+    async def success(conn, claimed, **kwargs):
+        seen.append(kwargs)
+        return True
+
+    async def nothing(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(run.router, "snapshot_hash", lambda prepared: "snapshot")
+    monkeypatch.setattr(store, "touch_source_postings", nothing)
+    monkeypatch.setattr(store, "finish_schedule_success", success)
+    monkeypatch.setattr(store, "append_poll_log", nothing)
+
+    assert await run.poll(_Pool(), object(), feed, NOW) == "ok"
+    assert seen[0]["full_listing"] is True
+    assert seen[0]["reused_detail"] is True

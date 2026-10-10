@@ -296,6 +296,7 @@ async def process(
     total = Counts()
     source = store.source_instance(feed)
     refused: Unparseable | None = None
+    simplify_tokens: list[tuple[str, str, int]] = []
     # Mint only on the live poll path. ``dry_run`` writes nothing, and a caller
     # passing an alias snapshot declared that nothing writes aliases mid-pass.
     can_mint = feed.type == "ATS" and not dry_run and aliases is None
@@ -329,7 +330,9 @@ async def process(
         for canonical in canonicals:
             if not isinstance(canonical, Posting):
                 total += Counts(unsupported=1)
-            elif canonical.fidelity != "origin":
+            elif canonical.fidelity != "origin" and not (
+                feed.source == "simplify" and canonical.fidelity == "secondhand"
+            ):
                 total += Counts(secondhand=1)
             else:
                 postings.append(canonical)
@@ -357,12 +360,22 @@ async def process(
                 )
                 total += Counts(postings=1) if closed else Counts(unchanged=1)
                 continue
-            company_id = await _company_id(conn, feed, posting, aliases=aliases)
+            is_simplify = feed.source == "simplify" and posting.fidelity == "secondhand"
+            if is_simplify:
+                from xjobscore import simplify_postings
+
+                posting = simplify_postings.project(posting, item.payload)
+                company_id, minted = await simplify_postings.company(
+                    conn, posting, dry_run=dry_run, aliases=aliases,
+                )
+                total += Counts(minted=int(minted))
+            else:
+                company_id = await _company_id(conn, feed, posting, aliases=aliases)
             if company_id is None:
                 # Once minted, the rest of the batch falls back to it exactly
                 # as it would to the token's company on the next poll.
                 company_id = minted_id
-            if company_id is None and can_mint:
+            if company_id is None and can_mint and not is_simplify:
                 company_id, minted = await _mint_for_feed(conn, feed, posting)
                 minted_id = company_id
                 total += Counts(minted=int(minted))
@@ -376,6 +389,8 @@ async def process(
                 total += Counts(unresolved=1)
                 continue
             values = _projection(posting)
+            if is_simplify:
+                values["attributes"].update(simplify_postings.metadata(item.payload))
             if dry_run:
                 total += Counts(postings=1)
                 continue
@@ -396,6 +411,10 @@ async def process(
                 touch_seen=touch_seen,
                 ats_closed_at=seen_at if closed else None,
             )
+            if is_simplify:
+                candidate = simplify_postings.token_candidate(posting.url_posting, company_id)
+                if candidate is not None:
+                    simplify_tokens.append(candidate)
             if changed and changes is not None:
                 changes.add(posting_id, company_id)
             total += (
@@ -416,6 +435,8 @@ async def process(
         raise ValueError(
             f"every item was unparseable source={source} items={len(stored)}"
         ) from refused
+    if simplify_tokens:
+        await simplify_postings.discover(conn, simplify_tokens, seen_at)
     return total
 
 

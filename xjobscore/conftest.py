@@ -9,7 +9,7 @@ due, polls them through its fake harvester, and leaves their feed state and bron
 rows corrupted. Cleaning up by source name cannot undo that, because the rows
 belong to feeds the test never created.
 
-Mirrors ``inspector/conftest.py``'s per-test schema pattern, with one
+Mirrors ``console/conftest.py``'s per-test schema pattern, with one
 difference: ``schema.sql`` wraps itself in ``BEGIN``/``COMMIT``, so the
 search_path is set at session level on a dedicated connection rather than with
 ``SET LOCAL`` -- the file's own COMMIT would end an outer transaction and

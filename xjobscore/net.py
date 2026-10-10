@@ -34,7 +34,7 @@ __all__ = [
 ]
 
 # Declared once here rather than per entry point: the string is long enough
-# that a second copy is how production and the inspector drift into presenting
+# that a second copy is how production and the console drift into presenting
 # themselves differently, which would make any measured per-vendor ceiling
 # untransferable between them.
 #
@@ -111,7 +111,7 @@ def _vendor_key(host: str) -> str | None:
 def rate_group(host: str) -> str | None:
     """The `_VENDOR_RATES` key whose budget `host` spends, or None.
 
-    Public for the same reason as `vendor_cap`: the inspector labels each
+    Public for the same reason as `vendor_cap`: the console labels each
     scheduler lane with the budget `Net` actually charges it.
     """
     return _suffix_key(host, _VENDOR_RATES)
@@ -158,8 +158,8 @@ def vendor_cap(host: str) -> int | None:
 # measured share the old 3 req/s. See docs/ats-poll-rate.md.
 #
 # One budget per `Net` instance, like `_vendor_semaphores`: the scheduler's
-# single Net carries all production polling, and the inspector shares one
-# dict across its per-feed instances (`InspectorNet`).
+# single Net carries all production polling, and the console shares one
+# dict across its per-feed instances (`ConsoleNet`).
 _VENDOR_RATES: dict[str, tuple[float, int]] = {
     "wd1.myworkdayjobs.com": (8.0, 20),
     "wd5.myworkdayjobs.com": (8.0, 20),

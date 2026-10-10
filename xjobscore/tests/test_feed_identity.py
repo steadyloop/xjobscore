@@ -99,3 +99,18 @@ async def test_feed_import_preserves_existing_polling_state():
     )
 
     assert feed_id == 17
+
+
+def test_avature_careers_board_is_stored_as_the_bare_company():
+    """A bare key has always meant `/careers`, so keyscan's `company/careers`
+    must land on the existing feed, not mint a second one for the same board."""
+    assert canonical_feed_key("avature", "deloitteus/careers") == "deloitteus"
+    assert canonical_feed_key("avature", "Bupaanz/CareersAU") == "bupaanz/careersau"
+    # The locale is case-sensitive on Avature (ja_jp 404s), so it keeps xx_YY.
+    assert canonical_feed_key("avature", "AstellasJapan/ja_jp/Careers") == "astellasjapan/ja_JP/careers"
+    assert canonical_feed_key("avature", "deloitteus") == "deloitteus"
+
+
+def test_ashby_board_names_with_spaces_are_stored_decoded():
+    assert canonical_feed_key("ashby", "Citizen%20Health") == "citizen health"
+    assert canonical_feed_key("ashby", "Citizen Health") == "citizen health"

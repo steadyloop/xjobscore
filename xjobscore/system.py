@@ -9,7 +9,7 @@ import sys
 import uvicorn
 
 from xjobscore import activity
-from xjobscore.inspector.app import create_app
+from xjobscore.console.app import create_app
 from xjobscore.runtime import RuntimeSettings, UnifiedRuntime
 
 

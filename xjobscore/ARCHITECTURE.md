@@ -8,6 +8,8 @@ The pipeline's `frontend_identity` table maps natural job/company identities to
 stable serving IDs seeded from Neon. A publication allocates IDs once, then sends
 the same cohort independently to the local frontend database and Neon. OneShot
 can read job data locally while keeping its personal data connection on Neon.
+The `oneshot-ui` repository owns the browser client and the sole request-facing
+API in its `api/` package. This repository owns the pipeline and Console.
 The implemented core path is:
 
 ```text
@@ -63,7 +65,7 @@ time, and lease. Conditional requests use ETag only.
 
 ## Scheduler
 
-`uv run xjobscore` owns the scheduler, workers, token heartbeat, and Inspector.
+`uv run xjobscore` owns the scheduler, workers, token heartbeat, and Console.
 One PostgreSQL advisory lock permits exactly one active system per database;
 `scheduler_control.running` is the sole persisted polling switch.
 
@@ -104,7 +106,7 @@ latest ETag, and advances `last_poll_at` and `due_at`. `last_change_at` and
 Partial fetches and network/parser failures preserve committed bronze rows,
 increment strikes, clear the lease, and use exponential backoff capped at 24
 hours. They never set `paused_at` — that column is the operator's, written only
-from the inspector's Scheduler page, and a feed is never given up on
+from the console's Scheduler page, and a feed is never given up on
 automatically. A parser failure deliberately leaves the
 old `res_hash`, so the next poll retries the snapshot.
 
@@ -267,7 +269,6 @@ ATS closure signal. CLI totals distinguish link and page closures.
 | `run.py` | Polling engine plus explicit maintenance and replay commands. |
 | `runtime.py` | Unified lifecycle, scheduler supervision, and process lock. |
 | `pipeline.py` | Incremental Gold, retry batches, dedup generations, and run telemetry. |
-| `oneshot-ui/` | Reads `job_posting`; writes application-tracker tables. |
 
 Enrichment, scoring, notifications, dynamic targets, labels, and facts remain
 deferred. `gold.py` does not read `status`, so closed postings are still

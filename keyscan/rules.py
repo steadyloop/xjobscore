@@ -60,7 +60,7 @@ class Rule:
     # way. The board is absent only when all of them say so.
     exists_fallbacks: tuple[str, ...] = ()
     # Liveness-only overrides, taken only when the caller asks "does this board
-    # still exist" and not "how many jobs does it have" -- the inspector's
+    # still exist" and not "how many jobs does it have" -- the console's
     # Tokens page writes `token.status` and nothing else, while the crawl keeps
     # the full path because it persists `job_count`. Measured 2026-08-20: these
     # turn a 5.9 MB lever board into 12 KB and a 1.29 MB ashby board into zero

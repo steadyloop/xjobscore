@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "alias_candidates",
-    "absent_postings",
     "all_feeds",
     "append_poll_log",
     "claim_due_feeds",
@@ -544,7 +543,7 @@ async def append_poll_log(
     )
 
 
-# Hoisted so both the inspector's manual drop and the scheduler's automatic one
+# Hoisted so both the console's manual drop and the scheduler's automatic one
 # run this exact statement rather than two copies of it. The log row goes in the
 # same CTE as the delete, and `token_log` has no FK, so it is the only trace of
 # the feed that survives.
@@ -1153,38 +1152,6 @@ async def upsert_job_posting(
 
 
 # Gold projection -----------------------------------------------------------
-
-
-async def absent_postings(
-    conn: Connection, feed: Feed, source: str
-) -> list[asyncpg.Record]:
-    """Active postings this feed stopped returning, as of its last whole fetch.
-
-    Absence is only meaningful against a *complete* poll. A truncated listing, a
-    dead token, or a half-failed pagination makes every posting in the source
-    look absent at once, so the cutoff comes from ``poll_log`` --
-    append-only, and ``run.poll`` records 'ok' only for a fetch that finished
-    (``truncated`` becomes 'partial'). ``feed.last_poll_at`` cannot stand in for
-    it: that column records the attempt, not the outcome.
-
-    This reports absence, never closure. The caller probes each row and decides.
-    """
-    return await conn.fetch(
-        """
-        SELECT p.id, p.source, p.source_key, p.source_url, p.apply_url,
-               p.last_seen_at
-        FROM job_posting p
-        WHERE p.source = $1
-          AND p.status = 'active'
-          AND p.last_seen_at < (
-              SELECT max(polled_at) FROM poll_log
-              WHERE feed_id = $2 AND status = 'ok'
-          )
-        ORDER BY p.id
-        """,
-        source,
-        feed.id,
-    )
 
 
 async def mark_missing_postings(

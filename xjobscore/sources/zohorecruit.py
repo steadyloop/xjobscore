@@ -32,16 +32,23 @@ def _payload(text: str) -> tuple[list[dict], dict]:
     parser = _Inputs()
     parser.feed(text)
     parser.close()
-    jobs = json.loads(parser.values.get("jobs", "[]"))
+    if "jobs" not in parser.values:
+        raise ValueError("Zoho Recruit page did not expose jobs payload")
+    jobs = json.loads(parser.values["jobs"])
     meta = json.loads(parser.values.get("meta", "{}"))
     if not isinstance(jobs, list) or not isinstance(meta, dict):
         raise ValueError("Zoho Recruit page did not expose jobs/meta payloads")
     return [row for row in jobs if isinstance(row, dict)], meta
 
 
+def _url(feed: Feed) -> str:
+    path = str(feed.config.get("path", "jobs/Careers")).strip("/")
+    default = f"https://{feed.key}.zohorecruit.com/{path}"
+    return str(feed.config.get("url", default)).format(key=feed.key).rstrip("/")
+
+
 async def harvest(feed: Feed, net: Net) -> Record:
-    path = str(feed.config.get("path", "jobs/Careers"))
-    url = f"https://{feed.key}.zohorecruit.com/{path.lstrip('/')}"
+    url = _url(feed)
     response = await net.get(url, etag=feed.etag)
     if response.not_modified:
         return Record(http_status=304, etag=response.headers.get("etag"))
@@ -75,8 +82,7 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     meta = meta if isinstance(meta, dict) else {}
     organization = meta.get("org_info")
     organization = organization if isinstance(organization, dict) else {}
-    path = str(feed.config.get("path", "jobs/Careers")).strip("/")
-    url = f"https://{feed.key}.zohorecruit.com/{path}/{item.external_id}"
+    url = f"{_url(feed)}/{item.external_id}"
     locations = [
         str(row[name])
         for name in ("City", "State", "Country")

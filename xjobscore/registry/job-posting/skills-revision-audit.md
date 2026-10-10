@@ -1,11 +1,13 @@
 # Skills revision retention audit
 
-This audit evaluates every canonical entry in `skills-revision.yaml` for a
-Computer Science student applying broadly to US software and finance roles,
+This historical audit evaluates every canonical entry in the former skills
+revision draft for a Computer Science student applying broadly to US software and finance roles,
 including quantitative development, with a longer-term focus on backend,
 infrastructure, AI infrastructure, and platform engineering.
 
 The audit is a recommendation record. It does not modify the taxonomy.
+The unused draft dictionary was removed during repository cleanup on 2026-10-07;
+`skills.yaml` remains the active taxonomy.
 
 ## Decision standard
 

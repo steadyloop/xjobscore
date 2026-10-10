@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from xjobscore.inspector import token_heartbeat, tokens
+from xjobscore.console import token_heartbeat, tokens
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("XJOBSCORE_TEST_DSN"),

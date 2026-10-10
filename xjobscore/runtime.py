@@ -1,4 +1,4 @@
-"""The one long-lived xjobscore process: scheduler, workers, and Inspector."""
+"""The one long-lived xjobscore process: scheduler, workers, and Console."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from typing import Any
 
 import asyncpg
 
-from xjobscore import coverage_snapshot, publish, reconcile, run, store, workable_policy
-from xjobscore.inspector import config
-from xjobscore.inspector.cache import now_utc
-from xjobscore.inspector.db import CatalogDB
-from xjobscore.inspector.persistence import ResultStore
-from xjobscore.inspector.policy import PolicyStore
-from xjobscore.inspector.service import InspectorService
-from xjobscore.inspector.token_heartbeat import (
+from xjobscore import coverage_snapshot, publish, reconcile, run, workable_policy
+from xjobscore.console import config
+from xjobscore.console.cache import now_utc
+from xjobscore.console.db import CatalogDB
+from xjobscore.console.persistence import ResultStore
+from xjobscore.console.policy import PolicyStore
+from xjobscore.console.service import ConsoleService
+from xjobscore.console.token_heartbeat import (
     TokenHeartbeatRunner,
     heartbeat_snapshot,
 )
@@ -40,8 +40,8 @@ DEDUP_ENABLED = False
 @dataclass(frozen=True, slots=True)
 class RuntimeSettings:
     dsn: str
-    inspector_store_dsn: str
-    inspector_schema: str
+    console_store_dsn: str
+    console_schema: str
     host: str = "127.0.0.1"
     port: int = 8765
     user_agent: str = DEFAULT_USER_AGENT
@@ -85,8 +85,8 @@ class RuntimeSettings:
         dsn = config.dsn()
         return cls(
             dsn=dsn,
-            inspector_store_dsn=config.persistence_dsn(),
-            inspector_schema=config.persistence_schema(),
+            console_store_dsn=config.persistence_dsn(),
+            console_schema=config.persistence_schema(),
             host=os.environ.get("XJOBSCORE_HOST", "127.0.0.1"),
             port=int(os.environ.get("XJOBSCORE_PORT", "8765")),
             user_agent=os.environ.get("XJOBSCORE_USER_AGENT", DEFAULT_USER_AGENT),
@@ -633,7 +633,7 @@ class NeonPublisher:
 
 
 class UnifiedRuntime:
-    """Composition root shared by Uvicorn's lifespan and Inspector routes."""
+    """Composition root shared by Uvicorn's lifespan and Console routes."""
 
     def __init__(self, settings: RuntimeSettings) -> None:
         self.settings = settings
@@ -641,9 +641,9 @@ class UnifiedRuntime:
         self.policy = PolicyStore(settings.dsn)
         self.catalog = CatalogDB(self.policy)
         self.result_store = ResultStore(
-            settings.inspector_store_dsn, schema=settings.inspector_schema
+            settings.console_store_dsn, schema=settings.console_schema
         )
-        self.inspector = InspectorService(
+        self.console = ConsoleService(
             self.catalog,
             user_agent=settings.user_agent,
             result_store=self.result_store,
@@ -709,7 +709,7 @@ class UnifiedRuntime:
                 joined = ", ".join(missing)
                 raise RuntimeError(
                     "unified runtime schema is missing "
-                    f"{joined}; apply pending SQL migrations in xjobscore/migrations/"
+                    f"{joined}; migrate the database to match schema.sql"
                 )
             owned = await conn.fetchval("SELECT pg_try_advisory_lock($1)", SYSTEM_LOCK_ID)
             if not owned:

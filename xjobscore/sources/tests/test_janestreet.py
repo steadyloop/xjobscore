@@ -8,7 +8,7 @@ from xjobscore.records import Feed, Item
 from xjobscore.sources import janestreet
 
 
-FIXTURES = Path(__file__).parents[2] / "fixtures"
+FIXTURES = Path(__file__).parents[3] / "fixtures"
 
 
 def fixture(name: str) -> list[dict]:

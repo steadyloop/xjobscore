@@ -797,17 +797,128 @@ async def test_skills_step_rebuilds_postings_from_an_older_taxonomy() -> None:
     )
 
 
+# Focus chips --------------------------------------------------------------
+
+
+class _FocusConnection:
+    def __init__(self) -> None:
+        self.rows: dict[int, dict[str, Any]] = {
+            1: {
+                "id": 1,
+                "title": "Mechanical Engineering Intern",
+                "description": "Design fixtures for our orthopedic implant line.",
+                "company_id": 10,
+                "company": "Stryker",
+                "job_type": "intern",
+                "attributes": {},
+            },
+            2: {
+                "id": 2,
+                "title": "Mechanical Engineering Intern",
+                "description": None,
+                "company_id": 20,
+                "company": "Ford Motor Company",
+                "job_type": "intern",
+                "attributes": {},
+            },
+            3: {
+                "id": 3,
+                "title": "Regulatory Affairs Specialist",
+                "description": None,
+                "company_id": 10,
+                "company": "Stryker",
+                "job_type": None,
+                "attributes": {},
+            },
+        }
+        self.update_calls = 0
+
+    def _stale(self, row: dict[str, Any], version: str) -> bool:
+        return str(row["attributes"].get("focus_meta", {}).get("version", "")) != version
+
+    async def fetch(self, query: str, *args: Any):
+        if "ANY($1::bigint[])" in query:
+            (ids,) = args
+            return [
+                {key: row[key] for key in ("id", "title", "description", "company_id", "attributes", "company")}
+                for row in self.rows.values()
+                if row["id"] in ids and row["job_type"] is not None
+            ]
+        last_id, limit, version = args
+        return [
+            {key: row[key] for key in ("id", "title", "description", "company_id", "company")}
+            for row in self.rows.values()
+            if row["id"] > last_id and row["job_type"] is not None and self._stale(row, version)
+        ][:limit]
+
+    async def executemany(self, query: str, updates):
+        self.update_calls += 1
+        for posting_id, payload, title, description, company_id, version in updates:
+            row = self.rows[posting_id]
+            if (row["title"], row["description"] or "", row["company_id"]) != (title, description, company_id):
+                continue
+            if row["job_type"] is not None and self._stale(row, version):
+                row["attributes"].update(payload)
+
+
+@pytest.mark.asyncio
+async def test_focus_step_stamps_typed_postings_once_per_version() -> None:
+    connection = _FocusConnection()
+
+    first = await gold._focus_rebuild(connection, parsed_at=NOW)
+    second = await gold._focus_rebuild(connection, parsed_at=NOW)
+
+    assert first == gold.Counts(postings=2)
+    assert second == gold.Counts()
+    assert connection.update_calls == 1
+    stryker = connection.rows[1]["attributes"]
+    assert stryker["focus"] == ["med_device"]
+    assert stryker["focus_meta"] == {
+        "version": gold.bioengineering.focus_version(),
+        "reasons": {"med_device": "employer"},
+        "parsed_at": "2026-08-17T21:34:00Z",
+        "input_hash": gold.focus_input_hash(
+            "Mechanical Engineering Intern",
+            "Design fixtures for our orthopedic implant line.",
+            "Stryker",
+        ),
+    }
+    # The same title at a non-life-science employer earns nothing, and an
+    # untyped posting is never in the feed, so it is never stamped.
+    assert connection.rows[2]["attributes"]["focus"] == []
+    assert connection.rows[3]["attributes"] == {}
+
+
+@pytest.mark.asyncio
+async def test_incremental_focus_skips_current_stamps() -> None:
+    connection = _FocusConnection()
+    await gold._focus_rebuild(connection, parsed_at=NOW)
+    connection.rows[2]["attributes"] = {}
+
+    counts = await gold.apply_incremental(connection, "focus", [1, 2, 3])
+
+    assert counts == gold.Counts(postings=1)
+    assert connection.rows[2]["attributes"]["focus"] == []
+
+
+def test_focus_hash_covers_the_employer() -> None:
+    assert gold.focus_input_hash("Intern", "x", "Stryker") != gold.focus_input_hash(
+        "Intern", "x", "Ford Motor Company"
+    )
+
+
 # Step registry ------------------------------------------------------------
 
 
 def test_steps_selects_all_or_one() -> None:
     assert [step.name for step in gold.steps()] == [
-        "job_type", "skills", "degrees", "summaries", "dedup"
+        "job_type", "skills", "degrees", "summaries", "focus", "dedup"
     ]
     assert [step.name for step in gold.steps("job_type")] == ["job_type"]
     assert [step.name for step in gold.steps("degrees")] == ["degrees"]
     assert [step.name for step in gold.steps("skills")] == ["skills"]
     assert [step.name for step in gold.steps("summaries")] == ["summaries"]
+    assert [step.name for step in gold.steps("focus")] == ["focus"]
     assert [step.name for step in gold.steps("dedup")] == ["dedup"]
 
 

@@ -158,7 +158,7 @@ _encoded_hash = encoded_hash
 
 
 def _content_hash(payload: dict | str, kind: str, volatile: frozenset[str]) -> str:
-    """Compatibility helper used by the inspector for a payload-only hash."""
+    """Compatibility helper used by the console for a payload-only hash."""
     return encoded_hash({"kind": kind, "payload": _strip(payload, volatile)})
 
 

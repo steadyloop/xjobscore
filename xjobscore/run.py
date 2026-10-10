@@ -14,7 +14,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -74,8 +74,8 @@ def _env_bool(name: str, default: bool) -> bool:
 def _load_dotenv() -> None:
     """Read KEY=VALUE from ``.env`` so a bare invocation finds the DSN.
 
-    Deliberately duplicated from ``inspector/config.py`` rather than imported:
-    the core pipeline does not depend on the inspector, and this is ten lines.
+    Deliberately duplicated from ``console/config.py`` rather than imported:
+    the core pipeline does not depend on the console, and this is ten lines.
     ``setdefault`` semantics mean a real environment variable always wins, so
     running under a process manager that already exports the DSN is unaffected.
     """
@@ -787,7 +787,7 @@ async def fetch_all(
 ) -> FetchAllResult:
     """Poll every currently claimable feed with bounded shared concurrency.
 
-    This is the command-line counterpart to the inspector's Fetch all.  The
+    This is the command-line counterpart to the console's Fetch all.  The
     inventory intentionally ignores schedules, but every live task claims its
     individual feed immediately before polling so it cannot override a pause,
     disable, or concurrent worker lease.

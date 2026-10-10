@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from xjobscore import classify
 from xjobscore.probe import parse_tombstone
@@ -31,7 +32,7 @@ _TOKEN = re.compile(r"{([^}]+)}")
 class JsonApiHarvestOptions:
     """One-run overrides for controlled pagination and detail reuse.
 
-    The registered harvester still accepts only ``(feed, net)``. The inspector
+    The registered harvester still accepts only ``(feed, net)``. The console
     may override request widths; the production scheduler supplies prior items
     and refresh timing through ``sources.reusing``.
     """
@@ -86,7 +87,19 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
         parts = [_value(part, payload, context) for part in spec["join"]]
         return spec.get("sep", ", ").join(str(part) for part in parts if part not in (None, "")) or None
     if "template" in spec:
-        return _format(spec["template"], payload, context)
+        url = _format(spec["template"], payload, context)
+        if "params" in spec:
+            parts = urlsplit(url)
+            params = {
+                key: _value(value, payload, context)
+                for key, value in spec["params"].items()
+            }
+            params = {key: value for key, value in params.items() if value not in (None, "")}
+            query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                     if key not in params]
+            query.extend(params.items())
+            url = urlunsplit(parts._replace(query=urlencode(query)))
+        return url
     if "date" in spec:
         value = _value(spec["date"], payload, context)
         if not value:
@@ -540,10 +553,21 @@ async def harvest(
         response = await _request(
             list_config, feed, net, context, first=True, concurrency=list_config.get("concurrency", 1)
         )
-    except NetError:
-        if list_config.get("catch_first_error"):
+    except NetError as exc:
+        lever_us = name == "lever" and settings.get("url", list_config["url"]) in (
+            list_config["url"], _format(list_config["url"], None, context),
+        )
+        if lever_us and exc.status == 404:
+            # An EU board answers 404 on the US host. Check its own region
+            # before the scheduler counts this as a missing board.
+            response = await _request(
+                {**list_config, "url": config["eu_url"], "url_override": False},
+                feed, net, context, first=True, concurrency=list_config.get("concurrency", 1),
+            )
+        elif list_config.get("catch_first_error"):
             return Record(truncated=True)
-        raise
+        else:
+            raise
     first_status, first_etag = response.status, etag(response)
     if response.not_modified:
         return Record(http_status=304, etag=first_etag)
@@ -1001,6 +1025,3 @@ def parser(name: str):
 
 def get_adapter(name: str) -> dict:
     return CONFIGS[name]
-
-
-get = get_adapter

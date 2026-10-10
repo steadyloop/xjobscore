@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>System · xJobscore Console</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/system/styles.css">
+  <script src="/static/shared/preferences.js"></script>
+</head>
+<body class="scheduler-page">
+  <header id="topnav"></header>
+
+  <main class="ops-shell" id="ops-shell">
+    <header class="ops-header sys-page-head" aria-labelledby="page-title">
+      <div class="ops-header-title">
+        <h1 id="page-title">Activity</h1>
+        <span class="sys-spinner" id="activity-spinner" data-state="loading" role="img" aria-label="Loading"></span>
+      </div>
+      <div class="ops-header-right">
+        <button class="btn small ops-run-toggle" type="button" id="run-toggle">Loading…</button>
+        <span class="ops-clock" id="local-clock" aria-hidden="true"></span>
+      </div>
+    </header>
+
+    <div class="ops-alert" id="system-alert" role="status" hidden></div>
+
+    <section id="activity-pane" aria-label="Activity">
+      <section class="enrichment" aria-labelledby="enrich-title">
+        <div class="enrich-summary">
+          <h2 id="enrich-title">Enrich</h2>
+          <span class="enrich-issues" id="enrich-issues">Issues<span class="filter-count" id="enrich-issue-count">0</span></span>
+          <span class="enrich-alert" id="enrich-alert" hidden>
+            <span class="enrich-alert-message" id="enrich-alert-message"></span>
+            <button class="enrich-error-toggle" id="enrich-error-toggle" type="button" aria-expanded="false" aria-controls="enrich-error-details">Details <span aria-hidden="true">›</span></button>
+          </span>
+          <span class="enrich-history-note" id="enrich-history-note" hidden></span>
+          <span class="next-check" id="next-check" aria-label="Next enrichment check"></span>
+        </div>
+        <div class="enrich-entry" id="enrich-entry" aria-label="Last completed enrichment run" hidden>
+          <time id="enrich-completed-at"></time>
+          <div class="enrich-metrics">
+            <span id="enrich-outcome"></span>
+            <span class="enrich-metric" id="enrich-postings" title="Distinct postings in successful enrichment batches; counted once across steps"></span>
+            <span class="enrich-duration-wrap" id="enrich-duration-wrap">
+              <button class="enrich-duration-trigger" id="enrich-duration-trigger" type="button" aria-describedby="enrich-timings" aria-label="Duration and step timings"><span id="enrich-duration">—</span></button>
+              <span class="enrich-timings" id="enrich-timings" role="tooltip">
+                <span class="enrich-timings-title">Step timings (last run)</span>
+                <span id="enrich-timing-rows"></span>
+              </span>
+            </span>
+          </div>
+        </div>
+        <div class="activity-empty" id="enrich-empty">Reading enrichment history…</div>
+        <div class="enrich-error-details" id="enrich-error-details" hidden>
+          <pre class="trace-content" id="enrich-error-trace"></pre>
+        </div>
+      </section>
+      <section class="log-surface" aria-label="Activity logs">
+        <div class="activity-tools" aria-label="Activity filters">
+          <div class="activity-views" role="group" aria-label="Activity view">
+            <button class="activity-view" data-activity-view="all" type="button" aria-pressed="true">Logs<span class="filter-count" id="activity-all-count"></span></button>
+            <button class="activity-view" data-activity-view="issues" type="button" aria-pressed="false" title="Warning and error entries in recent activity; not a count of distinct feeds.">Issues<span class="filter-count" id="activity-issue-count"></span></button>
+          </div>
+          <select id="activity-process" aria-label="Filter activity by process"><option value="all">all processes</option></select>
+          <label class="activity-polls"><input id="activity-all-polls" type="checkbox">all polls</label>
+          <label class="activity-search"><span class="sr-only">Search activity</span><input id="activity-search" type="search" placeholder="filter activity…"></label>
+          <button class="activity-follow" id="activity-follow" type="button" aria-pressed="true">↓ following</button>
+        </div>
+        <div class="activity-stream" id="activity-stream" role="log" aria-label="Activity log entries" aria-live="off"></div>
+        <div class="activity-footer"><span id="activity-shown"></span><span>newest at bottom</span></div>
+        <div class="activity-availability" id="activity-availability" role="status"></div>
+      </section>
+    </section>
+
+    <section id="reconcile-panel" aria-labelledby="reconcile-title">
+      <div class="lc-header">
+        <div class="lc-heading">
+          <h2 id="reconcile-title">Link checks</h2>
+          <span class="lc-status" id="reconcile-status" data-state="idle" role="status">Loading</span>
+        </div>
+        <div class="lc-actions">
+          <button class="lc-text-button lc-pause-button" id="reconcile-toggle" type="button" title="Pause new checks; current checks finish." disabled>
+            <svg aria-hidden="true" viewBox="0 0 10 10"><path d="M2 1h2v8H2zM6 1h2v8H6z"/></svg>
+            <span id="reconcile-toggle-label">Pause</span>
+          </button>
+          <button class="lc-text-button" id="reconcile-settings-toggle" type="button" aria-expanded="false" aria-controls="reconcile-settings-panel">Settings</button>
+        </div>
+      </div>
+
+      <dl class="lc-metrics" id="reconcile-summary" aria-label="Link check queue">
+        <div class="lc-metric"><dt>ready</dt><dd id="reconcile-ready">—</dd></div>
+        <div class="lc-metric"><dt>checking</dt><dd><span id="reconcile-checking">—</span><span class="lc-capacity" id="reconcile-capacity"></span></dd></div>
+        <div class="lc-metric"><dt>scheduled</dt><dd id="reconcile-scheduled">—</dd></div>
+        <div class="lc-metric"><dt>Oldest ready</dt><dd id="reconcile-oldest">—</dd></div>
+      </dl>
+
+      <p class="lc-notice" id="reconcile-notice" role="status" hidden>
+        <span id="reconcile-notice-text"></span>
+        <button class="lc-text-button" id="reconcile-retry" type="button" hidden>Retry</button>
+      </p>
+
+      <div class="lc-footer">
+        <button class="lc-text-button lc-details-toggle" id="reconcile-details-toggle" type="button" aria-expanded="false" aria-controls="reconcile-details" disabled>
+          Details <svg class="lc-chevron" aria-hidden="true" viewBox="0 0 10 10"><path d="m2 3.5 3 3 3-3"/></svg>
+        </button>
+        <span class="lc-updated" id="reconcile-updated">Reading queue…</span>
+      </div>
+
+      <div class="lc-detail-content" id="reconcile-details" hidden>
+        <p><strong id="reconcile-completed">—</strong> completed · <strong id="reconcile-cancelled">—</strong> cancelled <span class="lc-retention">— retained history</span></p>
+        <p class="lc-retention">Completed and cancelled entries are kept for 30 days.</p>
+        <p class="lc-recorded-error" id="reconcile-recorded-error" hidden>Latest recorded check error <code id="reconcile-last-error"></code></p>
+      </div>
+
+      <section class="lc-settings" id="reconcile-settings-panel" aria-labelledby="reconcile-settings-title" hidden>
+        <div class="lc-settings-heading">
+          <h3 id="reconcile-settings-title">Settings</h3>
+          <p>Pause stops new checks. In-progress checks finish.</p>
+        </div>
+        <form id="reconcile-settings">
+          <fieldset id="reconcile-fields" disabled>
+            <div class="lc-fields">
+              <label>Concurrent checks<input name="concurrency" aria-label="Concurrent checks" type="number" min="1" max="32" step="1" required></label>
+              <label>Checks / second<input name="checks_per_second" aria-label="Checks per second" type="number" min="0.1" max="20" step="0.1" required></label>
+              <label>Live recheck · min<input name="recheck_minutes" aria-label="Live recheck in minutes" type="number" min="1" max="10080" step="1" required></label>
+              <label>Initial retry · min<input name="retry_minutes" aria-label="Initial retry in minutes" type="number" min="1" max="10080" step="1" required></label>
+            </div>
+            <div class="lc-form-actions">
+              <button class="lc-save-button" id="reconcile-save" type="submit" disabled>Save changes</button>
+              <button class="lc-text-button" id="reconcile-cancel" type="button">Cancel</button>
+              <span class="lc-save-note" id="reconcile-save-note" role="status"></span>
+            </div>
+          </fieldset>
+        </form>
+      </section>
+    </section>
+
+    <header class="ops-header sys-section-head" id="scheduler-head" data-live="off">
+      <div class="ops-header-title"><h2>Scheduler</h2><span class="sys-spinner" id="scheduler-spinner" data-state="off" aria-hidden="true"></span></div>
+    </header>
+
+    <!-- The feeds this board schedules: their status, then what the last 15m of polling did. -->
+    <section class="sys-strip sys-sched-strip" aria-label="Feed status and recent polling">
+      <div class="sys-strip-row">
+        <span class="sys-strip-k">feeds</span>
+        <div class="sys-strip-v ops-summary-line" id="summary-line" aria-live="polite">Loading scheduler state…</div>
+      </div>
+      <div class="sys-strip-row">
+        <span class="sys-strip-k" id="strip-feeds-window">last 15m</span>
+        <span class="sys-strip-v" id="strip-feeds"><span class="wk-dim">reading…</span></span>
+      </div>
+    </section>
+
+    <div class="ops-filterbar">
+      <label class="ops-search">
+        <span class="sr-only">Filter feeds</span>
+        <input type="search" id="search" placeholder="filter…  group:name" autocomplete="off">
+        <kbd>/</kbd>
+      </label>
+
+      <div class="ops-view-pills" role="group" aria-label="Feed view">
+        <button type="button" data-view="all" aria-pressed="true">all <span></span></button>
+        <button type="button" data-view="issues" aria-pressed="false">issues <span></span></button>
+        <button type="button" data-view="failing" aria-pressed="false">failing <span></span></button>
+        <button type="button" data-view="paused" aria-pressed="false">paused <span></span></button>
+      </div>
+
+      <div class="ops-expand-links">
+        <button class="ops-linkish" type="button" id="expand-all">expand all</button>
+        <span aria-hidden="true">·</span>
+        <button class="ops-linkish" type="button" id="collapse-all">collapse all</button>
+        <span aria-hidden="true">·</span>
+        <button class="ops-linkish" type="button" id="edit-groups" aria-expanded="false" aria-controls="groups-panel">edit groups</button>
+      </div>
+
+      <span class="ops-shown" id="row-count"></span>
+      <button class="btn small" type="button" id="refresh">Refresh</button>
+      <button class="btn small" type="button" id="fetch-matching">Fetch matching</button>
+    </div>
+
+    <div class="table-wrap ops-table-wrap">
+      <table class="data ops-table" id="sched-table">
+        <thead>
+          <tr>
+            <th data-sort="status"><button type="button">status</button></th>
+            <th data-sort="name"><button type="button">source</button></th>
+            <th class="sys-workers-col" title="One tick per worker slot: polling, over 60s, over 3m, idle">workers</th>
+            <th class="num" data-sort="interval"><button type="button">interval</button></th>
+            <th class="num" data-sort="due"><button type="button">next</button></th>
+            <th class="num" data-sort="last_poll"><button type="button">last</button></th>
+            <th class="num" data-sort="jobs"><button type="button">new·1d</button></th>
+            <th class="num" data-sort="errors"><button type="button">err·7d</button></th>
+            <th class="ops-actions-col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+      </table>
+      <div class="empty-state" id="sched-empty" hidden></div>
+    </div>
+
+  </main>
+
+  <aside class="ops-detail-panel" id="detail-panel" aria-labelledby="panel-title" hidden></aside>
+  <aside class="ops-detail-panel ops-groups-panel" id="groups-panel" aria-labelledby="groups-title" hidden></aside>
+  <div class="ops-move-menu" id="move-menu" role="menu" hidden></div>
+
+  <dialog class="ops-dialog" id="bulk-dialog" aria-labelledby="bulk-title"></dialog>
+  <dialog class="ops-dialog" id="remove-dialog" aria-labelledby="remove-title"></dialog>
+  <div class="ops-toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="/static/system/app.js"></script>
+</body>
+</html>

@@ -230,8 +230,8 @@ def width(name: str) -> int:
 
     Derived, never declared: the number is whatever this source's own
     concurrency and `net`'s vendor cap already leave room for. A second copy
-    of a width is how the inspector once measured 8 while production ran 4
-    (see `inspector/service.py`), and here the cost would be worse than a
+    of a width is how the console once measured 8 while production ran 4
+    (see `console/service.py`), and here the cost would be worse than a
     wrong number on a page -- workers wider than the cap sit holding feed
     leases while queued on a semaphore.
 

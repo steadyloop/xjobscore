@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xJobscore Console</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <script src="/static/shared/preferences.js"></script>
+</head>
+<body>
+  <header id="topnav"></header>
+  <main class="page">
+    <div class="banner" id="degraded-banner" hidden>
+      PostgreSQL is unreachable — policy controls are disabled. Fetching, parsing,
+      and network inspection still work.
+    </div>
+
+    <div class="page-header">
+      <div class="pills" id="category-pills" role="group" aria-label="Source category"></div>
+      <div class="grow"></div>
+      <label class="secondary" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="filter-enabled"> enabled
+      </label>
+      <label class="secondary" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="filter-errors"> errors
+      </label>
+      <button class="btn" type="button" id="fetch-all-visible"
+              title="Live-fetch every feed currently in view. Requests are paced per host by the shared rate limiter, so feeds sharing a host (e.g. all of Ashby) queue safely behind it.">
+        Fetch all
+      </button>
+      <button class="btn" type="button" id="enable-all-visible"
+              title="Enable every feed currently in view, importing feeds into PostgreSQL as needed.">
+        Enable all
+      </button>
+      <input type="search" id="search" placeholder="Search company or key…" autocomplete="off">
+    </div>
+
+    <div class="master" id="master">
+    <section class="card feeds-card">
+      <div class="table-wrap">
+        <table class="data" id="feeds-table">
+          <thead>
+            <tr>
+              <th style="width:96px">On/Fetch</th>
+              <th>Feed</th>
+              <th>Last run</th>
+              <th class="num">Items</th>
+              <th class="num">Elapsed</th>
+            </tr>
+          </thead>
+          <tbody id="feeds-body"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="feeds-empty" hidden>No feeds match the current filters.</div>
+    </section>
+    <div class="split-handle" id="split-handle" hidden></div>
+    <aside class="detail-pane" id="detail-pane" hidden></aside>
+    </div>
+  </main>
+  <script type="module" src="/static/feeds.js"></script>
+</body>
+</html>

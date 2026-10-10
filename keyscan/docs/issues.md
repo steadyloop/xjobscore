@@ -22,8 +22,8 @@ board redirects to the tenant default.
 
 **Follow-up 2026-10-05 — vanity site names read absent.** A board URL names its
 site by `SiteNumber` (`CX_4001`) or by its vanity `SiteURLName` (`Aerospace`);
-99 of 605 oracle tokens in `validated-live.toml` are the latter, and the
-SiteNumber-only check called all 30 sampled `absent`. Added
+99 of 605 oracle tokens in the historical live-token snapshot were the latter,
+and the SiteNumber-only check called all 30 sampled `absent`. Added
 `Rule.exists_fallbacks`: oracle now asks `SiteURLName='X'` when `SiteNumber='X'`
 answers zero. Re-run: 27 of 30 live; the other 3 are vanity names the tenant no
 longer has (the page redirects to its default `CX_*` site), so `absent` is right.

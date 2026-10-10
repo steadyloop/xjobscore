@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from xjobscore import activity, coverage_snapshot, run, store
+from xjobscore import activity, coverage_snapshot, run, store, workable_policy
 from xjobscore.records import Feed
 
 pytestmark = pytest.mark.asyncio
@@ -80,6 +80,8 @@ class _Harness:
         monkeypatch.setattr(store, "due_feeds", due_feeds)
         monkeypatch.setattr(coverage_snapshot, "refresh", refresh)
         monkeypatch.setattr(run.sources, "width", lambda name: widths.get(name, 1))
+        # Scripted vendors are one lane each; test_drain_lanes covers partitions.
+        monkeypatch.setattr(run.sources, "partitions", lambda source: ())
 
     def poll(self, sleeps: dict[str, float] | None = None):
         sleeps = sleeps or {}
@@ -250,6 +252,63 @@ async def test_nothing_due_is_drained_and_still_refreshes_once(monkeypatch):
     assert result == run.CycleResult(polled=0, drained=True, by_source={})
     assert len(harness.refreshed) == 1
     assert harness.claims == []
+
+
+@pytest.mark.parametrize("entry", ["cycle", "drain_source"])
+async def test_workable_cooldown_stops_claims_mid_lane_without_blocking_other_sources(monkeypatch, entry):
+    harness = _Harness(
+        monkeypatch,
+        {"workable": [_feed("workable", i) for i in range(3)],
+         "lever": [_feed("lever", 10)]},
+        {"workable": 1, "lever": 1},
+    )
+    polling = harness.poll()
+
+    async def poll(pool, net, feed, now):
+        await polling(pool, net, feed, now)
+        if feed.source == "workable":
+            await workable_policy.policy().hold(86400)
+
+    monkeypatch.setattr(run, "poll", poll)
+    if entry == "cycle":
+        result = await run.cycle(_Pool(), object(), _cfg(), run.datetime.now(run.timezone.utc))
+        assert result.polled == 2
+        assert result.drained is True
+    else:
+        counts = await asyncio.gather(*(
+            run.drain_source(_Pool(), object(), _cfg(), source)
+            for source in ("workable", "lever")
+        ))
+        assert counts == [1, 1]
+
+    assert [source for source, _ in harness.claims].count("workable") == 1
+    assert len(harness.queues["workable"]) == 2
+    assert sorted(feed.source for feed, _ in harness.polls) == ["lever", "workable"]
+
+
+async def test_fetch_all_skips_workable_without_claiming_during_cooldown(monkeypatch):
+    await workable_policy.policy().hold(86400)
+    candidates = [_feed("workable", 1), _feed("lever", 2)]
+    claimed = []
+
+    async def fetchable_feeds(conn, now):
+        return candidates
+
+    async def claim_feed(conn, *, source, key, **kwargs):
+        claimed.append(source)
+        return next(feed for feed in candidates if feed.key == key)
+
+    async def poll(pool, net, feed, now):
+        return "ok"
+
+    monkeypatch.setattr(store, "fetchable_feeds", fetchable_feeds)
+    monkeypatch.setattr(store, "claim_feed", claim_feed)
+    monkeypatch.setattr(run, "poll", poll)
+
+    result = await run.fetch_all(_Pool(), object(), _cfg())
+
+    assert result == run.FetchAllResult(eligible=2, polled=1, skipped=1)
+    assert claimed == ["lever"]
 
 
 async def test_dry_run_snapshots_each_queue_and_never_claims(monkeypatch):

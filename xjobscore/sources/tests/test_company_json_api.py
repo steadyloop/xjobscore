@@ -11,7 +11,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import json_api
 
 
-FIXTURES = Path(__file__).parents[2] / "fixtures"
+FIXTURES = Path(__file__).parents[3] / "fixtures"
 
 
 class FixtureNet:

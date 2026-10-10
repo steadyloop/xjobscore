@@ -16,8 +16,8 @@ import os
 
 import pytest
 
-from xjobscore.inspector import tokens, validator
-from xjobscore.inspector.policy import DROP_FEED_SQL
+from xjobscore.console import tokens, validator
+from xjobscore.console.policy import DROP_FEED_SQL
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("XJOBSCORE_TEST_DSN"),

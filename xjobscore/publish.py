@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import logging
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import asyncpg
 
 from xjobscore import store
+
+logger = logging.getLogger(__name__)
 
 
 JOB_COLUMNS = (
@@ -341,8 +344,8 @@ async def _assert_thin_target(target: Any) -> None:
         )
 
 
-async def _ensure_coverage_schema(target: Any) -> None:
-    uses_id = await target.fetchval(
+async def _coverage_uses_id(target: Any) -> bool:
+    return bool(await target.fetchval(
         """
         SELECT EXISTS (
             SELECT 1
@@ -352,8 +355,11 @@ async def _ensure_coverage_schema(target: Any) -> None:
               AND column_name = 'id'
         )
         """
-    )
-    if uses_id:
+    ))
+
+
+async def _ensure_coverage_schema(target: Any) -> None:
+    if await _coverage_uses_id(target):
         return
     if await target.fetchval("SELECT COUNT(*) FROM coverage_snapshot"):
         raise RuntimeError(
@@ -384,6 +390,8 @@ async def publish(
     seen_drift_s: float = DEFAULT_SEEN_DRIFT_S,
     retained: dict[str, list[Any]] | None = None,
     cleanup_closed: bool = True,
+    company_edit_revisions: dict[int, Any] | None = None,
+    maintained_company_ids: list[int] | None = None,
 ) -> PublishCounts:
     """Send Neon only what differs from the home cohort.
 
@@ -392,9 +400,44 @@ async def publish(
     """
     cohort = await read_cohort(source)
     cohort_ids = [int(row["id"]) for row in cohort]
-    company_ids = sorted({int(row["company_id"]) for row in cohort})
+    company_ids = sorted({int(row["company_id"]) for row in cohort} | set(company_edit_revisions or {}) | set(maintained_company_ids or []))
 
     await _assert_thin_target(target)
+    # Source reads can take minutes, particularly when both targets share one
+    # snapshot. Complete them outside the target's write transaction: Neon
+    # terminates a transaction that sits idle while waiting on the source.
+    source_companies = _fingerprints(await _fetch_utc(source, COMPANY_FINGERPRINT_SQL, company_ids))
+    source_logos = _fingerprints(await source.fetch(LOGO_FINGERPRINT_SQL, company_ids))
+    source_stamp = await source.fetchval(COVERAGE_STAMP_SQL)
+
+    async with target.transaction():
+        await target.execute("SET LOCAL TIME ZONE 'UTC'")
+        published = await target.fetch(PUBLISHED_JOBS_SQL)
+        target_companies = _fingerprints(await target.fetch(COMPANY_FINGERPRINT_SQL, company_ids))
+        target_logos = _fingerprints(await target.fetch(LOGO_FINGERPRINT_SQL, company_ids))
+        target_stamp = await target.fetchval(COVERAGE_STAMP_SQL) if await _coverage_uses_id(target) else None
+
+    job_ids = changed_job_ids(cohort, published, seen_drift_s=seen_drift_s)
+    changed_companies = _differing(source_companies, target_companies)
+    changed_logos = _differing(source_logos, target_logos)
+    cohort_set = set(cohort_ids)
+    departed_ids = {int(row["id"]) for row in published} - cohort_set
+    if retained is not None:
+        # Retained central history is restored first. Reapply canonical source
+        # rows where it overlaps the active cohort, even if the target already
+        # matched before that restoration. Identical upserts still skip writes.
+        job_ids = sorted(set(job_ids) | ({int(row["id"]) for row in retained["jobs"]} & cohort_set))
+        changed_companies = sorted(set(changed_companies) | ({int(row["id"]) for row in retained["companies"]} & source_companies.keys()))
+        changed_logos = sorted(set(changed_logos) | ({int(row["company_id"]) for row in retained["logos"]} & source_logos.keys()))
+        departed_ids |= {int(row["id"]) for row in retained["jobs"] if row["status"] == "active"} - cohort_set
+
+    companies = [_values(row, COMPANY_COLUMNS) for row in await source.fetch(COMPANY_ROWS_SQL, changed_companies)] if changed_companies else []
+    logos = [_values(row, ("company_id", "bytes")) for row in await source.fetch(LOGO_ROWS_SQL, changed_logos)] if changed_logos else []
+    jobs = [_values(row, JOB_COLUMNS) for row in await source.fetch(JOB_ROWS_SQL, job_ids)] if job_ids else []
+    closures = [_values(row, ("id", *CLOSURE_COLUMNS)) for row in await source.fetch(SOURCE_CLOSURES_SQL, sorted(departed_ids))] if departed_ids else []
+    coverage_changed = source_stamp is not None and source_stamp != target_stamp
+    coverage = await source.fetchrow(COVERAGE_ROW_SQL) if coverage_changed else None
+
     transaction = target.transaction()
     await transaction.start()
     try:
@@ -412,60 +455,16 @@ async def publish(
                 if rows:
                     await target.executemany(query, [_values(row, columns) for row in rows])
 
-        published = await target.fetch(PUBLISHED_JOBS_SQL)
-        job_ids = changed_job_ids(
-            cohort,
-            published,
-            seen_drift_s=seen_drift_s,
-        )
-        changed_companies = _differing(
-            _fingerprints(await _fetch_utc(source, COMPANY_FINGERPRINT_SQL, company_ids)),
-            _fingerprints(await target.fetch(COMPANY_FINGERPRINT_SQL, company_ids)),
-        )
-        changed_logos = _differing(
-            _fingerprints(await source.fetch(LOGO_FINGERPRINT_SQL, company_ids)),
-            _fingerprints(await target.fetch(LOGO_FINGERPRINT_SQL, company_ids)),
-        )
-        source_stamp = await source.fetchval(COVERAGE_STAMP_SQL)
-        coverage_changed = source_stamp is not None and source_stamp != (
-            await target.fetchval(COVERAGE_STAMP_SQL)
-        )
-
-        if changed_companies:
-            await target.executemany(
-                UPSERT_COMPANY_SQL,
-                [
-                    _values(row, COMPANY_COLUMNS)
-                    for row in await source.fetch(COMPANY_ROWS_SQL, changed_companies)
-                ],
-            )
-        if changed_logos:
-            await target.executemany(
-                UPSERT_LOGO_SQL,
-                [
-                    (row["company_id"], row["bytes"])
-                    for row in await source.fetch(LOGO_ROWS_SQL, changed_logos)
-                ],
-            )
-        if job_ids:
-            await target.executemany(
-                UPSERT_JOB_SQL,
-                [
-                    _values(row, JOB_COLUMNS)
-                    for row in await source.fetch(JOB_ROWS_SQL, job_ids)
-                ],
-            )
-        departures = sorted({int(row["id"]) for row in published} - set(cohort_ids))
-        if departures:
-            closures = await source.fetch(SOURCE_CLOSURES_SQL, departures)
-            if closures:
-                await target.executemany(
-                    UPDATE_CLOSURES_SQL,
-                    [_values(row, ("id", *CLOSURE_COLUMNS)) for row in closures],
-                )
+        for query, rows in (
+            (UPSERT_COMPANY_SQL, companies),
+            (UPSERT_LOGO_SQL, logos),
+            (UPSERT_JOB_SQL, jobs),
+            (UPDATE_CLOSURES_SQL, closures),
+        ):
+            if rows:
+                await target.executemany(query, rows)
         closed = _command_count(await target.execute(SOFT_CLOSE_SQL, cohort_ids))
-        if coverage_changed:
-            coverage = await source.fetchrow(COVERAGE_ROW_SQL)
+        if coverage is not None:
             await target.execute(
                 UPSERT_COVERAGE_SQL,
                 coverage["id"],
@@ -477,12 +476,20 @@ async def publish(
                 await target.execute(DELETE_CLOSED_PROTECTED_SQL, [row["id"] for row in retained["jobs"]])
             else:
                 await target.execute(DELETE_CLOSED_SQL)
+        if company_edit_revisions:
+            await target.executemany(
+                "DELETE FROM company_edit WHERE company_id = $1 AND revision = $2",
+                list(company_edit_revisions.items()),
+            )
         if dry_run:
             await transaction.rollback()
         else:
             await transaction.commit()
     except BaseException:
-        await transaction.rollback()
+        try:
+            await transaction.rollback()
+        except Exception:
+            logger.warning("Publisher rollback failed; preserving the original error", exc_info=True)
         raise
 
     return PublishCounts(
@@ -547,15 +554,24 @@ async def publish_to(
 ) -> PublishCounts:
     from xjobscore import serving
 
-    if not isinstance(source, serving.Source):
-        source = serving.Source(source, await serving.prepare(source))
     # A fresh connection per run lets Neon's compute scale to zero in between.
     target = await connect_target(target_dsn)
     try:
+        if not isinstance(source, serving.Source):
+            from xjobscore import company_edits
+            revisions = await company_edits.sync(source, target, dry_run=dry_run)
+            source = serving.Source(source, await serving.prepare(source))
+            source.company_edit_revisions = revisions
+        source.maintained_company_ids = [int(row['id']) for row in await source.fetch(
+            "SELECT id FROM frontend_identity m WHERE kind='company' "
+            "AND COALESCE(to_jsonb(m)->'previous_keys', '[]'::jsonb) <> '[]'::jsonb"
+        )]
         await serving.validate_target(source, target)
         return await publish(
             source, target, dry_run=dry_run, seen_drift_s=seen_drift_s,
             retained=source.retained, cleanup_closed=source.cleanup_closed,
+            company_edit_revisions=source.company_edit_revisions,
+            maintained_company_ids=source.maintained_company_ids,
         )
     finally:
         await target.close()
@@ -571,7 +587,7 @@ async def publish_targets(
     """Publish one cohort independently to each target using shared serving IDs."""
     from xjobscore import serving
 
-    async def central_references() -> dict[str, list[Any]] | None:
+    async def central_references(shared: Any) -> dict[str, list[Any]] | None:
         if "neon" not in targets:
             return None
         conn = None
@@ -583,9 +599,13 @@ async def publish_targets(
                    OR EXISTS (SELECT 1 FROM job_feedback f WHERE f.job_posting_id=j.id)
             """)
             ids = list({row["company_id"] for row in jobs})
+            # Retained postings can be old, but company metadata must come
+            # from the canonical snapshot whenever its identity still exists.
+            companies = {row['id']: row for row in await conn.fetch(COMPANY_ROWS_SQL, ids)}
+            companies.update({row['id']: row for row in await serving.Source(shared).fetch(COMPANY_ROWS_SQL, ids)})
             return {
                 "jobs": jobs,
-                "companies": await conn.fetch(COMPANY_ROWS_SQL, ids),
+                "companies": list(companies.values()),
                 "logos": await conn.fetch(LOGO_ROWS_SQL, ids),
             }
         except Exception:
@@ -598,14 +618,30 @@ async def publish_targets(
 
 
     async with pool.acquire() as connection:
+        # Import administrator edits before opening the shared read snapshot.
+        # An unavailable target still cannot prevent the other from publishing.
+        from xjobscore import company_edits
+        revisions = {}
+        if not dry_run:
+            for name, dsn in targets.items():
+                target = None
+                try:
+                    target = await connect_target(dsn, timeout=15)
+                    revisions[name] = await company_edits.sync(connection, target)
+                except Exception as exc:
+                    logger.warning("Company edit sync for %s failed: %s", name, exc)
+                finally:
+                    if target is not None:
+                        await target.close()
         await serving.prepare(connection)
         async with connection.transaction(isolation="repeatable_read", readonly=True):
             shared = serving.SharedSnapshot(connection)
             cohort = await read_cohort(serving.Source(shared))
-            references = asyncio.create_task(central_references())
+            references = asyncio.create_task(central_references(shared))
 
             async def send(name: str, dsn: str) -> PublishCounts:
                 mapped = serving.Source(shared, cohort)
+                mapped.company_edit_revisions = revisions.get(name, {})
                 if name == "local":
                     mapped.retained = await references
                     mapped.cleanup_closed = mapped.retained is not None

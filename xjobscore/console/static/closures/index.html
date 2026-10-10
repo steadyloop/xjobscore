@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Closed jobs · xJobscore Console</title>
+  <link rel="stylesheet" href="/static/shared/tokens.css">
+  <link rel="stylesheet" href="/static/shared/base.css">
+  <link rel="stylesheet" href="/static/shared/components.css">
+  <link rel="stylesheet" href="/static/closures/styles.css">
+  <script src="/static/shared/preferences.js"></script>
+</head>
+<body class="closures-page">
+  <header id="topnav"></header>
+  <main class="page">
+    <div class="heading">
+      <div><div class="eyebrow">POSTING AVAILABILITY</div><h1>Closed jobs</h1><p>What closed, how we know, and what needs another look.</p></div>
+      <div class="controls"><label>Period <select id="period"><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label><button class="btn" id="refresh" type="button">Refresh</button></div>
+    </div>
+    <div class="banner error" id="error" role="alert" hidden></div>
+    <p id="loading" role="status">Loading closure observations…</p>
+    <div id="dashboard" hidden>
+      <div class="metrics" id="metrics"></div>
+      <p class="coverage" id="coverage"></p>
+      <div class="charts">
+        <section class="chart-card trend-panel"><div class="chart-head"><div><h2>Closures over time</h2><p>First detected closure, counted once per posting.</p></div><span class="hint">Click a segment to inspect</span></div><div id="trend"></div><div class="legend" id="legend"></div></section>
+        <section class="chart-card evidence-panel"><div class="chart-head"><div><h2>What triggered closure?</h2><p>Earliest recorded evidence.</p></div></div><div id="evidence"></div><p class="footnote">Redirects are a separate signal from an explicit closure message.</p></section>
+        <section class="chart-card backlog-panel"><div class="chart-head"><div><h2>Where verification is stuck</h2><p>Currently missing and still active. All ages.</p></div><span class="hint">Darker = more postings</span></div><div class="outcomes" id="outcomes"></div><div class="heatmap-wrap" id="backlog"></div><p class="footnote" id="backlog-note"></p></section>
+        <section class="chart-card lag-panel"><div class="chart-head"><div><h2>Time to confirm closure</h2><p>From first missing observation to confirmation.</p></div></div><div id="lag"></div><p class="footnote" id="lag-note"></p></section>
+      </div>
+      <section class="chart-card postings-panel" id="postings-panel">
+        <div class="chart-head"><div><h2>Behind the numbers</h2><p id="table-description">Select a chart to inspect its postings.</p></div><input id="search" type="search" placeholder="Search company or title…" aria-label="Search postings" maxlength="200"></div>
+        <div class="table-toolbar"><div id="tabs" class="tabs" role="group" aria-label="Posting view"></div><div id="selection"></div></div>
+        <div id="table-status" role="status"></div>
+        <div class="table-wrap"><table class="data"><thead><tr><th>Company / job</th><th>Source</th><th id="date-heading">Closure detected</th><th>Evidence / outcome</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+        <div class="pagination"><span id="page-count"></span><button class="btn small" id="previous" type="button">Previous</button><button class="btn small" id="next" type="button">Next</button></div>
+      </section>
+      <p class="footnote methodology">These charts track observed availability, not hiring outcomes. Missing from a board does not mean closed. Counts are source postings and may include duplicates. Closure times are detection times; the current day and first observed day are partial.</p>
+    </div>
+  </main>
+  <script type="module" src="/static/closures/app.js"></script>
+</body>
+</html>

@@ -157,7 +157,7 @@ async def test_detail_without_max_is_unbounded_as_before():
     assert record.truncated is False
 
 
-# -- inspector-only revision reuse ---------------------------------------
+# -- console-only revision reuse ---------------------------------------
 
 
 class RevisionNet(DetailNet):

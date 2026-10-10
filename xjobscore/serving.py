@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -85,6 +86,8 @@ class Source:
         self.cohort = cohort
         self.retained: dict[str, list[Any]] | None = None
         self.cleanup_closed = True
+        self.company_edit_revisions: dict[int, Any] = {}
+        self.maintained_company_ids: list[int] = []
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.connection, name)
@@ -190,15 +193,38 @@ async def validate_target(source: Any, target: Any) -> None:
     """, [r['id'] for r in rows], [r['source'] for r in rows], [r['source_key'] for r in rows])
     if conflicts:
         raise RuntimeError(f"{conflicts} serving job IDs belong to different postings; refusing to publish")
-    companies = await source.fetch(publish.COMPANY_ROWS_SQL, list({r['company_id'] for r in cohort}))
+    companies = await source.fetch(publish.COMPANY_ROWS_SQL, list({r['company_id'] for r in cohort} | set(source.maintained_company_ids)))
     if source.retained is not None:
-        companies = [*companies, *source.retained["companies"]]
+        by_id = {row['id']: row for row in source.retained["companies"]}
+        by_id.update({row['id']: row for row in companies})
+        companies = list(by_id.values())
+    history = await source.fetch("""
+        SELECT id, COALESCE(to_jsonb(m)->'previous_keys', '[]'::jsonb) AS previous_keys
+        FROM frontend_identity m WHERE kind='company' AND id=ANY($1::bigint[])
+    """, [row['id'] for row in companies])
+    allowed = []
+    for row in history:
+        keys = row['previous_keys']
+        if isinstance(keys, str):
+            keys = json.loads(keys)
+        for key in keys:
+            if key[0] == 'domain':
+                allowed.append((row['id'], key[1], None))
+            elif key[0] == 'source_id':
+                allowed.append((row['id'], None, key[2]))
     conflicts = await target.fetchval("""
         SELECT count(*) FROM unnest($1::bigint[], $2::text[], $3::text[])
             AS incoming(id, domain, name)
         JOIN company stored ON stored.id=incoming.id
-        WHERE lower(stored.domain) IS DISTINCT FROM lower(incoming.domain)
-           OR (stored.domain IS NULL AND incoming.domain IS NULL AND stored.name <> incoming.name)
-    """, [r['id'] for r in companies], [r['domain'] for r in companies], [r['name'] for r in companies])
+        WHERE (lower(stored.domain) IS DISTINCT FROM lower(incoming.domain)
+           OR (stored.domain IS NULL AND incoming.domain IS NULL AND stored.name <> incoming.name))
+        AND NOT EXISTS (
+            SELECT 1 FROM unnest($4::bigint[], $5::text[], $6::text[]) AS prior(id, domain, name)
+            WHERE prior.id = stored.id
+              AND lower(prior.domain) IS NOT DISTINCT FROM lower(stored.domain)
+              AND (prior.domain IS NOT NULL OR prior.name = stored.name)
+        )
+    """, [r['id'] for r in companies], [r['domain'] for r in companies], [r['name'] for r in companies],
+        [r[0] for r in allowed], [r[1] for r in allowed], [r[2] for r in allowed])
     if conflicts:
         raise RuntimeError(f"{conflicts} serving company IDs belong to different companies; refusing to publish")

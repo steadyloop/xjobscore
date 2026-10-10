@@ -37,7 +37,7 @@ dev = [
 packages = [
     "keyscan",
     "xjobscore",
-    "xjobscore.inspector",
+    "xjobscore.console",
     "xjobscore.sources",
 ]
 
@@ -45,7 +45,8 @@ packages = [
 xjobscore = [
     "fixtures/*.json",
     "registry/job-posting/*.yaml",
-    "inspector/static/**/*",
+    "registry/filters/bioengineering-employers.yaml",
+    "console/static/**/*",
 ]
 
 [tool.pytest.ini_options]

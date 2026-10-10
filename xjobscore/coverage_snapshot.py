@@ -46,32 +46,6 @@ def board_state(
     return "ok"
 
 
-def empty_snapshot() -> dict[str, Any]:
-    """The stable API shape before the first pipeline refresh."""
-    return {
-        "source_coverage": {
-            "sources": [],
-            "source_count": 0,
-            "total_coverage": 0,
-            "total_added_today": 0,
-        },
-        "board_map": {
-            "providers": [],
-            "totals": {
-                "boards": 0,
-                "providers": 0,
-                "ok": 0,
-                "erroring": 0,
-                "stale": 0,
-                "paused": 0,
-                "never": 0,
-                "active_postings": 0,
-                "added_today": 0,
-            },
-        },
-    }
-
-
 _CURRENT_ROWS_SQL = """
 WITH posting_stats AS (
     SELECT

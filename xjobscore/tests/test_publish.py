@@ -2,12 +2,45 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import asyncpg
 import pytest
 
 from xjobscore import publish
 
 
 NOW = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("wrapper", ["", "'", '"'])
+async def test_connect_target_accepts_neon_urls_from_dotenv(monkeypatch, wrapper):
+    url = (
+        "postgresql://user:p%40ss@neon.example/db"
+        "?sslmode=verify-full&channel_binding=require&application_name=publisher"
+    )
+    seen = {}
+    target = object()
+
+    async def connect(dsn, **kwargs):
+        seen.update(dsn=dsn, kwargs=kwargs)
+        return target
+
+    async def install_codec(conn):
+        seen["codec_connection"] = conn
+
+    monkeypatch.setattr(publish.asyncpg, "connect", connect)
+    monkeypatch.setattr(publish.store, "_install_jsonb_codec", install_codec)
+
+    result = await publish.connect_target(
+        "  " + wrapper + url + wrapper + "  ", timeout=10
+    )
+
+    assert result is target
+    assert seen["dsn"] == (
+        "postgresql://user:p%40ss@neon.example/db"
+        "?sslmode=verify-full&application_name=publisher"
+    )
+    assert seen["kwargs"] == {"timeout": 10}
+    assert seen["codec_connection"] is target
 
 
 class Transaction:
@@ -53,16 +86,16 @@ def _job(job_id: int = 7) -> dict[str, object]:
         "status": "active",
         "first_seen_at": None,
         "last_seen_at": NOW,
-        "vendor_closed_at": None,
-        "link_marked_at": None,
+        "missing_since": None,
+        "paged_closed_at": None,
+        "ats_closed_at": None,
         "link_checked_at": None,
-        "link_closed_at": None,
+        "linked_dead_at": None,
         "attributes": '{"version":1}',
         "degree_version": None,
         "job_domain": "software",
         "job_domain_version": 1,
         "raw_id": 19,
-        "removal_marked_at": None,
     }
 
 
@@ -137,6 +170,7 @@ class Target:
         self.many: list[tuple[str, list[tuple[object, ...]]]] = []
         self.commands: list[tuple[str, tuple[object, ...]]] = []
         self.tx = Transaction()
+        self.transactions = []
 
     async def fetchval(self, query: str) -> object:
         if "information_schema.columns" in query:
@@ -157,6 +191,8 @@ class Target:
         raise AssertionError(query)
 
     def transaction(self) -> Transaction:
+        self.tx = Transaction()
+        self.transactions.append(self.tx)
         return self.tx
 
     async def executemany(self, query: str, rows: list[tuple[object, ...]]) -> None:
@@ -216,7 +252,7 @@ async def test_publish_sends_only_rows_that_differ():
 
 
 @pytest.mark.asyncio
-async def test_unchanged_cohort_writes_nothing_but_the_soft_close():
+async def test_unchanged_cohort_only_runs_closure_and_cleanup():
     source = Source([_state(1, "same")])
     target = Target([_state(1, "same")])
 
@@ -226,7 +262,8 @@ async def test_unchanged_cohort_writes_nothing_but_the_soft_close():
     assert target.many == []
     assert source.fetched_jobs == []
     assert [q for q, _ in target.commands if q != "SET LOCAL TIME ZONE 'UTC'"] == [
-        publish.SOFT_CLOSE_SQL
+        publish.SOFT_CLOSE_SQL,
+        publish.DELETE_CLOSED_SQL,
     ]
 
 
@@ -249,6 +286,30 @@ async def test_dry_run_rolls_back():
 
     assert target.tx.rolled_back
     assert not target.tx.committed
+
+
+async def test_connection_failure_is_not_hidden_by_failed_rollback():
+    original = asyncpg.ConnectionDoesNotExistError('connection lost during publication')
+
+    class BrokenTransaction(Transaction):
+        async def rollback(self):
+            raise asyncpg.InterfaceError('cannot roll back a closed connection')
+
+    class BrokenTarget(Target):
+        def transaction(self):
+            transaction = super().transaction()
+            if len(self.transactions) > 1:
+                self.tx = BrokenTransaction()
+                return self.tx
+            return transaction
+
+        async def executemany(self, query, rows):
+            raise original
+
+    with pytest.raises(asyncpg.ConnectionDoesNotExistError) as error:
+        await publish.publish(Source([_state(7, 'new')]), BrokenTarget())
+
+    assert error.value is original
 
 
 @pytest.mark.asyncio

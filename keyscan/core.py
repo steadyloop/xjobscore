@@ -20,7 +20,7 @@ import sqlite3
 import subprocess
 import time
 from typing import Any, Callable, Iterable, Iterator
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 import duckdb

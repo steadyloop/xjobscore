@@ -5,7 +5,7 @@ and integer pagination; the bespoke part is the boundary between a top-level HN
 comment and a conservative :class:`Posting` parsed from its free-form header.
 
 ``feed.key`` may be a numeric HN story id to pin a particular month.  Any
-other key (the standalone inspector uses ``hn``) discovers the newest canonical
+other key (the standalone console uses ``hn``) discovers the newest canonical
 thread posted by the ``whoishiring`` account.  ``feed.config.story_id`` is the
 explicit equivalent of a numeric key and is useful for backfills.
 """

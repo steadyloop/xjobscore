@@ -24,6 +24,7 @@ def _row(**overrides):
         "coverage": 3,
         "added_today": 2,
         "global_added_today": 7,
+        "global_active_postings": 23,
     }
     row.update(overrides)
     return row
@@ -69,9 +70,48 @@ def test_build_snapshot_preserves_both_coverage_api_shapes():
         "stale": 0,
         "paused": 0,
         "never": 0,
+        "active_postings": 23,
         "added_today": 7,
     }
     assert board_map["providers"][0]["boards"][1]["company"] == "beta"
+
+
+def test_global_active_count_survives_without_any_feeds():
+    snapshot = coverage_snapshot.build_snapshot(
+        [_row(source=None, global_active_postings=12)], computed_at=NOW
+    )
+    assert snapshot["board_map"]["totals"]["boards"] == 0
+    assert snapshot["board_map"]["totals"]["active_postings"] == 12
+
+
+async def test_active_total_counts_all_pipeline_postings(core_schema):
+    async with core_schema.pool.acquire() as conn:
+        company_id = await conn.fetchval(
+            "INSERT INTO company(name) VALUES('Example') RETURNING id"
+        )
+        raw_id = await conn.fetchval("""
+            INSERT INTO raw_posting(source, source_key, data, data_hash)
+            VALUES('test:orphan', 'raw', '{}'::jsonb, 'hash') RETURNING id
+        """)
+        # No feed rows: include unclassified and foreign postings that never
+        # enter OneShot's serving cohort, and exclude closed postings.
+        await conn.execute("""
+            INSERT INTO job_posting(
+                source, source_key, company_id, title, content_hash, raw_id,
+                status, job_type, locations
+            ) VALUES
+                ('test:orphan', 'student', $1, 'Intern', 'h', $2,
+                 'active', 'intern', '[]'),
+                ('test:orphan', 'unclassified', $1, 'Engineer', 'h', $2,
+                 'active', NULL, '[]'),
+                ('test:orphan', 'foreign', $1, 'Intern abroad', 'h', $2,
+                 'active', 'intern', '[{"country":"CA"}]'),
+                ('test:orphan', 'closed', $1, 'Closed', 'h', $2,
+                 'closed', 'intern', '[]')
+        """, company_id, raw_id)
+    snapshot = await coverage_snapshot.refresh(core_schema.pool)
+    assert snapshot["board_map"]["totals"]["active_postings"] == 3
+    assert snapshot["board_map"]["providers"] == []
 
 
 class _Context:
@@ -161,7 +201,7 @@ def test_board_state_ranks_deliberate_holds_above_derived_signals():
 def test_both_schemas_define_the_singleton_snapshot():
     root = Path(__file__).parent.parent.parent
 
-    for path in (root / "schema.sql", root / "schema-thin.sql"):
+    for path in (root / "schema.sql", root / "frontend.sql"):
         sql = path.read_text()
         assert "CREATE TABLE" in sql
         assert "coverage_snapshot (" in sql
@@ -169,11 +209,8 @@ def test_both_schemas_define_the_singleton_snapshot():
         assert "payload     jsonb NOT NULL" in sql
 
 
-def test_live_database_migration_defines_and_seeds_snapshot():
-    root = Path(__file__).parent.parent.parent
-    sql = (
-        root / "xjobscore" / "migrations" / "20260902_coverage_snapshot.sql"
-    ).read_text()
+def test_live_database_migration_defines_and_seeds_snapshot(live_migration):
+    sql = live_migration("20260902_coverage_snapshot.sql")
 
     assert "CREATE TABLE IF NOT EXISTS coverage_snapshot" in sql
     assert "ON CONFLICT (id) DO NOTHING" in sql

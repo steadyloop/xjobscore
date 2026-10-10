@@ -10,7 +10,7 @@ import pytest
 
 from xjobscore import workable_policy as policy
 from xjobscore.net import Net, NetError
-from xjobscore.inspector.network import InspectorNet
+from xjobscore.console.network import ConsoleNet
 from keyscan.probe import default_request
 
 
@@ -28,11 +28,11 @@ async def test_separate_clients_share_verification_spacing(shared):
         return httpx.Response(200, json={})
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         poller = Net(user_agent='test', min_interval_s=0)
-        inspector = InspectorNet(user_agent='test', min_interval_s=0)
-        poller._client = inspector._client = client
+        console = ConsoleNet(user_agent='test', min_interval_s=0)
+        poller._client = console._client = client
         await asyncio.gather(
             poller.get('https://apply.workable.com/api/v1/widget/accounts/a'),
-            inspector.get('https://apply.workable.com/api/v1/widget/accounts/b'),
+            console.get('https://apply.workable.com/api/v1/widget/accounts/b'),
             default_request(client,'GET','https://apply.workable.com/api/v1/widget/accounts/c'),
         )
     assert len(starts) == 3
@@ -65,7 +65,7 @@ async def test_cooldown_deadline_survives_restart_without_spending_allowance(sha
         assert db.execute('SELECT next_start FROM policy WHERE id=1').fetchone() == (0,)
 
 
-@pytest.mark.parametrize('kind',['net','inspector','default'])
+@pytest.mark.parametrize('kind',['net','console','default'])
 async def test_first_429_stops_retries_and_blocks_other_clients(shared,kind):
     calls = []
     async def refuse(request):
@@ -76,7 +76,7 @@ async def test_first_429_stops_retries_and_blocks_other_clients(shared,kind):
             response = await default_request(client,'GET','https://apply.workable.com/api/v1/widget/accounts/a')
             assert response.status_code == 429
         else:
-            net = (Net if kind == 'net' else InspectorNet)(user_agent='test',min_interval_s=0,max_retries=5)
+            net = (Net if kind == 'net' else ConsoleNet)(user_agent='test',min_interval_s=0,max_retries=5)
             net._client = client
             with pytest.raises(NetError) as caught:
                 await net.get('https://apply.workable.com/api/v1/widget/accounts/a?details=true')

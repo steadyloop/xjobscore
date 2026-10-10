@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from functools import partial
@@ -95,15 +96,6 @@ def _jsonld(text: str) -> list[dict]:
     return jobs
 
 
-def _extract_job_posting(raw_ldjson: str) -> dict | None:
-    """Compatibility helper for callers with one JSON-LD script block."""
-    try:
-        jobs = _job_postings(json.loads(raw_ldjson))
-    except json.JSONDecodeError:
-        return None
-    return jobs[0] if jobs else None
-
-
 def _external_id(job: dict) -> str:
     identifier = job.get("identifier")
     if isinstance(identifier, dict) and identifier.get("value"):
@@ -131,8 +123,14 @@ def _list_url(config: dict, feed: Feed) -> str:
     return _format(settings.get("url", config["list"]["url"]), feed)
 
 
+# Characters XML 1.0 forbids outright. Vendors leak them from pasted text
+# (Homerun shipped a raw U+0002 inside a description), and one stray byte
+# would otherwise fail the whole board.
+_XML_ILLEGAL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
 def _xml_items(text: str, spec: dict) -> list[Item]:
-    root = ET.fromstring(text)
+    root = ET.fromstring(_XML_ILLEGAL.sub("", text))
     items: list[Item] = []
     for element in root.findall(spec["path"]):
         external_id = next((_text(element.find(path)) for path in spec["id"] if _text(element.find(path))), None)

@@ -755,6 +755,7 @@ SIMPLE: dict[str, dict] = {
         # errors. Full first polls are bandwidth-bound (~110 Mbps at width
         # 10-20; median board 108 KB, p95 1.3 MB); steady state is ~91% 304s.
         "list": {"url": "https://api.lever.co/v0/postings/{key}?mode=json", "items": "", "id": "@id", "concurrency": 40},
+        "eu_url": "https://api.eu.lever.co/v0/postings/{key}?mode=json",
         "fields": {
             "title": "@text", "url_posting": "@hostedUrl", "apply_url": "@applyUrl", "company_raw": "$key",
             "location_raw": "@categories.location", "description_html": {"fallback": ["@descriptionBody", "@description"]},
@@ -1935,8 +1936,10 @@ DETAIL_A: dict[str, dict] = {
         },
         "fields": {
             "title": "@name",
-            "url_posting": {"template": "https://{host}{positionUrl}"},
-            "apply_url": {"template": "https://{host}{positionUrl}"},
+            # Shared hosts need the board domain even on individual job pages.
+            # Merge it as a query parameter: private positions already have ?pid=.
+            "url_posting": {"template": "https://{host}{positionUrl}", "params": {"domain": "$domain"}},
+            "apply_url": {"template": "https://{host}{positionUrl}", "params": {"domain": "$domain"}},
             "company_raw": "$company_raw",
             "location_raw": {"first": "@locations"},
             "locations_extra": {"rest": "@locations"},

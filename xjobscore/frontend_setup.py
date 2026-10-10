@@ -10,7 +10,6 @@ import asyncio
 import json
 import os
 from collections import Counter
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from xjobscore import publish, store

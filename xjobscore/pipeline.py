@@ -70,7 +70,7 @@ class GoldResult:
 
 
 class SystemRuns:
-    """Small durable job ledger used by the Inspector's system view."""
+    """Small durable job ledger used by the Console's system view."""
 
     async def begin(
         self, pool: Any, job_type: str, identity: str | None = None

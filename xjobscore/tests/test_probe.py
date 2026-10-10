@@ -125,3 +125,60 @@ async def test_probe_many_passes_concurrency_through():
 
     assert [one.outcome for one in results] == ["live", "live"]
     assert {call[1] for call in net.calls} == {4}
+
+
+@pytest.mark.parametrize("message", [
+    "This job has expired",
+    "This position is no longer active",
+    "This role has been filled",
+    "We are no longer accepting applications",
+    "Applications for this position are closed",
+])
+async def test_closed_page_message_is_distinct_from_a_dead_link(message):
+    response = Response(url=URL, status=200, headers={}, body=f"<h1>{message}</h1>".encode())
+    result = await probe.probe(_Net(response), URL, page=True)
+    assert result.outcome == "page_closed"
+    assert result.detail == message
+    assert result.status == 200
+
+
+async def test_job_page_redirect_is_page_closure_under_product_policy():
+    landed = "https://job-boards.greenhouse.io/anthropic?error=true"
+    result = await probe.probe(_Net(_response(200, landed)), URL, page=True)
+    assert result.outcome == "page_closed"
+    assert result.final_url == landed
+    assert result.detail == "job page redirected"
+
+
+async def test_closed_strings_inside_scripts_do_not_close_an_open_job():
+    response = Response(url=URL, status=200, headers={}, body=(
+        b'<script>const translations = {closed: "This job has expired"};</script>'
+        b'<h1>Engineer</h1><button>Apply</button>'
+    ))
+    assert (await probe.probe(_Net(response), URL, page=True)).outcome == "live"
+
+
+@pytest.mark.parametrize("status", [403, 429, 500])
+async def test_failed_page_request_does_not_become_redirect_closure(status):
+    net = _Net(NetError("refused", url="https://example.com/challenge", status=status))
+    assert (await probe.probe(net, URL, page=True)).outcome == "inconclusive"
+
+
+async def test_empty_javascript_shell_does_not_claim_the_job_is_live():
+    response = Response(url=URL, status=200, headers={}, body=b"<title>Jobs</title><div id='app'></div>")
+    assert (await probe.probe(_Net(response), URL, page=True)).outcome == "inconclusive"
+
+
+async def test_accepting_applications_until_role_is_filled_is_not_a_closure():
+    response = Response(url=URL, status=200, headers={}, body=b"<p>Apply until this position is filled.</p>")
+    assert (await probe.probe(_Net(response), URL, page=True)).outcome == "live"
+
+
+def test_page_closure_tombstone_keeps_channel_and_evidence():
+    from xjobscore.records import PAGE_CLOSED, Item
+    result = probe.Probe("page_closed", URL, URL, 200, "This job has expired")
+    payload = probe.tombstone(result, probed_at=NOW)
+    posting, = probe.parse_tombstone(Item("123", payload), payload["_probe"])
+    assert posting.closed_evidence == PAGE_CLOSED
+    assert payload["_probe"]["detail"] == "This job has expired"
+    assert payload["_probe"]["probed_at"] == NOW.isoformat()

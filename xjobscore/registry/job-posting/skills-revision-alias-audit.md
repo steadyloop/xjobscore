@@ -1,7 +1,9 @@
 # Remaining skills alias audit
 
 This audit covers the 996 canonical skills that predated the latest 27
-additions to `skills-revision.yaml`. It does not modify the dictionary.
+additions to the former skills revision draft. It does not modify the dictionary.
+The unused draft dictionary was removed during repository cleanup on 2026-10-07;
+`skills.yaml` remains the active taxonomy.
 
 ## Method
 

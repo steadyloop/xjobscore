@@ -4,21 +4,12 @@ import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import os
-from pathlib import Path
-import sys
 from uuid import uuid4
 
 import pytest
 
 from xjobscore import router, run, sources, store
 from xjobscore.records import Feed, Item, Posting, Record
-
-
-ONESHOT_PACKAGE = Path(__file__).parent.parent / "oneshot-ui"
-if str(ONESHOT_PACKAGE) not in sys.path:
-    sys.path.insert(0, str(ONESHOT_PACKAGE))
-
-from oneshot_ui.repository import PostgresRepository  # noqa: E402
 
 
 pytestmark = pytest.mark.skipif(
@@ -28,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
+async def test_poll_stores_jobs_from_each_feed(monkeypatch, core_schema):
     suffix = uuid4().hex
     source = f"pipeline_test_{suffix}"
     key = "board"
@@ -36,9 +27,6 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
     title = f"Schema Pipeline Intern {suffix}"
     now = datetime.now(timezone.utc)
     pool = core_schema.pool
-    # connect() returns early when handed a pool, so the repository reads the
-    # same throwaway schema the pipeline just wrote (repository.py:83-85).
-    repository = PostgresRepository(core_schema.dsn, pool=pool)
 
     async def harvest(feed, net):
         return Record(
@@ -152,14 +140,17 @@ async def test_poll_creates_a_job_visible_to_oneshot(monkeypatch, core_schema):
         pool, object(), replace(second_claim[0], type="ATS"), now
     ) == "ok"
 
-    await repository.connect()
-    result = await repository.list_jobs(q=title)
-    assert result["total"] == 2
-    assert {job["title"] for job in result["jobs"]} == {title}
-    listing = result["jobs"][0]
-    assert listing["title"] == title
-    assert listing["summary"] is None
-    assert "description" not in listing
+    async with pool.acquire() as conn:
+        postings = await conn.fetch(
+            "SELECT source, title, description FROM job_posting WHERE company_id = $1",
+            company_id,
+        )
+    assert len(postings) == 2
+    assert {row["source"] for row in postings} == {
+        f"{source}:{key}", f"{source}:{second_key}",
+    }
+    assert {row["title"] for row in postings} == {title}
+    assert all("Build the ingestion pipeline." in row["description"] for row in postings)
 
 
 @pytest.mark.asyncio
@@ -208,6 +199,39 @@ async def test_claim_due_feeds_filters_by_source(core_schema):
 
 
 @pytest.mark.asyncio
+async def test_claim_due_feeds_filters_by_key_part(core_schema):
+    """A Workday lane claims only its own data center's feeds, and the
+    `other` lane every data center without its own lane."""
+    now = datetime.now(timezone.utc)
+    pool = core_schema.pool
+    keys = ["a/wd1/ext", "b/wd3/ext", "c/wd12/ext", "d/wd103/ext"]
+
+    async with pool.acquire() as conn:
+        for key in keys:
+            await conn.execute(
+                "INSERT INTO token(ats, token, status) VALUES ('workday', $1, 'live')", key
+            )
+            await conn.execute(
+                "INSERT INTO feed(source, key, polling, due_at) VALUES ('workday', $1, true, $2)",
+                key,
+                now,
+            )
+        assert await store.due_key_parts(conn, now, "workday", 2) == ["wd1", "wd103", "wd12", "wd3"]
+        assert await run.due_lanes(conn, now) == ["workday:other", "workday:wd1", "workday:wd3"]
+
+        dry = await store.due_feeds(conn, now, source="workday", part=(2, ("wd3",), False), limit=5)
+        assert [feed.key for feed in dry] == ["b/wd3/ext"]
+
+        wd1 = await store.claim_due_feeds(conn, now, 5, source="workday", part=(2, ("wd1",), False))
+        assert [feed.key for feed in wd1] == ["a/wd1/ext"]
+        other = await store.claim_due_feeds(
+            conn, now, 5, source="workday", part=sources.lane_filter("workday:other")[1]
+        )
+        assert sorted(feed.key for feed in other) == ["c/wd12/ext", "d/wd103/ext"]
+        assert await run.due_lanes(conn, now) == ["workday:wd3"]
+
+
+@pytest.mark.asyncio
 async def test_due_feeds_reads_the_whole_queue_without_a_limit(core_schema):
     """The dry-run snapshot: no lease exists to bound a refilling claim."""
     suffix = uuid4().hex
@@ -251,6 +275,11 @@ async def test_claim_feed_leases_one_feed_regardless_of_due_at(core_schema):
     pool = core_schema.pool
 
     async with pool.acquire() as conn:
+        # feed (source, key) references token, so each feed needs its token.
+        for key in ("board", "off", "held"):
+            await conn.execute(
+                "INSERT INTO token(ats, token, status) VALUES ($1, $2, 'live')", source, key
+            )
         feed_id = await conn.fetchval(
             "INSERT INTO feed(source, key, polling, due_at) "
             "VALUES ($1, 'board', true, $2) RETURNING id",
@@ -454,7 +483,7 @@ async def test_missing_since_marks_first_absence_and_clears_on_return(core_schem
 
 
 @pytest.mark.asyncio
-async def test_missing_since_migration_backfills_from_the_first_complete_poll(core_schema):
+async def test_missing_since_migration_backfills_from_the_first_complete_poll(core_schema, live_migration):
     pool = core_schema.pool
     t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
     async with pool.acquire() as conn:
@@ -480,7 +509,6 @@ async def test_missing_since_migration_backfills_from_the_first_complete_poll(co
                 feed_id, t0 + timedelta(minutes=minutes), status)
         await conn.execute("UPDATE job_posting SET missing_since = NULL")
 
-        migration = Path(__file__).resolve().parents[1] / "migrations" / "20260929_job_posting_missing_since.sql"
-        await conn.execute(migration.read_text())
+        await conn.execute(live_migration("20260929_job_posting_missing_since.sql"))
 
         assert await conn.fetchval("SELECT missing_since FROM job_posting") == t0 + timedelta(minutes=45)

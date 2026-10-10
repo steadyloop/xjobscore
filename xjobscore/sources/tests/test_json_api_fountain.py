@@ -16,7 +16,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import json_api
 
 
-FIXTURE = Path(__file__).parents[2] / "fixtures" / "fountain.json"
+FIXTURE = Path(__file__).parents[3] / "fixtures" / "fountain.json"
 KEY = "renfroe/renfroe-home-office/US"
 
 

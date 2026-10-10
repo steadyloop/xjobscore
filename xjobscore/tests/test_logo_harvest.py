@@ -1,10 +1,13 @@
+import asyncio
 from io import BytesIO
 
+import httpx
 from PIL import Image
 
 from xjobscore.logo_harvest import (
     MAX_EDGE,
     MIN_EDGE,
+    _fetch_logo,
     _icon_candidates,
     _is_image,
     normalize,
@@ -87,3 +90,99 @@ def test_too_small_rejects_the_favicons_that_render_as_smudges():
     # browser's call rather than ours.
     assert not too_small(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>')
     assert not too_small(b"\x89PNG\r\n\x1a\n not a real png")
+
+
+def _fetch(routes: dict[str, httpx.Response | Exception], domain: str) -> tuple[bytes | None, list[str]]:
+    """Run `_fetch_logo` against canned responses; unlisted URLs 404."""
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        asked.append(url)
+        answer = routes.get(url, httpx.Response(404))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    async def run() -> bytes | None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await _fetch_logo(client, domain)
+
+    return asyncio.run(run()), asked
+
+
+GOOGLE = "https://www.google.com/s2/favicons?domain={}&sz=" + str(MAX_EDGE)
+
+
+def test_fetch_retries_www_when_the_apex_never_answers():
+    # Prudential: the apex times out while www serves.
+    logo = _png((64, 64))
+    found, asked = _fetch(
+        {
+            "https://acme.test/": httpx.ConnectTimeout("apex down"),
+            "https://acme.test/favicon.ico": httpx.ConnectTimeout("apex down"),
+            "https://www.acme.test/": httpx.Response(200, text="<html></html>"),
+            "https://www.acme.test/favicon.ico": httpx.Response(200, content=logo),
+        },
+        "acme.test",
+    )
+    assert found == logo
+    assert GOOGLE.format("acme.test") not in asked
+
+
+def test_fetch_skips_www_when_the_apex_answered():
+    # A host that served a page served its icons too; www would only repeat them.
+    _, asked = _fetch(
+        {"https://acme.test/": httpx.Response(200, text="<html></html>")},
+        "acme.test",
+    )
+    assert not any("www.acme.test" in url for url in asked)
+
+
+def test_fetch_falls_back_to_google_when_the_site_is_walled():
+    # Blue Origin: every request of ours draws a 429 bot checkpoint.
+    logo = _png((128, 128))
+    found, _ = _fetch(
+        {
+            "https://acme.test/": httpx.Response(429, text="checkpoint"),
+            "https://acme.test/favicon.ico": httpx.Response(429, text="checkpoint"),
+            GOOGLE.format("acme.test"): httpx.Response(200, content=logo),
+        },
+        "acme.test",
+    )
+    assert found == logo
+
+
+def test_fetch_ignores_googles_placeholder_globe():
+    # Google answers "no icon" with a 404 that still carries a globe PNG.
+    found, _ = _fetch(
+        {GOOGLE.format("acme.test"): httpx.Response(404, content=_png((16, 16)))},
+        "acme.test",
+    )
+    assert found is None
+
+
+def test_fetch_keeps_a_small_mark_only_when_nothing_larger_exists():
+    tiny, small = _png((16, 16)), _png((24, 24))
+    # Boeing: 16px on the site, 16px from Google -- stored rather than an empty box.
+    found, _ = _fetch(
+        {
+            "https://acme.test/": httpx.Response(200, text="<html></html>"),
+            "https://acme.test/favicon.ico": httpx.Response(200, content=tiny),
+            GOOGLE.format("acme.test"): httpx.Response(200, content=small),
+        },
+        "acme.test",
+    )
+    assert found == small
+
+    # Any drawable mark from any source beats the held small one.
+    big = _png((64, 64))
+    found, _ = _fetch(
+        {
+            "https://acme.test/": httpx.Response(200, text="<html></html>"),
+            "https://acme.test/favicon.ico": httpx.Response(200, content=tiny),
+            GOOGLE.format("acme.test"): httpx.Response(200, content=big),
+        },
+        "acme.test",
+    )
+    assert found == big

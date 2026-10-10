@@ -30,7 +30,7 @@ from xjobscore.records import Feed, Item
 from xjobscore.sources import json_api
 
 
-FIXTURES = Path(__file__).parents[2] / "fixtures"
+FIXTURES = Path(__file__).parents[3] / "fixtures"
 CONFIG = json_api.CONFIGS["usajobs"]
 
 

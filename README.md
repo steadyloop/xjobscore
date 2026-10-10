@@ -1,7 +1,7 @@
 # xjobscore
 
 Cross-board job aggregation with PostgreSQL-backed ingestion, deduplication,
-inspection, and application tracking.
+inspection, and publishing to the OneShot web app.
 
 ## Setup
 
@@ -15,55 +15,43 @@ psql -v ON_ERROR_STOP=1 --dbname=xjobscore --file=schema.sql
 ```
 
 Set `DATABASE_URL` in `.env` if it differs from
-`postgresql://localhost/xjobscore`. `uv run` installs each project's locked
+`postgresql://localhost/xjobscore`. `uv run` installs the project's locked
 dependencies automatically.
 
 ## Run the system
 
 One command starts the scheduler, Bronze → Silver → Gold workers, token
-heartbeat, and Inspector control plane at <http://127.0.0.1:8765>:
+heartbeat, and Console control plane at <http://127.0.0.1:8765>:
 
 ```bash
 uv run xjobscore
 ```
 
-For a database created before the unified runtime, apply its migration first:
+The operator interface lives in `xjobscore.console`. On the first restart after
+the rename, its default PostgreSQL history schema is renamed from `inspector`
+to `console` in a transaction, preserving existing history. Custom schema names
+are unchanged. Storage and Keyscan overrides now use `XJOBSCORE_CONSOLE_*`;
+the former `XJOBSCORE_INSPECTOR_*` settings remain deprecated aliases.
 
-```bash
-psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
-  --file=xjobscore/migrations/20260923_unified_runtime.sql
-```
-
-Scheduler board groups (the named, ordered sections on the Scheduler page)
-need their tables once on an existing database:
-
-```bash
-psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
-  --file=xjobscore/migrations/20261006_provider_groups.sql
-```
-
-Until then the board shows the plain provider list and grouping is switched off.
+The unified runtime and Scheduler board groups are defined in `schema.sql`.
+For an older database, compare its schema with the current storage contract
+and apply the required changes through a targeted SQL migration. Bootstrap
+files initialize empty databases and must not be rerun against existing data.
 
 System → Link checks controls the independent missing-job queue: pause/resume,
 concurrency, check starts/second, live rechecks, and failed-check retries.
-Apply `xjobscore/migrations/20261006_link_check_queue.sql` once on an existing
-database; it seeds missing jobs with the worker paused for rollout.
+Its `reconcile_control` and `reconcile_queue` tables are defined in `schema.sql`.
 
 The Scheduler page is the persistent pause/resume control. A fresh database
 runs immediately; an explicit pause survives restarts. Only one system process
 may own a database at a time.
 
-## Run OneShot
+## Web app
 
-OneShot — the JSON API at <http://127.0.0.1:8766>:
-
-```bash
-uv run -m oneshot_ui
-```
-
-OneShot is a uv workspace member, so it shares the root lockfile and `.venv`. The
-browser client lives in the separate oneshot-ui repo; set
-`XJOBSCORE_ONESHOT_CLIENT_URL` to its origin so CORS admits it.
+The separate `oneshot-ui` repository owns the browser client and its API
+(`api/`). Run `uv run oneshot-ui` from that repository to serve the web app
+at <http://127.0.0.1:8766>. This repository owns ingestion, enrichment, the
+Console, and publishing job data; it does not host the web app's API.
 
 ## Maintenance commands
 
@@ -97,16 +85,14 @@ invocation refuses with a pointer to `uv run xjobscore`.
 | `--user-agent VALUE` | Override the outbound HTTP user agent. |
 | `--help` | Show the CLI help. |
 
-For an existing database, install and populate the indexed Gold domain before
-serving the Software/Finance filters:
+Populate Gold's job types and domains before serving the Software/Finance filters:
 
 ```bash
-psql -v ON_ERROR_STOP=1 --dbname=xjobscore \
-  --file=xjobscore/migrations/20260910_job_domain.sql
 uv run python -m xjobscore.run --enrich job_type
 ```
 
-Apply the same migration to a separate thin serving database before publishing.
+Existing pipeline and serving databases need the `job_domain` columns and
+indexes defined in `schema.sql` and `frontend.sql` before enrichment or publishing.
 
 ## Check missing and ATS-closed jobs
 
@@ -165,8 +151,9 @@ Cleanup runs in the same transaction, so a failed publish or `--dry-run` rolls i
 back. Run it after Gold so both targets receive completed enrichments and duplicate selection.
 
 Initialize the local `xjobscore_frontend` database with `frontend.sql` and current
-OneShot migrations. Before the first publication, apply the core `frontend_identity`
-table definition and run `python -m xjobscore.frontend_setup`. This seeds shared
+OneShot migrations. Before the first publication, ensure the pipeline has the
+`frontend_identity` table defined in `schema.sql` and run
+`python -m xjobscore.frontend_setup`. This seeds shared
 job data and the pipeline's serving-ID map from existing Neon records. It refuses
 to overwrite a populated local frontend database and copies no personal tables.
 

@@ -279,6 +279,66 @@ async def test_zohorecruit_reads_hidden_jobs_and_meta_payloads():
     assert posting.company_raw == "Demo Labs"
 
 
+@pytest.mark.parametrize("body", [
+    "<html><body>Sign in</body></html>",
+    '<html><input id="meta" value="{}"><h1>Page unavailable</h1></html>',
+])
+async def test_zohorecruit_rejects_pages_without_jobs_payload(body):
+    url = "https://demo.zohorecruit.com/jobs/Careers"
+    net = RouteNet({("GET", url): response(url, body)})
+
+    with pytest.raises(ValueError, match="did not expose jobs payload"):
+        await zohorecruit.harvest(Feed(1, "zohorecruit", "demo"), net)
+
+
+async def test_zohorecruit_accepts_explicitly_empty_jobs():
+    url = "https://demo.zohorecruit.com/jobs/Careers"
+    net = RouteNet({("GET", url): response(url, '<input id="jobs" value="[]">')})
+
+    record = await zohorecruit.harvest(Feed(1, "zohorecruit", "demo"), net)
+
+    assert record.items == []
+    assert record.http_status == 200
+    assert not record.truncated
+
+
+@pytest.mark.parametrize("config, url", [
+    ({"url": "https://{key}.zohorecruit.eu/jobs/Careers"},
+     "https://demo.zohorecruit.eu/jobs/Careers"),
+    ({"path": "/jobs/Recruiting/"}, "https://demo.zohorecruit.com/jobs/Recruiting"),
+])
+async def test_zohorecruit_uses_configured_url_for_harvest_and_postings(config, url):
+    jobs = [{"id": "9", "Posting_Title": "Bioengineer"}]
+    body = f'<input id="jobs" value="{html.escape(json.dumps(jobs), quote=True)}">'
+    net = RouteNet({("GET", url): response(url, body)})
+    feed = Feed(1, "zohorecruit", "demo", config=config)
+
+    record = await zohorecruit.harvest(feed, net)
+    posting = zohorecruit.parse(feed, record.items[0], record.envelope)[0]
+
+    assert net.calls[0].url == url
+    assert posting.url_posting == f"{url}/9"
+    assert posting.apply_url == posting.url_posting
+
+
+async def test_homerun_strips_illegal_xml_control_character():
+    url = "https://feed.homerun.co/demo"
+    body = '''<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+      <id>h1</id><title>Engineer</title><link href="https://example/h1"/>
+      <description><![CDATA[<p>Use your real\x02world experience.</p>\n\t<p>R&amp;D</p>]]></description>
+    </entry></feed>'''
+    feed = Feed(1, "homerun", "demo")
+    record = await docxtract.harvest(
+        "homerun", feed, RouteNet({("GET", url): response(url, body)}),
+    )
+    posting = docxtract.parse("homerun", feed, record.items[0], {})[0]
+
+    assert len(record.items) == 1
+    assert not record.truncated
+    assert "\x02" not in record.items[0].payload
+    assert posting.description_html == "<p>Use your realworld experience.</p>\n\t<p>R&amp;D</p>"
+
+
 async def test_homerun_and_trakstar_document_configs_parse_vendor_extensions():
     homerun_xml = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry>
       <id>h1</id><title>ML Intern</title><link href="https://example/h1"/>

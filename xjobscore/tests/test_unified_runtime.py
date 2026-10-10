@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from xjobscore import gold, publish, router, run, silver, store
+from xjobscore import gold, publish, router, run, runtime, silver, store, workable_policy
+from xjobscore.net import NetError
 from xjobscore.pipeline import GoldCoordinator, GoldResult
 from xjobscore.records import Feed, Item, Record
 from xjobscore.runtime import (
@@ -44,10 +46,20 @@ class _Pool:
 
 
 class _Coordinator:
-    def __init__(self):
+    def __init__(self, *, hold_gold: bool = False):
         self.marked: list[tuple[set[int], set[int]]] = []
         self.finished: list[dict] = []
         self.notifications = 0
+        # When set, deferred Gold waits here instead of running at once, so a
+        # test can observe the poll returning before its Gold has run.
+        self.hold_gold = hold_gold
+        self.deferred: list = []
+
+    async def defer(self, job):
+        if self.hold_gold:
+            self.deferred.append(job)
+        else:
+            await job()
 
     async def begin_feed(self, pool, feed):
         return 17
@@ -106,7 +118,7 @@ async def test_gold_failure_degrades_pipeline_without_failing_source(monkeypatch
     monkeypatch.setattr(store, "finish_schedule_failure", failure)
     monkeypatch.setattr(store, "append_poll_log", observe)
 
-    async def mark_missing(conn, source, polled_at):
+    async def mark_missing(conn, source, polled_at, **kwargs):
         return 0
 
     monkeypatch.setattr(store, "mark_missing_postings", mark_missing)
@@ -141,8 +153,137 @@ async def test_gold_failure_degrades_pipeline_without_failing_source(monkeypatch
             "unsupported": 0,
             "secondhand": 0,
             "unparseable": 0,
+            "minted": 0,
         },
     }
+
+
+async def test_poll_returns_before_its_gold_runs(monkeypatch):
+    """Gold is handed to the coordinator, not awaited by the poll worker: on
+    2026-10-05 awaiting it was ~27s of a ~48s Workday poll whose fetch took
+    2.5s, and the worker could claim nothing else meanwhile."""
+    coordinator = _Coordinator(hold_gold=True)
+    feed = Feed(
+        id=1, source="fixture", key="acme", company_id=42, interval_s=900,
+        hold_until=NOW + timedelta(hours=1),
+    )
+
+    async def harvest(feed, net):
+        return Record(items=[Item("job-1", {"title": "Intern"})])
+
+    async def persist(conn, feed, prepared):
+        return [router.StoredRaw(prepared[0].item, 7, prepared[0].data_hash, True)]
+
+    async def process(conn, feed, stored, envelope, **kwargs):
+        kwargs["changes"].add(101, 42)
+        return silver.Counts(postings=1, created=1)
+
+    async def success(conn, feed, **kwargs):
+        return True
+
+    async def nothing(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(run.sources, "get", lambda name: harvest)
+    monkeypatch.setattr(router, "persist", persist)
+    monkeypatch.setattr(silver, "process", process)
+    monkeypatch.setattr(store, "finish_schedule_success", success)
+    monkeypatch.setattr(store, "append_poll_log", nothing)
+    monkeypatch.setattr(store, "mark_missing_postings", nothing)
+
+    outcome = await run.poll(_Pool(), object(), feed, NOW, coordinator=coordinator)
+
+    assert outcome == "ok"
+    assert coordinator.finished == []  # the run stays open until its Gold runs
+    assert len(coordinator.deferred) == 1
+
+    await coordinator.deferred[0]()
+
+    assert coordinator.notifications == 1
+    assert coordinator.finished[0]["outcome"] == "ok"
+    assert "gold" in coordinator.finished[0]["stages"]
+
+
+async def test_deferred_gold_is_bounded_and_drained():
+    from xjobscore import pipeline
+
+    coordinator = GoldCoordinator(_Runs())
+    running = peak = 0
+    done = []
+
+    def job(index):
+        async def run_job():
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+            done.append(index)
+        return run_job
+
+    for index in range(10):
+        await coordinator.defer(job(index))
+    await coordinator.drain()
+
+    assert peak == pipeline.DEFERRED_GOLD_CONCURRENCY
+    assert sorted(done) == list(range(10))
+
+
+async def test_defer_waits_once_the_gold_queue_is_full(monkeypatch):
+    from xjobscore import pipeline
+
+    monkeypatch.setattr(pipeline, "DEFERRED_GOLD_CONCURRENCY", 1)
+    monkeypatch.setattr(pipeline, "DEFERRED_GOLD_QUEUE", 2)
+    coordinator = GoldCoordinator(_Runs())
+    gate = asyncio.Event()
+
+    async def blocked():
+        await gate.wait()
+
+    await coordinator.defer(blocked)
+    await coordinator.defer(blocked)
+    third = asyncio.create_task(coordinator.defer(blocked))
+    await asyncio.sleep(0.02)
+    assert not third.done()  # backpressure: the poll worker waits here
+
+    gate.set()
+    await asyncio.wait_for(third, timeout=1)
+    await coordinator.drain()
+
+
+async def test_drain_cancels_gold_that_outlives_the_grace():
+    coordinator = GoldCoordinator(_Runs())
+    cancelled = asyncio.Event()
+
+    async def endless():
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    await coordinator.defer(endless)
+    await asyncio.sleep(0)
+    await asyncio.wait_for(coordinator.drain(0.05), timeout=1)
+
+    assert cancelled.is_set()
+
+
+async def test_a_failed_deferred_gold_job_is_logged_not_raised():
+    coordinator = GoldCoordinator(_Runs())
+    ran = []
+
+    async def broken():
+        raise RuntimeError("taxonomy unavailable")
+
+    async def fine():
+        ran.append(True)
+
+    await coordinator.defer(broken)
+    await coordinator.defer(fine)
+    await coordinator.drain()
+
+    assert ran == [True]
 
 
 class _Policy:
@@ -210,13 +351,43 @@ async def test_paused_scheduler_still_repairs_stored_gold():
     await worker.tick()
 
     assert gold.catchups == 1
+    assert gold.dedup == []
+    assert worker._next_delay_s is None
+
+
+async def test_enabled_dedup_runs_from_the_gold_worker(monkeypatch):
+    monkeypatch.setattr(runtime, "DEDUP_ENABLED", True)
+    gold = _GoldCoordinator()
+    worker = GoldWorker(
+        _Policy(False, _GoldPool()),
+        gold,
+        tick_s=60,
+        shutdown_grace_s=1,
+    )
+
+    await worker.tick()
+
     assert gold.dedup == [True]
     assert worker._next_delay_s == 30.0
 
 
-async def test_running_scheduler_passes_coordinator_to_pipeline(monkeypatch):
-    gold = _GoldCoordinator()
-    policy = _Policy(True)
+class _AcquirePool:
+    """Just enough pool for the tick's `due_sources` read."""
+
+    def acquire(self):
+        pool = self
+
+        class _Ctx:
+            async def __aenter__(self):
+                return pool
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _Ctx()
+
+
+def _scheduler(policy, gold):
     scheduler = SystemScheduler(
         policy,
         gold,
@@ -227,20 +398,204 @@ async def test_running_scheduler_passes_coordinator_to_pipeline(monkeypatch):
         shutdown_grace_s=1,
     )
     scheduler._net = object()
+    return scheduler
+
+
+async def test_running_scheduler_passes_coordinator_to_pipeline(monkeypatch):
+    gold = _GoldCoordinator()
+    scheduler = _scheduler(_Policy(True, _AcquirePool()), gold)
     seen = []
 
-    async def cycle(pool, net, cfg, now, *, coordinator, accepting):
-        seen.append(coordinator)
-        assert accepting() is True
-        return run.CycleResult(polled=2, drained=True)
+    async def due_sources(conn, now):
+        return ["greenhouse", "lever"]
 
-    monkeypatch.setattr(run, "cycle", cycle)
+    async def drain_source(pool, net, cfg, source, *, coordinator, accepting):
+        seen.append((source, coordinator))
+        assert accepting() is True
+        return 1
+
+    monkeypatch.setattr(store, "due_sources", due_sources)
+    monkeypatch.setattr(run, "drain_source", drain_source)
 
     await scheduler.tick()
+    await asyncio.gather(*scheduler._lanes.values())
+    await scheduler.tick()
 
-    assert seen == [gold]
+    assert sorted(seen[:2]) == [("greenhouse", gold), ("lever", gold)]
     assert scheduler.status()["last_polled"] == 2
     assert gold.dedup == []
+
+
+async def test_scheduler_skips_saved_workable_cooldown_and_resumes_when_it_expires(monkeypatch, caplog):
+    await workable_policy.policy().hold(86400)
+    deadline = await workable_policy.cooldown_until()
+    scheduler = _scheduler(_Policy(True, _AcquirePool()), _GoldCoordinator())
+    lanes = []
+
+    async def due_sources(conn, now):
+        return ["workable", "lever"]
+
+    async def drain_source(pool, net, cfg, source, **kwargs):
+        lanes.append(source)
+        return 0
+
+    monkeypatch.setattr(store, "due_sources", due_sources)
+    monkeypatch.setattr(run, "drain_source", drain_source)
+
+    for _ in range(2):
+        await scheduler.tick()
+        await asyncio.gather(*scheduler._lanes.values())
+
+    assert lanes == ["lever", "lever"]
+    notices = [record for record in caplog.records if "Workable rate-limited" in record.message]
+    assert len(notices) == 1
+    assert notices[0].exc_info is None
+
+    monkeypatch.setattr(run.time, "time", lambda: deadline + 1)
+    monkeypatch.setattr(runtime, "now_utc", lambda: datetime.fromtimestamp(deadline + 1, timezone.utc))
+    await scheduler.tick()
+    await asyncio.gather(*scheduler._lanes.values())
+
+    assert lanes == ["lever", "lever", "workable", "lever"]
+
+
+async def test_poll_logs_rate_limit_without_traceback(monkeypatch, caplog):
+    failures = []
+
+    async def harvest(feed, net):
+        raise NetError("Workable cooldown: 56779s remaining", url="https://apply.workable.com", status=429)
+
+    async def finish_failure(pool, feed, now, outcome, **kwargs):
+        failures.append((outcome, kwargs["status_code"]))
+
+    monkeypatch.setattr(run.sources, "get", lambda name: harvest)
+    monkeypatch.setattr(run, "_finish_failure", finish_failure)
+    feed = Feed(id=1, source="workable", key="acme")
+
+    assert await run.poll(_Pool(), object(), feed, NOW) == "error"
+    assert failures == [("error", 429)]
+    notices = [record for record in caplog.records if "rate limited (429)" in record.message]
+    assert len(notices) == 1
+    assert notices[0].exc_info is None
+
+
+async def test_a_slow_vendor_never_holds_another_vendors_lane(monkeypatch):
+    """The barrier this replaced: one long Avature poll idled Lever for minutes.
+
+    The tick starts a lane per due vendor and awaits none of them, so a vendor
+    whose lane finished is restarted on the next tick while another vendor's
+    lane is still mid-poll.
+    """
+    scheduler = _scheduler(_Policy(True, _AcquirePool()), _GoldCoordinator())
+    release_avature = asyncio.Event()
+    runs: list[str] = []
+
+    async def due_sources(conn, now):
+        return ["avature", "lever"]
+
+    async def drain_source(pool, net, cfg, source, *, coordinator, accepting):
+        runs.append(source)
+        if source == "avature":
+            await release_avature.wait()
+        return 1
+
+    monkeypatch.setattr(store, "due_sources", due_sources)
+    monkeypatch.setattr(run, "drain_source", drain_source)
+
+    await scheduler.tick()
+    await asyncio.sleep(0)
+    await scheduler.tick()
+    await asyncio.sleep(0)
+
+    # Lever ran twice; Avature's first lane is still open and was not doubled.
+    assert runs.count("lever") == 2
+    assert runs.count("avature") == 1
+    assert scheduler.status()["lanes"] == ["avature"]
+
+    release_avature.set()
+    await asyncio.gather(*scheduler._lanes.values())
+
+
+async def test_pausing_the_scheduler_stops_lanes_claiming(monkeypatch):
+    policy = _Policy(True, _AcquirePool())
+    scheduler = _scheduler(policy, _GoldCoordinator())
+    accepting_seen: list[bool] = []
+    paused = asyncio.Event()
+
+    async def due_sources(conn, now):
+        return ["lever"]
+
+    async def drain_source(pool, net, cfg, source, *, coordinator, accepting):
+        accepting_seen.append(accepting())
+        await paused.wait()
+        accepting_seen.append(accepting())
+        return 0
+
+    monkeypatch.setattr(store, "due_sources", due_sources)
+    monkeypatch.setattr(run, "drain_source", drain_source)
+
+    await scheduler.tick()
+    await asyncio.sleep(0)
+    policy.running = False
+    await scheduler.tick()
+    paused.set()
+    await asyncio.gather(*scheduler._lanes.values())
+
+    assert accepting_seen == [True, False]
+
+
+async def test_drain_source_polls_until_its_queue_is_empty(monkeypatch):
+    queue = [Feed(id=i, source="lever", key=f"k{i}") for i in range(5)]
+    polled: list[int] = []
+
+    async def claim_due_feeds(conn, now, limit, *, lease_seconds, source):
+        assert source == "lever"
+        return [queue.pop(0)] if queue else []
+
+    async def poll(pool, net, feed, claimed_at, **kwargs):
+        polled.append(feed.id)
+
+    monkeypatch.setattr(store, "claim_due_feeds", claim_due_feeds)
+    monkeypatch.setattr(run, "poll", poll)
+    monkeypatch.setattr(run.sources, "width", lambda source: 3)
+
+    count = await run.drain_source(_AcquirePool(), object(), run.Config(dsn="", user_agent="test"), "lever")
+
+    assert count == 5
+    assert sorted(polled) == [0, 1, 2, 3, 4]
+
+
+async def test_drain_source_claims_only_its_lanes_partition(monkeypatch):
+    seen = []
+
+    async def claim_due_feeds(conn, now, limit, *, lease_seconds, source, part=None):
+        seen.append((source, part))
+        return []
+
+    monkeypatch.setattr(store, "claim_due_feeds", claim_due_feeds)
+
+    await run.drain_source(
+        _AcquirePool(), object(), run.Config(dsn="", user_agent="test"), "workday:wd3"
+    )
+
+    assert set(seen) == {("workday", (2, ("wd3",), False))}
+    assert len(seen) == run.sources.width("workday:wd3")
+
+
+async def test_due_lanes_splits_partitioned_sources(monkeypatch):
+    async def due_sources(conn, now):
+        return ["greenhouse", "workday"]
+
+    async def due_key_parts(conn, now, source, index):
+        assert (source, index) == ("workday", 2)
+        return ["wd1", "wd103", "wd12", "wd5"]
+
+    monkeypatch.setattr(store, "due_sources", due_sources)
+    monkeypatch.setattr(store, "due_key_parts", due_key_parts)
+
+    assert await run.due_lanes(object(), NOW) == [
+        "greenhouse", "workday:other", "workday:wd1", "workday:wd5",
+    ]
 
 
 class _LockConnection:
@@ -262,8 +617,8 @@ class _LockConnection:
 def _settings() -> RuntimeSettings:
     return RuntimeSettings(
         dsn="postgresql://test/runtime",
-        inspector_store_dsn="postgresql://test/runtime",
-        inspector_schema="inspector",
+        console_store_dsn="postgresql://test/runtime",
+        console_schema="console",
     )
 
 
@@ -296,18 +651,18 @@ async def test_second_runtime_is_rejected_and_connection_is_closed(monkeypatch):
     assert conn.closed is True
 
 
-async def test_runtime_settings_prefer_unified_names_and_accept_legacy_aliases(
+async def test_runtime_settings_use_unified_names(
     monkeypatch,
 ):
     monkeypatch.setattr("xjobscore.runtime.config.dsn", lambda: "postgresql://test/db")
     monkeypatch.setattr(
         "xjobscore.runtime.config.persistence_dsn", lambda: "postgresql://test/db"
     )
-    monkeypatch.setattr("xjobscore.runtime.config.persistence_schema", lambda: "inspector")
+    monkeypatch.setattr("xjobscore.runtime.config.persistence_schema", lambda: "console")
     monkeypatch.setenv("XJOBSCORE_PORT", "9000")
-    monkeypatch.setenv("XJOBSCORE_INSPECTOR_PORT", "8999")
-    monkeypatch.delenv("XJOBSCORE_TICK_S", raising=False)
-    monkeypatch.setenv("XJOBSCORE_INSPECTOR_RUNNER_TICK_S", "12")
+    monkeypatch.setenv("XJOBSCORE_CONSOLE_PORT", "8999")
+    monkeypatch.setenv("XJOBSCORE_TICK_S", "12")
+    monkeypatch.setenv("XJOBSCORE_CONSOLE_RUNNER_TICK_S", "12")
 
     settings = RuntimeSettings.from_env()
 
@@ -741,7 +1096,7 @@ async def test_runtime_settings_read_the_publish_target(monkeypatch):
     monkeypatch.setattr(
         "xjobscore.runtime.config.persistence_dsn", lambda: "postgresql://test/db"
     )
-    monkeypatch.setattr("xjobscore.runtime.config.persistence_schema", lambda: "inspector")
+    monkeypatch.setattr("xjobscore.runtime.config.persistence_schema", lambda: "console")
     monkeypatch.setenv("PUBLISH_DATABASE_URL", "postgresql://neon/thin")
     monkeypatch.setenv("XJOBSCORE_PUBLISH_INTERVAL_S", "900")
     monkeypatch.delenv("XJOBSCORE_PUBLISH_SEEN_DRIFT_S", raising=False)

@@ -1,5 +1,5 @@
 """Standalone probe engine, shared by the crawl and by callers that only need
-to classify a single token's liveness (e.g. the inspector's Tokens page).
+to classify a single token's liveness (e.g. the console's Tokens page).
 
 The logic here was factored out of ``Keyscan._probe`` so both the full crawl
 and one-off validators run *exactly* the same per-vendor rules. Everything is
@@ -130,7 +130,7 @@ async def probe_rule(
 
     ``liveness_only`` narrows the question to "does this board exist" and lets
     a rule swap in its cheap variant (``light_url`` / ``light_method``). The
-    crawl leaves it off because it persists ``job_count``; the inspector's
+    crawl leaves it off because it persists ``job_count``; the console's
     Tokens page turns it on because it stores nothing but ``token.status``.
     """
     if controls is None:

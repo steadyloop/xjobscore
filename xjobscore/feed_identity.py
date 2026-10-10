@@ -33,7 +33,7 @@ def canonical_feed_source(source: str) -> str:
 # lives in token.config), and while the API does ignore board-id case
 # (arbe/C6.001 and arbe/c6.001 return identical payloads), the slug half does
 # not fold the same way across renames. Board-level dedup lives in
-# inspector/tokens.py `_BOARD`, keyed on the upper-cased board id.
+# console/tokens.py `_BOARD`, keyed on the upper-cased board id.
 CASE_INSENSITIVE_SOURCES = frozenset({
     "workday",          # Cisco_Careers / cisco_careers -- one board
     "greenhouse",       # Duolingo / duolingo -- both 88 jobs

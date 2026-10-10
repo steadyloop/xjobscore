@@ -17,7 +17,7 @@ from xjobscore.records import Feed
 from xjobscore.sources import docxtract
 
 
-FIXTURES = Path(__file__).parents[2] / "fixtures"
+FIXTURES = Path(__file__).parents[3] / "fixtures"
 
 
 class LinkFixtureNet:

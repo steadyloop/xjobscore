@@ -1,7 +1,8 @@
 # Token validation — observed signals
 
 Probed 2026-08-19, one run, one IP. Real token from the registry or
-`validated-live.toml`; invalid token = `zq7x4kplmv2wnrt9`.
+the historical live-token snapshot; invalid token = `zq7x4kplmv2wnrt9`.
+The generated snapshot was removed during repository cleanup on 2026-10-07.
 
 `target` is what the rule actually requests: `probe_url` for json/xml,
 `board_url` for html. A page-based check can only prove the *page* is gone,
@@ -50,14 +51,14 @@ not the board.
 | comeet | 400 on both; needs the two-step board-id → api-token handshake |
 | recruitcrm | untested — the rule is `POST` with `count_path=('data','jobs')`; the probe run above sent GET and got 405, so no verdict either way |
 | fountain, talentreef | no rule |
-| bullhorn, vincere | no token in registry or `validated-live.toml` |
+| bullhorn, vincere | no token in registry or the historical live-token snapshot |
 
 ## Notes
 
 Observed behavior and follow-up fixes in the shared probe:
 
 - **Closed 2026-10-06 — Paylocity sweep repeated and lost failed HTML controls.**
-  The inspector fetched its nonexistent-board control for every token, with
+  The console fetched its nonexistent-board control for every token, with
   no shared cache. A control 429 went through HTTP retries and host cooldowns,
   but its final failure was ignored: the candidate's HTTP 200 could still be
   recorded as live without a successful comparison. A generic HTTP-200 error
@@ -88,7 +89,7 @@ Observed behavior and follow-up fixes in the shared probe:
 - **Closed 2026-10-05 — workday 422.** Workday answers 422 both for a bogus
   tenant and for a real one on the wrong `wdN` host (no redirect). The probe
   now tries the rule's other `shards`: a 200 elsewhere is `absent` /
-  `wrong_shard` with `moved_to` naming the working token, which the inspector
+  `wrong_shard` with `moved_to` naming the working token, which the console
   adds as live; 422 on every shard is `absent` / `tenant_not_found`. A disabled
   site's 403 `{"errorCode": "S22"}` is `absent` / `site_disabled`.
 - **Closed 2026-10-06 — a dead tenant host.** A transport failure now asks
@@ -154,7 +155,7 @@ Context that is not a keyscan issue:
 Measured 2026-08-20, one board per vendor, decompressed response bytes summed
 over every request a probe makes. `heavy` is the crawl's path
 (`probe_rule(..., liveness_only=False)`, which persists `job_count`); `light`
-is what the inspector's Tokens page now asks for, since it stores `status` and
+is what the console's Tokens page now asks for, since it stores `status` and
 `checked_at` and nothing else.
 
 | vendor | board | heavy | light | how |
@@ -198,7 +199,7 @@ classes:
 
 | class | source | n | disagreements |
 |---|---|---|---|
-| live | `validated-live.toml`, 6 boards per vendor | 36 | 0 |
+| live | historical live-token snapshot, 6 boards per vendor | 36 | 0 |
 | live, zero open jobs | dedicated sweep, see below | 22 | 1 by design (ashby), 1 bug (gem, now fixed) |
 | dead — was real, now gone | `token.status = 'dead'` in Postgres, plus registry rows that have since 404'd | 5 | 0 |
 | synthetic — never existed (`zq7x4kplmv2wnrt9`) | one per vendor | 7 | 0 |

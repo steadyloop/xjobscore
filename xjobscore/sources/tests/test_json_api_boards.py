@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from xjobscore.net import Response
+from xjobscore.net import NetError, Response
 from xjobscore.records import Feed
 from xjobscore.sources import json_api
 
 
-FIXTURES = Path(__file__).parents[2] / "fixtures"
+FIXTURES = Path(__file__).parents[3] / "fixtures"
 
 
 class FixtureNet:
@@ -236,3 +236,63 @@ async def test_boards_that_state_their_own_status_report_it():
 
     assert recruitee.source_active is True
     assert unstop.source_active is True
+
+
+class LeverRegionNet:
+    def __init__(self, us_status, eu_status):
+        self.statuses = {
+            "https://api.lever.co/v0/postings/acme?mode=json": us_status,
+            "https://api.eu.lever.co/v0/postings/acme?mode=json": eu_status,
+        }
+        self.calls = []
+
+    async def get(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        status = self.statuses[url]
+        if status is None or status >= 400:
+            raise NetError("board request failed", url=url, status=status)
+        body = json.dumps([{"id": "first"}, {"id": "second"}]).encode() if status == 200 else b""
+        return Response(url=url, status=status, headers={}, body=body)
+
+
+@pytest.mark.parametrize("us_status, expected_calls", [(200, 1), (404, 2)])
+@pytest.mark.parametrize("config", [
+    {}, {"url": "https://api.lever.co/v0/postings/acme?mode=json"},
+])
+async def test_lever_checks_eu_after_us_404(us_status, expected_calls, config):
+    net = LeverRegionNet(us_status, 200)
+    record = await json_api.harvest("lever", Feed(1, "lever", "acme", config=config), net)
+
+    assert record.http_status == 200
+    assert [item.external_id for item in record.items] == ["first", "second"]
+    assert not record.truncated
+    assert len(net.calls) == expected_calls
+
+
+async def test_lever_missing_in_both_regions_still_fails():
+    net = LeverRegionNet(404, 404)
+    with pytest.raises(NetError) as caught:
+        await json_api.harvest("lever", Feed(1, "lever", "acme"), net)
+
+    assert caught.value.status == 404
+    assert len(net.calls) == 2
+
+
+@pytest.mark.parametrize("status", [None, 429, 500])
+async def test_lever_does_not_mask_transport_or_server_failures(status):
+    net = LeverRegionNet(status, 200)
+    with pytest.raises(NetError) as caught:
+        await json_api.harvest("lever", Feed(1, "lever", "acme"), net)
+
+    assert caught.value.status == status
+    assert len(net.calls) == 1
+
+
+async def test_lever_configured_eu_endpoint_preserves_conditional_requests():
+    url = "https://api.eu.lever.co/v0/postings/acme?mode=json"
+    feed = Feed(1, "lever", "acme", config={"url": url}, etag='"stored"')
+    net = LeverRegionNet(404, 304)
+    record = await json_api.harvest("lever", feed, net)
+
+    assert record.http_status == 304
+    assert net.calls == [{"url": url, "etag": '"stored"', "concurrency": 40}]
