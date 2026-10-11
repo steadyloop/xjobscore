@@ -419,6 +419,8 @@ SIMPLE: dict[str, dict] = {
         "envelope": {"meta": "@meta"},
         "fields": {
             "title": "@title", "url_posting": "@absolute_url", "apply_url": "@absolute_url", "company_raw": "@company_name",
+            # On the employer's own site for ~1 in 7 boards; a greenhouse.io link is refused.
+            "company_domain": "@absolute_url",
             "location_raw": "@location.name", "description_html": {"unescape": "@content"}, "requisition_id": "@requisition_id",
             "published_at": {"date": "@first_published"}, "published_at_precision": "exact",
             "source_updated_at": {"date": "@updated_at"}, "deadline_at": {"date": "@application_deadline"},
@@ -831,6 +833,8 @@ SIMPLE: dict[str, dict] = {
         "fields": {
             "title": "@title", "url_posting": "@url", "apply_url": "@application_url",
             "company_raw": {"fallback": ["$envelope.name", "$key"]},
+            # The account's own "about us"; silver fills it into an empty company.
+            "company_description": "$envelope.description",
             "location_raw": {"join": ["@city", "@state", "@country"]}, "description_html": "@description",
             "requisition_id": "@code", "employment_type": "@employment_type", "published_at": {"date": "@published_on"},
             # DERIVED -- measured on vendors-tbd/workable.md, 136 rows.
@@ -965,6 +969,8 @@ SIMPLE: dict[str, dict] = {
         "fields": {
             "title": "@title", "url_posting": "@careers_url", "apply_url": "@careers_apply_url",
             "company_raw": "@company_name",
+            # A custom careers domain names the employer; a recruitee.com link is refused.
+            "company_domain": "@careers_url",
             "location_raw": {"fallback": ["@location", {"join": ["@city", "@state_name", "@country"]}]},
             "description_html": {"concat": ["@description", "@requirements"], "sep": "\n"},
             "requisition_id": "@guid", "employment_type": "@employment_type_code",
@@ -2309,7 +2315,11 @@ DETAIL_A: dict[str, dict] = {
         "fields": {
             "title": "@name",
             "url_posting": "@url",
-            "company_raw": {"fallback": ["@companyName", "@board.title", "$key"]},
+            # Not `board.title`: that is the page heading ("Current Openings").
+            "company_raw": {"fallback": ["@companyName", "@board.companyName", "$key"]},
+            # Usually ats.rippling.com, which is no company's domain and is
+            # refused; a board hosted on the employer's own site names it.
+            "company_domain": "@board.boardURL",
             "location_raw": {"fallback": [{"first": "@workLocations"}, {"first": "@locations"}, "@workLocation.label"]},
             "locations_extra": {"fallback": [{"rest": "@workLocations"}, {"rest": "@locations"}]},
             "description_html": {"fallback": [{"concat": ["@description.role", "@description.company"]}, "@description"]},
@@ -2445,6 +2455,8 @@ DETAIL_B: dict[str, dict] = {
             "title": "@title",
             "url_posting": {"template": "https://jobs.gem.com/{key}/{id}"},
             "company_raw": "$company_raw",
+            # Rarely set (1 of 917 boards, 2026-10-11), but it is the employer's own site.
+            "company_domain": "@companyUrl",
             "description_html": "@descriptionHtml",
             "location_raw": {"first": {"map": "@locations", "value": "@name"}},
             "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
@@ -2610,6 +2622,8 @@ DETAIL_B: dict[str, dict] = {
             "title": "@name",
             "url_posting": "@postingUrl",
             "company_raw": "@company.name",
+            # Also kept inside description_html below; this copy is the company's.
+            "company_description": "@jobAd.sections.companyDescription.text",
             "apply_url": "@applyUrl",
             "location_raw": "@location.fullLocation",
             "description_html": {

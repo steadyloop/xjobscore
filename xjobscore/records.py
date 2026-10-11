@@ -113,6 +113,8 @@ class Feed:
     enabled: bool = True
     company_id: int | None = None
     company_name: str | None = None
+    # Silver may still fill this company's domain or description (store.fill_company).
+    company_needs_fill: bool = True
     description: str = ""  # company description resolved through the token
     type: str = "ATS"
     etag: str | None = None

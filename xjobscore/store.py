@@ -120,6 +120,7 @@ def _feed_from_row(row: asyncpg.Record) -> Feed:
         enabled=row["enabled"],
         company_id=row.get("company_id"),
         company_name=row.get("company_name"),
+        company_needs_fill=row.get("company_needs_fill", True),
         description=row.get("description") or "",
         type=row.get("type") or "ATS",
         etag=row.get("etag"),
@@ -141,7 +142,11 @@ _FEED_SELECT = """
         f.interval_s, f.etag, f.last_modified, f.res_hash, f.list_total, f.last_full_poll_at,
         f.strikes, f.due_at, f.hold_until,
         t.company_id,
-        c.name AS company_name
+        c.name AS company_name,
+        -- False once there is nothing left for silver to fill: see fill_company.
+        (c.id IS NULL OR (c.reviewed = 'pending'
+                          AND (c.domain IS NULL OR c.description IS NULL)
+                          AND NOT c.tags ? 'fill_checked_at')) AS company_needs_fill
     FROM feed f
     LEFT JOIN token t ON t.ats = f.source AND t.token = f.key
     LEFT JOIN company c ON c.id = t.company_id
@@ -976,6 +981,20 @@ def normalize_domain(value: str | None, *, board_hosts_ok: bool = False) -> str 
     return host
 
 
+# A job link on careers.acme.com names acme.com; the subdomain is the board.
+_CAREER_LABELS = frozenset(
+    "careers career jobs job karriere werkenbij vacatures recrutement recruiting "
+    "join apply work hiring talent".split()
+)
+
+
+def _without_career_label(domain: str | None) -> str | None:
+    if domain is None:
+        return None
+    label, _, rest = domain.partition(".")
+    return rest if label in _CAREER_LABELS and "." in rest else domain
+
+
 # Serving identity of a company row `c`: its domain once it has one. Shared by
 # serving (allocation, joins) and every writer that can change the inputs.
 COMPANY_KEY = "CASE WHEN c.domain IS NOT NULL THEN jsonb_build_array('domain', lower(c.domain)) ELSE jsonb_build_array('source_id', c.id, c.name) END"
@@ -1036,23 +1055,29 @@ async def fill_company(
     rows claiming one domain is a merge, and that is a person's decision. Each
     filled value is also kept as ``<field>_machine`` so the Companies page can
     show what the machine guessed. Returns whether anything changed.
+
+    Runs once per company: every attempt stamps ``fill_checked_at``, even one
+    that found nothing usable, and a stamped row is never tried again.
     """
-    domain = normalize_domain(domain)
+    domain = _without_career_label(normalize_domain(domain))
     description = (description or "").strip() or None
-    if domain is None and description is None:
-        return False
     try:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
                 SELECT domain, description FROM company
                  WHERE id = $1 AND reviewed = 'pending'
+                   AND NOT tags ? 'fill_checked_at'
                    FOR UPDATE
                 """,
                 company_id,
             )
             if row is None:
                 return False
+            await conn.execute(
+                "UPDATE company SET tags = tags || jsonb_build_object('fill_checked_at', now()) WHERE id = $1",
+                company_id,
+            )
             patch: dict[str, Any] = {}
             if row["domain"] is None and domain is not None and not await conn.fetchval(
                 "SELECT EXISTS (SELECT 1 FROM company WHERE lower(domain) = $1)", domain

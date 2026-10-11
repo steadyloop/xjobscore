@@ -398,6 +398,7 @@ async def process(
                 continue
             if (
                 not is_simplify
+                and feed.company_needs_fill
                 and company_id not in filled
                 and (posting.company_domain or posting.company_description)
             ):
@@ -406,7 +407,7 @@ async def process(
                     conn,
                     company_id,
                     domain=posting.company_domain,
-                    description=posting.company_description,
+                    description=_plain_text(posting.company_description),
                 )
             # ats_closed_at is the stated channel only. No link_checked_at
             # here: a stated closure arrives with the listing, and that moment

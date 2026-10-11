@@ -128,7 +128,7 @@ async def test_silver_fills_once_per_batch_and_never_on_a_dry_run(core_schema, m
             title="Intern",
             url_posting=f"https://{host}/jobs/{index}",
             company_domain=f"https://{host}/jobs/{index}",
-            company_description="Makes rockets.",
+            company_description="<p>Makes <b>rockets</b>.</p>",
         )
         for index in range(3)
     }
@@ -161,10 +161,91 @@ async def test_silver_fills_once_per_batch_and_never_on_a_dry_run(core_schema, m
         assert fills == []
         async with conn.transaction():
             await silver.process(conn, feed, stored, {}, seen_at=NOW)
-        domain = await conn.fetchval("SELECT domain FROM company WHERE id = $1", company_id)
+        row = await conn.fetchrow("SELECT domain, description FROM company WHERE id = $1", company_id)
 
     assert fills == [company_id]
+    # Vendors send HTML; the company row keeps the text.
+    assert (row["domain"], row["description"]) == (host, "Makes rockets.")
+
+
+@pytest.mark.asyncio
+async def test_a_company_is_tried_once_even_when_nothing_was_usable(core_schema):
+    async with core_schema.pool.acquire() as conn:
+        company_id = await _company(conn)
+        first = await store.fill_company(conn, company_id, domain="https://boards.greenhouse.io/acme")
+        second = await store.fill_company(conn, company_id, domain=_host(), description="Late.")
+        row = await conn.fetchrow("SELECT domain, description, tags FROM company WHERE id = $1", company_id)
+
+    assert (first, second) == (False, False)
+    assert (row["domain"], row["description"]) == (None, None)
+    assert "fill_checked_at" in row["tags"]
+
+
+@pytest.mark.asyncio
+async def test_a_career_subdomain_names_the_company_site(core_schema):
+    host = _host()
+    async with core_schema.pool.acquire() as conn:
+        company_id = await _company(conn)
+        await store.fill_company(conn, company_id, domain=f"https://careers.{host}/o/intern")
+        domain = await conn.fetchval("SELECT domain FROM company WHERE id = $1", company_id)
+
     assert domain == host
+
+
+@pytest.mark.asyncio
+async def test_the_feed_says_whether_its_company_still_needs_filling(core_schema):
+    cases = {
+        "nocompany": None,
+        "fresh": {},
+        "verified": {"reviewed": "verified"},
+        "complete": {"domain": _host(), "description": "Done."},
+        "tried": {"tags": {"fill_checked_at": "2026-10-11"}},
+        "halfway": {"domain": _host()},
+    }
+    async with core_schema.pool.acquire() as conn:
+        for key, columns in cases.items():
+            token = f"{key}-{uuid4().hex[:6]}"
+            company_id = None if columns is None else await _company(conn, **columns)
+            await conn.execute(
+                "INSERT INTO token (ats, token, status, company_id) VALUES ('greenhouse', $1, 'live', $2)",
+                token, company_id,
+            )
+            await store.import_feed(conn, source="greenhouse", key=token, enabled=True)
+            cases[key] = token
+        feeds = {feed.key: feed.company_needs_fill for feed in await store.all_feeds(conn)}
+
+    assert {key: feeds[token] for key, token in cases.items()} == {
+        "nocompany": True, "fresh": True, "verified": False,
+        "complete": False, "tried": False, "halfway": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_silver_skips_the_fill_when_the_feed_needs_none(core_schema, monkeypatch):
+    posting = Posting(
+        external_id="job-0", title="Intern", url_posting="https://x.test/0",
+        company_domain=_host(),
+    )
+    monkeypatch.setattr(
+        silver.sources, "parser", lambda name: lambda feed, item, envelope: [posting]
+    )
+
+    async def write(conn, **kwargs):
+        return 1, True, True
+
+    async def fail(*args, **kwargs):
+        raise AssertionError("fill_company must not run")
+
+    monkeypatch.setattr(store, "upsert_job_posting", write)
+    monkeypatch.setattr(store, "fill_company", fail)
+    async with core_schema.pool.acquire() as conn:
+        company_id = await _company(conn)
+        feed = Feed(id=1, source="greenhouse", key="acme", company_id=company_id,
+                    type="ATS", company_needs_fill=False)
+        async with conn.transaction():
+            await silver.process(
+                conn, feed, [router.StoredRaw(Item("job-0", {}), 1, "raw-0", True)], {}, seen_at=NOW
+            )
 
 
 @pytest.mark.asyncio
