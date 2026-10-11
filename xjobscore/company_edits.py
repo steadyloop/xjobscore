@@ -10,9 +10,10 @@ import json
 import logging
 from typing import Any
 
+from xjobscore.store import COMPANY_KEY, IDENTITY_LOCK
+
 logger = logging.getLogger(__name__)
 FIELDS = ("name", "domain", "description", "tags")
-COMPANY_KEY = "CASE WHEN c.domain IS NOT NULL THEN jsonb_build_array('domain', lower(c.domain)) ELSE jsonb_build_array('source_id', c.id, c.name) END"
 
 
 def _changes(value: Any) -> dict[str, Any]:
@@ -47,7 +48,7 @@ async def sync(source: Any, target: Any, *, dry_run: bool = False) -> dict[int, 
                 async with source.transaction():
                     # Use the identity allocator's lock. Renaming a domainless
                     # company or changing its domain must keep its serving ID.
-                    await source.execute("SELECT pg_advisory_xact_lock(627031007)")
+                    await source.execute("SELECT pg_advisory_xact_lock($1)", IDENTITY_LOCK)
                     company = await source.fetchrow(
                         f"SELECT c.id FROM company c JOIN frontend_identity m "
                         f"ON m.kind = 'company' AND m.key = {COMPANY_KEY} "

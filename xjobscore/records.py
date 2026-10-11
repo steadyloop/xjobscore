@@ -200,6 +200,10 @@ class Posting:
     closed_evidence: str | None = None
 
     company_raw: str | None = None
+    # What the vendor says about the employer itself: a URL or host on its own
+    # site, and its "about us" text. Silver fills only empty company columns.
+    company_domain: str | None = None
+    company_description: str | None = None
 
     apply_url: str | None = None  # apply_url
     location_raw: str | None = None

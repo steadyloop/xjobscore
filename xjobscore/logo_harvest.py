@@ -364,8 +364,7 @@ async def harvest_one(
         target = await pool.fetchval(
             "SELECT domain FROM company WHERE id = $1", company_id
         ) or ""
-    target = target.strip().lower().removeprefix("http://").removeprefix("https://")
-    target = target.split("/")[0]
+    target = store.normalize_domain(target, board_hosts_ok=True)
     if not target:
         return None
 

@@ -49,7 +49,7 @@ import {
 import { clockTime, paintWorkers, setFeeds, startLive } from "/static/system/live.js";
 import { setPollActivity } from "/static/system/activity.js";
 
-renderNav("System");
+renderNav("Console");
 
 const RENDER_CHUNK = 200;
 const SEARCH_DEBOUNCE_MS = 180;

@@ -154,14 +154,6 @@ SELECT count(*)::int AS total,
 """
 )
 
-_ALIAS_INSERT = """
-INSERT INTO company_alias (alias_norm, company_id, alias)
-SELECT norm, $2, raw FROM unnest($1::text[], $3::text[]) AS t(norm, raw)
-ON CONFLICT (alias_norm) DO NOTHING
-RETURNING alias_norm
-"""
-
-
 def _validate(name: str, value: str, allowed: tuple[str, ...]) -> str:
     if value not in allowed:
         raise ValueError(f"unknown {name}: {value!r}")
@@ -178,6 +170,20 @@ def _clean(value: str | None) -> str | None:
         return None
     trimmed = value.strip()
     return trimmed or None
+
+
+def _domain(value: str) -> str | None:
+    """A typed domain in stored form; blank clears it, nonsense is refused.
+
+    Stored form (``acme.com``, never ``https://Acme.com/``) is what keeps the
+    UNIQUE column honest: two spellings of one host would both fit.
+    """
+    if _clean(value) is None:
+        return None
+    domain = store.normalize_domain(value, board_hosts_ok=True)
+    if domain is None:
+        raise ValueError(f"not a domain: {value!r}")
+    return domain
 
 
 def _review_state(record: Any) -> str:
@@ -258,29 +264,6 @@ async def get(pool, company_id: int) -> dict[str, Any] | None:
     return _shape(record) if record else None
 
 
-async def _write_aliases(conn, company_id: int, names: list[str | None]) -> list[str]:
-    """Point every spelling of *names* at ``company_id``, never stealing one.
-
-    A rename must not orphan the old spelling: postings already resolved
-    through the token slug, and ``silver`` will keep seeing that slug on the
-    wire long after the display name is fixed. ``DO NOTHING`` is the safety --
-    an ``alias_norm`` already owned by a different company stays owned by it,
-    because a verification is not a merge.
-    """
-    seen: dict[str, str] = {}
-    for raw in names:
-        if not raw:
-            continue
-        for candidate in store.alias_candidates(raw):
-            seen.setdefault(candidate, raw)
-    if not seen:
-        return []
-    records = await conn.fetch(
-        _ALIAS_INSERT, list(seen.keys()), company_id, list(seen.values())
-    )
-    return [record["alias_norm"] for record in records]
-
-
 async def verify(
     pool,
     company_id: int,
@@ -315,7 +298,7 @@ async def verify(
             new_name = current["name"] if name is None else _clean(name)
             if not new_name:
                 raise ValueError("name cannot be empty")
-            new_domain = current["domain"] if domain is None else _clean(domain)
+            new_domain = current["domain"] if domain is None else _domain(domain)
             new_description = (
                 current["description"] if description is None else _clean(description)
             )
@@ -327,6 +310,7 @@ async def verify(
                 patch["name_machine"] = current["name"]
             if "domain_machine" not in tags:
                 patch["domain_machine"] = current["domain"]
+            old_key = await store.company_identity_key(conn, company_id)
             await conn.execute(
                 """
                 UPDATE company
@@ -347,7 +331,10 @@ async def verify(
                 patch,
                 by,
             )
-            await _write_aliases(conn, company_id, [current["name"], new_name])
+            # Renaming a domainless row or changing its domain changes its
+            # serving key; OneShot must keep the ID it already shows.
+            await store.rekey_company_identity(conn, company_id, old_key)
+            await store.write_company_aliases(conn, company_id, current["name"], new_name)
     return await get(pool, company_id)
 
 
@@ -398,7 +385,7 @@ async def owner_of_domain(pool, domain: str | None) -> dict[str, Any] | None:
     A bare "that domain is taken" leaves the operator to go and find the other
     row by hand. Naming it is what makes the conflict actionable in one step.
     """
-    cleaned = _clean(domain)
+    cleaned = store.normalize_domain(domain, board_hosts_ok=True)
     if cleaned is None:
         return None
     async with pool.acquire() as conn:
@@ -482,7 +469,7 @@ async def merge(pool, source_id: int, target_id: int) -> dict[str, Any] | None:
             source = await conn.fetchrow(
                 "SELECT name, domain FROM company WHERE id = $1", source_id
             )
-            await _write_aliases(conn, target_id, [source["name"]])
+            await store.write_company_aliases(conn, target_id, source["name"])
 
             # A logo is per-company and the target keeps its own; the source's
             # is only worth moving when the target has none.

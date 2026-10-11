@@ -628,6 +628,55 @@ def test_scheduler_feed_detail(imported_client):
     assert imported_client.get(f"/api/scheduler/feeds/{gone}").status_code == 404
 
 
+def _count_builds(client, monkeypatch) -> list[int]:
+    """Count full fleet reads -- the expensive step the board must share."""
+    console = client.app.state.console
+    calls = [0]
+    original = console.feed_rows
+
+    async def counted():
+        calls[0] += 1
+        return await original()
+
+    monkeypatch.setattr(console, "feed_rows", counted)
+    return calls
+
+
+def test_scheduler_board_is_built_once_for_every_route(imported_client, monkeypatch):
+    builds = _count_builds(imported_client, monkeypatch)
+    feeds = imported_client.get("/api/scheduler/feeds")
+    overview = imported_client.get("/api/scheduler/overview").json()
+    detail = imported_client.get(f"/api/scheduler/feeds/{REF}").json()
+    imported_client.get("/api/scheduler/feeds")
+
+    assert builds == [1]
+    assert overview["feed_count"] == len(feeds.json()["feeds"]) == 3
+    assert overview["counts_by_status"] == {"never_polled": 1, "paused": 2}
+    assert detail["feed"]["feed_ref"] == REF
+    assert imported_client.get("/api/scheduler/feeds/not-a-ref").status_code == 404
+
+
+def test_scheduler_board_rebuilds_after_a_write(imported_client, monkeypatch):
+    builds = _count_builds(imported_client, monkeypatch)
+    imported_client.get("/api/scheduler/feeds")
+    response = imported_client.post(f"/api/feeds/{REF}/policy", json={"paused": True})
+    assert response.status_code == 200
+    after_write = builds[0]  # the write resolves its feed with a fleet read too
+    imported_client.get("/api/scheduler/feeds")
+    imported_client.get("/api/scheduler/overview")
+    assert builds[0] == after_write + 1  # one rebuild, then shared again
+
+
+def test_scheduler_board_is_sent_gzipped_only_when_accepted(imported_client):
+    zipped = imported_client.get("/api/scheduler/feeds")
+    assert zipped.headers["content-encoding"] == "gzip"
+    plain = imported_client.get(
+        "/api/scheduler/feeds", headers={"Accept-Encoding": "identity"}
+    )
+    assert "content-encoding" not in plain.headers
+    assert plain.json() == zipped.json()
+
+
 def test_scheduler_events_degrade_to_empty(imported_client):
     """No pool means no fleet-wide poll log -- an empty list, never a 500."""
     body = imported_client.get("/api/scheduler/events").json()
@@ -1347,6 +1396,10 @@ class FakeCompaniesPool:
         if self.raises is not None:
             raise self.raises
         return "UPDATE 1"
+
+    async def fetchval(self, sql, *args):
+        # No frontend_identity table: the serving re-key is a no-op here.
+        return None
 
 
 def _company_row(**overrides):

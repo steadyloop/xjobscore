@@ -100,20 +100,8 @@ def load_candidates(path: Path) -> list[Candidate]:
     return rows
 
 
-def _display_name(candidate: Candidate) -> str:
-    """What to call the company. The slug is the fallback, never a blank name.
-
-    ``company.name`` is NOT NULL and the frontend prints it on every posting,
-    so a nameless board becomes `windborne-systems` rather than an empty cell --
-    ugly, visibly wrong, and therefore certain to be corrected in the queue.
-    """
-    return candidate.name or resolve_key(candidate.ats, candidate.token)
-
-
-async def _mint(
-    conn: Connection, candidate: Candidate, *, name: str, tag: str | None
-) -> int:
-    """Create the company row for a token nothing else resolves.
+def _tags(tag: str | None) -> dict[str, Any]:
+    """Batch marker for minted rows.
 
     *tag* marks a batch for later removal. It is a jsonb key on `tags` rather
     than a column because it is temporary by construction -- a recon batch that
@@ -121,10 +109,7 @@ async def _mint(
     `tags ? 'recon'` is both the UI's exclusion filter and the teardown's
     selector.
     """
-    tags: dict[str, Any] = {}
-    if tag:
-        tags[tag] = datetime.now(timezone.utc).date().isoformat()
-    return await store.mint_company(conn, name, discovered_from="keyscan", tags=tags)
+    return {tag: datetime.now(timezone.utc).date().isoformat()} if tag else {}
 
 
 def _mark_imported(db_path: Path, rows: list[Candidate], *, now: str) -> int:
@@ -159,41 +144,28 @@ async def seed_keyscan_tokens(
     written: list[Candidate] = []
 
     async with pool.acquire() as conn:
-        aliases = await store.load_alias_map(conn)
         async with conn.transaction():
             for candidate in candidates:
-                name = _display_name(candidate)
-                company_id = await store.resolve_company(
-                    conn, resolve_key(candidate.ats, candidate.token), aliases=aliases
-                )
-                if company_id is None and candidate.name:
-                    company_id = await store.resolve_company(
-                        conn, candidate.name, aliases=aliases
-                    )
-                if company_id is None:
-                    if dry_run:
+                # The name wins over the slug, and a nameless board is minted
+                # under its slug rather than a blank: ``company.name`` is NOT
+                # NULL and printed on every posting, so `windborne-systems` is
+                # visibly wrong and certain to be corrected in the queue.
+                names = (candidate.name, resolve_key(candidate.ats, candidate.token))
+                if dry_run:
+                    for name in filter(None, names):
+                        if await store.resolve_company(conn, name) is not None:
+                            result.resolved += 1
+                            break
+                    else:
                         result.minted += 1
-                        continue
-                    company_id = await _mint(conn, candidate, name=name, tag=tag)
+                    continue
+                company_id, minted = await store.resolve_or_mint(
+                    conn, *names, discovered_from="keyscan", tags=_tags(tag)
+                )
+                if minted:
                     result.minted += 1
-                    # Feed the in-memory map as we go: two tokens naming the
-                    # same employer must land on one company, and the map is
-                    # the only thing that sees the row we just inserted.
-                    for key in store.alias_candidates(name):
-                        aliases.setdefault(key, company_id)
                 else:
                     result.resolved += 1
-
-                if dry_run:
-                    continue
-
-                await store.write_company_aliases(
-                    conn, company_id, name, resolve_key(candidate.ats, candidate.token)
-                )
-                for key in store.alias_candidates(
-                    resolve_key(candidate.ats, candidate.token)
-                ):
-                    aliases.setdefault(key, company_id)
 
                 # The conflict branch declines any token the native feeder
                 # already owns; only what actually landed may be marked done.

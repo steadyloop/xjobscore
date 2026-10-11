@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from functools import partial
@@ -24,6 +25,7 @@ import xml.etree.ElementTree as ET
 from xjobscore.net import Net, NetError, etag, last_modified
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
 from .docxtract_configs import CONFIGS
+from .json_api import shared_job_type
 
 
 # Mirror the public Summer2027-Internships README selection.  The repository's
@@ -515,6 +517,16 @@ def _simplify_is_current(payload: object, *, now: datetime | None = None) -> boo
 
 def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     config = CONFIGS[name]
+    postings = _parse(config, feed, item)
+    # Opt-in per board: `"job_type": "shared"` types each posting from its
+    # title with the shared ladder (json_api.shared_job_type). Boards without
+    # it keep job_type None, exactly as before.
+    if config.get("job_type") == "shared":
+        postings = [replace(posting, job_type=shared_job_type(posting.title)) for posting in postings]
+    return postings
+
+
+def _parse(config: dict, feed: Feed, item: Item) -> list[Canonical]:
     if config["parser"] == "schemaorg":
         return [_schemaorg(config, feed, item)]
     if config["parser"] == "rss":

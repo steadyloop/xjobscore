@@ -52,6 +52,10 @@ class FakeCompanyPool:
         self.executed.append((sql, args))
         return "UPDATE 1"
 
+    async def fetchval(self, sql, *args):
+        # No frontend_identity table: the serving re-key is a no-op here.
+        return None
+
 
 def _row(**overrides):
     row = {

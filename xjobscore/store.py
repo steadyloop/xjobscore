@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from functools import cache
 import re
 from typing import TYPE_CHECKING, Any
 import unicodedata
@@ -31,6 +32,8 @@ __all__ = [
     "dedup_descriptions",
     "due_feeds",
     "ensure_token_company",
+    "company_identity_key",
+    "fill_company",
     "fetchable_feeds",
     "finish_schedule_failure",
     "finish_schedule_success",
@@ -40,10 +43,13 @@ __all__ = [
     "load_alias_map",
     "mark_checked",
     "mint_company",
+    "normalize_domain",
     "raw_candidates",
     "replace_dup_groups",
+    "rekey_company_identity",
     "replay_feeds",
     "resolve_company",
+    "resolve_or_mint",
     "save_raw",
     "set_feed_enabled",
     "set_schedule_interval",
@@ -866,12 +872,14 @@ async def mint_company(
     )
 
 
-async def write_company_aliases(conn: Connection, company_id: int, *raw: str) -> None:
+async def write_company_aliases(conn: Connection, company_id: int, *raw: str | None) -> list[str]:
     """Point every spelling of *raw* at ``company_id``, never stealing one.
 
     The slug matters as much as the name: silver sees the slug on the wire for
     vendors whose postings carry no company name, and a name-only alias set
     would leave those postings unresolvable.
+
+    Returns the keys actually written; one another company owns is skipped.
     """
     seen: dict[str, str] = {}
     for value in raw:
@@ -880,17 +888,200 @@ async def write_company_aliases(conn: Connection, company_id: int, *raw: str) ->
         for candidate in alias_candidates(value):
             seen.setdefault(candidate, value)
     if not seen:
-        return
-    await conn.execute(
+        return []
+    records = await conn.fetch(
         """
         INSERT INTO company_alias (alias_norm, company_id, alias)
         SELECT norm, $2, raw FROM unnest($1::text[], $3::text[]) AS t(norm, raw)
         ON CONFLICT (alias_norm) DO NOTHING
+        RETURNING alias_norm
         """,
         list(seen.keys()),
         company_id,
         list(seen.values()),
     )
+    return [record["alias_norm"] for record in records]
+
+
+async def resolve_or_mint(
+    conn: Connection,
+    *names: str | None,
+    discovered_from: str,
+    tags: dict[str, Any] | None = None,
+) -> tuple[int, bool]:
+    """Find the company any of *names* already resolves to, else mint one.
+
+    Returns ``(company_id, minted)``. Names resolve in the order given and the
+    first non-empty one names a minted row; every name becomes an alias.
+
+    Concurrent callers naming the same employer must land on one company, and
+    ``company.name`` is not unique, so the alias keys are the only shared
+    identity. Each key is taken as a transaction-scoped advisory lock, in
+    sorted order so two callers holding overlapping keys cannot deadlock, and
+    the alias lookup is repeated under the lock: the first caller mints and
+    writes the aliases, every later one finds them. The lock lives until the
+    caller's transaction commits, which is also when those aliases become
+    visible -- so the caller must be inside one.
+    """
+    present = [name for name in dict.fromkeys(name.strip() for name in names if name) if name]
+    if not present:
+        raise ValueError("resolve_or_mint needs a name")
+    for key in sorted({key for name in present for key in alias_candidates(name)}):
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            f"company_alias:{key}",
+        )
+    company_id = None
+    for name in present:
+        company_id = await resolve_company(conn, name)
+        if company_id is not None:
+            break
+    minted = company_id is None
+    if company_id is None:
+        company_id = await mint_company(
+            conn, present[0], discovered_from=discovered_from, tags=tags
+        )
+    await write_company_aliases(conn, company_id, *present)
+    return company_id, minted
+
+
+# Hosts that serve job boards for many employers. A posting URL on one names
+# the vendor, never the employer, so it is no company's domain -- not even the
+# vendor's own, which a person can still set by hand.
+@cache
+def _board_hosts() -> frozenset[str]:
+    from keyscan.rules import RULES
+
+    return frozenset(domain for rule in RULES for domain in rule.domains)
+
+
+def normalize_domain(value: str | None, *, board_hosts_ok: bool = False) -> str | None:
+    """The bare host in *value* (a URL or a host), or None if it is no domain.
+
+    Lowercase, no scheme, path, query, port or leading ``www.`` -- the form
+    every stored ``company.domain`` already has, so the UNIQUE column compares
+    like with like. A job-board host is refused unless *board_hosts_ok*: a
+    person typing ``rippling.com`` for Rippling means it, a feed never does.
+    """
+    host = (value or "").strip().lower()
+    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", host)
+    host = re.split(r"[/?#]", host, maxsplit=1)[0]
+    host = host.rsplit("@", 1)[-1].split(":", 1)[0].strip(".")
+    host = host.removeprefix("www.")
+    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
+        return None
+    labels = host.split(".")
+    if not board_hosts_ok and any(".".join(labels[i:]) in _board_hosts() for i in range(len(labels))):
+        return None
+    return host
+
+
+# Serving identity of a company row `c`: its domain once it has one. Shared by
+# serving (allocation, joins) and every writer that can change the inputs.
+COMPANY_KEY = "CASE WHEN c.domain IS NOT NULL THEN jsonb_build_array('domain', lower(c.domain)) ELSE jsonb_build_array('source_id', c.id, c.name) END"
+# Held by serving's identity allocator; a re-key must not race it.
+IDENTITY_LOCK = 627031007
+
+
+async def company_identity_key(conn: Connection, company_id: int) -> Any:
+    """The row's current serving key; read it before changing domain or name."""
+    return await conn.fetchval(f"SELECT {COMPANY_KEY} FROM company c WHERE c.id = $1", company_id)
+
+
+async def rekey_company_identity(conn: Connection, company_id: int, old_key: Any) -> None:
+    """Keep a company's serving ID after its domain or (domainless) name changed.
+
+    The mapping row under *old_key* moves to the row's current key and keeps
+    the old one in ``previous_keys``. Without this the next publish allocates a
+    fresh ID, and OneShot loses everything tied to the old one. Call it in the
+    transaction that changed the row. A no-op where publication was never set
+    up, where the key did not change, or where the new key already has a
+    mapping of its own (re-pointing would violate its uniqueness).
+    """
+    if await conn.fetchval("SELECT to_regclass('frontend_identity')") is None:
+        return
+    await conn.execute("SELECT pg_advisory_xact_lock($1)", IDENTITY_LOCK)
+    await conn.execute(
+        f"""
+        UPDATE frontend_identity m
+           SET previous_keys = CASE WHEN m.previous_keys @> jsonb_build_array(m.key)
+                                    THEN m.previous_keys
+                                    ELSE m.previous_keys || jsonb_build_array(m.key) END,
+               key = {COMPANY_KEY}
+          FROM company c
+         WHERE c.id = $1 AND m.kind = 'company' AND m.key = $2::jsonb
+           AND m.key IS DISTINCT FROM {COMPANY_KEY}
+           AND NOT EXISTS (
+               SELECT 1 FROM frontend_identity taken
+                WHERE taken.kind = 'company' AND taken.key = {COMPANY_KEY}
+           )
+        """,
+        company_id,
+        old_key,
+    )
+
+
+async def fill_company(
+    conn: Connection,
+    company_id: int,
+    *,
+    domain: str | None = None,
+    description: str | None = None,
+) -> bool:
+    """Fill what a feed knows about a company into columns nobody has set.
+
+    Machine facts never overwrite: an empty column is filled, a set one is left
+    alone, and a verified or rejected row is a person's answer and is not
+    touched at all. A domain another company already holds is skipped -- two
+    rows claiming one domain is a merge, and that is a person's decision. Each
+    filled value is also kept as ``<field>_machine`` so the Companies page can
+    show what the machine guessed. Returns whether anything changed.
+    """
+    domain = normalize_domain(domain)
+    description = (description or "").strip() or None
+    if domain is None and description is None:
+        return False
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT domain, description FROM company
+                 WHERE id = $1 AND reviewed = 'pending'
+                   FOR UPDATE
+                """,
+                company_id,
+            )
+            if row is None:
+                return False
+            patch: dict[str, Any] = {}
+            if row["domain"] is None and domain is not None and not await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM company WHERE lower(domain) = $1)", domain
+            ):
+                patch["domain"] = domain
+            if row["description"] is None and description is not None:
+                patch["description"] = description
+            if not patch:
+                return False
+            old_key = await company_identity_key(conn, company_id) if "domain" in patch else None
+            await conn.execute(
+                """
+                UPDATE company
+                   SET domain = COALESCE($2, domain),
+                       description = COALESCE($3, description),
+                       tags = tags || $4::jsonb
+                 WHERE id = $1
+                """,
+                company_id,
+                patch.get("domain"),
+                patch.get("description"),
+                {f"{field}_machine": value for field, value in patch.items()},
+            )
+            if old_key is not None:
+                await rekey_company_identity(conn, company_id, old_key)
+            return True
+    except asyncpg.UniqueViolationError:
+        # Another feed claimed the same domain since the check; theirs stands.
+        return False
 
 
 async def ensure_token_company(
@@ -900,34 +1091,15 @@ async def ensure_token_company(
 
     Returns ``(company_id, minted)``. Called from silver when a polled ATS
     feed's postings resolve to nothing, so a bulk-promoted token stops dropping
-    every posting it fetches.
-
-    Concurrent feeds naming the same employer must land on one company, and
-    ``company.name`` is not unique, so the alias keys are the only shared
-    identity. Each key is taken as a transaction-scoped advisory lock, in
-    sorted order so two callers holding overlapping keys cannot deadlock, and
-    the alias lookup is repeated under the lock: the first caller mints and
-    writes the aliases, every later one finds them. The lock lives until the
-    caller's transaction commits, which is also when those aliases become
-    visible -- so the caller must be inside one (silver's poll path is).
+    every posting it fetches. Resolution and minting are ``resolve_or_mint``'s,
+    so the caller must be inside a transaction (silver's poll path is).
     """
     ats, token = canonical_feed_identity(ats, token)
     slug = token_slug(ats, token)
-    name = (name or "").strip() or slug
-    keys = sorted({*alias_candidates(name), *alias_candidates(slug)})
     async with conn.transaction():
-        for key in keys:
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"company_alias:{key}",
-            )
-        company_id = await resolve_company(conn, name)
-        if company_id is None:
-            company_id = await resolve_company(conn, slug)
-        minted = company_id is None
-        if company_id is None:
-            company_id = await mint_company(conn, name, discovered_from="feed")
-        await write_company_aliases(conn, company_id, name, slug)
+        company_id, minted = await resolve_or_mint(
+            conn, name, slug, discovered_from="feed"
+        )
         await conn.execute(
             """
             UPDATE token SET company_id = $1

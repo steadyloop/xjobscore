@@ -8,9 +8,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from xjobscore import publish
+from xjobscore.store import COMPANY_KEY, IDENTITY_LOCK
 
 
-COMPANY_KEY = "CASE WHEN c.domain IS NOT NULL THEN jsonb_build_array('domain', lower(c.domain)) ELSE jsonb_build_array('source_id', c.id, c.name) END"
 JOB_KEY = "jsonb_build_array(j.source, j.source_key)"
 JOB_JOIN = f"JOIN frontend_identity jm ON jm.kind = 'job' AND jm.key = {JOB_KEY}"
 COMPANY_JOIN = f"JOIN frontend_identity cm ON cm.kind = 'company' AND cm.key = {COMPANY_KEY}"
@@ -153,7 +153,7 @@ async def prepare(connection: Any) -> list[Any]:
         job_ids = [row["id"] for row in cohort]
         company_ids = list({row["company_id"] for row in cohort})
         async with connection.transaction():
-            await connection.execute("SELECT pg_advisory_xact_lock(627031007)")
+            await connection.execute("SELECT pg_advisory_xact_lock($1)", IDENTITY_LOCK)
             await connection.execute(f"""
                 INSERT INTO frontend_identity(kind, key)
                 SELECT 'company', {COMPANY_KEY} FROM company c

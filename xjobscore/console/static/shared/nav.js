@@ -4,7 +4,7 @@ import { api } from "/static/shared/api.js";
 import { el } from "/static/shared/format.js";
 
 const LINKS = [
-  ["System", "/system"],
+  ["Console", "/system"],
   ["Keyscan", "/keyscan"],
   ["Tokens", "/tokens"],
   ["Feeds", "/feeds"],
@@ -43,7 +43,7 @@ export function renderNav(active) {
   );
 
   header.replaceChildren(
-    el("div", { class: "brand" }, "xJobscore Console"),
+    el("div", { class: "brand" }, "xJobscore"),
     el(
       "nav",
       {},

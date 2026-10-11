@@ -1052,6 +1052,10 @@ SIMPLE: dict[str, dict] = {
             },
             "requisition_id": "@job.requisition_id", "employment_type": "@employment_type_text",
             "workplace_type_raw": "@workplace_type",
+            # The shared ladder as-is, read off the title (2026-10-10: 555 of
+            # 11,578 active postings typed, 190 of them US; the only
+            # intern-titled row left untyped is a PhD one, by design).
+            "job_type": {"classify": _job_type_from("@title")},
         },
         "extra": {
             "department": "@job.department.name", "division": "@job.division", "job": "@job",
@@ -2551,6 +2555,10 @@ DETAIL_B: dict[str, dict] = {
             "description_html": "@requisitionDescription",
             "requisition_id": "@clientRequisitionID",
             "employment_type": "@workLevelCode.shortName",
+            # The shared ladder as-is, read off the title (2026-10-10: 2,214 of
+            # 146,311 active postings typed, 2,069 of them US; untyped
+            # intern titles are SkillBridge and pharmacy, by design).
+            "job_type": {"classify": _job_type_from("@requisitionTitle")},
             "published_at": {"date": "@postDate"}, "published_at_precision": "exact",
             "locations_extra": {"rest": {"map": "@requisitionLocations", "value": "@nameCode.shortName"}},
         },

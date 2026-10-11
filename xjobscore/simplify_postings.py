@@ -51,19 +51,9 @@ async def company(
     resolved = await store.resolve_company(conn, name, aliases=aliases)
     if resolved is not None or dry_run or aliases is not None:
         return resolved, False
-    # Match the existing employer mint's locking convention, without changing
-    # any existing token's company or attaching employers to Simplify's token.
-    for key in sorted(store.alias_candidates(name)):
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-            f"company_alias:{key}",
-        )
-    resolved = await store.resolve_company(conn, name)
-    if resolved is not None:
-        return resolved, False
-    resolved = await store.mint_company(conn, name, discovered_from="simplify")
-    await store.write_company_aliases(conn, resolved, name)
-    return resolved, True
+    # Never changes an existing token's company or attaches employers to
+    # Simplify's token: only the listing's own employer is resolved or minted.
+    return await store.resolve_or_mint(conn, name, discovered_from="simplify")
 
 
 def token_candidate(url: str, company_id: int) -> tuple[str, str, int] | None:

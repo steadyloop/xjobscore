@@ -22,7 +22,7 @@ from xjobscore import classify
 from xjobscore.probe import parse_tombstone
 from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
-from .json_api_configs import CONFIGS
+from .json_api_configs import CONFIGS, _job_type_from
 
 
 _TOKEN = re.compile(r"{([^}]+)}")
@@ -1008,6 +1008,17 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         key: _value(value, item.payload, context) for key, value in config.get("extra", {}).items()
     }
     return [Posting(external_id=item.external_id, **fields)]
+
+
+# The shared title ladder for adapters with no JSON field table (docxtract and
+# the bespoke modules): the same rules, run by the same `classify` branch of
+# `_value` that a config's `{"classify": _job_type_from(...)}` runs.
+_TITLE_JOB_TYPE = {"classify": _job_type_from("@title")}
+
+
+def shared_job_type(title: str) -> str | None:
+    """The opportunity kind the shared ladder reads off a parsed title."""
+    return _value(_TITLE_JOB_TYPE, {"title": title}, {})
 
 
 def _parse_probe(item: Item, evidence: dict) -> list[Canonical]:

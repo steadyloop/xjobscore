@@ -19,7 +19,6 @@ Set `DATABASE_URL` in `.env` if it differs from
 dependencies automatically.
 
 ## Run the system
-
 One command starts the scheduler, Bronze → Silver → Gold workers, token
 heartbeat, and Console control plane at <http://127.0.0.1:8765>:
 
