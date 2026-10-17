@@ -37,11 +37,16 @@ For an older database, compare its schema with the current storage contract
 and apply the required changes through a targeted SQL migration. Bootstrap
 files initialize empty databases and must not be rerun against existing data.
 
-System → Link checks controls the independent missing-job queue: pause/resume,
+Console → Link checks controls the independent missing-job queue: pause/resume,
 concurrency, check starts/second, live rechecks, and failed-check retries.
 Its `reconcile_control` and `reconcile_queue` tables are defined in `schema.sql`.
 
-The Scheduler page is the persistent pause/resume control. A fresh database
+New Workable feeds default to a 12-hour polling interval; other providers keep
+the 15-minute default. Explicit intervals supplied during token promotion take
+precedence. Existing feed intervals remain operator settings. Coverage marks a
+board overdue after three missed intervals: 36 hours for a 12-hour Workable feed.
+
+The Console page's run switch is the persistent pause/resume control. A fresh database
 runs immediately; an explicit pause survives restarts. Only one system process
 may own a database at a time.
 
