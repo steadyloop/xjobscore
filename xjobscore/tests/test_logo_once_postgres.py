@@ -113,3 +113,41 @@ async def test_migration_stamps_existing_logos_with_todays_domain(core_schema, l
         )
         await conn.execute(sql)
         assert dict(await _logo(conn, company_id)) == {"bytes": PNG, "domain": domain}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reviewed,state,website,preserved",
+    [
+        ("verified", "resolved_shared_website", "https://banner.example/stores", True),
+        ("verified", "resolved_shared_website", "http://banner.example", True),
+        ("pending", "resolved_shared_website", "https://banner.example", False),
+        ("verified", "resolved", "https://banner.example", False),
+        ("verified", "resolved_shared_website", "", False),
+        ("verified", "resolved_shared_website", "ftp://banner.example", False),
+        ("verified", "resolved_shared_website", "https:///stores", False),
+        ("verified", None, None, False),
+    ],
+)
+async def test_verified_shared_website_logo_is_preserved(
+    core_schema, fetched, reviewed, state, website, preserved
+):
+    async with core_schema.pool.acquire() as conn:
+        company_id = await _company(conn, None)
+        tags = {"company_resolution": {"state": state, "website": website}}
+        await conn.execute(
+            "UPDATE company SET reviewed=$2,tags=$3::jsonb WHERE id=$1",
+            company_id, reviewed, tags,
+        )
+        await logo_harvest._store(conn, company_id, None, PNG)
+
+    await logo_harvest.harvest(core_schema.pool)
+    await logo_harvest.harvest(core_schema.pool)
+
+    async with core_schema.pool.acquire() as conn:
+        assert dict(await _logo(conn, company_id)) == {
+            "bytes": PNG if preserved else None,
+            "domain": None,
+        }
+        assert await conn.fetchval("SELECT domain FROM company WHERE id=$1", company_id) is None
+    assert fetched[0] == []
