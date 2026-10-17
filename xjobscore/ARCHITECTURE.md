@@ -106,7 +106,7 @@ latest ETag, and advances `last_poll_at` and `due_at`. `last_change_at` and
 Partial fetches and network/parser failures preserve committed bronze rows,
 increment strikes, clear the lease, and use exponential backoff capped at 24
 hours. They never set `paused_at` — that column is the operator's, written only
-from the console's Scheduler page, and a feed is never given up on
+from the Console page's scheduler board, and a feed is never given up on
 automatically. A parser failure deliberately leaves the
 old `res_hash`, so the next poll retries the snapshot.
 
@@ -337,10 +337,9 @@ The exact scoring, selection rules, live-data findings, and tradeoffs are in
 
 Cross-source deduplication is at stage one and **generates candidates only**.
 Its key hierarchy is provider-native ATS requisition identity, then an exact
-apply URL when the ATS is unsupported, then
-`(company_id, normalize_title(title), normalize_location(location_text))` only
-for rows with no apply URL. This prevents different known requisitions or
-different visible apply links from being merged by the weaker role fallback.
+apply URL when the ATS is unsupported. Both require the same company identity.
+Rows without either URL identity stay ungrouped: matching titles and locations
+can describe distinct openings, so they never establish a duplicate match.
 Fallback keys with more than ten members are dropped as placeholders;
 authoritative ATS identities are not frequency-capped. Group ids are `uuid5`
 of the versioned key, so the pass is idempotent.

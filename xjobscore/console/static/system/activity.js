@@ -1,5 +1,6 @@
-/* The Activity pane combines process logs, durable polls, and system runs.
-   Scheduler controls and worker cells remain owned by app.js and live.js. */
+/* The Activity pane (Enrich, above the board) and the Activity log (below it)
+   combine process logs, durable polls, and system runs. Scheduler controls
+   and workers remain owned by board.js and live.js. */
 import { el, formatCount } from "/static/shared/format.js";
 import {
   activityEntries, enrichmentSummary, filterActivity, nextCheck,
@@ -7,6 +8,7 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const pane = $("activity-pane");
+const logPane = $("activity-log");
 const state = {
   run: null, worker: null, logs: [], polls: [], runs: [], boot: "",
   historyAvailable: false, logsAvailable: false, pollsAvailable: false,
@@ -103,14 +105,14 @@ export function setPollActivity(polls, available) {
 }
 
 function updateFollow() {
-  if (!pane) return;
+  if (!logPane) return;
   $("activity-follow").setAttribute("aria-pressed", String(state.following));
   $("activity-follow").textContent = state.following ? "↓ following" : "↓ follow latest";
 }
 
 let renderSignature = null;
 function renderLogs() {
-  if (!pane) return;
+  if (!logPane) return;
   const entries = activityEntries({ logs: state.logs, polls: state.polls, runs: state.runs, boot: state.boot });
   const processSelect = $("activity-process");
   const selected = processSelect.value;
@@ -179,7 +181,7 @@ function renderLogs() {
   stream.scrollTop = state.following ? stream.scrollHeight : scrollTop;
 }
 
-if (pane) {
+if (pane && logPane) {
   $("enrich-error-toggle").addEventListener("click", () => {
     const button = $("enrich-error-toggle");
     const expanded = button.getAttribute("aria-expanded") !== "true";
@@ -193,10 +195,10 @@ if (pane) {
   durationWrap.addEventListener("mouseleave", () => durationWrap.classList.remove("tooltip-dismissed"));
   durationWrap.addEventListener("focusout", () => durationWrap.classList.remove("tooltip-dismissed"));
   $("enrich-duration-trigger").addEventListener("click", () => durationWrap.classList.remove("tooltip-dismissed"));
-  for (const button of pane.querySelectorAll("[data-activity-view]")) {
+  for (const button of logPane.querySelectorAll("[data-activity-view]")) {
     button.addEventListener("click", () => {
       state.view = button.dataset.activityView;
-      for (const item of pane.querySelectorAll("[data-activity-view]")) {
+      for (const item of logPane.querySelectorAll("[data-activity-view]")) {
         item.setAttribute("aria-pressed", String(item === button));
       }
       renderLogs();

@@ -352,6 +352,8 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
         static / "feed" / "app.js",
         static / "shared" / "feed-detail.js",
         static / "system" / "app.js",
+        static / "system" / "board.js",
+        static / "system" / "drawer.js",
         static / "system" / "live.js",
     ]
     for script in scripts:
@@ -369,11 +371,11 @@ def test_frontend_uses_public_feed_refs_and_sequential_group_fetch():
 
 
 def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
-    # The scheduler board lives on the System page.
+    # The scheduler board lives on the Console page (/system).
     scheduler = Path(__file__).with_name("static") / "system"
     source = "\n".join(
         (scheduler / name).read_text()
-        for name in ("index.html", "app.js", "live.js", "model.mjs")
+        for name in ("index.html", "app.js", "board.js", "drawer.js", "live.js", "model.mjs")
     )
     for removed in (
         "ewma_" + "lambda",
@@ -386,27 +388,31 @@ def test_scheduler_frontend_has_no_adaptive_cadence_artifacts():
         assert removed not in source
 
     html = (scheduler / "index.html").read_text()
-    app = (scheduler / "app.js").read_text()
+    board = (scheduler / "board.js").read_text()
+    drawer = (scheduler / "drawer.js").read_text()
     css = (scheduler / "styles.css").read_text()
     assert '/static/system/styles.css' in html
     assert 'id="detail-panel"' in html
-    assert 'id="bulk-dialog"' in html
+    assert 'id="workers"' in html
+    # Gone with the rebuilt board: bulk fetch, the groups editor, the workers
+    # column, and the whole-fleet feed list it all ran on.
+    for gone in ('id="bulk-dialog"', 'id="groups-panel"', 'id="fetch-matching"', 'id="edit-groups"', "sys-workers-col"):
+        assert gone not in html
+    assert '"/api/scheduler/feeds"' not in board
     assert 'id="vendor-panel"' not in html
     assert 'id="filter-platform"' not in html
     assert 'data-sort="vendor"' not in html
-    assert "vendorsExpanded" not in app
     assert ".ops-vendor-item" not in css
-    # Selecting a feed only changes row selection and opens the detail panel.
-    # Replacing the chunk-rendered tbody here used to collapse the table
-    # briefly, making the page jump on every feed click.
-    load_detail = app.split("async function loadDetail(", 1)[1].split("\n}\n", 1)[0]
-    select_feed = app.split("function selectFeed(", 1)[1].split("\n}\n", 1)[0]
-    close_panel = app.split("function closePanel(", 1)[1].split("\n}\n", 1)[0]
-    assert "renderTable(" not in load_detail
+    assert ".ops-groups-panel" not in css
+    # Selecting a feed only changes row selection and opens the drawer; it
+    # never re-renders the board, which would make the page jump on a click.
+    select_feed = drawer.split("export function selectFeed(", 1)[1].split("\n}\n", 1)[0]
+    close_panel = drawer.split("export function closePanel(", 1)[1].split("\n}\n", 1)[0]
+    load_detail = drawer.split("export async function loadDetail(", 1)[1].split("\n}\n", 1)[0]
     assert "syncSelectedRow();" in select_feed
-    assert "renderTable(" not in select_feed
     assert "syncSelectedRow();" in close_panel
-    assert "renderTable(" not in close_panel
+    for body in (select_feed, close_panel, load_detail):
+        assert "renderBoard(" not in body
 
 
 async def test_feed_rows_use_string_ids_and_stable_public_refs(store):

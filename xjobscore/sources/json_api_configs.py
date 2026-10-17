@@ -6,19 +6,20 @@ else is a literal.  Keep a configuration declarative; only add engine support
 when a pattern is shared by several vendors.
 """
 
-# The SHARED job_type table of doc/raw_postings/regex/job_type.md, transcribed
-# verbatim and lifted out of the configs so its consumers DERIVE from it rather
+# The SHARED job_type table of doc/raw_postings/regex/job_type.md, with the
+# undergraduate recall corrections verified against Workday on 2026-10-16.
+# Keep it shared so its consumers DERIVE from it rather
 # than transcribe it again. Three read it: `workday`'s job_type, `workday`'s
 # detail `only` gate, and `eightfold`'s job_type through `_job_type_from`.
 #
-# The gate re-runs this same ladder inside harvest(), on the raw list row, to
-# decide which rows are worth a detail fetch -- it cannot read parse()'s
-# `job_type`, because harvest returns a Record long before silver parses it.
-# Hand-maintained copies would drift; one list and a comprehension cannot.
+# The gate re-runs this ladder inside harvest(), then admits the narrowly
+# scoped description candidates below. It cannot read parse()'s `job_type`,
+# because harvest returns a Record long before silver parses it. Description
+# candidates are not classified until the fetched evidence confirms them.
 #
 # `from` is `@title` here because that is Workday's key. A vendor that spells
 # it differently rebinds with `_job_type_from` and changes nothing else.
-_SHARED_JOB_TYPE: list[dict] = [
+_SHARED_TITLE_EXCLUSIONS: list[dict] = [
             # EXCLUDED first, and terminal. A licensure-, service- or degree-gated
             # posting is not a student one whatever else the title says, so
             # `is: None` voids the row rather than letting it fall through.
@@ -26,7 +27,20 @@ _SHARED_JOB_TYPE: list[dict] = [
             {"from": "@title", "re": "skillbridge", "is": None},
             {"from": "@title", "re": "pharmacy|pharmacist", "is": None},
             {"from": "@title", "re": "rns?|nurses?|nursing|bsn", "is": None},
-            {"from": "@title", "re": "ph\\.?d\\.?s?|postdoc(s|toral)?|doctoral", "is": None},
+            {"from": "@title", "re": "ph\\.?d\\.?s?|postdoc(s|toral)?|doctoral|doctorate", "is": None},
+            # Terminal even when a title also says student, work study or
+            # intern. Graduate assistantships are outside the product scope.
+            {"from": "@title",
+             "re": "(?<!under[ -])grad(uate)?[ /-]+((research|teaching)[ /-]+)?assistant(s|ships?)?",
+             "is": None},
+]
+
+# Only the new undergraduate aliases use this veto. In particular, do not
+# mistake staff administering work-study for work-study participants.
+_UNDERGRAD_STAFF = "directors?|managers?|supervisors?|coordinators?|recruiters?|head of"
+
+_SHARED_JOB_TYPE: list[dict] = [
+            *_SHARED_TITLE_EXCLUSIONS,
             # Co-op ahead of intern: co-op titles are a subset of the
             # intern-ish set, so the intern rule would otherwise consume
             # them. Both boundaries load-bearing -- dropping the trailing one
@@ -91,13 +105,23 @@ _SHARED_JOB_TYPE: list[dict] = [
                     "|recruiters?|recruiting|recruitment|talent acquisition"
                     "|(program|programme) (managers?|leads?|directors?|coordinators?)",
              "is": "new_grad"},
+            # These identify participants rather than staff who administer
+            # student programs. They may recover a student-assistant role
+            # skipped by the student-affairs/student-success veto above, but
+            # preserve the labels of already classified jobs.
+            {"from": "@title", "re": "work[ -]?study|undergraduate research assistants?",
+             "not": _UNDERGRAD_STAFF, "is": "student"},
+            {"from": "@title", "re": "student assistants?",
+             "not": _UNDERGRAD_STAFF + "|externs?|externship|clerkship|student rotation"
+                    "|pre.employment training|bpet|nationals only|j1 students",
+             "is": "student"},
             # NO `$site` rules. The board names a recruiting channel, not the
             # audience of every row it carries, and measured live it was
             # 15-for-35 wrong. Removed 2026-08-26 with the Workday table.
 ]
 
 
-# The detail `only` gate: the SAME ladder, same order, same `not` lists, with
+# The title-based part of the detail gate: same order and `not` lists, with
 # every verdict rewritten to True. A row the table types is worth one detail
 # request; the excluded tier's `is: None` and the absent default both evaluate
 # to "not True", which is exactly the skip the engine tests for
@@ -107,6 +131,71 @@ _SHARED_JOB_TYPE: list[dict] = [
 _WORKDAY_DETAIL_ONLY: list[dict] = [
     rule if rule["is"] is None else {**rule, "is": True}
     for rule in _SHARED_JOB_TYPE
+]
+
+# An ambiguous title may justify a detail request without justifying a label.
+# These two university boards were checked against live descriptions. Board
+# identity opens discovery ONLY; it never establishes student eligibility.
+_WORKDAY_STUDENT_BOARD = {"lookup": [{
+    "utaustin/wd1/utstudent": True,
+    "wisconsin/wd1/uw_students": True,
+}, "$key"]}
+_WORKDAY_PROBE_VETO = (
+    _UNDERGRAD_STAFF + "|masters?|m\\.?sc\\.?|externs?|externship|clerkship"
+    "|student rotation|pre.employment training|bpet|nationals only|j1 students"
+)
+_WORKDAY_UNDERGRAD_CANDIDATES = [
+    *_SHARED_TITLE_EXCLUSIONS,
+    {"from": "@title", "re": _WORKDAY_PROBE_VETO, "is": None},
+    {"from": "@title",
+     "re": "software engineering fellowships?|summer (investment|development) analysts?"
+           "|industrial placements?|co[ ‐‑–—]ops?", "is": True},
+    {"from": "@title", "re": "[a-z][a-z0-9]*", "when": _WORKDAY_STUDENT_BOARD, "is": True},
+]
+_WORKDAY_DETAIL_ONLY += _WORKDAY_UNDERGRAD_CANDIDATES
+
+_WORKDAY_DESCRIPTION = {"plain_text": "@jobPostingInfo.jobDescription"}
+_WORKDAY_UNDERGRAD_PROBE = {"classify": _WORKDAY_UNDERGRAD_CANDIDATES}
+_WORKDAY_JOB_TYPE = [
+    *_SHARED_JOB_TYPE,
+    # Do not revive a graduate-only opportunity from undergraduate boilerplate.
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "(graduate|masters?|doctoral|ph\\.?d\\.?) students? only"
+           "|must be (currently )?enrolled in a (graduate|masters?|doctoral|ph\\.?d\\.?) program"
+           "|enrolled in (a|the) ([a-z]+ ){0,3}graduate program",
+     "is": None},
+    # The spaced Co Op alias includes master's/PhD-only jobs in the audited
+    # corpus. Do not extend the shared title regex: require undergraduate
+    # eligibility before admitting the newly discovered spelling.
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "pursuing (a )?(bachelor['’]?s|b\\.s\\.?)"
+           "|currently enrolled undergraduate"
+           "|pursuing a degree in: bachelor['’]?s",
+     "when": {"classify": [
+         {"from": "@title", "re": "co[ ‐‑–—]ops?",
+          "not": _WORKDAY_PROBE_VETO, "is": True},
+     ]}, "is": "coop"},
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "internship for undergraduate students?",
+     "when": _WORKDAY_UNDERGRAD_PROBE, "is": "intern"},
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "enrolled in a bachelor['’]?s degree program",
+     "when": {"classify": [
+         {"from": "@title", "re": "summer (investment|development) analysts?",
+          "not": _WORKDAY_PROBE_VETO, "is": True},
+     ]}, "is": "intern"},
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "university students graduating|pursuing a bachelor['’]?s degree",
+     "when": {"classify": [
+         {"from": "@title", "re": "industrial placements?",
+          "not": _WORKDAY_PROBE_VETO, "is": True},
+     ]}, "is": "intern"},
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "job category: student hourly job profile: student help",
+     "when": _WORKDAY_UNDERGRAD_PROBE, "is": "student"},
+    {"from": _WORKDAY_DESCRIPTION,
+     "re": "required qualifications current ut austin student",
+     "when": _WORKDAY_UNDERGRAD_PROBE, "is": "student"},
 ]
 
 
@@ -119,6 +208,58 @@ def _job_type_from(path: str) -> list[dict]:
     where the shared rules apply as-is to a differently-named field.
     """
     return [{**rule, "from": path} for rule in _SHARED_JOB_TYPE]
+
+# Retrieval filters, independently verified against complete live boards on
+# 2026-10-16. These are candidate searches, not classification rules. Keep
+# unvalidated boards unfiltered: OR semantics and facet coverage vary by site.
+# See doc/workday-optimizations.md for coverage and measured request savings.
+_WORKDAY_SEARCH_COMMON = (
+    'coop OR "co-op" OR "co op" OR student OR apprentice OR summer OR fellowship'
+    ' OR "work study" OR workstudy OR undergraduate OR graduate OR "new grad"'
+    ' OR "college grad" OR NCG OR "early career" OR "early talent" OR "emerging talent"'
+    ' OR "campus hire" OR "school leaver" OR "development program" OR "rotational program"'
+    ' OR "launch program" OR "industrial placement" OR traineeship OR trainee'
+    ' OR praktik OR werkstudent OR stagiaire OR alternance OR estagio OR estágio'
+    ' OR aprendiz OR becario OR pasantia OR pasantía OR grads OR "recent grad"'
+    ' OR "fresh grad" OR "post grad" OR "grad program"'
+)
+_WORKDAY_SEARCH_BROAD = 'intern OR ' + _WORKDAY_SEARCH_COMMON
+_WORKDAY_ENROLLMENT_TERMS = (
+    'internship', 'interns', '"college intern"', '"summer intern"',
+    *(term for term in _WORKDAY_SEARCH_COMMON.split(' OR ') if term != 'coop'),
+    'enrolled', '"working towards"',
+)
+
+
+def _workday_enrollment_search(*omit: str) -> str:
+    # Narrow retrieval only where live coverage passed. These enrollment
+    # terms recover genuine internships whose title/description says only
+    # singular "intern"; bare intern also matches unrelated "internal" text.
+    return ' OR '.join(term for term in _WORKDAY_ENROLLMENT_TERMS if term not in omit)
+
+
+_WORKDAY_SEARCH_PLANS = {
+    "adobe/wd5/external_experienced": {"query": _workday_enrollment_search()},
+    "aoins/wd5/autoowners": {
+        "facets": {"jobFamilyGroup": ["87fadf8c078701c789f8bc4cb02e4c27"]},
+    },
+    "bmo/wd3/external": {"query": _workday_enrollment_search('"work study"')},
+    "cmegroup/wd1/cme_careers": {
+        "facets": {"workerSubType": ["7a3301e6ea5710f63d5e0fb77b80251e"]},
+    },
+    "hpe/wd5/jobsathpe": {"query": _workday_enrollment_search('"development program"')},
+    "keppel/wd3/keppelcareers": {
+        "facets": {"workerSubType": [
+            "7d50a309ab59017d446efc1c7b16a609", "3a2524e3b9f0014dcc30c616de00ba8b",
+        ]},
+    },
+    "plexus/wd504/plexus_careers": {"query": _WORKDAY_SEARCH_BROAD},
+    "tencent/wd1/tencent_careers": {
+        "facets": {"workerSubType": ["b32f1ee18078012df7b19ebd5d8f0002"]},
+    },
+    "ttc/wd1/toro_external_careers": {"query": _workday_enrollment_search()},
+}
+
 
 SIMPLE: dict[str, dict] = {
     "ashby": {
@@ -419,6 +560,8 @@ SIMPLE: dict[str, dict] = {
         "envelope": {"meta": "@meta"},
         "fields": {
             "title": "@title", "url_posting": "@absolute_url", "apply_url": "@absolute_url", "company_raw": "@company_name",
+            # On the employer's own site for ~1 in 7 boards; a greenhouse.io link is refused.
+            "company_domain": "@absolute_url",
             "location_raw": "@location.name", "description_html": {"unescape": "@content"}, "requisition_id": "@requisition_id",
             "published_at": {"date": "@first_published"}, "published_at_precision": "exact",
             "source_updated_at": {"date": "@updated_at"}, "deadline_at": {"date": "@application_deadline"},
@@ -831,6 +974,8 @@ SIMPLE: dict[str, dict] = {
         "fields": {
             "title": "@title", "url_posting": "@url", "apply_url": "@application_url",
             "company_raw": {"fallback": ["$envelope.name", "$key"]},
+            # The account's own "about us"; silver fills it into an empty company.
+            "company_description": "$envelope.description",
             "location_raw": {"join": ["@city", "@state", "@country"]}, "description_html": "@description",
             "requisition_id": "@code", "employment_type": "@employment_type", "published_at": {"date": "@published_on"},
             # DERIVED -- measured on vendors-tbd/workable.md, 136 rows.
@@ -965,6 +1110,8 @@ SIMPLE: dict[str, dict] = {
         "fields": {
             "title": "@title", "url_posting": "@careers_url", "apply_url": "@careers_apply_url",
             "company_raw": "@company_name",
+            # A custom careers domain names the employer; a recruitee.com link is refused.
+            "company_domain": "@careers_url",
             "location_raw": {"fallback": ["@location", {"join": ["@city", "@state_name", "@country"]}]},
             "description_html": {"concat": ["@description", "@requirements"], "sep": "\n"},
             "requisition_id": "@guid", "employment_type": "@employment_type_code",
@@ -1052,6 +1199,10 @@ SIMPLE: dict[str, dict] = {
             },
             "requisition_id": "@job.requisition_id", "employment_type": "@employment_type_text",
             "workplace_type_raw": "@workplace_type",
+            # The shared ladder as-is, read off the title (2026-10-10: 555 of
+            # 11,578 active postings typed, 190 of them US; the only
+            # intern-titled row left untyped is a PhD one, by design).
+            "job_type": {"classify": _job_type_from("@title")},
         },
         "extra": {
             "department": "@job.department.name", "division": "@job.division", "job": "@job",
@@ -1563,6 +1714,11 @@ SIMPLE: dict[str, dict] = {
             # 2,000-row result window -- a property of the endpoint, not of the
             # detail leg, so partitioning stays.
             "partition": {"window": 2000, "facets": "facets"},
+            "search": {
+                "parameter": "searchText",
+                "refresh_s": 86_400,
+                "plans": _WORKDAY_SEARCH_PLANS,
+            },
             # 10 was the measured optimum when nothing but the host's own 429s
             # bounded rate (retries tracked total volume against Workday's
             # sustained limiter, not fan-out width). Rate is now set per data
@@ -1649,42 +1805,13 @@ SIMPLE: dict[str, dict] = {
             # "Posted Today" is never faked into a date.
             "published_at": {"date": "@jobPostingInfo.startDate"},
             "published_at_precision": "date",
-            # DERIVED -- the SHARED table in doc/raw_postings/regex/job_type.md,
-            # transcribed verbatim and read from `title` alone. It replaced the
-            # Workday-measured table on 2026-08-26 after a head-to-head over all
-            # 153,325 rows in raw_posting: the shared table fires on 2,518 rows
-            # to the Workday table's 6,118, and on the 2,092 both type it agrees
-            # on the label EVERY time -- 0 disagreements. The whole difference is
-            # which rows get typed at all.
-            #
-            # Drops 4,026: 3,901 to `pharmacy|pharmacist` (`Pharmacy Intern`,
-            # one tenant), 118 to `rns?|nurses?|nursing|bsn` (`New Grad RN
-            # Resident - <unit>`, one hospital system), 6 to the new-grad `not`
-            # list, 1 to a real gap. Six of those 124 new-grad drops are rows
-            # the Workday table got WRONG -- `University Talent Acquisition
-            # Business Partner`, `Vice President, Asia Early Career Program
-            # Manager` -- which its `university talent` and `launch program`
-            # rules had no recruiter or programme-operator veto for.
-            #
-            # Adds 426: 328 from `grad(uate|uates|s)?|ncg` where the old rule
-            # needed an exact phrase (`Chemist 1 New College Grad`), 61 from
-            # bare `apprentice`, 23 from bare `students?`, 12 from the
-            # development-program group, 2 from `early careers?`.
-            #
-            # KNOWN REGRESSIONS, deliberately carried and pinned by tests:
-            # `industrial placement` (1 row) has no shared pattern; bare
-            # `apprentice` re-admits 61 trades rows this vendor measured and
-            # excluded. Both belong upstream in the shared doc's `not` lists,
-            # not in a per-vendor override.
-            #
-            # TITLE ONLY. The two `@externalPath` slug legs went with the old
-            # table: re-measured they add 45 rows, 20 of them junk the slug's
-            # hyphenation smuggles past every `not` list (`J1-Students-Only`,
-            # `Pharmacy-Intern`) or the location segment invents outright
-            # (`/job/Zagreb-Grad-Zagreb-Croatia/` -> new_grad; "Grad" is
-            # Croatian for city). Normalised the honest yield is 22, and 15 are
-            # non-English titles whose slug is English. US-only: 7, none CS.
-            "job_type": {"classify": _SHARED_JOB_TYPE},
+            # Shared title rules remain authoritative, including terminal
+            # exclusions. A small set of ambiguous undergraduate candidates
+            # can additionally qualify through explicit detail evidence. The
+            # list gate fetches those descriptions without pre-classifying
+            # them. Neither board identity nor an incidental mention of
+            # students/internships in a description is sufficient.
+            "job_type": {"classify": _WORKDAY_JOB_TYPE},
             # The weakest signal of the set: a closed `timeType` field, only
             # 29.1% filled at list-time vs 98.9% on detail (workday.md).
             "part_time": {"classify": [
@@ -2305,7 +2432,11 @@ DETAIL_A: dict[str, dict] = {
         "fields": {
             "title": "@name",
             "url_posting": "@url",
-            "company_raw": {"fallback": ["@companyName", "@board.title", "$key"]},
+            # Not `board.title`: that is the page heading ("Current Openings").
+            "company_raw": {"fallback": ["@companyName", "@board.companyName", "$key"]},
+            # Usually ats.rippling.com, which is no company's domain and is
+            # refused; a board hosted on the employer's own site names it.
+            "company_domain": "@board.boardURL",
             "location_raw": {"fallback": [{"first": "@workLocations"}, {"first": "@locations"}, "@workLocation.label"]},
             "locations_extra": {"fallback": [{"rest": "@workLocations"}, {"rest": "@locations"}]},
             "description_html": {"fallback": [{"concat": ["@description.role", "@description.company"]}, "@description"]},
@@ -2441,6 +2572,8 @@ DETAIL_B: dict[str, dict] = {
             "title": "@title",
             "url_posting": {"template": "https://jobs.gem.com/{key}/{id}"},
             "company_raw": "$company_raw",
+            # Rarely set (1 of 917 boards, 2026-10-11), but it is the employer's own site.
+            "company_domain": "@companyUrl",
             "description_html": "@descriptionHtml",
             "location_raw": {"first": {"map": "@locations", "value": "@name"}},
             "locations_extra": {"rest": {"map": "@locations", "value": "@name"}},
@@ -2551,6 +2684,10 @@ DETAIL_B: dict[str, dict] = {
             "description_html": "@requisitionDescription",
             "requisition_id": "@clientRequisitionID",
             "employment_type": "@workLevelCode.shortName",
+            # The shared ladder as-is, read off the title (2026-10-10: 2,214 of
+            # 146,311 active postings typed, 2,069 of them US; untyped
+            # intern titles are SkillBridge and pharmacy, by design).
+            "job_type": {"classify": _job_type_from("@requisitionTitle")},
             "published_at": {"date": "@postDate"}, "published_at_precision": "exact",
             "locations_extra": {"rest": {"map": "@requisitionLocations", "value": "@nameCode.shortName"}},
         },
@@ -2602,6 +2739,8 @@ DETAIL_B: dict[str, dict] = {
             "title": "@name",
             "url_posting": "@postingUrl",
             "company_raw": "@company.name",
+            # Also kept inside description_html below; this copy is the company's.
+            "company_description": "@jobAd.sections.companyDescription.text",
             "apply_url": "@applyUrl",
             "location_raw": "@location.fullLocation",
             "description_html": {

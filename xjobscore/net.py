@@ -21,6 +21,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any, Self
 from urllib.parse import urlsplit
 
@@ -401,6 +402,19 @@ def _to_response(r: httpx.Response) -> Response:
     )
 
 
+class _OracleCookiePolicy(DefaultCookiePolicy):
+    def set_ok(self, cookie, request):
+        if not super().set_ok(cookie, request):
+            return False
+        # Career pages set tenant sessions on the whole vendor domain. Keep
+        # them on their origin so other tenants cannot overflow Cookie headers.
+        if cookie.domain.lstrip(".").lower() == "oraclecloud.com":
+            cookie.domain = urlsplit(request.get_full_url()).hostname
+            cookie.domain_specified = False
+            cookie.domain_initial_dot = False
+        return True
+
+
 class Net:
     """An HTTP client with the engine's policy already applied.
 
@@ -480,6 +494,7 @@ class Net:
             timeout=httpx.Timeout(self._timeout_s, connect=self._connect_timeout_s)
             if self._connect_timeout_s is not None else self._timeout_s,
             headers={"User-Agent": self._user_agent},
+            cookies=CookieJar(policy=_OracleCookiePolicy()),
             follow_redirects=True,
             max_redirects=self._max_redirects,
             limits=httpx.Limits(

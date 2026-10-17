@@ -541,3 +541,37 @@ async def test_a_prior_without_detail_is_never_reused(workday_config):
     assert len(net.gets) == 1
     assert record.reused_item_count == 0
     assert record.items[0].payload["jobPostingInfo"]["jobDescription"] == "<p>Build things</p>"
+
+
+async def test_undergraduate_probe_fetches_details_without_preclassifying(workday_config):
+    rows = [
+        typed(0, "Software Engineering Fellowship - Summer 2027"),
+        typed(1, "2027 Spring Co Op Neuroscience Research"),
+        typed(2, "PhD Software Engineering Fellowship"),
+    ]
+
+    class UndergraduateNet(DetailNet):
+        async def get(self, url, **kwargs):
+            self.gets.append({"url": url})
+            path = url.split("/Site", 1)[1]
+            description = (
+                "This is a paid internship for undergraduate students."
+                if path == "/job/0" else
+                "Currently pursuing a master's or PhD degree in neuroscience."
+            )
+            return response(url, {"jobPostingInfo": {"jobDescription": description}})
+
+    net = UndergraduateNet(rows)
+    # Previously skipped list-only rows must fetch detail even when their
+    # title/path revisions have not changed.
+    options = json_api.JsonApiHarvestOptions(
+        revision_fields=("title", "externalPath"),
+        prior_items={r["externalPath"]: Item(r["externalPath"], r) for r in rows},
+    )
+    record = await json_api.harvest("workday-test", feed(), net, options=options)
+    assert record.detail_fetched_count == 2
+    assert record.reused_item_count == 0
+    assert record.detail_skipped_count == 1
+    parsed = {item.external_id: json_api.parse("workday-test", feed(), item, {})[0].job_type
+              for item in record.items}
+    assert parsed == {"/job/0": "intern", "/job/1": None, "/job/2": None}

@@ -30,19 +30,16 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
   current backlog is independent of the selected closure period. Counts are
   source postings and may include duplicates. Reads use a one-minute cache and
   read-only transactions; opening the page never checks a link or changes a job.
-- **System** (`/system`; `/` and `/scheduler` redirect here) — the landing
-  page and production operations console, in three sections:
-  - **Activity**: the last Gold catch-up run (when, how long, postings
-    enriched, errors) and the server log — the process's own log lines at
-    INFO and above, minus `httpx` requests and the access log. The terminal
-    only prints warnings and errors.
-  - **Scheduler**: feed status (ok / erroring / paused), the last 15 minutes
-    of polling (polled, feeds with new jobs, new postings, partial, errors),
-    then the scheduler board described under **Scheduler**, with a *workers*
-    column: one tick per worker slot for each vendor, green while polling,
-    amber past 60 s, red past 3 min.
-  - **Logs**: the live fetch log and system events (non-feed runs and failed
-    feeds from `system_run`).
+- **Console** (`/system`; `/` and `/scheduler` redirect here) — the landing
+  page and production operations console, top to bottom:
+  - **Activity**: the run switch, the last Enrich (Gold catch-up) run, and
+    **Link checks**, the missing-job queue.
+  - **Scheduler**: feed status (ok / err / stale / new / paused / total), the
+    last 15 minutes of polling (polled, feeds with new jobs, new postings,
+    partial, errors), the **workers** block, then the scheduler board
+    described under **Scheduler** below.
+  - **Log**: one stream of process log lines, polls, and system runs, newest
+    at the bottom.
 
   Worker slots, the 15-minute counts, and the server log live in process
   memory (`xjobscore/activity.py`) and reset on restart; everything else is
@@ -80,70 +77,49 @@ Then open <http://127.0.0.1:8765> (`XJOBSCORE_PORT` overrides).
     status and duration, click it for the full detail), the
     allowlisted response headers with `*ratelimit*`/`Retry-After` highlighted,
     and an elapsed-time sparkline over the retained run history.
-- **Scheduler** (now the board on the System page; `/scheduler` redirects
-  to `/system`) — the production polling operations console.
-  Its header reports the persisted run switch and whether a runner is actually
-  listening. Four summary cards cover scheduled feeds, polls today, errors in
-  24 h, and p95 discovery latency. A quiet vendor summary reports configured
-  load and attention counts. Feeds are grouped under collapsible vendor headers
-  that show feed counts, configured requests/day, and only the operational
-  exceptions that matter. Vendor groups and their feeds both put problems
-  first; the workspace can be searched or narrowed to attention, paused, or
-  interval views.
+- **Scheduler** (the board on the Console page; `/scheduler` redirects to
+  `/system`) — the production polling operations console. The browser never
+  receives the whole fleet: the server builds the board once per minute
+  (`console/board.py`), keeps one gzip blob per vendor, and answers small
+  questions about it.
 
-  Groups start collapsed (the fleet is a few dozen vendors, one of which holds
-  most feeds), and the ones an operator opens are remembered per browser. Each
-  vendor header is a rollup in the feed columns: worst state, a
-  `N err / N stale / N feeds` breakdown ordered by concern, the soonest due,
-  the most recent poll, and `new·1d` / `err·7d` sums that stay `—` when no
-  feed carries the observation. A narrowing filter (`failing`, or a search)
-  that leaves a small result opens every matching group and hides the rest;
-  column sorts reorder feeds inside a group and never reorder the groups.
-  `poll all` on a header opens the bulk fetch dialog scoped to that vendor;
-  `pause all` / `resume all` fan out the per-feed policy write after a
-  confirmation.
+  The **workers** block lists vendors with more than one worker
+  (`sources.width` > 1): one tick per slot, longest poll first, green while
+  polling, amber past 60 s, red past 3 min, then busy/width and the longest
+  poll when it is slow or stuck. Workday's per-data-center lanes share one
+  combined bar; hovering or clicking it opens the lanes, with a lane drawing
+  429s marked amber. Single-worker vendors are left out; a slow poll there
+  shows as `polling Ns` on the feed's row.
 
-  Selecting a feed opens a fixed detail drawer with Poll now / Pause controls,
-  operational timestamps, a 14-day new-postings chart, and recent poll events.
-  Cadence is entirely operator-owned: five presets and a custom interval from
-  60 seconds through 7 days write `feed.interval_s` only after an explicit
-  Apply. Nothing on the page estimates or changes a polling interval.
+  The board lists vendors under the operator's groups, Ungrouped last. Each
+  vendor row is a rollup: worst state, a `N err / N stale / … / N feeds`
+  breakdown, interval range, soonest due, latest poll, and `new·1d` /
+  `err·7d` sums that stay `—` without telemetry (`GET
+  /api/scheduler/providers`). Opening a vendor shows one **status line** per
+  state (err, stale, new, paused, ok) with the same columns rolled up; an
+  err line of 12 feeds or fewer opens on its own. Opening a status line pages
+  its feeds 25 at a time, worst first, with a filter box (`GET
+  /api/scheduler/providers/{source}/feeds?state=&q=&page=`). The view pills
+  (all / issues / failing / paused) narrow both vendors and status lines.
+  Typing two or more characters in the search box asks the server for every
+  feed whose company or key matches (`GET /api/scheduler/search`) and shows
+  each matching vendor's hits; `group:name` narrows to groups.
 
-  **Poll now** means now. It backdates `due_at` well past the whole backlog
-  rather than to `now()` — `store.claim_due_feeds` orders by `due_at`
-  *ascending*, so `now()` sorts an express feed *behind* everything already
-  overdue — and then wakes the unified scheduler so the poll happens in seconds
-  instead of on the next tick. Because it promises a poll, it refuses (409, with
-  the reason) rather than queueing one that could not happen: a paused scheduler,
-  no runner listening, a disabled or paused feed, or a poll of that feed already
-  in flight. The sentinel `due_at` never persists — the poll's own
-  `finish_schedule_success`/`_failure` overwrites it.
+  Vendor controls sit on an open vendor's last status line, each behind a
+  confirmation: **interval** presets (5m, 15m, 1h, 6h, 24h) set every feed of
+  the vendor in one statement (`POST /api/scheduler/providers/{source}/interval`),
+  **fetch** brings every enabled feed of the vendor forward
+  (`POST /api/scheduler/poll-now`), and **pause/resume** flips the whole
+  vendor (`POST /api/scheduler/providers/{source}/pause`). Each resolves the
+  vendor on the server, without loading the fleet. A vendor row's
+  `move to ▾` files it in a group, or in a new one; clicking a group's name
+  renames it, and a group disappears once nothing is filed in it.
 
-  **Fetch matching feeds** (the filter bar's Fetch matching button, or a
-  vendor header's `poll all`) opens a confirmation/progress dialog. The browser
-  writes durable express queue positions for the matching feeds — collapsed
-  groups included — and the unified scheduler claims them. Per-feed policy
-  still holds: paused, disabled, or already-claimed feeds refuse rather than
-  reporting a queue position that cannot be honored. Every accepted production
-  polling request returns `202 Accepted`; completion is observed through the
-  run telemetry rather than held open in the HTTP request.
-
-  **Vendor grouping** keeps current configured cost next to the feeds that
-  create it. Paused feeds issue no requests, so they remain in each vendor's
-  feed count but are excluded from request totals. Groups with backing-off,
-  stale, or never-polled feeds come first and open by default; healthy groups
-  stay collapsed until requested. Search opens matching groups, while manual
-  expansion choices survive telemetry refreshes. Collapsing a group is only a
-  display choice and never changes the candidate set for Fetch visible feeds.
-
-  A provider's **pause/resume** button applies to all its imported feeds,
-  including rows hidden by search or status filters. It sends one provider
-  policy request and updates all its current feeds in one SQL statement,
-  without loading the full fleet or resolving individual feed references.
-  Feed pauses and the
-  separate global Scheduler pause persist across page reloads and backend
-  restarts. Already claimed polls may finish; paused feeds cannot be claimed
-  again until resumed.
+  Selecting a feed opens a drawer with its last poll and result, strikes,
+  new postings in 7 days, open postings, conditional-GET state, interval
+  presets, recent polls, and Fetch / Pause / Mute / Drop. Cadence is entirely
+  operator-owned: presets write `feed.interval_s` and nothing on the page
+  estimates or changes a polling interval.
 
   Vendor HTTP protection is separate from feed cadence. `net.py` still caps
   per-host concurrency and reacts to 429 responses so an operator-set interval

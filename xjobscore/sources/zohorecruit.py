@@ -11,8 +11,9 @@ import json
 from datetime import datetime
 from html.parser import HTMLParser
 
-from xjobscore.net import Net
+from xjobscore.net import Net, NetError
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
+from .json_api import shared_job_type
 
 
 class _Inputs(HTMLParser):
@@ -52,6 +53,9 @@ async def harvest(feed: Feed, net: Net) -> Record:
     response = await net.get(url, etag=feed.etag)
     if response.not_modified:
         return Record(http_status=304, etag=response.headers.get("etag"))
+    # A deleted portal answers 200 with an error page, not a 404.
+    if "<title>Page does not exist" in response.text:
+        raise NetError("Zoho Recruit portal does not exist", url=url, status=404)
     jobs, meta = _payload(response.text)
     items = [
         Item(external_id=str(row["id"]), payload=row)
@@ -93,12 +97,12 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         "id", "Posting_Title", "Job_Opening_Name", "Job_Description",
         "City", "State", "Country", "Job_Type", "Date_Opened", "Remote_Job",
     }
+    title = str(row.get("Posting_Title") or row.get("Job_Opening_Name") or "")
     return [
         Posting(
             external_id=item.external_id,
-            title=str(
-                row.get("Posting_Title") or row.get("Job_Opening_Name") or ""
-            ),
+            title=title,
+            job_type=shared_job_type(title),
             url_posting=url,
             apply_url=url,
             company_raw=(

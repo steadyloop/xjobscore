@@ -301,6 +301,8 @@ async def process(
     # passing an alias snapshot declared that nothing writes aliases mid-pass.
     can_mint = feed.type == "ATS" and not dry_run and aliases is None
     minted_id: int | None = None
+    # One company fill per batch: every posting of a board says the same thing.
+    filled: set[int] = set()
     for raw in stored:
         item = raw.item
         item_envelope = envelope
@@ -394,6 +396,19 @@ async def process(
             if dry_run:
                 total += Counts(postings=1)
                 continue
+            if (
+                not is_simplify
+                and feed.company_needs_fill
+                and company_id not in filled
+                and (posting.company_domain or posting.company_description)
+            ):
+                filled.add(company_id)
+                await store.fill_company(
+                    conn,
+                    company_id,
+                    domain=posting.company_domain,
+                    description=_plain_text(posting.company_description),
+                )
             # ats_closed_at is the stated channel only. No link_checked_at
             # here: a stated closure arrives with the listing, and that moment
             # is already last_seen_at -- link_checked_at belongs to the probe

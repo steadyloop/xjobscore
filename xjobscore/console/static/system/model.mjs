@@ -1,3 +1,7 @@
+/* Scheduler board model: pure functions over the server's per-vendor
+   summaries (`/api/scheduler/providers`) and the board-group layout. Nothing
+   here touches the DOM, so all of it runs under `node --test`. */
+
 export const INTERVAL_PRESETS = [
   [300, "5m"],
   [900, "15m"],
@@ -6,8 +10,6 @@ export const INTERVAL_PRESETS = [
   [86400, "24h"],
 ];
 
-export const MIN_INTERVAL_S = 60;
-export const MAX_INTERVAL_S = 7 * 86_400;
 export const ATTENTION_STATES = new Set(["backing_off", "stale", "never_polled"]);
 
 // No `disabled`: pause and disable were one intent over two columns, and are
@@ -21,50 +23,25 @@ export const STATUS_PRIORITY = {
   unknown: 5,
 };
 
-export function formatRequestRate(value) {
-  if (value == null || !Number.isFinite(value)) return "—";
-  if (value < 1) return value.toFixed(2);
-  if (value < 10) return value.toFixed(1).replace(/\.0$/, "");
-  return Math.round(value).toLocaleString();
-}
+/* The board's words for scheduler states: short enough for a status column. */
+export const STATE_LABEL = {
+  backing_off: "err",
+  stale: "stale",
+  never_polled: "new",
+  healthy: "ok",
+  paused: "paused",
+  unknown: "?",
+};
 
-export function intervalInput(seconds) {
-  const candidates = [
-    [86_400, "days"],
-    [3_600, "hours"],
-    [60, "minutes"],
-    [1, "seconds"],
-  ];
-  for (const [divisor, unit] of candidates) {
-    if (seconds && seconds % divisor === 0) {
-      return { value: seconds / divisor, unit };
-    }
-  }
-  return { value: seconds ?? "", unit: "seconds" };
-}
+/* The order a vendor's status lines appear in: problems, then held, then ok. */
+export const STATE_ORDER = ["backing_off", "stale", "never_polled", "paused", "healthy", "unknown"];
 
-export function intervalSeconds(value, unit) {
-  const number = Number(value);
-  const multiplier = { seconds: 1, minutes: 60, hours: 3600, days: 86_400 }[unit];
-  if (!Number.isInteger(number) || number <= 0 || !multiplier) return null;
-  return number * multiplier;
-}
-
-export function intervalError(seconds) {
-  if (!Number.isInteger(seconds)) return "Enter a whole-number interval.";
-  if (seconds < MIN_INTERVAL_S) return "Interval must be at least 60 seconds.";
-  if (seconds > MAX_INTERVAL_S) return "Interval cannot exceed 7 days.";
-  return null;
-}
-
-export function summaryCounts(countsByStatus = {}) {
-  const counts = countsByStatus ?? {};
-  return {
-    ok: counts.healthy ?? 0,
-    erroring: counts.backing_off ?? 0,
-    paused: counts.paused ?? 0,
-    other: (counts.stale ?? 0) + (counts.never_polled ?? 0),
-  };
+/* Which states each view pill keeps. `all` keeps everything. */
+export function viewMatches(state, view) {
+  if (view === "issues") return ATTENTION_STATES.has(state);
+  if (view === "failing") return state === "backing_off";
+  if (view === "paused") return state === "paused";
+  return true;
 }
 
 /* Next-due presentation and ordering. Paused and unscheduled feeds sort last;
@@ -90,155 +67,110 @@ export function jobsToday(feed) {
   return Array.isArray(spark) && spark.length ? spark[spark.length - 1] : null;
 }
 
-export function matchesFeed(feed, filters) {
-  const status = feed.sched.status.state;
-  if (filters.view === "issues" && !ATTENTION_STATES.has(status)) return false;
-  if (filters.view === "failing" && status !== "backing_off") return false;
-  if (filters.view === "paused" && status !== "paused") return false;
-  if (filters.provider && feed.source !== filters.provider) return false;
-  if (filters.inSection && !filters.inSection(feed.source)) return false;
-  if (!filters.search) return true;
-  const needle = filters.search.toLowerCase();
-  return [feed.company_name, feed.source, feed.key]
-    .filter(Boolean)
-    .some((value) => value.toLowerCase().includes(needle));
+/* "15m", "15m–6h", or "—": a status line or vendor spanning several intervals. */
+export function intervalRange(min, max, format) {
+  if (min == null) return "—";
+  return min === max || max == null ? format(min) : `${format(min)}–${format(max)}`;
 }
 
-function nullableNumber(value, missing = Infinity) {
-  return value == null || Number.isNaN(Number(value)) ? missing : Number(value);
+function earliest(a, b) {
+  if (a == null) return b;
+  if (b == null) return a;
+  return a < b ? a : b;
 }
 
-function compareValue(feed, key, nowMs) {
-  if (key === "name") return (feed.company_name || feed.key).toLowerCase();
-  if (key === "provider") return feed.source;
-  if (key === "status") return STATUS_PRIORITY[feed.sched.status.state] ?? 99;
-  if (key === "interval") return nullableNumber(feed.policy?.interval_s);
-  if (key === "due") {
-    return dueInfo(feed.policy?.due_at, feed.policy?.enabled === false, nowMs).sortKey;
-  }
-  if (key === "last_poll") {
-    const timestamp = Date.parse(feed.policy?.last_poll_at ?? "");
-    return Number.isNaN(timestamp) ? -Infinity : timestamp;
-  }
-  if (key === "jobs") return nullableNumber(jobsToday(feed), -Infinity);
-  if (key === "errors") return nullableNumber(feed.telemetry?.error_count_7d, -Infinity);
-  return STATUS_PRIORITY[feed.sched.status.state] ?? 99;
+function latest(a, b) {
+  if (a == null) return b;
+  if (b == null) return a;
+  return a > b ? a : b;
 }
 
-export function sortFeeds(feeds, sort = { key: "due", direction: "asc" }, nowMs = 0) {
-  const direction = sort.direction === "desc" ? -1 : 1;
-  return [...feeds].sort((a, b) => {
-    const key = sort.key === "priority" ? "status" : sort.key;
-    const left = compareValue(a, key, nowMs);
-    const right = compareValue(b, key, nowMs);
-    let result = 0;
-    if (typeof left === "string") result = left.localeCompare(right);
-    else result = left - right;
-    if (result) return result * direction;
-
-    if (key === "status") {
-      const leftPoll = compareValue(a, "last_poll", nowMs);
-      const rightPoll = compareValue(b, "last_poll", nowMs);
-      if (leftPoll !== rightPoll) return leftPoll - rightPoll;
-    }
-    return (a.company_name || a.key).localeCompare(b.company_name || b.key) ||
-      a.source.localeCompare(b.source) || a.key.localeCompare(b.key);
-  });
+function addNullable(a, b) {
+  return b == null ? a : (a ?? 0) + b;
 }
 
-/* Provider grouping. A group's rows are the feeds that pass the current
-   filters, sorted by the active column; the group order is fixed by concern —
-   most failing feeds first, then size — so a column sort never moves the group
-   an operator is looking at. allRows retains the complete provider for its
-   pause/resume control. Groups with no matching rows are dropped. */
-export function groupFeeds(feeds, filters, sort = { key: "due", direction: "asc" }, nowMs = 0) {
-  const groups = new Map();
-  for (const feed of feeds) {
-    let group = groups.get(feed.source);
-    if (!group) {
-      group = { source: feed.source, total: 0, rows: [], allRows: [] };
-      groups.set(feed.source, group);
-    }
-    group.total += 1;
-    group.allRows.push(feed);
-    if (matchesFeed(feed, filters)) group.rows.push(feed);
-  }
-  const result = [];
-  for (const group of groups.values()) {
-    if (!group.rows.length) continue;
-    group.rows = sortFeeds(group.rows, sort, nowMs);
-    group.rollup = groupRollup(group.rows, nowMs);
-    result.push(group);
-  }
-  return result.sort(
-    (a, b) =>
-      b.rollup.failing - a.rollup.failing ||
-      b.rows.length - a.rows.length ||
-      a.source.localeCompare(b.source)
-  );
-}
-
-/* Header-row aggregates for one group. Sums stay unknown (null) when no row
-   carries the observation, matching the per-feed "—" rather than inventing 0. */
-export function groupRollup(rows, nowMs = 0) {
-  const counts = {};
-  const intervals = new Set();
-  let failing = 0;
+/* A vendor row's columns, rolled up from its status lines. `worst` is the
+   state its status column shows. Sums stay null when no line carries them. */
+export function providerRollup(provider) {
+  const buckets = provider.buckets ?? [];
+  let total = 0;
+  let intervalMin = null;
+  let intervalMax = null;
+  let dueMin = null;
+  let lastMax = null;
   let jobs = null;
   let errors = null;
-  let soonestKey = Infinity;
-  let dueAt = null;
-  let latestPoll = -Infinity;
-  for (const feed of rows) {
-    const state = feed.sched.status.state;
-    counts[state] = (counts[state] ?? 0) + 1;
-    if (state === "backing_off") failing += 1;
-    const today = jobsToday(feed);
-    if (today != null) jobs = (jobs ?? 0) + today;
-    const errs = feed.telemetry?.error_count_7d;
-    if (errs != null) errors = (errors ?? 0) + errs;
-    const due = dueInfo(feed.policy?.due_at, feed.policy?.enabled === false, nowMs);
-    if (due.sortKey < soonestKey) {
-      soonestKey = due.sortKey;
-      dueAt = feed.policy.due_at;
-    }
-    const poll = Date.parse(feed.policy?.last_poll_at ?? "");
-    if (!Number.isNaN(poll) && poll > latestPoll) latestPoll = poll;
-    if (feed.policy?.interval_s != null) intervals.add(feed.policy.interval_s);
+  for (const bucket of buckets) {
+    total += bucket.count;
+    intervalMin = earliest(intervalMin, bucket.interval_min);
+    intervalMax = latest(intervalMax, bucket.interval_max);
+    dueMin = earliest(dueMin, bucket.due_min);
+    lastMax = latest(lastMax, bucket.last_max);
+    jobs = addNullable(jobs, bucket.jobs);
+    errors = addNullable(errors, bucket.errors);
   }
-  const states = Object.keys(counts).sort(
-    (a, b) => (STATUS_PRIORITY[a] ?? 99) - (STATUS_PRIORITY[b] ?? 99)
-  );
-  return {
-    worst: states[0] ?? "unknown",
-    counts: states.map((state) => [state, counts[state]]),
-    failing,
-    jobs,
-    errors,
-    dueAt,
-    lastPollAt: latestPoll === -Infinity ? null : new Date(latestPoll).toISOString(),
-    intervals: [...intervals].sort((a, b) => a - b),
-  };
+  const worst = [...buckets].sort(
+    (a, b) => (STATUS_PRIORITY[a.state] ?? 99) - (STATUS_PRIORITY[b.state] ?? 99)
+  )[0]?.state ?? null;
+  return { total, worst, intervalMin, intervalMax, dueMin, lastMax, jobs, errors };
 }
 
-/* Collapsed groups are the default; a narrowing filter that leaves a small
-   result set opens every matching group so the rows are visible at once. */
-export const AUTO_EXPAND_ROWS = 150;
+/* A vendor's status lines in board order, narrowed to the active view. */
+export function visibleBuckets(provider, view) {
+  return STATE_ORDER
+    .map((state) => (provider.buckets ?? []).find((bucket) => bucket.state === state))
+    .filter((bucket) => bucket && viewMatches(bucket.state, view));
+}
 
-export function autoExpand(groups, filters) {
-  if (filters.view === "all" && !filters.search) return false;
-  const rows = groups.reduce((sum, group) => sum + group.rows.length, 0);
-  return rows <= AUTO_EXPAND_ROWS;
+const SORT_VALUE = {
+  status: (rollup) => STATUS_PRIORITY[rollup.worst] ?? 99,
+  name: (_rollup, provider) => provider.source,
+  interval: (rollup) => rollup.intervalMin ?? Infinity,
+  due: (rollup) => (rollup.dueMin ? Date.parse(rollup.dueMin) : Infinity),
+  last_poll: (rollup) => (rollup.lastMax ? Date.parse(rollup.lastMax) : -Infinity),
+  jobs: (rollup) => rollup.jobs ?? -Infinity,
+  errors: (rollup) => rollup.errors ?? -Infinity,
+};
+
+/* Vendors sorted by one column; ties fall back to name so the order is stable. */
+export function sortProviders(providers, sort = { key: "status", direction: "asc" }) {
+  const value = SORT_VALUE[sort.key] ?? SORT_VALUE.status;
+  const direction = sort.direction === "desc" ? -1 : 1;
+  return providers
+    .map((provider) => ({ provider, rollup: providerRollup(provider) }))
+    .sort((a, b) => {
+      const left = value(a.rollup, a.provider);
+      const right = value(b.rollup, b.provider);
+      if (left < right) return -direction;
+      if (left > right) return direction;
+      return a.provider.source.localeCompare(b.provider.source);
+    })
+    .map(({ provider }) => provider);
+}
+
+/* Page links for a pager: first, last, and a window around the current page,
+   with null standing for a gap ("…"). */
+export function pageWindow(page, pages, around = 1) {
+  if (pages <= 1) return [1];
+  const keep = new Set([1, pages]);
+  for (let n = page - around; n <= page + around; n += 1) if (n >= 1 && n <= pages) keep.add(n);
+  const sorted = [...keep].sort((a, b) => a - b);
+  const out = [];
+  for (const [index, n] of sorted.entries()) {
+    if (index && n - sorted[index - 1] > 1) out.push(null);
+    out.push(n);
+  }
+  return out;
 }
 
 /* ---------- board sections (operator-named provider groups) ----------
 
    The server stores a layout: groups in board order, each with the providers
    ("sources") filed in it. Anything not filed is Ungrouped, which is not a
-   stored group -- it is always last and cannot be renamed, moved or deleted,
-   so a provider that appears tomorrow lands somewhere visible on its own.
-   Layout edits below return a new layout and never mutate, so the previous
-   one stays intact for undo. */
+   stored group -- it is always last and cannot be renamed, so a provider that
+   appears tomorrow lands somewhere visible on its own. Layout edits below
+   return a new layout and never mutate, so the previous one stays intact for
+   undo. */
 
 export const UNGROUPED = "ungrouped";
 export const UNGROUPED_NAME = "Ungrouped";
@@ -276,48 +208,32 @@ export function sectionMatcher(layout, needle) {
   return (source) => named.has(source) || (ungrouped && !filed.has(source));
 }
 
-/* Buckets provider groups (from groupFeeds, already in concern order) into
-   the layout's sections, Ungrouped last. Empty sections are kept; the caller
-   decides whether an empty one is worth a heading. */
-export function sectionGroups(providerGroups, layout) {
+/* Vendors bucketed into the layout's sections, Ungrouped last, in the order
+   given. Sections with no vendor to show are dropped. */
+export function sectionProviders(providers, layout) {
   const sections = layout.map((group) => ({
     id: sectionKey(group.id),
     name: group.name,
     ungrouped: false,
-    groups: [],
+    providers: [],
   }));
-  const ungrouped = { id: UNGROUPED, name: UNGROUPED_NAME, ungrouped: true, groups: [] };
+  const ungrouped = { id: UNGROUPED, name: UNGROUPED_NAME, ungrouped: true, providers: [] };
   const byId = new Map(sections.map((section) => [section.id, section]));
-  for (const group of providerGroups) {
-    (byId.get(sectionOf(layout, group.source)) ?? ungrouped).groups.push(group);
+  for (const provider of providers) {
+    (byId.get(sectionOf(layout, provider.source)) ?? ungrouped).providers.push(provider);
   }
-  return [...sections, ungrouped];
+  return [...sections, ungrouped].filter((section) => section.providers.length);
 }
 
-/* Section heading aggregates, summed from its providers' rollups. Sums stay
-   null when no provider carries the observation, matching groupRollup. */
-export function sectionRollup(section) {
+/* A section heading's state counts, summed over its vendors, worst first. */
+export function sectionCounts(section) {
   const counts = {};
-  let jobs = null;
-  let errors = null;
-  let feeds = 0;
-  for (const group of section.groups) {
-    feeds += group.rows.length;
-    for (const [state, count] of group.rollup.counts) counts[state] = (counts[state] ?? 0) + count;
-    if (group.rollup.jobs != null) jobs = (jobs ?? 0) + group.rollup.jobs;
-    if (group.rollup.errors != null) errors = (errors ?? 0) + group.rollup.errors;
+  for (const provider of section.providers) {
+    for (const [state, count] of Object.entries(provider.counts ?? {})) {
+      counts[state] = (counts[state] ?? 0) + count;
+    }
   }
-  const states = Object.keys(counts).sort(
-    (a, b) => (STATUS_PRIORITY[a] ?? 99) - (STATUS_PRIORITY[b] ?? 99)
-  );
-  return {
-    worst: states[0] ?? null,
-    counts: states.map((state) => [state, counts[state]]),
-    providers: section.groups.length,
-    feeds,
-    jobs,
-    errors,
-  };
+  return STATE_ORDER.filter((state) => counts[state]).map((state) => [state, counts[state]]);
 }
 
 function withoutSource(layout, source) {
@@ -325,6 +241,11 @@ function withoutSource(layout, source) {
     ...group,
     sources: group.sources.filter((item) => item !== source),
   }));
+}
+
+/* Groups only exist while something is filed in them: emptying one drops it. */
+export function dropEmptySections(layout) {
+  return layout.filter((group) => group.sources.length);
 }
 
 export function moveSource(layout, source, target) {
@@ -343,20 +264,6 @@ export function addSection(layout, name, sources = []) {
 
 export function renameSection(layout, id, name) {
   return layout.map((group) => (sectionKey(group.id) === id ? { ...group, name } : group));
-}
-
-export function removeSection(layout, id) {
-  return layout.filter((group) => sectionKey(group.id) !== id);
-}
-
-/* Moves a group to `index` in the board order (clamped). */
-export function moveSection(layout, id, index) {
-  const from = layout.findIndex((group) => sectionKey(group.id) === id);
-  if (from < 0) return layout;
-  const next = [...layout];
-  const [group] = next.splice(from, 1);
-  next.splice(Math.max(0, Math.min(index, next.length)), 0, group);
-  return next;
 }
 
 export function uniqueSectionName(layout, base = "New group") {

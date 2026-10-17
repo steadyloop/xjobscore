@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { boardUrl, guessDomain, links, readable, splitToken, toRow } from "./model.mjs";
+import { boardUrl, guessDomain, isAutoDomain, links, readable, splitToken, toRow } from "./model.mjs";
 
 /* The shape /api/companies actually returns (see companies._shape). */
 const apiRow = (over = {}) => ({
@@ -25,6 +25,20 @@ test("an api row becomes an editable row with a board link", () => {
 test("has_logo survives the row conversion", () => {
   assert.equal(toRow(apiRow()).hasLogo, false);
   assert.equal(toRow(apiRow({ has_logo: true })).hasLogo, true);
+});
+
+test("automatic provenance labels only the successfully added current domain", () => {
+  const tags = { domain_guess: { candidate: "tines.com", added: true } };
+  const row = toRow(apiRow({ domain: "tines.com", tags }));
+  assert.equal(isAutoDomain(row), true);
+  row.domain = "corrected.example";
+  assert.equal(isAutoDomain(row), false, "typing a correction hides the label");
+  assert.equal(isAutoDomain(toRow(apiRow({ domain: "corrected.example", tags }))), false);
+  assert.equal(isAutoDomain(toRow(apiRow({ domain: "tines.com" }))), false);
+  assert.equal(isAutoDomain(toRow(apiRow({
+    domain: "tines.com", tags: { domain_guess: { candidate: "tines.com", added: false } },
+  }))), false);
+  assert.equal(isAutoDomain(toRow(apiRow({ tags }))), false, "cleared domains have no label");
 });
 
 test("tokens split on the first colon only", () => {

@@ -114,6 +114,23 @@ async def test_successful_empty_board_marks_every_previous_job_missing(board):
                and row["status"] == "active" for row in (await board.state()).values())
 
 
+async def test_filtered_snapshots_preserve_omissions_and_the_daily_reconciliation_clock(board):
+    await board.poll(listing("kept", "outside-search", list_total=2, full_listing=True), 0)
+    for minute in (15, 30):  # changed and identical filtered-snapshot paths
+        assert await board.poll(listing("kept", list_total=3, filtered_listing=True), minute) == "ok"
+        rows = await board.state()
+        assert rows["outside-search"]["missing_since"] is None
+        assert rows["outside-search"]["last_seen_at"] == NOW
+    async with board.pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT list_total,last_full_poll_at FROM feed WHERE id=$1", board.feed_id)
+        assert row["list_total"] == 3  # next count probe can short-circuit
+        assert row["last_full_poll_at"] == NOW  # filtered polls cannot postpone discovery
+    await board.poll(Record(count_unchanged=True, http_status=200), 45)
+    assert (await board.state())["outside-search"]["missing_since"] is None
+    await board.poll(listing("kept", list_total=1, full_listing=True), 24 * 60)
+    assert (await board.state())["outside-search"]["missing_since"] == NOW + timedelta(days=1)
+
+
 async def test_complete_unchanged_listing_repairs_an_unrecorded_missing_stamp(board):
     await board.poll(listing("kept", "gone"), 0)
     await board.poll(listing("kept"), 15)

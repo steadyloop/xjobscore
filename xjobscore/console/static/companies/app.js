@@ -4,7 +4,7 @@
 import { renderNav } from "/static/shared/nav.js";
 import { api } from "/static/shared/api.js";
 import { el, formatCount } from "/static/shared/format.js";
-import { guessDomain, links, toRow } from "/static/companies/model.mjs";
+import { guessDomain, isAutoDomain, links, toRow } from "/static/companies/model.mjs";
 
 // Same keys and order as companies.FILTERS on the server.
 const FILTERS = [
@@ -104,11 +104,16 @@ function recount(previous, next, row) {
 }
 
 function rowNode(row) {
+  const autoDomain = el("span", { class: "t-meta", hidden: !isAutoDomain(row) },
+    "Automatically added");
   // The domain guess lives in the placeholder: grey until typed over, and
   // committed only if Save is pressed with the field still empty.
   const domain = el("input", { type: "text", value: row.domain, disabled: row.busy,
     placeholder: guessDomain(row.name) || "example.com",
-    oninput: (e) => { row.domain = e.target.value; } });
+    oninput: (e) => {
+      row.domain = e.target.value;
+      autoDomain.hidden = !isAutoDomain(row);
+    } });
   const name = el("input", { type: "text", value: row.name, disabled: row.busy,
     placeholder: "Company name",
     oninput: (e) => {
@@ -169,7 +174,7 @@ function rowNode(row) {
       row.blocker ? mergeOffer(row) : null),
     linksCell(row),
     el("td", {}, name),
-    el("td", {}, domain, logo),
+    el("td", {}, domain, autoDomain, logo),
     el("td", {}, description),
     el("td", {}, el("div", { class: "t-actions" }, save, secondary)));
 }

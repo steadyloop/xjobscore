@@ -11,6 +11,7 @@ from datetime import datetime
 
 from xjobscore.net import Net
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
+from .json_api import shared_job_type
 
 
 PAGE_SIZE = 25
@@ -104,10 +105,12 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     ]
     url = _posting_url(feed, item.external_id)
     published = _date(row.get("postingStartTimestampUTC"))
+    title = str(row.get("jobTitle") or "")
     return [
         Posting(
             external_id=item.external_id,
-            title=str(row.get("jobTitle") or ""),
+            title=title,
+            job_type=shared_job_type(title),
             url_posting=url,
             apply_url=url,
             company_raw=feed.company_name or feed.key,

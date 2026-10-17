@@ -30,7 +30,7 @@ from xjobscore.records import Canonical, Feed, Item, Record
 from xjobscore.source_policy import require_source_allowed
 from xjobscore.sources import (
     avature, dayforce, docxtract, hn, janestreet, join, json_api, taleo,
-    workatastartup, zohorecruit,
+    workatastartup, workable, zohorecruit,
 )
 
 __all__ = [
@@ -65,6 +65,7 @@ SOURCES: dict[str, Harvest] = {
     "janestreet": janestreet.harvest,
     "taleo": taleo.harvest,
     "workatastartup": workatastartup.harvest,
+    "workable": workable.harvest,
     "zohorecruit": zohorecruit.harvest,
     **{name: docxtract.harvester(name) for name in docxtract.CONFIGS},
 }
@@ -80,6 +81,7 @@ PARSERS: dict[str, Parse] = {
     "join": join.parse,
     "janestreet": janestreet.parse,
     "taleo": taleo.parse,
+    "workable": workable.parse,
     "zohorecruit": zohorecruit.parse,
     **{name: docxtract.parser(name) for name in docxtract.CONFIGS},
 }

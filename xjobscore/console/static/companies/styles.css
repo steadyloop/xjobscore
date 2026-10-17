@@ -29,6 +29,8 @@
   margin-top: 2px;
 }
 
+.companies-page .t-meta[hidden] { display: none; }
+
 .companies-page .t-links {
   display: flex;
   flex-direction: column;

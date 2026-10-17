@@ -40,6 +40,8 @@ export function toRow(api) {
     id: api.id,
     name: api.name || "",
     domain: api.domain || "",
+    autoDomain: api.tags?.domain_guess?.added === true
+      ? api.tags.domain_guess.candidate || "" : "",
     description: api.description || "",
     state: api.review_state,
     postings: api.active_postings || 0,
@@ -51,6 +53,10 @@ export function toRow(api) {
     hasLogo: Boolean(api.has_logo),
     error: "",
   };
+}
+
+export function isAutoDomain(row) {
+  return Boolean(row.autoDomain && row.domain === row.autoDomain);
 }
 
 /* Where to look to work out who this company is, most useful first. */

@@ -258,6 +258,32 @@ async def _fetch_logo(client: httpx.AsyncClient, domain: str) -> bytes | None:
     return small.payload
 
 
+def _client(**options) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        headers={"User-Agent": USER_AGENT, "Accept": "*/*"},
+        **options,
+    )
+
+
+async def _store(pool: Pool, company_id: int, domain: str | None, payload: bytes | None) -> None:
+    """Record one attempt: its bytes, and the domain they answer for.
+
+    Written either way. NULL bytes say this domain was asked and had nothing
+    usable; the domain is what makes the attempt once per URL -- a company
+    whose domain later differs is asked again, one with the same never is.
+    """
+    await pool.execute(
+        """
+        INSERT INTO company_logo (company_id, bytes, domain) VALUES ($1, $2, $3)
+        ON CONFLICT (company_id) DO UPDATE SET bytes = EXCLUDED.bytes, domain = EXCLUDED.domain
+        """,
+        company_id,
+        payload,
+        domain,
+    )
+
+
 @dataclass
 class Result:
     attempted: int = 0
@@ -274,18 +300,37 @@ async def harvest(
     refresh: bool = False,
     retry_failed: bool = False,
 ) -> Result:
-    """Fetch and store a logo for every company that has a domain but no row.
+    """Fetch and store a logo once for every company domain not yet asked.
 
-    `refresh` reconsiders companies already recorded, including the failures.
-    `retry_failed` reconsiders only the recorded failures (NULL `bytes`), for a
-    rerun after the fetch learned a new source.
+    A company is asked when it has no row, or its row answers for a different
+    domain (the URL was corrected). A failure for the same domain stays a
+    failure. `refresh` reconsiders every company; `retry_failed` also retries
+    the recorded failures (NULL `bytes`), for a rerun after the fetch learned a
+    new source.
+
+    A company whose domain was cleared keeps no logo unless it has a verified
+    shared website. Distinct franchise employers can use the same banner logo
+    without sharing a company domain. Cleared rows are emptied rather than
+    deleted, because publishing ships rows and would never ship a delete.
     """
+    await pool.execute(
+        """
+        UPDATE company_logo l SET bytes = NULL, domain = NULL
+          FROM company c
+         WHERE c.id = l.company_id AND (c.domain IS NULL OR c.domain = '')
+           AND NOT (
+             c.reviewed = 'verified'
+             AND COALESCE(c.tags #>> '{company_resolution,state}', '') = 'resolved_shared_website'
+             AND COALESCE(c.tags #>> '{company_resolution,website}', '') ~ '^https?://[^/[:space:]]+(/|$)'
+           )
+           AND (l.bytes IS NOT NULL OR l.domain IS NOT NULL)
+        """
+    )
     if refresh:
         where = ""
-    elif retry_failed:
-        where = "AND (l.company_id IS NULL OR l.bytes IS NULL)"
     else:
-        where = "AND l.company_id IS NULL"
+        where = "AND (l.company_id IS NULL OR l.domain IS DISTINCT FROM c.domain"
+        where += " OR l.bytes IS NULL)" if retry_failed else ")"
     rows = await pool.fetch(
         f"""
         SELECT c.id, c.domain
@@ -304,11 +349,7 @@ async def harvest(
 
     gate = asyncio.Semaphore(CONCURRENCY)
     limits = httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        headers={"User-Agent": USER_AGENT, "Accept": "*/*"},
-        limits=limits,
-    ) as client:
+    async with _client(limits=limits) as client:
 
         async def one(company_id: int, domain: str) -> tuple[int, str, bytes | None]:
             async with gate:
@@ -324,14 +365,7 @@ async def harvest(
         done = 0
         for task in asyncio.as_completed(tasks):
             company_id, domain, payload = await task
-            await pool.execute(
-                """
-                INSERT INTO company_logo (company_id, bytes) VALUES ($1, $2)
-                ON CONFLICT (company_id) DO UPDATE SET bytes = EXCLUDED.bytes
-                """,
-                company_id,
-                payload,
-            )
+            await _store(pool, company_id, domain, payload)
             if payload:
                 result.stored += 1
                 result.bytes_stored += len(payload)
@@ -364,31 +398,18 @@ async def harvest_one(
         target = await pool.fetchval(
             "SELECT domain FROM company WHERE id = $1", company_id
         ) or ""
-    target = target.strip().lower().removeprefix("http://").removeprefix("https://")
-    target = target.split("/")[0]
+    target = store.normalize_domain(target, board_hosts_ok=True)
     if not target:
         return None
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        headers={"User-Agent": USER_AGENT, "Accept": "*/*"},
-    ) as client:
+    async with _client() as client:
         try:
             payload = await _fetch_logo(client, target)
         except Exception as error:  # noqa: BLE001 -- third-party hosts fail freely
             log.debug("%s: %s", target, error)
             payload = None
 
-    # The row is written either way: a NULL `bytes` records that this domain
-    # was asked and had nothing usable, which is an answer the UI can show.
-    await pool.execute(
-        """
-        INSERT INTO company_logo (company_id, bytes) VALUES ($1, $2)
-        ON CONFLICT (company_id) DO UPDATE SET bytes = EXCLUDED.bytes
-        """,
-        company_id,
-        payload,
-    )
+    await _store(pool, company_id, target, payload)
     return payload
 
 

@@ -80,6 +80,12 @@ class FakePolicy:
         self.calls.append(("set_provider_paused", source, paused))
         return {"source": source, "paused": paused, "affected": 2013}
 
+    async def set_provider_interval(self, source: str, interval_s: int) -> dict:
+        if not 60 <= interval_s <= 7 * 86_400:
+            raise ValueError("interval_s must be within [60, 604800]")
+        self.calls.append(("set_provider_interval", source, interval_s))
+        return {"source": source, "interval_s": interval_s, "affected": 2013}
+
     async def set_feeds_enabled(self, identities: list[tuple], enabled: bool) -> dict:
         self.calls.append(("set_feeds_enabled", tuple(identities), enabled))
         return {
@@ -470,23 +476,31 @@ def test_scheduler_overview_without_telemetry(imported_client):
     assert "calibrating" not in body["counts_by_status"]
 
 
-def test_scheduler_feeds_carry_operational_state_and_show_every_imported_feed(
+def _page(client, source, state, **params):
+    response = client.get(
+        f"/api/scheduler/providers/{source}/feeds", params={"state": state, **params}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_scheduler_providers_carry_operational_state_and_show_every_imported_feed(
     imported_client,
 ):
-    body = imported_client.get("/api/scheduler/feeds").json()
+    body = imported_client.get("/api/scheduler/providers").json()
     assert body["telemetry_available"] is False
     # The row's existence is the membership test. Held feeds stay -- otherwise
     # Resume would be unreachable -- and only the unimported one is absent.
-    assert {row["feed_ref"] for row in body["feeds"]} == {
-        REF,
-        feed_ref("route-off", "demo"),
-        feed_ref("route-paused", "demo"),
-    }
-    assert [row["sched"]["status"]["state"] for row in body["feeds"]] == [
-        "never_polled",
-        "paused",
-        "paused",
-    ]
+    by_source = {p["source"]: p for p in body["providers"]}
+    assert set(by_source) == {"route-test", "route-off", "route-paused"}
+    assert by_source["route-test"]["counts"] == {"never_polled": 1}
+    assert by_source["route-off"]["counts"] == {"paused": 1}
+    bucket = by_source["route-test"]["buckets"][0]
+    assert bucket["state"] == "never_polled"
+    assert bucket["count"] == 1
+    assert bucket["interval_min"] == bucket["interval_max"] == 900
+    # No telemetry means no rollup numbers, not zeros.
+    assert bucket["jobs"] is None and bucket["errors"] is None
 
     # The unimported feed is still configured, so the catalog listing keeps it.
     all_refs = {
@@ -496,7 +510,10 @@ def test_scheduler_feeds_carry_operational_state_and_show_every_imported_feed(
     }
     assert feed_ref("route-unimported", "demo") in all_refs
 
-    row = next(row for row in body["feeds"] if row["feed_ref"] == REF)
+    page = _page(imported_client, "route-test", "never_polled")
+    assert (page["total"], page["page"], page["pages"]) == (1, 1, 1)
+    row = page["feeds"][0]
+    assert row["feed_ref"] == REF
     assert row["telemetry"] is None
     assert row["spark"] is None
     sched = row["sched"]
@@ -505,23 +522,50 @@ def test_scheduler_feeds_carry_operational_state_and_show_every_imported_feed(
     assert sched["status"]["state"] == "never_polled"
     assert sched["status"]["chip"] in {"ok", "unchanged", "partial", "error", "never"}
 
-    filtered = imported_client.get(
-        "/api/scheduler/feeds", params={"source": "route-test"}
+    assert _page(imported_client, "route-test", "healthy")["feeds"] == []
+
+
+def test_provider_feed_pages_filter_and_reject_bad_input(imported_client):
+    assert _page(imported_client, "route-test", "never_polled", q="DEM")["total"] == 1
+    assert _page(imported_client, "route-test", "never_polled", q="nothing")["total"] == 0
+    # Past the end clamps to the last page rather than returning nothing.
+    assert _page(imported_client, "route-test", "never_polled", page=9)["page"] == 1
+    feeds = "/api/scheduler/providers/{}/feeds"
+    assert imported_client.get(feeds.format("route-test"), params={"state": "bogus"}).status_code == 400
+    assert imported_client.get(feeds.format("route-test")).status_code == 422
+    assert imported_client.get(feeds.format("missing"), params={"state": "healthy"}).status_code == 404
+    assert (
+        imported_client.get(feeds.format("route-test"), params={"state": "healthy", "page": 0}).status_code
+        == 422
     )
-    assert {row["source"] for row in filtered.json()["feeds"]} == {"route-test"}
+
+
+def test_scheduler_search_groups_matches_by_provider(imported_client):
+    body = imported_client.get("/api/scheduler/search", params={"q": "Demo"}).json()
+    assert [(p["source"], p["count"]) for p in body["providers"]] == [
+        ("route-off", 1), ("route-paused", 1), ("route-test", 1),
+    ]
+    assert body["providers"][2]["feeds"][0]["feed_ref"] == REF
+    assert imported_client.get("/api/scheduler/search", params={"q": "zzz"}).json()["providers"] == []
+    assert imported_client.get("/api/scheduler/search", params={"q": " d "}).status_code == 400
 
 
 def test_paused_feed_stays_on_the_scheduler_and_says_so(imported_client):
     """Pausing holds polling without costing you the feed -- the whole feature."""
     ref = feed_ref("route-paused", "demo")
-    body = imported_client.get("/api/scheduler/feeds").json()
-    row = next(row for row in body["feeds"] if row["feed_ref"] == ref)
+    row = _page(imported_client, "route-paused", "paused")["feeds"][0]
 
+    assert row["feed_ref"] == ref
     assert row["policy"]["enabled"] is False
     assert row["sched"]["status"]["state"] == "paused"
 
-    # And the detail route serves it too, so Resume is reachable.
+    # And the detail route serves it too, so Resume is reachable -- with or
+    # without the vendor hint the drawer sends.
     assert imported_client.get(f"/api/scheduler/feeds/{ref}").status_code == 200
+    hinted = imported_client.get(f"/api/scheduler/feeds/{ref}", params={"source": "route-paused"})
+    assert hinted.json()["feed"]["feed_ref"] == ref
+    wrong = imported_client.get(f"/api/scheduler/feeds/{ref}", params={"source": "route-test"})
+    assert wrong.status_code == 404
 
 
 def test_pausing_is_forwarded_and_an_empty_body_is_still_rejected(imported_client):
@@ -614,6 +658,43 @@ def test_provider_pause_reports_database_failure(polling_client, monkeypatch):
     assert response.status_code == 503
 
 
+@pytest.mark.parametrize("interval_s", [60, 21_600, 604_800])
+def test_provider_interval_is_one_write_and_wakes_the_runner(polling_client, monkeypatch, interval_s):
+    async def no_fleet_lookup():
+        raise AssertionError("provider interval must not resolve the full fleet")
+
+    monkeypatch.setattr(polling_client.app.state.console, "feed_rows", no_fleet_lookup)
+    response = polling_client.post(
+        "/api/scheduler/providers/route-test/interval", json={"interval_s": interval_s}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"source": "route-test", "interval_s": interval_s, "affected": 2013}
+    assert polling_client.app.state.policy.calls == [
+        ("set_provider_interval", "route-test", interval_s)
+    ]
+    assert polling_client.app.state.scheduler_runner.nudges == 1
+
+
+@pytest.mark.parametrize("interval_s", [59, 604_801])
+def test_provider_interval_rejects_out_of_range(polling_client, interval_s):
+    response = polling_client.post(
+        "/api/scheduler/providers/route-test/interval", json={"interval_s": interval_s}
+    )
+    assert response.status_code == 400
+    assert "interval_s must be within" in response.text
+    assert polling_client.app.state.policy.calls == []
+
+
+def test_provider_interval_reports_absent_provider_and_bad_body(polling_client, monkeypatch):
+    async def absent(source, interval_s):
+        return {"source": source, "interval_s": interval_s, "affected": 0}
+
+    url = "/api/scheduler/providers/missing/interval"
+    assert polling_client.post(url, json={"interval_s": 900, "extra": 1}).status_code == 422
+    monkeypatch.setattr(polling_client.app.state.policy, "set_provider_interval", absent)
+    assert polling_client.post(url, json={"interval_s": 900}).status_code == 404
+
+
 def test_scheduler_feed_detail(imported_client):
     body = imported_client.get(f"/api/scheduler/feeds/{REF}").json()
     assert body["feed"]["feed_ref"] == REF
@@ -626,6 +707,53 @@ def test_scheduler_feed_detail(imported_client):
     assert imported_client.get(f"/api/scheduler/feeds/{off}").status_code == 200
     gone = feed_ref("route-unimported", "demo")
     assert imported_client.get(f"/api/scheduler/feeds/{gone}").status_code == 404
+
+
+def _count_builds(client, monkeypatch) -> list[int]:
+    """Count full fleet reads -- the expensive step the board must share."""
+    console = client.app.state.console
+    calls = [0]
+    original = console.feed_rows
+
+    async def counted():
+        calls[0] += 1
+        return await original()
+
+    monkeypatch.setattr(console, "feed_rows", counted)
+    return calls
+
+
+def test_scheduler_board_is_built_once_for_every_route(imported_client, monkeypatch):
+    builds = _count_builds(imported_client, monkeypatch)
+    providers = imported_client.get("/api/scheduler/providers").json()["providers"]
+    overview = imported_client.get("/api/scheduler/overview").json()
+    detail = imported_client.get(f"/api/scheduler/feeds/{REF}").json()
+    page = _page(imported_client, "route-test", "never_polled")
+    found = imported_client.get("/api/scheduler/search", params={"q": "demo"}).json()
+
+    assert builds == [1]
+    assert overview["feed_count"] == sum(sum(p["counts"].values()) for p in providers) == 3
+    assert overview["counts_by_status"] == {"never_polled": 1, "paused": 2}
+    assert detail["feed"]["feed_ref"] == REF
+    assert page["total"] == 1 and len(found["providers"]) == 3
+    assert imported_client.get("/api/scheduler/feeds/not-a-ref").status_code == 404
+
+
+def test_scheduler_board_rebuilds_after_a_write(imported_client, monkeypatch):
+    builds = _count_builds(imported_client, monkeypatch)
+    imported_client.get("/api/scheduler/providers")
+    response = imported_client.post(f"/api/feeds/{REF}/policy", json={"paused": True})
+    assert response.status_code == 200
+    after_write = builds[0]  # the write resolves its feed with a fleet read too
+    imported_client.get("/api/scheduler/providers")
+    imported_client.get("/api/scheduler/overview")
+    assert builds[0] == after_write + 1  # one rebuild, then shared again
+
+    imported_client.post(
+        "/api/scheduler/providers/route-test/interval", json={"interval_s": 3600}
+    )
+    imported_client.get("/api/scheduler/providers")
+    assert builds[0] == after_write + 2  # a vendor-wide write rebuilds too
 
 
 def test_scheduler_events_degrade_to_empty(imported_client):
@@ -641,8 +769,12 @@ def test_scheduler_survives_degraded_postgres(client):
     assert overview.status_code == 200
     assert overview.json()["telemetry_available"] is False
 
-    feeds = client.get("/api/scheduler/feeds").json()["feeds"]
-    row = next(row for row in feeds if row["feed_ref"] == REF)
+    providers = client.get("/api/scheduler/providers").json()["providers"]
+    assert {"source": "route-test", "counts": {"unknown": 1}}.items() <= next(
+        p for p in providers if p["source"] == "route-test"
+    ).items()
+    row = _page(client, "route-test", "unknown")["feeds"][0]
+    assert row["feed_ref"] == REF
     assert row["policy"] is None
     assert row["sched"]["status"]["state"] == "unknown"
 
@@ -1347,6 +1479,10 @@ class FakeCompaniesPool:
         if self.raises is not None:
             raise self.raises
         return "UPDATE 1"
+
+    async def fetchval(self, sql, *args):
+        # No frontend_identity table: the serving re-key is a no-op here.
+        return None
 
 
 def _company_row(**overrides):

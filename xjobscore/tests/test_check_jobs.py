@@ -23,7 +23,8 @@ async def db():
     try:
         await setup.execute(f"CREATE SCHEMA {schema}; SET search_path TO {schema}")
         await setup.execute("""
-            CREATE TABLE company(id bigint PRIMARY KEY, name text, description text);
+            CREATE TABLE company(id bigint PRIMARY KEY, name text, description text, domain text,
+                reviewed text DEFAULT 'pending', tags jsonb DEFAULT '{}');
             CREATE TABLE token(ats text, token text, company_id bigint, config jsonb);
             CREATE TABLE feed(
                 id bigint PRIMARY KEY, source text, key text, polling bool DEFAULT true,

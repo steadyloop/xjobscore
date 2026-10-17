@@ -31,6 +31,17 @@ from xjobscore import store
 _schema_counter = itertools.count()
 
 
+@pytest.fixture(autouse=True)
+def isolate_company_domain_requests(monkeypatch):
+    """Ordinary poll tests must not visit websites generated from fixture names."""
+    from xjobscore import company_domain
+
+    async def unavailable(candidate):
+        return False
+
+    monkeypatch.setattr(company_domain, "_reachable", unavailable)
+
+
 @pytest.fixture
 def live_migration():
     """Read a `xjobscore/migrations/` file, skipping the test when it is absent.

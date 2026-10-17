@@ -123,6 +123,11 @@ async def test_job_type_step_persists_domains_and_skips_unchanged_rows(
     assert connection.rows[4]["job_domain"] is None
 
 
+def _linked_row(posting_id: int, **overrides: Any) -> dict[str, Any]:
+    overrides.setdefault("apply_url", "https://careers.example.test/postings/42")
+    return _row(posting_id, **overrides)
+
+
 # Keying -------------------------------------------------------------------
 
 
@@ -204,13 +209,13 @@ def test_different_unparseable_apply_urls_never_use_role_fallback() -> None:
     assert plan.counts.groups == 0
 
 
-def test_same_company_title_and_missing_location_group_together() -> None:
+def test_same_company_title_and_missing_location_do_not_group() -> None:
     plan = gold.plan_dedup(
         [_row(1, title="Software Engineer"), _row(2, title="software   engineer!")]
     )
-    assert plan.counts == gold.Counts(groups=1, postings=2)
-    assert {member["group_id"] for member in plan.members} == {plan.groups[0]["id"]}
-    assert plan.groups[0]["evidence"]["signal"] == "company_role_location"
+    assert plan.counts == gold.Counts()
+    assert plan.groups == []
+    assert plan.members == []
 
 
 def test_different_locations_never_group() -> None:
@@ -220,11 +225,32 @@ def test_different_locations_never_group() -> None:
     assert plan.counts.groups == 0
 
 
-def test_equivalent_normalized_locations_group_together() -> None:
+def test_equivalent_normalized_locations_do_not_group() -> None:
     plan = gold.plan_dedup(
         [_row(1, location_text="San José, CA"), _row(2, location_text="san jose ca")]
     )
-    assert plan.counts == gold.Counts(groups=1, postings=2)
+    assert plan.counts == gold.Counts()
+
+
+def test_jane_street_distinct_openings_stay_separate() -> None:
+    plan = gold.plan_dedup([
+        _row(
+            index,
+            source="janestreet:janestreet",
+            title="Machine Learning Researcher",
+            location_text="HKG",
+            source_url=f"https://www.janestreet.com/join-jane-street/position/{key}/",
+            job_type=job_type,
+        )
+        for index, (key, job_type) in enumerate([
+            ("8596771002", "intern"),
+            ("7246309002", None),
+            ("8576934002", "new_grad"),
+        ], start=1)
+    ])
+    assert plan.counts == gold.Counts()
+    assert plan.groups == []
+    assert plan.members == []
 
 
 def test_different_companies_never_group() -> None:
@@ -258,7 +284,7 @@ def test_requisition_identity_does_not_require_a_title() -> None:
 
 
 def test_group_ids_are_deterministic() -> None:
-    rows = [_row(1), _row(2)]
+    rows = [_linked_row(1), _linked_row(2)]
     assert gold.plan_dedup(rows).groups[0]["id"] == gold.plan_dedup(rows).groups[0]["id"]
 
 
@@ -286,8 +312,8 @@ def test_direct_ats_posting_is_primary_over_newer_aggregator() -> None:
 
 def test_newest_posted_at_is_primary_within_same_source_quality() -> None:
     plan = gold.plan_dedup([
-        _row(1, posted_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-        _row(2, posted_at=datetime(2026, 8, 20, tzinfo=timezone.utc)),
+        _linked_row(1, posted_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
+        _linked_row(2, posted_at=datetime(2026, 8, 20, tzinfo=timezone.utc)),
     ])
 
     assert plan.groups[0]["primary_posting_id"] == 2
@@ -296,15 +322,15 @@ def test_newest_posted_at_is_primary_within_same_source_quality() -> None:
 def test_newest_first_seen_breaks_posted_at_tie() -> None:
     posted = datetime(2026, 8, 1, tzinfo=timezone.utc)
     plan = gold.plan_dedup([
-        _row(1, posted_at=posted, first_seen_at=datetime(2026, 8, 2, tzinfo=timezone.utc)),
-        _row(2, posted_at=posted, first_seen_at=datetime(2026, 8, 3, tzinfo=timezone.utc)),
+        _linked_row(1, posted_at=posted, first_seen_at=datetime(2026, 8, 2, tzinfo=timezone.utc)),
+        _linked_row(2, posted_at=posted, first_seen_at=datetime(2026, 8, 3, tzinfo=timezone.utc)),
     ])
 
     assert plan.groups[0]["primary_posting_id"] == 2
 
 
 def test_exact_primary_tie_stays_unselected_without_id_tiebreaker() -> None:
-    plan = gold.plan_dedup([_row(7), _row(99)])
+    plan = gold.plan_dedup([_linked_row(7), _linked_row(99)])
 
     assert plan.groups[0]["primary_posting_id"] is None
 
@@ -313,7 +339,7 @@ def test_exact_primary_tie_stays_unselected_without_id_tiebreaker() -> None:
 
 
 def test_oversized_key_is_dropped_and_counted() -> None:
-    rows = [_row(n) for n in range(gold._MAX_GROUP + 1)]
+    rows = [_linked_row(n) for n in range(gold._MAX_GROUP + 1)]
     plan = gold.plan_dedup(rows)
     assert plan.groups == []
     assert plan.counts.skipped_keys == 1
@@ -321,7 +347,7 @@ def test_oversized_key_is_dropped_and_counted() -> None:
 
 
 def test_key_at_the_cap_is_kept() -> None:
-    plan = gold.plan_dedup([_row(n) for n in range(gold._MAX_GROUP)])
+    plan = gold.plan_dedup([_linked_row(n) for n in range(gold._MAX_GROUP)])
     assert plan.counts.groups == 1
     assert plan.counts.skipped_keys == 0
 
@@ -339,11 +365,11 @@ def test_authoritative_requisition_identity_is_not_frequency_capped() -> None:
 
 
 def test_stage_one_never_decides() -> None:
-    plan = gold.plan_dedup([_row(1), _row(2)])
+    plan = gold.plan_dedup([_linked_row(1), _linked_row(2)])
     group = plan.groups[0]
     assert group["state"] == "pending"
-    assert group["evidence"]["keyer"] == "ats_requisition_then_apply_then_unlinked_role"
-    assert group["evidence"]["strategy_version"] == 4
+    assert group["evidence"]["keyer"] == "ats_requisition_then_apply"
+    assert group["evidence"]["strategy_version"] == 5
     assert group["evidence"]["primary_selector"] == "direct_ats_then_posted_then_first_seen"
 
 
@@ -373,8 +399,8 @@ def test_evidence_records_signals_it_does_not_key_on() -> None:
 @pytest.mark.asyncio
 async def test_rebuild_fetches_descriptions_only_for_group_members(monkeypatch) -> None:
     candidates = [
-        {key: value for key, value in _row(1).items() if key != "description"},
-        {key: value for key, value in _row(2).items() if key != "description"},
+        {key: value for key, value in _linked_row(1).items() if key != "description"},
+        {key: value for key, value in _linked_row(2).items() if key != "description"},
         {
             key: value
             for key, value in _row(3, title="Unique title").items()

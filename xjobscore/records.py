@@ -113,6 +113,8 @@ class Feed:
     enabled: bool = True
     company_id: int | None = None
     company_name: str | None = None
+    # Silver may still fill this company's domain or description (store.fill_company).
+    company_needs_fill: bool = True
     description: str = ""  # company description resolved through the token
     type: str = "ATS"
     etag: str | None = None
@@ -167,6 +169,9 @@ class Record:
     count_unchanged: bool = False
     list_total: int | None = None
     full_listing: bool = False
+    # A complete search result is only a subset of the board. Its omissions
+    # are not disappearance evidence; only unfiltered polls reconcile them.
+    filtered_listing: bool = False
     # Incremental harvests may carry forward a detail payload whose stable
     # list/detail identity fields prove it unchanged. This remains useful
     # diagnostics when production enables reuse for a source.
@@ -200,6 +205,10 @@ class Posting:
     closed_evidence: str | None = None
 
     company_raw: str | None = None
+    # What the vendor says about the employer itself: a URL or host on its own
+    # site, and its "about us" text. Silver fills only empty company columns.
+    company_domain: str | None = None
+    company_description: str | None = None
 
     apply_url: str | None = None  # apply_url
     location_raw: str | None = None

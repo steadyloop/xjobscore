@@ -2,144 +2,121 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AUTO_EXPAND_ROWS,
+  STATE_LABEL,
   UNGROUPED,
   addSection,
-  autoExpand,
+  dropEmptySections,
   dueInfo,
-  formatRequestRate,
-  groupFeeds,
-  groupRollup,
-  intervalError,
-  intervalInput,
-  intervalSeconds,
+  intervalRange,
   jobsToday,
-  matchesFeed,
-  moveSection,
   moveSource,
+  pageWindow,
   parseSearch,
-  removeSection,
+  providerRollup,
   renameSection,
-  sectionGroups,
+  sectionCounts,
   sectionMatcher,
   sectionOf,
-  sectionRollup,
-  sortFeeds,
-  summaryCounts,
+  sectionProviders,
+  sortProviders,
   uniqueSectionName,
+  viewMatches,
+  visibleBuckets,
 } from "./model.mjs";
 
-function feed(source, state, interval = 900, options = {}) {
+function bucket(state, count, extra = {}) {
   return {
-    source,
-    key: options.key ?? source,
-    feed_ref: options.feedRef ?? `${source}:${options.key ?? source}`,
-    company_name: options.name ?? source,
-    policy: {
-      interval_s: interval,
-      enabled: !options.paused,
-      last_poll_at: options.lastPoll ?? null,
-      due_at: options.dueAt ?? null,
-    },
-    sched: { status: { state }, requests_per_day: 86_400 / interval },
-    telemetry: options.telemetry ?? null,
-    postings: options.postings ?? null,
-    spark: options.spark ?? null,
+    state,
+    count,
+    interval_min: 900,
+    interval_max: 900,
+    due_min: null,
+    last_min: null,
+    last_max: null,
+    jobs: null,
+    errors: null,
+    ...extra,
   };
 }
 
-const ALL = { view: "all", search: "" };
+function provider(source, buckets) {
+  return {
+    source,
+    counts: Object.fromEntries(buckets.map((item) => [item.state, item.count])),
+    buckets,
+  };
+}
 
-test("groups order by failing count, then size, and sort rows inside each group", () => {
-  const now = Date.parse("2026-08-22T12:00:00Z");
-  const rows = [
-    feed("ashby", "stale", 900, { key: "b", name: "Bravo", dueAt: "2026-08-22T11:00:00Z" }),
-    feed("ashby", "stale", 900, { key: "a", name: "Alpha", dueAt: "2026-08-22T11:00:00Z" }),
-    feed("ashby", "backing_off", 900, { key: "c", name: "Charlie", dueAt: "2026-08-22T12:20:00Z" }),
-    feed("workable", "stale", 900, { key: "w1" }),
-    feed("workable", "stale", 900, { key: "w2" }),
-    feed("workable", "stale", 900, { key: "w3" }),
-    feed("workable", "stale", 900, { key: "w4" }),
-    feed("lever", "backing_off", 900, { key: "l1", dueAt: "2026-08-22T12:10:00Z" }),
-    feed("lever", "backing_off", 900, { key: "l2", dueAt: "2026-08-22T12:05:00Z" }),
-  ];
-  const groups = groupFeeds(rows, ALL, undefined, now);
-  // lever has the most failing feeds; ashby beats workable on failing count despite being smaller.
-  assert.deepEqual(groups.map((group) => group.source), ["lever", "ashby", "workable"]);
-  assert.deepEqual(groups[1].rows.map((row) => row.key), ["a", "b", "c"]);
-  assert.equal(groups[1].total, 3);
-  const byName = groupFeeds(rows, ALL, { key: "name", direction: "desc" }, now);
-  assert.deepEqual(byName.map((group) => group.source), ["lever", "ashby", "workable"]);
-  assert.deepEqual(byName[1].rows.map((row) => row.key), ["c", "b", "a"]);
-});
+const WORKDAY = provider("workday", [
+  bucket("backing_off", 3, {
+    interval_min: 900, interval_max: 3600, due_min: "2026-10-10T00:05:00+00:00",
+    last_max: "2026-10-10T00:00:00+00:00", jobs: 0, errors: 14,
+  }),
+  bucket("stale", 2945, {
+    interval_min: 21600, interval_max: 21600, due_min: "2026-10-10T00:01:00+00:00",
+    last_max: "2026-10-08T00:00:00+00:00", jobs: 0, errors: 0,
+  }),
+  bucket("paused", 6, { interval_min: 900, interval_max: 900, jobs: 0, errors: 0 }),
+  bucket("healthy", 3641, {
+    interval_min: 900, interval_max: 21600, due_min: "2026-10-10T00:09:00+00:00",
+    last_max: "2026-10-10T00:04:00+00:00", jobs: 31479, errors: 0,
+  }),
+]);
 
-test("groups drop providers with no matching rows but keep the full total", () => {
-  const rows = [
-    feed("ashby", "backing_off", 900, { key: "a" }),
-    feed("ashby", "stale", 900, { key: "b" }),
-    feed("workable", "stale", 900, { key: "w" }),
-  ];
-  const groups = groupFeeds(rows, { view: "failing", search: "" });
-  assert.deepEqual(groups.map((group) => group.source), ["ashby"]);
-  assert.equal(groups[0].rows.length, 1);
-  assert.equal(groups[0].total, 2);
-  // Provider pause/resume must include the row hidden by the status filter.
-  assert.deepEqual(groups[0].allRows, rows.slice(0, 2));
-  assert.deepEqual(groupFeeds(rows, { view: "all", search: "zzz" }), []);
-});
-
-test("group rollup reports worst state, counts by concern, sums, and soonest due", () => {
-  const now = Date.parse("2026-08-22T12:00:00Z");
-  const rows = [
-    feed("ashby", "stale", 900, {
-      key: "a", dueAt: "2026-08-22T11:00:00Z", lastPoll: "2026-08-21T10:00:00Z",
-      spark: [1, 5], telemetry: { error_count_7d: 2 },
-    }),
-    feed("ashby", "stale", 3600, {
-      key: "b", dueAt: "2026-08-22T11:30:00Z", lastPoll: "2026-08-21T11:00:00Z",
-      spark: [0, 7], telemetry: { error_count_7d: 0 },
-    }),
-    feed("ashby", "backing_off", 900, {
-      key: "c", dueAt: "2026-08-22T12:15:00Z", lastPoll: "2026-08-22T09:00:00Z",
-      spark: [2, 1], telemetry: { error_count_7d: 14 },
-    }),
-    feed("ashby", "paused", 900, { key: "d", paused: true, dueAt: "2026-08-22T10:00:00Z" }),
-  ];
-  const rollup = groupRollup(rows, now);
-  assert.equal(rollup.worst, "backing_off");
-  assert.deepEqual(rollup.counts, [["backing_off", 1], ["stale", 2], ["paused", 1]]);
-  assert.equal(rollup.failing, 1);
-  assert.equal(rollup.jobs, 13);
-  assert.equal(rollup.errors, 16);
-  assert.equal(rollup.dueAt, "2026-08-22T11:00:00Z"); // paused row's earlier due_at is ignored
-  assert.equal(rollup.lastPollAt, "2026-08-22T09:00:00.000Z");
-  assert.deepEqual(rollup.intervals, [900, 3600]);
-});
-
-test("group rollup keeps sums unknown when no row carries the observation", () => {
-  const rollup = groupRollup([feed("ashby", "never_polled"), feed("ashby", "never_polled", 900, { key: "b" })]);
-  assert.equal(rollup.jobs, null);
-  assert.equal(rollup.errors, null);
-  assert.equal(rollup.dueAt, null);
-  assert.equal(rollup.lastPollAt, null);
-  assert.equal(rollup.worst, "never_polled");
-});
-
-test("auto-expand opens groups only for a narrowing filter with a small result", () => {
-  const small = [{ rows: Array(AUTO_EXPAND_ROWS - 10) }, { rows: Array(10) }];
-  const large = [{ rows: Array(AUTO_EXPAND_ROWS + 1) }];
-  assert.equal(autoExpand(small, ALL), false);
-  assert.equal(autoExpand(small, { view: "failing", search: "" }), true);
-  assert.equal(autoExpand(small, { view: "all", search: "acme" }), true);
-  assert.equal(autoExpand(large, { view: "failing", search: "" }), false);
-});
-
-test("summary counts map scheduler states to the header vocabulary", () => {
-  const counts = summaryCounts({
-    healthy: 1200, backing_off: 26, paused: 3, stale: 8, never_polled: 2,
+test("a vendor row rolls its status lines up into one set of columns", () => {
+  assert.deepEqual(providerRollup(WORKDAY), {
+    total: 6595,
+    worst: "backing_off",
+    intervalMin: 900,
+    intervalMax: 21600,
+    dueMin: "2026-10-10T00:01:00+00:00",
+    lastMax: "2026-10-10T00:04:00+00:00",
+    jobs: 31479,
+    errors: 14,
   });
-  assert.deepEqual(counts, { ok: 1200, erroring: 26, paused: 3, other: 10 });
-  assert.deepEqual(summaryCounts(null), { ok: 0, erroring: 0, paused: 0, other: 0 });
+  // Without telemetry nothing carries jobs or errors: unknown, not zero.
+  const blind = providerRollup(provider("x", [bucket("healthy", 2)]));
+  assert.equal(blind.jobs, null);
+  assert.equal(blind.errors, null);
+  assert.equal(providerRollup(provider("y", [])).worst, null);
+});
+
+test("status lines appear worst first and follow the view pill", () => {
+  const states = (view) => visibleBuckets(WORKDAY, view).map((item) => item.state);
+  assert.deepEqual(states("all"), ["backing_off", "stale", "paused", "healthy"]);
+  assert.deepEqual(states("issues"), ["backing_off", "stale"]);
+  assert.deepEqual(states("failing"), ["backing_off"]);
+  assert.deepEqual(states("paused"), ["paused"]);
+  assert.equal(viewMatches("never_polled", "issues"), true);
+  assert.equal(viewMatches("healthy", "issues"), false);
+  assert.equal(STATE_LABEL.backing_off, "err");
+  assert.equal(STATE_LABEL.never_polled, "new");
+  assert.equal(STATE_LABEL.healthy, "ok");
+});
+
+test("vendors sort by any column with name breaking ties", () => {
+  const quiet = provider("ashby", [bucket("healthy", 10, { jobs: 5, errors: 0 })]);
+  const stale = provider("adp", [bucket("stale", 2, { jobs: 0, errors: 0 })]);
+  const names = (sort) => sortProviders([quiet, WORKDAY, stale], sort).map((item) => item.source);
+  assert.deepEqual(names({ key: "status", direction: "asc" }), ["workday", "adp", "ashby"]);
+  assert.deepEqual(names({ key: "name", direction: "asc" }), ["adp", "ashby", "workday"]);
+  assert.deepEqual(names({ key: "jobs", direction: "desc" }), ["workday", "ashby", "adp"]);
+  assert.deepEqual(names({ key: "errors", direction: "desc" }), ["workday", "adp", "ashby"]);
+});
+
+test("interval ranges collapse when every feed shares one interval", () => {
+  const short = (seconds) => `${seconds / 60}m`;
+  assert.equal(intervalRange(900, 900, short), "15m");
+  assert.equal(intervalRange(900, 3600, short), "15m–60m");
+  assert.equal(intervalRange(null, null, short), "—");
+});
+
+test("pagers keep the ends and a window around the current page", () => {
+  assert.deepEqual(pageWindow(1, 1), [1]);
+  assert.deepEqual(pageWindow(1, 3), [1, 2, 3]);
+  assert.deepEqual(pageWindow(1, 118), [1, 2, null, 118]);
+  assert.deepEqual(pageWindow(50, 118), [1, null, 49, 50, 51, null, 118]);
+  assert.deepEqual(pageWindow(118, 118), [1, null, 117, 118]);
 });
 
 test("due info counts down, flags imminent polls, and parks paused feeds", () => {
@@ -160,86 +137,9 @@ test("due info counts down, flags imminent polls, and parks paused feeds", () =>
 });
 
 test("jobs today reads the newest daily spark bucket", () => {
-  assert.equal(jobsToday(feed("a", "healthy", 900, { spark: [0, 3, 7] })), 7);
-  assert.equal(jobsToday(feed("a", "healthy")), null);
-  assert.equal(jobsToday(feed("a", "healthy", 900, { spark: [] })), null);
-});
-
-test("issues view includes only operational problems", () => {
-  const filters = { view: "issues", provider: null, search: "" };
-  assert.equal(matchesFeed(feed("a", "stale"), filters), true);
-  assert.equal(matchesFeed(feed("a", "never_polled"), filters), true);
-  assert.equal(matchesFeed(feed("a", "backing_off"), filters), true);
-  assert.equal(matchesFeed(feed("a", "healthy"), filters), false);
-  assert.equal(matchesFeed(feed("a", "paused"), filters), false);
-});
-
-test("failing view narrows to backing-off feeds only", () => {
-  const filters = { view: "failing", provider: null, search: "" };
-  assert.equal(matchesFeed(feed("a", "backing_off"), filters), true);
-  assert.equal(matchesFeed(feed("a", "stale"), filters), false);
-});
-
-test("provider filter composes with view and search", () => {
-  assert.equal(matchesFeed(feed("ashby", "healthy"), { view: "all", provider: "ashby", search: "" }), true);
-  assert.equal(matchesFeed(feed("lever", "healthy"), { view: "all", provider: "ashby", search: "" }), false);
-  assert.equal(
-    matchesFeed(feed("ashby", "healthy", 900, { name: "Acme" }), { view: "all", provider: "ashby", search: "acme" }),
-    true
-  );
-});
-
-test("default due sort runs soonest-first with paused and unscheduled last", () => {
-  const now = Date.parse("2026-08-22T12:00:00Z");
-  const rows = sortFeeds([
-    feed("later", "healthy", 900, { dueAt: "2026-08-22T13:00:00Z" }),
-    feed("paused", "paused", 900, { paused: true, dueAt: "2026-08-22T12:01:00Z" }),
-    feed("soon", "healthy", 900, { dueAt: "2026-08-22T12:05:00Z" }),
-    feed("never", "never_polled", 900),
-  ], undefined, now);
-  assert.deepEqual(rows.map((row) => row.source), ["soon", "later", "never", "paused"]);
-});
-
-test("status sort puts problems first and pauses last", () => {
-  const rows = sortFeeds([
-    feed("paused", "paused"),
-    feed("healthy", "healthy"),
-    feed("backoff", "backing_off"),
-    feed("stale", "stale"),
-  ], { key: "status", direction: "asc" });
-  assert.deepEqual(rows.map((row) => row.sched.status.state), [
-    "backing_off", "stale", "healthy", "paused",
-  ]);
-});
-
-test("jobs and errors sorts treat missing telemetry as smallest", () => {
-  const withJobs = feed("a", "healthy", 900, { spark: [5] });
-  const noJobs = feed("b", "healthy");
-  assert.deepEqual(
-    sortFeeds([noJobs, withJobs], { key: "jobs", direction: "desc" }).map((row) => row.source),
-    ["a", "b"]
-  );
-  const withErrors = feed("c", "healthy", 900, { telemetry: { error_count_7d: 3 } });
-  assert.deepEqual(
-    sortFeeds([noJobs, withErrors], { key: "errors", direction: "desc" }).map((row) => row.source),
-    ["c", "b"]
-  );
-});
-
-test("custom intervals convert, normalize, and validate at policy bounds", () => {
-  assert.equal(intervalSeconds("90", "minutes"), 5400);
-  assert.deepEqual(intervalInput(5400), { value: 90, unit: "minutes" });
-  assert.equal(intervalError(60), null);
-  assert.equal(intervalError(7 * 86_400), null);
-  assert.match(intervalError(59), /at least/);
-  assert.match(intervalError(7 * 86_400 + 1), /exceed/);
-});
-
-test("request rates remain legible below one request per day", () => {
-  assert.equal(formatRequestRate(96), "96");
-  assert.equal(formatRequestRate(1.5), "1.5");
-  assert.equal(formatRequestRate(1 / 7), "0.14");
-  assert.equal(formatRequestRate(null), "—");
+  assert.equal(jobsToday({ spark: [0, 3, 7] }), 7);
+  assert.equal(jobsToday({ spark: null }), null);
+  assert.equal(jobsToday({ spark: [] }), null);
 });
 
 const LAYOUT = [
@@ -247,39 +147,17 @@ const LAYOUT = [
   { id: 2, name: "Banks & Funds", sources: ["avature"] },
 ];
 
-test("sections follow the layout order, with every unfiled provider in Ungrouped last", () => {
-  const rows = [
-    feed("teamtailor", "backing_off"),
-    feed("workday", "healthy"),
-    feed("lever", "backing_off"),
-    feed("gem", "healthy"),
-  ];
-  const sections = sectionGroups(groupFeeds(rows, ALL), LAYOUT);
+test("sections follow the layout order, Ungrouped last, empty ones dropped", () => {
+  const providers = ["gem", "workday", "lever"].map((source) => provider(source, [bucket("healthy", 1)]));
+  const sections = sectionProviders(providers, LAYOUT);
   assert.deepEqual(
-    sections.map((section) => [section.id, section.groups.map((group) => group.source)]),
-    [["1", ["lever", "workday"]], ["2", []], [UNGROUPED, ["teamtailor", "gem"]]]
+    sections.map((section) => [section.name, section.providers.map((item) => item.source)]),
+    [["Watchlist", ["workday", "lever"]], ["Ungrouped", ["gem"]]]
   );
-  assert.equal(sections.at(-1).ungrouped, true);
-});
-
-test("section rollups sum their providers and keep unknown sums null", () => {
-  const rows = [
-    feed("workday", "backing_off", 900, { spark: [0, 4], telemetry: { error_count_7d: 2 } }),
-    feed("workday", "healthy"),
-    feed("lever", "stale", 900, { spark: [1] }),
-  ];
-  const [watch, banks] = sectionGroups(groupFeeds(rows, ALL), LAYOUT);
-  assert.deepEqual(sectionRollup(watch), {
-    worst: "backing_off",
-    counts: [["backing_off", 1], ["stale", 1], ["healthy", 1]],
-    providers: 2,
-    feeds: 3,
-    jobs: 5,
-    errors: 2,
-  });
-  assert.deepEqual(sectionRollup(banks), {
-    worst: null, counts: [], providers: 0, feeds: 0, jobs: null, errors: null,
-  });
+  assert.equal(sections[1].ungrouped, true);
+  assert.deepEqual(sectionCounts({ providers: [WORKDAY, provider("gem", [bucket("healthy", 4)])] }), [
+    ["backing_off", 3], ["stale", 2945], ["paused", 6], ["healthy", 3645],
+  ]);
 });
 
 test("group: in the search box narrows to sections by name, Ungrouped included", () => {
@@ -292,10 +170,6 @@ test("group: in the search box narrows to sections by name, Ungrouped included",
   assert.deepEqual(["workday", "avature", "gem"].map(watch), [true, false, false]);
   const loose = sectionMatcher(LAYOUT, "ungr");
   assert.deepEqual(["workday", "gem"].map(loose), [false, true]);
-
-  const rows = [feed("workday", "healthy"), feed("gem", "healthy")];
-  const filters = { ...ALL, inSection: watch };
-  assert.deepEqual(rows.filter((row) => matchesFeed(row, filters)).map((row) => row.source), ["workday"]);
 });
 
 test("layout edits return a new layout and leave the old one for undo", () => {
@@ -312,9 +186,11 @@ test("layout edits return a new layout and leave the old one for undo", () => {
   assert.deepEqual(added[0].sources, ["workday"]);
 
   assert.equal(renameSection(LAYOUT, "2", "Banks")[1].name, "Banks");
-  assert.deepEqual(removeSection(LAYOUT, "1").map((group) => group.id), [2]);
-  assert.deepEqual(moveSection(LAYOUT, "2", 0).map((group) => group.id), [2, 1]);
-  assert.deepEqual(moveSection(LAYOUT, "1", 99).map((group) => group.id), [2, 1]);
+});
+
+test("moving the last vendor out of a group removes the group", () => {
+  const emptied = dropEmptySections(moveSource(LAYOUT, "avature", UNGROUPED));
+  assert.deepEqual(emptied.map((group) => group.id), [1]);
 });
 
 test("new group names never collide, ignoring case", () => {

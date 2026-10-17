@@ -54,6 +54,9 @@ CONFIGS: dict[str, dict] = {
             "probe": {"method": "HEAD"},
         },
         "parser": "rss",
+        # Shared title ladder (2026-10-10: 166 of 7,384 active postings
+        # typed, 69 of them US).
+        "job_type": "shared",
         "rss": {
             "namespace": "https://recruiterbox.com/rss/job/",
             "location_path": "locationCity",
@@ -129,6 +132,9 @@ CONFIGS: dict[str, dict] = {
             "id": ("guid", "link"),
         },
         "parser": "rss",
+        # Shared title ladder (2026-10-10: 184 of 2,196 active postings
+        # typed, 128 of them US).
+        "job_type": "shared",
         "rss": {
             "namespace": "http://base.google.com/ns/1.0",
             "location_path": "location",
@@ -191,6 +197,9 @@ CONFIGS: dict[str, dict] = {
         # and matches the ceiling used elsewhere in this tree.
         "detail_concurrency": 4,
         "parser": "schemaorg",
+        # Shared title ladder (2026-10-10: 696 of 41,642 active postings
+        # typed, 603 of them US).
+        "job_type": "shared",
     },
     # PeopleAdmin. `.json` 406s and the plain HTML search page has no
     # JSON-LD, but `/postings/search.atom` is a full board with descriptions

@@ -18,6 +18,7 @@ import re
 
 from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
+from .json_api import shared_job_type
 
 API = "https://hn.algolia.com/api/v1/search_by_date"
 THREAD_QUERY = "Ask HN: Who is hiring?"
@@ -293,6 +294,7 @@ def parse(feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
         Posting(
             external_id=item.external_id,
             title=title,
+            job_type=shared_job_type(title),
             url_posting=comment_url,
             fidelity="origin",
             state="open",

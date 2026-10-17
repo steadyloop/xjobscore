@@ -1091,6 +1091,35 @@ async def test_neon_publisher_tick_publishes_from_a_pooled_connection(monkeypatc
     assert status["last_published_at"] is not None
 
 
+@pytest.mark.parametrize("logos_fail", [False, True])
+async def test_neon_publisher_harvests_logos_first_and_never_blocks_on_them(monkeypatch, logos_fail):
+    order = []
+
+    async def harvest(pool):
+        order.append("logos")
+        if logos_fail:
+            raise RuntimeError("logo host down")
+        return runtime.logo_harvest.Result()
+
+    async def publish_to(source, target_dsn, *, seen_drift_s):
+        order.append("publish")
+        return publish.PublishCounts(0, 0, 0, 0, 0, False)
+
+    monkeypatch.setattr(runtime.logo_harvest, "harvest", harvest)
+    monkeypatch.setattr(publish, "publish_to", publish_to)
+    publisher = NeonPublisher(
+        _PublishPolicy(_AcquirePool()),
+        target_dsn="postgresql://neon/thin",
+        interval_s=3600,
+        seen_drift_s=60,
+        shutdown_grace_s=1,
+    )
+
+    await publisher.tick()
+
+    assert order == ["logos", "publish"]
+
+
 async def test_runtime_settings_read_the_publish_target(monkeypatch):
     monkeypatch.setattr("xjobscore.runtime.config.dsn", lambda: "postgresql://test/db")
     monkeypatch.setattr(

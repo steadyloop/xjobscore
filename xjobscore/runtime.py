@@ -12,7 +12,7 @@ from typing import Any
 
 import asyncpg
 
-from xjobscore import coverage_snapshot, publish, reconcile, run, workable_policy
+from xjobscore import coverage_snapshot, logo_harvest, publish, reconcile, run, workable_policy
 from xjobscore.console import config
 from xjobscore.console.cache import now_utc
 from xjobscore.console.db import CatalogDB
@@ -598,6 +598,15 @@ class NeonPublisher:
         pool = await self._policy.pool_or_none()
         if pool is None or not self.enabled:
             raise RuntimeError("PostgreSQL unavailable")
+
+        # New or corrected company domains get their one logo attempt here, so
+        # this same publish ships it. A logo problem never blocks a publish.
+        try:
+            logos = await logo_harvest.harvest(pool)
+            if logos.attempted:
+                logger.info("logos attempted=%d stored=%d", logos.attempted, logos.stored)
+        except Exception:
+            logger.exception("logo harvest failed")
 
         started = asyncio.get_running_loop().time()
         if self._local_target_dsn:

@@ -1810,7 +1810,7 @@ async def test_a_listing_that_reused_detail_records_the_total_but_not_the_reconc
     )
 
     query, args = conn.calls[0]
-    assert "list_total = CASE WHEN $9 THEN $8" in query
+    assert "list_total = COALESCE($8::integer, list_total)" in query
     assert "last_full_poll_at = CASE WHEN $9 AND NOT $12 THEN $2" in query
     assert args[8] is True and args[11] is True  # $9 full_listing, $12 reused_detail
 

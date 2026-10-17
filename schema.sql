@@ -39,7 +39,8 @@ CREATE INDEX company_alias_company_idx ON company_alias (company_id);
 -- The 40px mark on an opportunity card, harvested from the company's own site.
 CREATE TABLE company_logo (
     company_id bigint PRIMARY KEY REFERENCES company (id) ON DELETE CASCADE,
-    bytes      bytea -- NULL records a domain that refused to answer, so rerun skips.
+    bytes      bytea, -- NULL records a domain that refused to answer, so rerun skips.
+    domain     text   -- the company domain this row was fetched from; a different domain means fetch again
 );
 
 -- FEEDS --
