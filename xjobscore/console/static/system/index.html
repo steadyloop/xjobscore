@@ -58,21 +58,6 @@
           <pre class="trace-content" id="enrich-error-trace"></pre>
         </div>
       </section>
-      <section class="log-surface" aria-label="Activity logs">
-        <div class="activity-tools" aria-label="Activity filters">
-          <div class="activity-views" role="group" aria-label="Activity view">
-            <button class="activity-view" data-activity-view="all" type="button" aria-pressed="true">Logs<span class="filter-count" id="activity-all-count"></span></button>
-            <button class="activity-view" data-activity-view="issues" type="button" aria-pressed="false" title="Warning and error entries in recent activity; not a count of distinct feeds.">Issues<span class="filter-count" id="activity-issue-count"></span></button>
-          </div>
-          <select id="activity-process" aria-label="Filter activity by process"><option value="all">all processes</option></select>
-          <label class="activity-polls"><input id="activity-all-polls" type="checkbox">all polls</label>
-          <label class="activity-search"><span class="sr-only">Search activity</span><input id="activity-search" type="search" placeholder="filter activity…"></label>
-          <button class="activity-follow" id="activity-follow" type="button" aria-pressed="true">↓ following</button>
-        </div>
-        <div class="activity-stream" id="activity-stream" role="log" aria-label="Activity log entries" aria-live="off"></div>
-        <div class="activity-footer"><span id="activity-shown"></span><span>newest at bottom</span></div>
-        <div class="activity-availability" id="activity-availability" role="status"></div>
-      </section>
     </section>
 
     <section id="reconcile-panel" aria-labelledby="reconcile-title">
@@ -154,6 +139,11 @@
       </div>
     </section>
 
+    <!-- Vendors with more than one worker: one tick per slot, longest poll first. -->
+    <section class="sys-workers" id="workers" aria-label="Worker pools">
+      <span class="sys-strip-k">workers</span><span class="wk-dim sys-wk-none">reading…</span>
+    </section>
+
     <div class="ops-filterbar">
       <label class="ops-search">
         <span class="sr-only">Filter feeds</span>
@@ -172,13 +162,10 @@
         <button class="ops-linkish" type="button" id="expand-all">expand all</button>
         <span aria-hidden="true">·</span>
         <button class="ops-linkish" type="button" id="collapse-all">collapse all</button>
-        <span aria-hidden="true">·</span>
-        <button class="ops-linkish" type="button" id="edit-groups" aria-expanded="false" aria-controls="groups-panel">edit groups</button>
       </div>
 
       <span class="ops-shown" id="row-count"></span>
       <button class="btn small" type="button" id="refresh">Refresh</button>
-      <button class="btn small" type="button" id="fetch-matching">Fetch matching</button>
     </div>
 
     <div class="table-wrap ops-table-wrap">
@@ -187,26 +174,41 @@
           <tr>
             <th data-sort="status"><button type="button">status</button></th>
             <th data-sort="name"><button type="button">source</button></th>
-            <th class="sys-workers-col" title="One tick per worker slot: polling, over 60s, over 3m, idle">workers</th>
             <th class="num" data-sort="interval"><button type="button">interval</button></th>
             <th class="num" data-sort="due"><button type="button">next</button></th>
             <th class="num" data-sort="last_poll"><button type="button">last</button></th>
             <th class="num" data-sort="jobs"><button type="button">new·1d</button></th>
             <th class="num" data-sort="errors"><button type="button">err·7d</button></th>
-            <th class="ops-actions-col"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
       </table>
       <div class="empty-state" id="sched-empty" hidden></div>
     </div>
 
+    <!-- The Activity log: process lines, polls, and system runs, newest at the bottom. -->
+    <section id="activity-log" aria-label="Activity log">
+      <section class="log-surface" aria-label="Activity logs">
+        <div class="activity-tools" aria-label="Activity filters">
+          <div class="activity-views" role="group" aria-label="Activity view">
+            <button class="activity-view" data-activity-view="all" type="button" aria-pressed="true">Logs<span class="filter-count" id="activity-all-count"></span></button>
+            <button class="activity-view" data-activity-view="issues" type="button" aria-pressed="false" title="Warning and error entries in recent activity; not a count of distinct feeds.">Issues<span class="filter-count" id="activity-issue-count"></span></button>
+          </div>
+          <select id="activity-process" aria-label="Filter activity by process"><option value="all">all processes</option></select>
+          <label class="activity-polls"><input id="activity-all-polls" type="checkbox">all polls</label>
+          <label class="activity-search"><span class="sr-only">Search activity</span><input id="activity-search" type="search" placeholder="filter activity…"></label>
+          <button class="activity-follow" id="activity-follow" type="button" aria-pressed="true">↓ following</button>
+        </div>
+        <div class="activity-stream" id="activity-stream" role="log" aria-label="Activity log entries" aria-live="off"></div>
+        <div class="activity-footer"><span id="activity-shown"></span><span>newest at bottom</span></div>
+        <div class="activity-availability" id="activity-availability" role="status"></div>
+    </section>
+    </section>
+
   </main>
 
   <aside class="ops-detail-panel" id="detail-panel" aria-labelledby="panel-title" hidden></aside>
-  <aside class="ops-detail-panel ops-groups-panel" id="groups-panel" aria-labelledby="groups-title" hidden></aside>
   <div class="ops-move-menu" id="move-menu" role="menu" hidden></div>
 
-  <dialog class="ops-dialog" id="bulk-dialog" aria-labelledby="bulk-title"></dialog>
   <dialog class="ops-dialog" id="remove-dialog" aria-labelledby="remove-title"></dialog>
   <div class="ops-toast" id="toast" role="status" aria-live="polite" hidden></div>
 

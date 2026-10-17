@@ -376,6 +376,29 @@ class PolicyStore:
             "affected": int(result.rsplit(" ", 1)[-1]),
         }
 
+    async def set_provider_interval(self, source: str, interval_s: int) -> dict[str, Any]:
+        """Set every feed of one provider to one interval, in one statement.
+
+        Like :meth:`set_provider_paused`, the write is resolved by source so
+        a browser's loaded page or filter can never narrow it. `due_at` is
+        left alone, exactly as the per-feed :meth:`set_interval` leaves it.
+        """
+        if not MIN_INTERVAL_S <= interval_s <= MAX_INTERVAL_S:
+            raise ValueError(
+                f"interval_s must be within [{MIN_INTERVAL_S}, {MAX_INTERVAL_S}]"
+            )
+        source = canonical_feed_source(source)
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE feed SET interval_s = $2 WHERE source = $1", source, interval_s
+            )
+        return {
+            "source": source,
+            "interval_s": interval_s,
+            "affected": int(result.rsplit(" ", 1)[-1]),
+        }
+
     async def poll_now(self, source: str, key: str) -> dict[str, Any]:
         """Put one feed at the front of the production queue, to be polled now.
 

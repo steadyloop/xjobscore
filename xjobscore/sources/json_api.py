@@ -12,13 +12,14 @@ import html
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from xjobscore import classify
+from xjobscore.company_name import enrich_posting, plain_text
 from xjobscore.probe import parse_tombstone
 from xjobscore.net import Net, NetError, etag
 from xjobscore.records import Canonical, Feed, Item, Posting, Record
@@ -45,6 +46,7 @@ class JsonApiHarvestOptions:
     detail_revision_fields: tuple[str, ...] = ()
     prior_items: Mapping[str, Item] | None = None
     force_full: bool = False
+    force_unfiltered: bool = False
     now: datetime | None = None
 
 
@@ -116,6 +118,9 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
     if "unescape" in spec:
         value = _value(spec["unescape"], payload, context)
         return html.unescape(value) if value else None
+    if "plain_text" in spec:
+        value = _value(spec["plain_text"], payload, context)
+        return " ".join(plain_text(value).split()) if isinstance(value, str) else None
     if "first" in spec:
         values = _value(spec["first"], payload, context) or []
         return values[0] if values else None
@@ -159,6 +164,11 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
         # `not` pattern matches is skipped rather than ending the scan, so a
         # documented false positive falls through to the next signal.
         for rule in spec["classify"]:
+            # A second field may corroborate a match (e.g. a participant title
+            # plus explicit enrollment requirements). Missing evidence fails
+            # closed; a truthy string is not confirmation.
+            if "when" in rule and _value(rule["when"], payload, context) is not True:
+                continue
             text = _value(rule["from"], payload, context)
             if not isinstance(text, str) or not text:
                 continue
@@ -614,6 +624,8 @@ async def harvest(
     partition = list_config.get("partition")
     count_probe = list_config.get("count_probe")
     observed_total = context.get("total")
+    filtered_listing = False
+    search_sentinels: set[str] = set()
     probe_now = (
         options.now
         if options is not None and options.now is not None
@@ -626,7 +638,7 @@ async def harvest(
     # result-window cap is excluded because 2,000 is not the real board total.
     if (
         count_probe
-        and not (options is not None and options.force_full)
+        and not (options is not None and (options.force_full or options.force_unfiltered))
         and isinstance(observed_total, int)
         and feed.list_total == observed_total
         and feed.last_full_poll_at is not None
@@ -642,6 +654,61 @@ async def harvest(
             list_total=observed_total,
             enumerated_item_count=len(rows),
         )
+
+    # Keep the unfiltered count probe: unchanged boards still cost one call.
+    # Search is an optional acceleration of changed, warm boards, not the
+    # reconciliation boundary. Only individually validated board queries are
+    # enabled; cold, expired, and explicitly forced runs enumerate everything.
+    search = list_config.get("search") or {}
+    plan = search.get("plans", {}).get(feed.key.lower())
+    if (
+        plan
+        and count_probe
+        and page_config
+        and not context.get("appliedFacets")
+        and isinstance(observed_total, int)
+        # A probe plus one search page cannot improve a one/two-page board.
+        and observed_total > 2 * page_config.get("size", 20)
+        and feed.last_full_poll_at is not None
+        and (probe_now - feed.last_full_poll_at).total_seconds() < search["refresh_s"]
+        and not (options is not None and (options.force_full or options.force_unfiltered))
+    ):
+        searched_config = {
+            **list_config,
+            "body": {**list_config["body"], search["parameter"]: plan.get("query", "")},
+        }
+        searched_context = {**context, "appliedFacets": plan.get("facets", {})}
+        try:
+            searched_response = await _request(
+                searched_config, feed, net, searched_context, first=False,
+                concurrency=list_config.get("concurrency", 1),
+            )
+            searched_body = searched_response.json()
+            searched_total = _value(page_config["total"], searched_body, searched_context)
+            searched_rows = _items(searched_body, list_config)
+        except (NetError, ValueError, TypeError):
+            searched_total, searched_rows = None, []
+        size = page_config.get("size", 20)
+        if (
+            isinstance(searched_total, int)
+            and searched_total > 0
+            and searched_rows
+            and 1 + math.ceil(searched_total / size) < math.ceil(observed_total / size)
+        ):
+            gate = (config.get("detail") or {}).get("only")
+            search_sentinels = {
+                external_id
+                for row in rows
+                if gate is not None and _value(gate, row, context) is True
+                if (external_id := _item_id(list_config["id"], row, context)) is not None
+            }
+            list_config = searched_config
+            context["appliedFacets"] = searched_context["appliedFacets"]
+            body, rows = searched_body, searched_rows
+            page = rows
+            context["total"] = searched_total
+            last_status = searched_response.status
+            filtered_listing = True
     if (
         page_config
         and partition
@@ -720,6 +787,16 @@ async def harvest(
         rows.extend(page)
         pages += 1
 
+    if filtered_listing and not (list_failed or pagination_truncated):
+        found = {_item_id(list_config["id"], row, context) for row in rows}
+        if not search_sentinels.issubset(found):
+            # The live unfiltered page proves the query omitted a candidate.
+            # Retry unfiltered before any filtered snapshot can be persisted.
+            return await harvest(
+                name, feed, net,
+                options=replace(options or JsonApiHarvestOptions(), force_unfiltered=True),
+            )
+
     detail = config.get("detail")
     if not detail:
         return Record(
@@ -729,7 +806,8 @@ async def harvest(
             http_status=last_status if config.get("last_status") else first_status,
             etag=first_etag,
             list_total=observed_total if isinstance(observed_total, int) else None,
-            full_listing=bool(count_probe) and not pagination_truncated,
+            full_listing=bool(count_probe) and not pagination_truncated and not filtered_listing,
+            filtered_listing=filtered_listing,
             enumerated_item_count=len(rows),
             partition_count=partition_count,
             result_window_truncated=result_window_truncated,
@@ -806,6 +884,7 @@ async def harvest(
             # `list_total=NULL` on every full pass and the probe could never
             # find a stored baseline to compare against.
             list_total=observed_total if isinstance(observed_total, int) else None,
+            filtered_listing=filtered_listing,
             # Two ways to earn a full listing, and both require `not truncated`.
             #
             # A forced all-detail pass is the reconciliation boundary for a
@@ -827,7 +906,7 @@ async def harvest(
             # is exactly the guard that needs.
             full_listing=(
                 bool(count_probe) or bool(options is not None and options.force_full)
-            ) and not truncated,
+            ) and not truncated and not filtered_listing,
         )
 
     batch = detail.get("batch")
@@ -982,7 +1061,16 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     context = {"key": feed.key, "envelope": envelope}
     context.update(zip(config.get("key_parts", ()), feed.key.split("/", len(config.get("key_parts", ())) - 1)))
     context.update(settings)
+    context["external_id"] = item.external_id
     fields = {key: _value(value, item.payload, context) for key, value in config.get("fields", {}).items()}
+    # Shared boards can opt into an evidence-backed employer expression using
+    # the existing field vocabulary. Keep vendor defaults for every other feed;
+    # unknown employers can explicitly fall back to a pending shared identity.
+    if "company_raw_spec" in settings:
+        company_raw = _value(settings["company_raw_spec"], item.payload, context)
+        if company_raw is not None and not isinstance(company_raw, str):
+            raise ValueError("company_raw_spec must resolve to an employer name or None")
+        fields["company_raw"] = company_raw
     # `setdefault` fills a key the config never mapped; these fill a key it
     # mapped to a payload that turned out not to carry it. `fields` above comes
     # from a comprehension over every configured field, so such a field arrives
@@ -1007,7 +1095,7 @@ def parse(name: str, feed: Feed, item: Item, envelope: dict) -> list[Canonical]:
     fields["source_extra"] = {
         key: _value(value, item.payload, context) for key, value in config.get("extra", {}).items()
     }
-    return [Posting(external_id=item.external_id, **fields)]
+    return [enrich_posting(feed, Posting(external_id=item.external_id, **fields))]
 
 
 # The shared title ladder for adapters with no JSON field table (docxtract and

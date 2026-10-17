@@ -445,8 +445,8 @@ async def promote_verified(
 ) -> int:
     """Add these exact tokens to ``feed`` -- the live, unmuted, absent ones.
 
-    `interval_s` sets the new feeds' poll interval; None keeps the column
-    default. Returns how many were added.
+    `interval_s` sets the new feeds' poll interval; None uses 12 hours for
+    Workable and 15 minutes for other providers. Returns how many were added.
     """
     identities = list(dict.fromkeys(identities))
     if not identities:
@@ -464,7 +464,7 @@ async def promote_verified(
                  WHERE {_ADDABLE}
             ), promoted AS (
                 INSERT INTO feed(source, key, polling, interval_s)
-                SELECT ats, token, true, coalesce($3::int, 900)
+                SELECT ats, token, true, coalesce($3::int, CASE WHEN ats = 'workable' THEN 43200 ELSE 900 END)
                   FROM candidates
                  WHERE first_of_board
                 ON CONFLICT (source, key) DO NOTHING
@@ -518,7 +518,7 @@ async def add_vendors_to_feed(
                  WHERE {where} AND {_ADDABLE}
             ), promoted AS (
                 INSERT INTO feed(source, key, polling, interval_s)
-                SELECT ats, token, true, coalesce($2::int, 900)
+                SELECT ats, token, true, coalesce($2::int, CASE WHEN ats = 'workable' THEN 43200 ELSE 900 END)
                   FROM candidates
                  WHERE first_of_board
                 ON CONFLICT (source, key) DO NOTHING

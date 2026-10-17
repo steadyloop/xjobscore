@@ -22,7 +22,7 @@ def test_paylocity_is_hidden_and_stale_controls_cannot_reenable_it(app_store, mo
     )
     with TestClient(app) as client:
         assert client.get("/api/feeds").json()["feeds"] == []
-        assert client.get("/api/scheduler/feeds").json()["feeds"] == []
+        assert client.get("/api/scheduler/providers").json()["providers"] == []
         assert "paylocity" not in client.get("/api/system/live").json()["workers"]
         assert client.post(f"/api/feeds/{ref}/policy", json={"enabled": True}).status_code == 404
         assert client.post("/api/feeds/bulk-policy", json={"refs": [ref], "enabled": True}).status_code == 404

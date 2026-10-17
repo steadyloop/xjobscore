@@ -487,6 +487,33 @@ async def test_policy_store_interval_bounds():
         await policy.set_interval("lever", "acme", 5)
     with pytest.raises(ValueError):
         await policy.set_interval("lever", "acme", 10**9)
+    with pytest.raises(ValueError):
+        await policy.set_provider_interval("lever", 59)
+    with pytest.raises(ValueError):
+        await policy.set_provider_interval("lever", 7 * 86_400 + 1)
+
+
+async def test_policy_store_provider_interval_is_one_statement(monkeypatch):
+    """A vendor-wide interval is one UPDATE keyed by source, nothing per feed."""
+    connection = FakeConnection(
+        {"UPDATE feed SET interval_s = $2 WHERE source = $1": "UPDATE 2591"}
+    )
+    pool = FakePool(connection)
+
+    async def fake_connect(_dsn):
+        return pool
+
+    monkeypatch.setattr(store, "connect", fake_connect)
+    policy = PolicyStore("postgresql://localhost/xjobscore")
+
+    assert await policy.set_provider_interval("ashby", 21_600) == {
+        "source": "ashby",
+        "interval_s": 21_600,
+        "affected": 2591,
+    }
+    assert connection.queries == [
+        ("UPDATE feed SET interval_s = $2 WHERE source = $1", ("ashby", 21_600))
+    ]
 
 
 # store.py mutators ----------------------------------------------------------

@@ -665,8 +665,8 @@ async def _focus_rebuild(
 # isolated so they can never merge two different known requisitions.
 
 _NAMESPACE = uuid.UUID("9f8b2c14-6d3a-5e7f-8a1b-2c3d4e5f6071")
-_STRATEGY_VERSION = 4
-_KEYER = "ats_requisition_then_apply_then_unlinked_role"
+_STRATEGY_VERSION = 5
+_KEYER = "ats_requisition_then_apply"
 _PRIMARY_SELECTOR = "direct_ats_then_posted_then_first_seen"
 
 # A fallback key shared by more members than this is a placeholder, not an
@@ -805,8 +805,8 @@ def _dedup_key(row: Mapping[str, Any]) -> tuple[str, str] | None:
 
     A known ATS requisition wins even when source presentations disagree on
     title, location, or URL decoration. An unparseable but exact apply URL is a
-    weaker fallback. Company/title/location is used only when there is no apply
-    link at all, which prevents it from merging distinct known or visible URLs.
+    weaker fallback. Without either URL identity, leave the posting ungrouped:
+    matching titles and locations can describe distinct openings.
     """
     company_id = row["company_id"]
     if company_id is None:
@@ -822,12 +822,7 @@ def _dedup_key(row: Mapping[str, Any]) -> tuple[str, str] | None:
         parts = ["exact_apply_url", company_id, apply_url]
         return "exact_apply_url", json.dumps(parts, separators=(",", ":"))
 
-    role = normalize_title(row["title"] or "")
-    if not role:
-        return None
-    location = _norm_text(row["location_text"])
-    parts = ["company_role_location", company_id, role, location]
-    return "company_role_location", json.dumps(parts, separators=(",", ":"))
+    return None
 
 
 def plan_dedup(rows: Sequence[Mapping[str, Any]]) -> Plan:

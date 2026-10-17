@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import asyncpg
 
-from xjobscore import activity, coverage_snapshot, gold, router, silver, sources, store, work, workable_policy
+from xjobscore import activity, company_domain, coverage_snapshot, gold, router, silver, sources, store, work, workable_policy
 from xjobscore.net import DEFAULT_USER_AGENT, Net
 from xjobscore.records import Feed
 from xjobscore.work import Outcome
@@ -294,6 +294,13 @@ async def poll(
         error_stage: str | None = None,
         error: str | None = None,
     ) -> Outcome:
+        # Every completion path is outside the posting transaction, including
+        # 304s. Website failures must never turn a successful poll into a failure.
+        if outcome in {"ok", "unchanged", "partial"}:
+            try:
+                await company_domain.try_for_feed(pool, feed)
+            except Exception:
+                logger.exception("company domain guess failed source=%s", source)
         if coordinator is not None and system_run_id is not None:
             try:
                 await coordinator.finish_feed(
@@ -419,12 +426,12 @@ async def poll(
                     status="ok",
                     new_postings=0,
                 )
-                # This is still a complete listing. The scoped touch leaves
-                # previously absent postings alone; record any missing stamp
-                # that has not landed yet, even when the snapshot is stable.
-                await store.mark_missing_postings(
-                    conn, source, now, listed_keys=[item.external_id for item in record.items]
-                )
+                # A stable unfiltered listing still supplies absence evidence.
+                # A complete search result says nothing about omitted jobs.
+                if not record.filtered_listing:
+                    await store.mark_missing_postings(
+                        conn, source, now, listed_keys=[item.external_id for item in record.items]
+                    )
         if not ok:
             logger.warning("lost schedule lease after unchanged poll source=%s", source)
         return await finish_system_run("ok")
@@ -556,11 +563,11 @@ async def poll(
                 status="ok",
                 new_postings=counts.created,
             )
-            # A whole listing was just projected (truncated fetches took the
-            # partial branch above), so anything it did not list is missing.
-            await store.mark_missing_postings(
-                conn, source, now, listed_keys=[item.external_id for item in record.items]
-            )
+            # Only an unfiltered listing supplies board-disappearance evidence.
+            if not record.filtered_listing:
+                await store.mark_missing_postings(
+                    conn, source, now, listed_keys=[item.external_id for item in record.items]
+                )
     if not ok:
         logger.warning("lost schedule lease after success source=%s", source)
     return await finish_with_gold("ok")

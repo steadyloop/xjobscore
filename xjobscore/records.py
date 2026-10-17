@@ -169,6 +169,9 @@ class Record:
     count_unchanged: bool = False
     list_total: int | None = None
     full_listing: bool = False
+    # A complete search result is only a subset of the board. Its omissions
+    # are not disappearance evidence; only unfiltered polls reconcile them.
+    filtered_listing: bool = False
     # Incremental harvests may carry forward a detail payload whose stable
     # list/detail identity fields prove it unchanged. This remains useful
     # diagnostics when production enables reuse for a source.

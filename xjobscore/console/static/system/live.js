@@ -5,8 +5,9 @@
  *   /api/system/events  every 5s  system events + the last Gold run (PostgreSQL history)
  *   /api/system/logs    every 5s  server log lines after the last seen sequence number
  *
- * Worker cells are painted in place: the scheduler table rebuilds every 60s, and
- * app.js calls paintWorkers() after each rebuild so the bars never wait for a tick.
+ * The workers block above the board is repainted with every snapshot. Feed
+ * rows the board draws carry a "polling Ns" slot, which board.js asks this
+ * module to fill after each render (paintFeedWorkers) so it never waits a tick.
  */
 
 import { api } from "/static/shared/api.js";
@@ -33,35 +34,17 @@ const live = {
 const stripFeedsEl = document.getElementById("strip-feeds");
 const stripFeedsWindowEl = document.getElementById("strip-feeds-window");
 const tableEl = document.getElementById("sched-table");
+const workersEl = document.getElementById("workers");
 const schedulerHeadEl = document.getElementById("scheduler-head");
 const spinnerEl = document.getElementById("scheduler-spinner");
 const activitySpinnerEl = document.getElementById("activity-spinner");
 
 /* ---------- formatting ---------- */
 
-export function clockTime(iso) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
-}
-
 function duration(seconds) {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
-  return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
-}
-
-function ago(seconds) {
-  const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
   return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
@@ -103,141 +86,116 @@ function paintFeedsLine() {
   );
 }
 
-/* ---------- worker cells ---------- */
+/* ---------- workers block ---------- */
 
-function workerBar(source, pool) {
-  const busy = pool?.busy ?? [];
-  const width = pool?.width ?? 1;
-  const ticks = [];
+/* Only vendors with a real pool appear: a one-worker vendor's single tick
+   flips every few seconds and says nothing about load, and a slow poll there
+   already shows as "polling Ns" on its feed row. Ticks run longest poll
+   first, so stuck and slow slots sit at the left of each bar. */
+
+function ticks(source, runs, width) {
+  const out = [];
   for (let index = 0; index < width; index += 1) {
-    const run = busy[index];
-    ticks.push(run
+    const run = runs[index];
+    out.push(run
       ? el("i", { "data-s": slotState(run.age_s), title: `${source}:${run.key} · ${duration(run.age_s)}` })
       : el("i", { "data-s": "idle" }));
   }
-  const longest = busy[0];
-  const tip = `${busy.length} of ${width} workers busy`
-    + (longest ? ` · longest ${longest.key} ${duration(longest.age_s)}` : "");
-  return [
-    el("span", { class: "sys-bar", title: tip }, ticks),
-    el("span", { class: "sys-busy" }, el("b", {}, String(busy.length)), `/${width}`),
-    longest && slotState(longest.age_s) !== "busy"
-      ? el("span", {
-          class: "wk-age",
-          "data-s": slotState(longest.age_s),
-          title: `${source}:${longest.key}`,
-        }, duration(longest.age_s))
-      : null,
-  ];
+  return el("span", { class: "sys-bar" }, out);
 }
 
-/* A vendor whose limiter counts per partition (Workday: per data center) runs
-   one pool per lane. The row keeps one bar, split into a labelled segment per
-   lane; a segment turns amber once Cloudflare starts answering its lane 429. */
-
-// Per-lane counts from the board's feed list: feeds never polled, and the
-// distinct partitions sharing each `other` lane. Recounted when the feed list
-// changes (`setFeeds`) or a snapshot first names a partitioned vendor.
-let boardFeeds = [];
-let laneCounts = null;
-
-export function setFeeds(feeds) {
-  boardFeeds = feeds;
-  laneCounts = null;
-}
-
-function countLanes(workers) {
-  const never = new Map();
-  const shared = new Map();
-  for (const [source, pool] of Object.entries(workers)) {
-    if (!pool.lanes) continue;
-    const others = new Set();
-    for (const feed of boardFeeds) {
-      if (feed.source !== source) continue;
-      const value = (feed.key.split("/")[pool.partition.index - 1] ?? "").toLowerCase();
-      const named = pool.partition.named.includes(value);
-      if (!named) others.add(value);
-      if (!feed.policy?.last_poll_at) {
-        const lane = `${source}:${named ? value : "other"}`;
-        never.set(lane, (never.get(lane) ?? 0) + 1);
-      }
-    }
-    shared.set(source, others.size);
-  }
-  return { never, shared };
-}
+const byAge = (runs) => [...runs].sort((a, b) => b.age_s - a.age_s);
 
 function laneTip(lane) {
-  const parts = [`${lane.label} · ${lane.busy.length}/${lane.width} busy`];
+  const parts = [`${lane.busy.length}/${lane.width} busy`];
   if (lane.budget != null) {
     parts.push(lane.rate != null ? `${lane.rate} of ${lane.budget} req/s` : `${lane.budget} req/s budget`);
   }
-  const never = laneCounts?.never.get(lane.lane);
-  if (never) parts.push(`${formatCount(never)} never polled`);
-  if (lane.throttled != null) parts.push(`${formatCount(lane.throttled)} 429s in 1h`);
-  if (lane.label === "other") parts.push("shared by data centers without their own budget");
+  if (lane.throttled) parts.push(`${formatCount(lane.throttled)} 429s in 1h`);
+  if (lane.label === "other") parts.push("data centers without their own budget");
   return parts.join(" · ");
 }
 
-function splitBar(source, pool) {
-  const busy = pool.lanes.reduce((sum, lane) => sum + lane.busy.length, 0);
-  const segments = pool.lanes.map((lane) => {
-    const ticks = [];
-    for (let index = 0; index < lane.width; index += 1) {
-      const run = lane.busy[index];
-      ticks.push(run
-        ? el("i", { "data-s": slotState(run.age_s), title: `${source}:${run.key} · ${duration(run.age_s)}` })
-        : el("i", { "data-s": "idle" }));
-    }
-    return el("span", {
-      class: "sys-lane",
-      "data-throttled": lane.throttled ? "true" : null,
-      title: laneTip(lane),
-    }, el("span", { class: "sys-lane-k" }, lane.label === "other"
-      ? `+${laneCounts?.shared.get(source) ?? ""}`
-      : lane.label), ticks);
-  });
+/* A vendor whose limiter counts per partition (Workday: per data center)
+   runs one pool per lane. Its row keeps one combined bar; the lanes open in
+   a popup, each with its label to the right of its own bar. */
+function lanePopup(source, pool) {
+  return el(
+    "span",
+    { class: "sys-lanes", role: "tooltip" },
+    pool.lanes.flatMap((lane) => [
+      ticks(source, byAge(lane.busy), lane.width),
+      el(
+        "span",
+        { class: "sys-lane-k", "data-throttled": lane.throttled ? "true" : null, title: laneTip(lane) },
+        lane.label,
+        lane.throttled ? " · 429" : ""
+      ),
+      el("span", { class: "sys-busy" }, el("b", {}, String(lane.busy.length)), `/${lane.width}`),
+    ])
+  );
+}
+
+function workerRow(source, pool) {
+  const runs = byAge(pool.busy);
+  const longest = runs[0];
+  const flagged = longest && slotState(longest.age_s) !== "busy";
+  const bar = ticks(source, runs, pool.width);
   return [
-    el("span", { class: "sys-bar sys-bar-split" }, segments),
-    el("span", { class: "sys-busy", title: `${busy} of ${pool.width} workers busy` },
-      el("b", {}, String(busy)), `/${pool.width}`),
+    el("span", { class: "sys-wk-name" }, source),
+    pool.lanes
+      ? el(
+          "button",
+          { class: "sys-lane-wrap", type: "button", "aria-label": `${source} lanes`, onclick: (event) => event.currentTarget.classList.toggle("is-open") },
+          bar,
+          el("span", { class: "sys-lane-caret", "aria-hidden": "true" }, "▾"),
+          lanePopup(source, pool)
+        )
+      : bar,
+    el("span", { class: "sys-busy" }, el("b", {}, String(runs.length)), `/${pool.width}`),
+    flagged
+      ? el("span", { class: "wk-age", "data-s": slotState(longest.age_s), title: `${source}:${longest.key}` },
+          `${longest.key} ${duration(longest.age_s)}`)
+      : el("span", {}),
   ];
 }
 
-export function paintWorkers() {
+function paintWorkers() {
+  if (!workersEl) return;
   const workers = live.snapshot?.workers;
-  if (!workers || !tableEl) return;
-  if (!laneCounts && boardFeeds.length) laneCounts = countLanes(workers);
-  for (const cell of tableEl.querySelectorAll("td[data-worker-source]")) {
-    const pool = workers[cell.dataset.workerSource];
-    // replaceChildren prints null as text, unlike el(): drop the absent age flag.
-    cell.replaceChildren(
-      ...(pool?.lanes ? splitBar(cell.dataset.workerSource, pool) : workerBar(cell.dataset.workerSource, pool))
-        .filter(Boolean)
-    );
+  if (!workers) {
+    workersEl.replaceChildren(el("span", { class: "sys-strip-k" }, "workers"), el("span", { class: "wk-dim sys-wk-none" }, "live telemetry unavailable"));
+    return;
   }
-  // Section headings sum their providers' slots; the empty bar keeps the
-  // count aligned under the provider rows' counts.
-  for (const cell of tableEl.querySelectorAll("td[data-worker-sources]")) {
-    let busy = 0;
-    let width = 0;
-    for (const source of cell.dataset.workerSources.split(" ").filter(Boolean)) {
-      busy += workers[source]?.busy.length ?? 0;
-      width += workers[source]?.width ?? 1;
-    }
-    cell.replaceChildren(
-      el("span", { class: "sys-bar", "aria-hidden": "true" }),
-      el("span", { class: "sys-busy", title: `${busy} of ${width} workers busy` },
-        el("b", {}, String(busy)), `/${width}`)
-    );
+  // An open lane popup survives the 2s repaint.
+  const openLanes = new Set(
+    [...workersEl.querySelectorAll(".sys-lane-wrap.is-open")].map((node) => node.getAttribute("aria-label"))
+  );
+  const pools = Object.entries(workers)
+    .filter(([, pool]) => pool.width > 1)
+    .sort(([a, left], [b, right]) => right.width - left.width || a.localeCompare(b));
+  workersEl.replaceChildren(
+    ...pools.flatMap(([source, pool], index) => [
+      el("span", { class: "sys-strip-k" }, index ? "" : "workers"),
+      ...workerRow(source, pool),
+    ])
+  );
+  for (const node of workersEl.querySelectorAll(".sys-lane-wrap")) {
+    if (openLanes.has(node.getAttribute("aria-label"))) node.classList.add("is-open");
   }
+}
+
+/* "polling 1m04s" on whichever feed rows the board currently draws. */
+export function paintFeedWorkers() {
+  const workers = live.snapshot?.workers;
+  if (!tableEl) return;
   const running = new Map();
-  for (const [source, pool] of Object.entries(workers)) {
+  for (const [source, pool] of Object.entries(workers ?? {})) {
     for (const run of pool.busy) running.set(`${source}:${run.key}`, run.age_s);
   }
-  for (const cell of tableEl.querySelectorAll("td[data-worker-feed]")) {
-    const age = running.get(cell.dataset.workerFeed);
-    cell.replaceChildren(age == null
+  for (const slot of tableEl.querySelectorAll("[data-worker-feed]")) {
+    const age = running.get(slot.dataset.workerFeed);
+    slot.replaceChildren(age == null
       ? ""
       : el("span", { class: "wk-age", "data-s": slotState(age) }, `polling ${duration(age)}`));
   }
@@ -255,6 +213,7 @@ async function loadLive() {
   paintFeedsLine();
   setEnrichmentWorker(live.snapshot?.enrichment ?? null);
   paintWorkers();
+  paintFeedWorkers();
 }
 
 async function loadEvents() {

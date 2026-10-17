@@ -454,8 +454,9 @@ async def finish_schedule_success(
     poll cannot short-circuit (304 or matching hash) past silver. Used when
     silver left postings unresolved: a later poll may be able to resolve them.
 
-    ``full_listing`` records the board's total, but only a listing that also
-    fetched every detail fresh (``reused_detail`` false) advances
+    A supplied ``list_total`` records the unfiltered board's observed total,
+    even when a search accelerates the subsequent retrieval. Only a full
+    listing that also fetched every detail fresh (``reused_detail`` false) advances
     ``last_full_poll_at``. That column is the clock `sources.reusing` bounds
     detail reuse by; a count-probe source enumerates its whole board on most
     polls, so advancing it on every listing kept reuse "fresh" forever and a
@@ -471,7 +472,7 @@ async def finish_schedule_success(
             hold_until = NULL,
             last_poll_at = $2,
             last_change_at = CASE WHEN $6 THEN $2 ELSE last_change_at END,
-            list_total = CASE WHEN $9 THEN $8 ELSE list_total END,
+            list_total = COALESCE($8::integer, list_total),
             last_full_poll_at = CASE WHEN $9 AND NOT $12 THEN $2 ELSE last_full_poll_at END,
             last_modified = CASE WHEN $11 THEN NULL ELSE $10 END
         WHERE id = $1 AND hold_until = $7
@@ -733,8 +734,8 @@ async def set_feeds_enabled(
     rows = await conn.fetch(
         """
         WITH upserted AS (
-            INSERT INTO feed(source, key, polling)
-            SELECT source, key, true
+            INSERT INTO feed(source, key, polling, interval_s)
+            SELECT source, key, true, CASE WHEN source = 'workable' THEN 43200 ELSE 900 END
             FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
             ON CONFLICT (source, key) DO UPDATE SET polling = true
             RETURNING id, source, key, (xmax = 0) AS inserted
@@ -1630,8 +1631,8 @@ async def import_feed(
     feed_id = await conn.fetchval(
         """
         WITH upserted AS (
-            INSERT INTO feed(source, key, polling)
-            VALUES ($1, $2, $3)
+            INSERT INTO feed(source, key, polling, interval_s)
+            VALUES ($1, $2, $3, CASE WHEN $1 = 'workable' THEN 43200 ELSE 900 END)
             ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
             RETURNING id, source, key, (xmax = 0) AS inserted
         ), logged AS (
@@ -1672,8 +1673,8 @@ async def import_feeds(
     rows = await conn.fetch(
         """
         WITH upserted AS (
-            INSERT INTO feed(source, key, polling)
-            SELECT source, key, $3
+            INSERT INTO feed(source, key, polling, interval_s)
+            SELECT source, key, $3, CASE WHEN source = 'workable' THEN 43200 ELSE 900 END
             FROM unnest($1::text[], $2::text[]) AS incoming(source, key)
             ON CONFLICT (source, key) DO UPDATE SET source = EXCLUDED.source
             RETURNING id, source, key, (xmax = 0) AS inserted

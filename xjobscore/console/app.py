@@ -11,13 +11,13 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import asyncpg
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from xjobscore.console import closures, scheduling, telemetry
-from xjobscore.console.board import Board, Shared
+from xjobscore.console.board import STATES as BOARD_STATES, Board, Shared
 from xjobscore.console.cache import now_utc
 from xjobscore.console.policy import (
     FeedNotInPostgres,
@@ -57,6 +57,10 @@ from xjobscore import sources as source_registry
 from xjobscore.source_policy import source_disabled
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# One page of a vendor's status line; also the cap on search matches shown
+# per vendor.
+FEED_PAGE_SIZE = 25
+SEARCH_MIN_CHARS = 2
 
 
 class KeyscanRunBody(BaseModel):
@@ -86,6 +90,11 @@ class BulkPolicyOptions(BaseModel):
 class ProviderPauseOptions(BaseModel):
     model_config = {"extra": "forbid"}
     paused: bool
+
+
+class ProviderIntervalOptions(BaseModel):
+    model_config = {"extra": "forbid"}
+    interval_s: int
 
 
 class PollNowOptions(BaseModel):
@@ -718,16 +727,7 @@ def create_app(*, runtime: Any, token_sweep: Any | None = None) -> FastAPI:
     # keep only its gzip bytes, and rebuild early after any write it shows.
     async def build_board() -> Board:
         rows, available = await scheduler_rows(now_utc())
-        counts: dict[str, int] = {}
-        for row in rows:
-            state = row["sched"]["status"]["state"]
-            counts[state] = counts.get(state, 0) + 1
-        payload = {
-            "postgres": policy_store.status(),
-            "telemetry_available": available,
-            "feeds": rows,
-        }
-        return Board.build(payload, counts)
+        return Board.build(rows, telemetry_available=available)
 
     async def load_tiles() -> dict[str, Any] | None:
         pool = await policy_store.pool_or_none()
@@ -852,24 +852,99 @@ def create_app(*, runtime: Any, token_sweep: Any | None = None) -> FastAPI:
         pool = await _public_pool()
         return (await runtime.coordinator.status(pool))["gold"]
 
-    @application.get("/api/scheduler/feeds", response_model=None)
-    async def scheduler_feeds(
-        request: Request, source: str | None = None
-    ) -> Response | dict[str, Any]:
-        if source is None:
-            return (await board_cache.get()).response(request)
-        rows, available = await scheduler_rows(now_utc())
+    @application.get("/api/scheduler/providers")
+    async def scheduler_providers() -> dict[str, Any]:
+        """Every vendor's status counts and per-status rollups; no feed rows."""
+        board = await board_cache.get()
         return {
             "postgres": policy_store.status(),
-            "telemetry_available": available,
-            "feeds": [row for row in rows if row["source"] == source],
+            "telemetry_available": board.telemetry_available,
+            "providers": [
+                {"source": source, **summary}
+                for source, summary in sorted(board.summary.items())
+            ],
         }
 
+    @application.get("/api/scheduler/providers/{source}/feeds")
+    async def scheduler_provider_feeds(
+        source: str,
+        state: str = Query(...),
+        q: str = Query("", max_length=200),
+        page: int = Query(1, ge=1),
+    ) -> dict[str, Any]:
+        """One page of one vendor's feeds in one status, worst first."""
+        if state not in BOARD_STATES:
+            raise HTTPException(status_code=400, detail=f"Unknown state: {state}")
+        board = await board_cache.get()
+        rows = board.rows(source)
+        if rows is None:
+            raise HTTPException(status_code=404, detail="No feeds for this provider")
+        needle = q.strip().casefold()
+        matching = [
+            row for row in rows
+            if row["sched"]["status"]["state"] == state
+            and (
+                not needle
+                or needle in f"{row.get('company_name') or ''} {row['key']}".casefold()
+            )
+        ]
+        pages = max(1, -(-len(matching) // FEED_PAGE_SIZE))
+        page = min(page, pages)
+        start = (page - 1) * FEED_PAGE_SIZE
+        return {
+            "source": source,
+            "state": state,
+            "total": len(matching),
+            "page": page,
+            "pages": pages,
+            "page_size": FEED_PAGE_SIZE,
+            "telemetry_available": board.telemetry_available,
+            "feeds": matching[start:start + FEED_PAGE_SIZE],
+        }
+
+    @application.get("/api/scheduler/search")
+    async def scheduler_search(q: str = Query(..., max_length=200)) -> dict[str, Any]:
+        """Feeds whose company or key contains `q`, grouped by vendor."""
+        query = q.strip()
+        if len(query) < SEARCH_MIN_CHARS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Search needs at least {SEARCH_MIN_CHARS} characters",
+            )
+        board = await board_cache.get()
+        providers = []
+        for source, (count, indexes) in sorted(board.search(query, FEED_PAGE_SIZE).items()):
+            rows = board.rows(source) or []
+            providers.append({
+                "source": source,
+                "count": count,
+                "feeds": [rows[index] for index in indexes if index < len(rows)],
+            })
+        return {
+            "query": query,
+            "telemetry_available": board.telemetry_available,
+            "providers": providers,
+        }
+
+    @application.post("/api/scheduler/providers/{source}/interval")
+    async def scheduler_provider_interval(
+        source: str, body: ProviderIntervalOptions
+    ) -> dict[str, Any]:
+        try:
+            result = await policy_store.set_provider_interval(source, body.interval_s)
+        except (PolicyUnavailable, ValueError) as exc:
+            raise _policy_error(exc) from exc
+        if not result["affected"]:
+            raise HTTPException(status_code=404, detail="No feeds for this provider")
+        board_cache.invalidate()
+        scheduler_runner.nudge()
+        return result
+
     @application.get("/api/scheduler/feeds/{feed_ref}")
-    async def scheduler_feed(feed_ref: str) -> dict[str, Any]:
+    async def scheduler_feed(feed_ref: str, source: str | None = None) -> dict[str, Any]:
         board = await board_cache.get()
         available = board.telemetry_available
-        row = board.row(feed_ref)
+        row = board.row(feed_ref, source)
         if row is None:
             raise HTTPException(status_code=404, detail="Feed not found")
         feed_id = (row.get("policy") or {}).get("feed_id")

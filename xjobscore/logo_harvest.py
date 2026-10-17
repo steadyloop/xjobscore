@@ -308,14 +308,21 @@ async def harvest(
     the recorded failures (NULL `bytes`), for a rerun after the fetch learned a
     new source.
 
-    A company whose domain was cleared keeps no logo: its row is emptied rather
-    than deleted, because publishing ships rows and would never ship a delete.
+    A company whose domain was cleared keeps no logo unless it has a verified
+    shared website. Distinct franchise employers can use the same banner logo
+    without sharing a company domain. Cleared rows are emptied rather than
+    deleted, because publishing ships rows and would never ship a delete.
     """
     await pool.execute(
         """
         UPDATE company_logo l SET bytes = NULL, domain = NULL
           FROM company c
          WHERE c.id = l.company_id AND (c.domain IS NULL OR c.domain = '')
+           AND NOT (
+             c.reviewed = 'verified'
+             AND COALESCE(c.tags #>> '{company_resolution,state}', '') = 'resolved_shared_website'
+             AND COALESCE(c.tags #>> '{company_resolution,website}', '') ~ '^https?://[^/[:space:]]+(/|$)'
+           )
            AND (l.bytes IS NOT NULL OR l.domain IS NOT NULL)
         """
     )
