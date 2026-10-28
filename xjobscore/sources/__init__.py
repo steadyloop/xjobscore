@@ -169,8 +169,8 @@ REVISION_REFRESH_WINDOWS: dict[str, int] = {
     # was unbounded (the "original SmartRecruiters behavior" noted above),
     # which left such edits permanently stale.
     "smartrecruiters": 86_400,
-    # Same bound, and the same window as the config's `count_probe`, so one
-    # forced pass a day both re-lists the board and refetches every detail.
+    # Full Workday listings run every poll. Detail reuse stays bounded so
+    # description-only eligibility changes are refreshed at least daily.
     "workday": 86_400,
 }
 

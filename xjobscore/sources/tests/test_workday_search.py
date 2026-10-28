@@ -1,4 +1,4 @@
-"""Filtered retrieval must save requests without claiming board completeness."""
+"""Optional JSON search behavior. Production Workday now enumerates fully."""
 
 import copy
 import json as jsonlib
@@ -48,9 +48,16 @@ def configured(monkeypatch):
     config["list"]["body"]["limit"] = 2
     config["list"]["page"].update(size=2, step=2, concurrency=2)
     config["list"]["partition"]["window"] = 100
+    # Exercise the generic optional search path, not Workday production policy.
+    from xjobscore.sources.json_api_configs import _SHARED_JOB_TYPE
+    config["detail"]["only"] = {"classify": [
+        rule if rule["is"] is None else {**rule, "is": True}
+        for rule in _SHARED_JOB_TYPE
+    ]}
+    config["list"]["count_probe"] = {"window_s": 86_400}
     config["list"]["search"] = {
         "parameter": "searchText", "refresh_s": 86_400,
-        "plans": {KEY: {"query": "intern OR student"}},
+        "query": "intern OR student",
     }
     monkeypatch.setitem(json_api.CONFIGS, "search-test", config)
     return config
@@ -85,9 +92,9 @@ async def test_next_unchanged_board_still_costs_one_request(configured):
 
 @pytest.mark.parametrize("kwargs", [
     {"last_full": None}, {"last_full": NOW - timedelta(days=1)},
-    {"force_full": True}, {"force_unfiltered": True}, {"key": "unknown/wd1/careers"},
+    {"force_full": True}, {"force_unfiltered": True},
 ])
-async def test_cold_expired_forced_and_unvalidated_boards_stay_unfiltered(configured, kwargs):
+async def test_cold_expired_and_forced_boards_stay_unfiltered(configured, kwargs):
     net = SearchNet()
     record = await fetch(net, **kwargs)
     assert len(record.items) == 10 and record.full_listing and not record.filtered_listing
@@ -109,17 +116,31 @@ async def test_query_that_loses_a_live_first_page_candidate_is_rejected(configur
     assert sum(bool(p["searchText"]) for p in net.posts) == 1
 
 
-async def test_facets_are_carried_to_every_filtered_page(configured):
-    configured["list"]["search"]["plans"][KEY] = {"facets": {"workerSubType": ["intern", "graduate"]}}
+@pytest.mark.parametrize("key", [KEY, "unknown/wd1/careers", "hpe/wd5/jobsathpe"])
+async def test_same_query_is_used_on_every_board_without_manual_plans(configured, key):
     net = SearchNet()
-    record = await fetch(net)
+    record = await fetch(net, key=key)
     assert record.filtered_listing and len(record.items) == 3
-    assert net.posts[0]["appliedFacets"] == {}
-    assert all(p["appliedFacets"] == {"workerSubType": ["intern", "graduate"]}
-               for p in net.posts[1:])
+    assert all(p["appliedFacets"] == {} for p in net.posts)
+    assert all(p["searchText"] == "intern OR student" for p in net.posts[1:])
 
 
 async def test_failed_search_page_keeps_partial_results_without_completeness(configured):
     record = await fetch(SearchNet(fail_page=True))
     assert record.truncated and record.filtered_listing and not record.full_listing
     assert {item.external_id for item in record.items} == {"/job/0", "/job/3"}
+
+
+@pytest.mark.parametrize("title", [
+    "Internal Auditor", "Grade 5 Engineer", "PhD Research Intern",
+    "Pharmacy Intern", "Nursing Student", "Graduate Research Assistant",
+    "Student Recruitment Coordinator",
+])
+async def test_broad_search_hit_does_not_override_local_classification(configured, title):
+    net = SearchNet()
+    net.jobs[3]["title"] = title
+    record = await fetch(net)
+    hit = next(item for item in record.items if item.external_id == "/job/3")
+    assert record.filtered_listing and record.detail_fetched_count == 1
+    assert "jobPostingInfo" not in hit.payload
+    assert json_api._value(configured["fields"]["job_type"], hit.payload, {"key": KEY}) is None

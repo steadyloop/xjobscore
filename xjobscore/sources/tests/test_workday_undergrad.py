@@ -53,7 +53,8 @@ def test_exclusions_cannot_be_revived_by_details_or_student_board(title):
     "Software Engineering Fellowship Director",
 ])
 def test_staff_and_substring_collisions_are_not_new_opportunities(title):
-    assert resolve(title) == (False, None)
+    # Discovery now inspects these descriptions without assigning a label.
+    assert resolve(title) == (True, None)
 
 
 @pytest.mark.parametrize(("title", "description", "key", "kind"), [
@@ -74,6 +75,8 @@ def test_staff_and_substring_collisions_are_not_new_opportunities(title):
     ("Engineering (Manufacturing) Industrial Placement 2027",
      "<h3>What We Look For:</h3><p>University students graduating in 2029.</p>",
      "pg/wd5/1000", "intern"),
+    ("Accounting Assistant", "Job Category: Student Hourly Job Profile: Student Help",
+     "unverified/wd1/students", "student"),
     ("Accounting Assistant",
      "<p>Job Category: Student Hourly</p><p>Job Profile: Student Help</p>",
      "wisconsin/wd1/uw_students", "student"),
@@ -103,8 +106,6 @@ def test_ambiguous_titles_need_description_confirmation(title, description, key,
      "sanofi/wd3/careers"),
     ("Accounting Assistant", "Current students and faculty should apply internally.",
      "wisconsin/wd1/uw_students"),
-    ("Accounting Assistant", "Job Category: Student Hourly Job Profile: Student Help",
-     "unverified/wd1/students"),
     ("Accounting Assistant", "Job Category: Student Hourly Job Profile: Student Help. Graduate students only.",
      "wisconsin/wd1/uw_students"),
     ("Software Engineering Fellowship", "Candidates must have previous internship experience.",

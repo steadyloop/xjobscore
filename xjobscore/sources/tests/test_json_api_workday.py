@@ -28,7 +28,7 @@ def response(url: str, body: dict) -> Response:
 
 def job(number: int) -> dict:
     return {
-        "title": f"Job {number}",
+        "title": f"PhD Researcher {number}",
         "externalPath": f"/job/{number}",
         "bulletFields": [f"R{number}"],
     }
@@ -136,7 +136,7 @@ async def test_items_are_the_verbatim_list_rows(workday_config):
     assert record.items[0].payload == jobs[0]
 
 
-async def test_recent_equal_total_stops_after_the_first_page(workday_config):
+async def test_recent_equal_total_still_enumerates_every_page(workday_config):
     jobs = [job(index) for index in range(3)]
     net = ListOnlyNet(jobs, {"category": {"A": [j["externalPath"] for j in jobs]}})
 
@@ -147,10 +147,10 @@ async def test_recent_equal_total_stops_after_the_first_page(workday_config):
         options=json_api.JsonApiHarvestOptions(now=NOW + timedelta(hours=23)),
     )
 
-    assert record.count_unchanged is True
+    assert record.count_unchanged is False
     assert record.list_total == 3
-    assert record.items == []
-    assert len(net.posts) == 1
+    assert len(record.items) == 3
+    assert len(net.posts) == 2
 
 
 async def test_changed_total_paginates_immediately(workday_config):
@@ -312,10 +312,10 @@ def typed(number: int, title: str) -> dict:
     return {"title": title, "externalPath": f"/job/{number}", "bulletFields": [f"R{number}"]}
 
 
-async def test_detail_is_fetched_only_for_rows_the_job_type_table_types(workday_config):
+async def test_detail_fetches_ordinary_titles_but_preserves_explicit_exclusions(workday_config):
     rows = [
         typed(0, "Software Engineer Intern"),      # intern  -> fetched
-        typed(1, "Staff Software Engineer"),       # untyped -> skipped
+        typed(1, "Staff Software Engineer"),       # ordinary -> fetched
         typed(2, "Chemist 1 New College Grad"),    # new_grad -> fetched
         typed(3, "Pharmacy Intern"),               # EXCLUDED -> skipped, on purpose
     ]
@@ -323,9 +323,9 @@ async def test_detail_is_fetched_only_for_rows_the_job_type_table_types(workday_
 
     record = await harvest(net)
 
-    assert record.detail_fetched_count == 2
-    assert record.detail_skipped_count == 2
-    assert sorted(g["url"].split("/Site")[1] for g in net.gets) == ["/job/0", "/job/2"]
+    assert record.detail_fetched_count == 3
+    assert record.detail_skipped_count == 1
+    assert sorted(g["url"].split("/Site")[1] for g in net.gets) == ["/job/0", "/job/1", "/job/2"]
     # Every row still emits -- a skipped row is not a dropped row.
     assert len(record.items) == 4
 
@@ -441,7 +441,7 @@ async def test_a_failed_page_keeps_the_rows_already_fetched(workday_config):
     go through the gate and detail as usual, and the record says truncated."""
     rows = [
         typed(0, "Software Engineer Intern"),  # gated in -> detail
-        typed(1, "Staff Software Engineer"),   # gated out -> bare list row
+        typed(1, "Staff Software Engineer"),   # ordinary title -> detail
         typed(2, "Data Science Intern"),       # on the page that fails
     ]
     net = FailingPageNet(rows, {"category": {"A": [r["externalPath"] for r in rows]}}, fail_offset=2)
@@ -451,8 +451,8 @@ async def test_a_failed_page_keeps_the_rows_already_fetched(workday_config):
     assert record.truncated is True
     assert record.full_listing is False  # never a basis for absence
     assert sorted(item.external_id for item in record.items) == ["/job/0", "/job/1"]
-    assert record.detail_fetched_count == 1
-    assert [g["url"].split("/Site")[1] for g in net.gets] == ["/job/0"]
+    assert record.detail_fetched_count == 2
+    assert sorted(g["url"].split("/Site")[1] for g in net.gets) == ["/job/0", "/job/1"]
 
 
 async def test_a_failed_partition_branch_keeps_the_other_branches(workday_config):

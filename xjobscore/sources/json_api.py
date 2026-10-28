@@ -18,7 +18,7 @@ from functools import partial
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from xjobscore import classify
+from xjobscore import classify, undergraduate
 from xjobscore.company_name import enrich_posting, plain_text
 from xjobscore.probe import parse_tombstone
 from xjobscore.net import Net, NetError, etag
@@ -158,6 +158,10 @@ def _value(spec: Any, payload: Any, context: dict[str, Any]) -> Any:
     if "eq" in spec:
         left, right = (_value(value, payload, context) for value in spec["eq"])
         return left == right
+    if "student_eligibility" in spec:
+        values = {key: _value(value, payload, context)
+                  for key, value in spec["student_eligibility"].items()}
+        return undergraduate.job_type(**values)
     if "classify" in spec:
         # An ordered rule table, first match wins. Each rule reads one already
         # resolved field and tests it on whole-word boundaries; a rule whose
@@ -638,6 +642,7 @@ async def harvest(
     # result-window cap is excluded because 2,000 is not the real board total.
     if (
         count_probe
+        and int(count_probe["window_s"]) > 0
         and not (options is not None and (options.force_full or options.force_unfiltered))
         and isinstance(observed_total, int)
         and feed.list_total == observed_total
@@ -657,12 +662,12 @@ async def harvest(
 
     # Keep the unfiltered count probe: unchanged boards still cost one call.
     # Search is an optional acceleration of changed, warm boards, not the
-    # reconciliation boundary. Only individually validated board queries are
-    # enabled; cold, expired, and explicitly forced runs enumerate everything.
+    # reconciliation boundary. Every board uses the same candidate query;
+    # cold, expired, and explicitly forced runs enumerate everything.
     search = list_config.get("search") or {}
-    plan = search.get("plans", {}).get(feed.key.lower())
+    query = search.get("query")
     if (
-        plan
+        query
         and count_probe
         and page_config
         and not context.get("appliedFacets")
@@ -675,9 +680,9 @@ async def harvest(
     ):
         searched_config = {
             **list_config,
-            "body": {**list_config["body"], search["parameter"]: plan.get("query", "")},
+            "body": {**list_config["body"], search["parameter"]: query},
         }
-        searched_context = {**context, "appliedFacets": plan.get("facets", {})}
+        searched_context = {**context, "appliedFacets": {}}
         try:
             searched_response = await _request(
                 searched_config, feed, net, searched_context, first=False,
@@ -950,19 +955,28 @@ async def harvest(
 
         concurrency = detail.get("concurrency", 1)
         if concurrency > 1:
-            # One request per pending row, bounded by Net's per-host
-            # semaphore. Unlike the serial path, every request is issued even
-            # if an early one fails -- same trade-off as _paginate_parallel.
-            results = await asyncio.gather(
-                *(
-                    _request(detail, feed, net, {**context, "id": detail_id},
-                             first=False, concurrency=concurrency)
-                    for _, detail_id, _ in misses
-                ),
-                return_exceptions=True,
-            )
+            # Bound tasks as well as network requests. A full Workday board
+            # can have tens of thousands of details; creating one waiting
+            # task per row wastes memory even with Net's host semaphore.
+            fetched = {}
+            remaining = iter(misses)
+
+            async def fetch_details() -> None:
+                for index, detail_id, _ in remaining:
+                    try:
+                        fetched[index] = await _request(
+                            detail, feed, net, {**context, "id": detail_id},
+                            first=False, concurrency=concurrency,
+                        )
+                    except Exception as exc:
+                        # Preserve successful siblings and let the existing
+                        # detail loop distinguish NetError from parser faults.
+                        fetched[index] = exc
+
+            await asyncio.gather(*(
+                fetch_details() for _ in range(min(concurrency, len(misses)))
+            ))
             detail_fetched_count += len(misses)
-            fetched = {index: result for (index, _, _), result in zip(misses, results)}
         else:
             fetched = None
         for index, (detail_id, row) in enumerate(pending):

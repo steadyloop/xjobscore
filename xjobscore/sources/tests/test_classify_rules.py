@@ -146,14 +146,10 @@ def workday_remote(remote_type="", locations_text="", title=""):
 @pytest.mark.parametrize(("title", "expected"), [
     ("Software Engineering Intern", "intern"),                      # md:17, 555 hits
     ("Metrology Co-Op", "coop"),                                    # md:61, 36 hits
-    # ENGLISH-ONLY: md:23 and md:19 still measure these as German intern rows,
-    # but the werkstudent/praktikum stems were dropped from the rule table, so
-    # they now fall through unclassified, and bare `trainee` was dropped too:
-    # on its own it is on-the-job training for a full-time hire (GEICO claims,
-    # BofA advisors), not a student opportunity. A `Graduate Trainee` is still
-    # claimed by the graduate-programme rule and lands in `new_grad`.
-    ("Werkstudent (m/w/d) im Bereich E-Commerce", None),            # md:23, was "intern"
-    ("Praktikanten Marketing", None),                               # md:19, was "intern"
+    # Audited international student aliases are now recognized. Bare trainee
+    # still does not establish student eligibility.
+    ("Werkstudent (m/w/d) im Bereich E-Commerce", "student"),
+    ("Praktikanten Marketing", "intern"),
     ("Auto Damage Trainee (Field)", None),                          # md:22, was "intern"
     ("ACE Graduate Trainee", "new_grad"),
     ("Software Engineer, New Grad", "new_grad"),             # md:18, 134 hits

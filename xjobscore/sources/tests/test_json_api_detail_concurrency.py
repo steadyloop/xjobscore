@@ -1,7 +1,7 @@
 """Opt-in concurrent detail fetches in the json-api engine.
 
-A `detail` config with `"concurrency": N` fires every per-item request at
-once, bounded by Net's per-host semaphore. Items must come back in list-row
+A `detail` config with `"concurrency": N` runs at most N detail workers,
+with Net also enforcing its per-host budget. Items must come back in list-row
 order regardless of completion order, a failed detail costs only its own row
 and flags `truncated`, dedupe still fetches each id once, and configs
 without the key keep the serial loop -- including with fake nets whose `get`
@@ -90,7 +90,7 @@ async def test_detail_fetches_overlap_and_preserve_row_order():
     assert [item.external_id for item in record.items] == [str(i) for i in range(6)]
     assert net.calls[0]["concurrency"] == 1
     assert all(call["concurrency"] == 3 for call in detail_calls(net))
-    assert net.max_in_flight >= 2
+    assert net.max_in_flight == 3
 
 
 async def test_failed_detail_skips_its_row_and_keeps_the_rest():
@@ -98,9 +98,8 @@ async def test_failed_detail_skips_its_row_and_keeps_the_rest():
     record = await harvest(net)
 
     assert record.truncated is True
-    # The fan-out issued and paid for all six requests before any failed, so
-    # dropping the survivors would discard work already done. Only row 3 is
-    # lost; `truncated` is how the shortfall stays visible.
+    # A failed request does not stop queued siblings. Only row 3 is lost;
+    # `truncated` is how the shortfall stays visible.
     assert [item.external_id for item in record.items] == ["0", "1", "2", "4", "5"]
 
 

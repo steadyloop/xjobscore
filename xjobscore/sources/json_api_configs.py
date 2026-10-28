@@ -8,14 +8,10 @@ when a pattern is shared by several vendors.
 
 # The SHARED job_type table of doc/raw_postings/regex/job_type.md, with the
 # undergraduate recall corrections verified against Workday on 2026-10-16.
-# Keep it shared so its consumers DERIVE from it rather
-# than transcribe it again. Three read it: `workday`'s job_type, `workday`'s
-# detail `only` gate, and `eightfold`'s job_type through `_job_type_from`.
-#
-# The gate re-runs this ladder inside harvest(), then admits the narrowly
-# scoped description candidates below. It cannot read parse()'s `job_type`,
-# because harvest returns a Record long before silver parses it. Description
-# candidates are not classified until the fetched evidence confirms them.
+# Workday uses this for a title verdict, then refines it with applicant
+# eligibility in the description. Eightfold rebinds it through `_job_type_from`.
+# Workday discovery uses only the explicit exclusions: every other titled row
+# is inspected regardless of whether these title rules recognize it.
 #
 # `from` is `@title` here because that is Workday's key. A vendor that spells
 # it differently rebinds with `_job_type_from` and changes nothing else.
@@ -121,25 +117,17 @@ _SHARED_JOB_TYPE: list[dict] = [
 ]
 
 
-# The title-based part of the detail gate: same order and `not` lists, with
-# every verdict rewritten to True. A row the table types is worth one detail
-# request; the excluded tier's `is: None` and the absent default both evaluate
-# to "not True", which is exactly the skip the engine tests for
-# (json_api.py: `if gate is not None and _value(gate, row, context) is not True`).
-# Excluded rows are skipped ON PURPOSE -- a pharmacy or RN posting is out of
-# scope, so it should not cost a request either.
+# Fetch eligibility evidence for every titled listing outside the explicit
+# exclusions. Ordinary titles can contain student/new-graduate requirements
+# only in their descriptions, so a positive title match cannot gate discovery.
 _WORKDAY_DETAIL_ONLY: list[dict] = [
-    rule if rule["is"] is None else {**rule, "is": True}
-    for rule in _SHARED_JOB_TYPE
+    *_SHARED_TITLE_EXCLUSIONS,
+    {"from": "@title", "re": r"\S+", "is": True},
 ]
 
-# An ambiguous title may justify a detail request without justifying a label.
-# These two university boards were checked against live descriptions. Board
-# identity opens discovery ONLY; it never establishes student eligibility.
-_WORKDAY_STUDENT_BOARD = {"lookup": [{
-    "utaustin/wd1/utstudent": True,
-    "wisconsin/wd1/uw_students": True,
-}, "$key"]}
+# Description evidence is shared across boards. Job titles that identify
+# program staff or advanced/clinical placements do not qualify through these
+# otherwise broad fallback rules.
 _WORKDAY_PROBE_VETO = (
     _UNDERGRAD_STAFF + "|masters?|m\\.?sc\\.?|externs?|externship|clerkship"
     "|student rotation|pre.employment training|bpet|nationals only|j1 students"
@@ -147,12 +135,8 @@ _WORKDAY_PROBE_VETO = (
 _WORKDAY_UNDERGRAD_CANDIDATES = [
     *_SHARED_TITLE_EXCLUSIONS,
     {"from": "@title", "re": _WORKDAY_PROBE_VETO, "is": None},
-    {"from": "@title",
-     "re": "software engineering fellowships?|summer (investment|development) analysts?"
-           "|industrial placements?|co[ ‐‑–—]ops?", "is": True},
-    {"from": "@title", "re": "[a-z][a-z0-9]*", "when": _WORKDAY_STUDENT_BOARD, "is": True},
+    {"from": "@title", "re": r"\S+", "is": True},
 ]
-_WORKDAY_DETAIL_ONLY += _WORKDAY_UNDERGRAD_CANDIDATES
 
 _WORKDAY_DESCRIPTION = {"plain_text": "@jobPostingInfo.jobDescription"}
 _WORKDAY_UNDERGRAD_PROBE = {"classify": _WORKDAY_UNDERGRAD_CANDIDATES}
@@ -194,7 +178,7 @@ _WORKDAY_JOB_TYPE = [
      "re": "job category: student hourly job profile: student help",
      "when": _WORKDAY_UNDERGRAD_PROBE, "is": "student"},
     {"from": _WORKDAY_DESCRIPTION,
-     "re": "required qualifications current ut austin student",
+     "re": "required qualifications current ([a-z]+ ){1,8}students?",
      "when": _WORKDAY_UNDERGRAD_PROBE, "is": "student"},
 ]
 
@@ -208,58 +192,6 @@ def _job_type_from(path: str) -> list[dict]:
     where the shared rules apply as-is to a differently-named field.
     """
     return [{**rule, "from": path} for rule in _SHARED_JOB_TYPE]
-
-# Retrieval filters, independently verified against complete live boards on
-# 2026-10-16. These are candidate searches, not classification rules. Keep
-# unvalidated boards unfiltered: OR semantics and facet coverage vary by site.
-# See doc/workday-optimizations.md for coverage and measured request savings.
-_WORKDAY_SEARCH_COMMON = (
-    'coop OR "co-op" OR "co op" OR student OR apprentice OR summer OR fellowship'
-    ' OR "work study" OR workstudy OR undergraduate OR graduate OR "new grad"'
-    ' OR "college grad" OR NCG OR "early career" OR "early talent" OR "emerging talent"'
-    ' OR "campus hire" OR "school leaver" OR "development program" OR "rotational program"'
-    ' OR "launch program" OR "industrial placement" OR traineeship OR trainee'
-    ' OR praktik OR werkstudent OR stagiaire OR alternance OR estagio OR estágio'
-    ' OR aprendiz OR becario OR pasantia OR pasantía OR grads OR "recent grad"'
-    ' OR "fresh grad" OR "post grad" OR "grad program"'
-)
-_WORKDAY_SEARCH_BROAD = 'intern OR ' + _WORKDAY_SEARCH_COMMON
-_WORKDAY_ENROLLMENT_TERMS = (
-    'internship', 'interns', '"college intern"', '"summer intern"',
-    *(term for term in _WORKDAY_SEARCH_COMMON.split(' OR ') if term != 'coop'),
-    'enrolled', '"working towards"',
-)
-
-
-def _workday_enrollment_search(*omit: str) -> str:
-    # Narrow retrieval only where live coverage passed. These enrollment
-    # terms recover genuine internships whose title/description says only
-    # singular "intern"; bare intern also matches unrelated "internal" text.
-    return ' OR '.join(term for term in _WORKDAY_ENROLLMENT_TERMS if term not in omit)
-
-
-_WORKDAY_SEARCH_PLANS = {
-    "adobe/wd5/external_experienced": {"query": _workday_enrollment_search()},
-    "aoins/wd5/autoowners": {
-        "facets": {"jobFamilyGroup": ["87fadf8c078701c789f8bc4cb02e4c27"]},
-    },
-    "bmo/wd3/external": {"query": _workday_enrollment_search('"work study"')},
-    "cmegroup/wd1/cme_careers": {
-        "facets": {"workerSubType": ["7a3301e6ea5710f63d5e0fb77b80251e"]},
-    },
-    "hpe/wd5/jobsathpe": {"query": _workday_enrollment_search('"development program"')},
-    "keppel/wd3/keppelcareers": {
-        "facets": {"workerSubType": [
-            "7d50a309ab59017d446efc1c7b16a609", "3a2524e3b9f0014dcc30c616de00ba8b",
-        ]},
-    },
-    "plexus/wd504/plexus_careers": {"query": _WORKDAY_SEARCH_BROAD},
-    "tencent/wd1/tencent_careers": {
-        "facets": {"workerSubType": ["b32f1ee18078012df7b19ebd5d8f0002"]},
-    },
-    "ttc/wd1/toro_external_careers": {"query": _workday_enrollment_search()},
-}
-
 
 SIMPLE: dict[str, dict] = {
     "ashby": {
@@ -1706,19 +1638,13 @@ SIMPLE: dict[str, dict] = {
             # is the string "Posted 30+ Days Ago", so it is not an identity.
             "id": "@externalPath",
             "catch_first_error": True,
-            # CXS sends no ETag/Last-Modified and explicitly says no-store.
-            # During this window, an unchanged, uncapped `total` stops after
-            # the first page. A changed count paginates immediately; expiry
-            # forces a full reconciliation even when the count stayed equal.
-            "count_probe": {"window_s": 86_400},
-            # 2,000-row result window -- a property of the endpoint, not of the
-            # detail leg, so partitioning stays.
+            # Full inventory on every poll: equal totals can hide replacements,
+            # and CXS keyword search can silently omit student opportunities.
+            # Keep count bookkeeping, with its shortcut explicitly disabled.
+            "count_probe": {"window_s": 0},
+            # The endpoint caps result windows at 2,000; partitioning remains
+            # necessary for full coverage of larger boards.
             "partition": {"window": 2000, "facets": "facets"},
-            "search": {
-                "parameter": "searchText",
-                "refresh_s": 86_400,
-                "plans": _WORKDAY_SEARCH_PLANS,
-            },
             # 10 was the measured optimum when nothing but the host's own 429s
             # bounded rate (retries tracked total volume against Workday's
             # sustained limiter, not fan-out width). Rate is now set per data
@@ -1730,13 +1656,9 @@ SIMPLE: dict[str, dict] = {
             # six Workday polls at once where 10 ran two.
             "page": {"total": "@total", "size": 20, "step": 20, "concurrency": 4},
         },
-        # GATED detail. An ungated leg is one GET per posting and was ~91% of
-        # the run -- that is why it was removed on 2026-08-22. Gated to the rows
-        # the job_type table already types, it costs 2,518 requests over the
-        # whole 153,325-row corpus (1.6%, a 98.4% cut): median 9 per feed, max
-        # 148 (micron/wd1/external). Its concurrency matches the page leg's so
-        # both share one per-host semaphore (`_host_semaphores` is keyed by
-        # width).
+        # Inspect every non-excluded titled job. Student eligibility may live
+        # only in the description. Revision reuse and its 24-hour refresh
+        # bound reduce repeat requests while catching description-only edits.
         #
         # `merge` is load-bearing, not an optimisation. Without it a detail row
         # loses `externalPath` -- which is the LIST leg's `id`, so identity
@@ -1805,13 +1727,17 @@ SIMPLE: dict[str, dict] = {
             # "Posted Today" is never faked into a date.
             "published_at": {"date": "@jobPostingInfo.startDate"},
             "published_at_precision": "date",
-            # Shared title rules remain authoritative, including terminal
-            # exclusions. A small set of ambiguous undergraduate candidates
-            # can additionally qualify through explicit detail evidence. The
-            # list gate fetches those descriptions without pre-classifying
-            # them. Neither board identity nor an incidental mention of
-            # students/internships in a description is sufficient.
-            "job_type": {"classify": _WORKDAY_JOB_TYPE},
+            # Exclusions remain terminal. Description eligibility refines the
+            # title verdict and recovers ordinary-title student/graduate jobs.
+            # Discovery fetches these details on every board without allowlists.
+            "job_type": {"student_eligibility": {
+                "title": "@title",
+                "description": "@jobPostingInfo.jobDescription",
+                "title_type": {"classify": _WORKDAY_JOB_TYPE},
+                "excluded": {"classify": [
+                    {**rule, "is": True} for rule in _SHARED_TITLE_EXCLUSIONS
+                ], "default": False},
+            }},
             # The weakest signal of the set: a closed `timeType` field, only
             # 29.1% filled at list-time vs 98.9% on detail (workday.md).
             "part_time": {"classify": [
