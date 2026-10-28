@@ -48,6 +48,7 @@ __all__ = [
     "replace_dup_groups",
     "rekey_company_identity",
     "replay_feeds",
+    "renew_feed_lease",
     "resolve_company",
     "resolve_or_mint",
     "save_raw",
@@ -431,6 +432,21 @@ async def replay_feeds(conn: Connection) -> list[Feed]:
         """
     )
     return [_feed_from_row(row) for row in rows]
+
+
+async def renew_feed_lease(
+    conn: Connection, feed: Feed, *, now: datetime, until: datetime,
+) -> bool:
+    """Extend only a still-live claim owned by this poll."""
+    result = await conn.execute(
+        """
+        UPDATE feed SET hold_until = $3
+        WHERE id = $1 AND hold_until = $2 AND hold_until > $4
+        """,
+        feed.id, feed.hold_until, until, now,
+        timeout=10,
+    )
+    return result == "UPDATE 1"
 
 
 async def finish_schedule_success(

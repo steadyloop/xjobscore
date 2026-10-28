@@ -24,6 +24,7 @@ import asyncpg
 from xjobscore import activity, company_domain, coverage_snapshot, gold, router, silver, sources, store, work, workable_policy
 from xjobscore.net import DEFAULT_USER_AGENT, Net
 from xjobscore.records import Feed
+from xjobscore.feed_lease import FeedLease
 from xjobscore.work import Outcome
 
 if TYPE_CHECKING:
@@ -335,8 +336,16 @@ async def poll(
                 prior = await router.prior_items(conn, source)
         except Exception:
             logger.exception("prior-item read failed source=%s", source)
+    lease = FeedLease(pool, feed, now)
     try:
-        record = await sources.reusing(feed.source, prior, now=now)(feed, net)
+        try:
+            record = await lease.run(
+                lambda: sources.reusing(feed.source, prior, now=now)(feed, net)
+            )
+        finally:
+            # Renewal changes the claim token. Every success/failure path must
+            # finalize with the latest owned token, after renewal has stopped.
+            feed = lease.feed
     except Exception as exc:
         stage_ms["fetch"] = round((time.monotonic() - fetch_started) * 1000)
         status = _status_of(exc)

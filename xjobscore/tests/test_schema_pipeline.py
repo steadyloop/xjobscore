@@ -1842,3 +1842,44 @@ async def test_poll_reports_reused_detail_to_the_schedule(monkeypatch):
     assert await run.poll(_Pool(), object(), feed, NOW) == "ok"
     assert seen[0]["full_listing"] is True
     assert seen[0]["reused_detail"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_poll_finalizes_with_the_renewed_lease_token(monkeypatch, failed):
+    from dataclasses import replace
+    feed = _claimed_feed()
+    renewed = replace(feed, hold_until=feed.hold_until + timedelta(hours=1))
+    seen = []
+
+    class Lease:
+        def __init__(self, pool, initial, now):
+            self.feed = initial
+
+        async def run(self, operation):
+            try:
+                return await operation()
+            finally:
+                self.feed = renewed
+
+    async def harvest(feed, net):
+        if failed:
+            raise RuntimeError("fetch failed after renewal")
+        return Record(http_status=304)
+
+    async def finish(conn, claimed, **kwargs):
+        seen.append(claimed.hold_until)
+        return True
+
+    async def nothing(*args, **kwargs):
+        return 0
+
+    monkeypatch.setattr(run, "FeedLease", Lease)
+    monkeypatch.setattr(run.sources, "get", lambda source: harvest)
+    monkeypatch.setattr(store, "touch_source_postings", nothing)
+    monkeypatch.setattr(store, "finish_schedule_success", finish)
+    monkeypatch.setattr(store, "finish_schedule_failure", finish)
+    monkeypatch.setattr(store, "append_poll_log", nothing)
+    monkeypatch.setattr(run.company_domain, "try_for_feed", nothing)
+    assert await run.poll(_Pool(), object(), feed, NOW) == ("error" if failed else "unchanged")
+    assert seen == [renewed.hold_until]
