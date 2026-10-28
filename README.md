@@ -48,7 +48,8 @@ board overdue after three missed intervals: 36 hours for a 12-hour Workable feed
 
 The Console page's run switch is the persistent pause/resume control. A fresh database
 runs immediately; an explicit pause survives restarts. Only one system process
-may own a database at a time.
+may own a database at a time. Long network harvests renew their feed leases;
+losing ownership cancels the harvest before it can finalize the feed.
 
 ## Web app
 
