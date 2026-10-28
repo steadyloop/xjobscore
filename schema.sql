@@ -12,11 +12,6 @@ CREATE TABLE company (
     description        text,        -- 6-8 words
     discovered_from    text,
     created_at         timestamptz,
-    -- Review verdict. A column rather than a `tags` key because every company
-    -- has exactly one, drawn from a fixed set: `tags` cannot constrain that,
-    -- and "unreviewed" as a missing key conflated absent/null/empty-document.
-    -- Rejection is a label, never a DELETE -- job_posting_company_id_fkey is
-    -- NO ACTION, so a company carrying postings refuses to be removed.
     reviewed           text NOT NULL DEFAULT 'pending'
         CONSTRAINT company_reviewed_state
         CHECK (reviewed IN ('pending', 'verified', 'rejected')),
