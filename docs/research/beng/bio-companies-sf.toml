@@ -1,0 +1,4601 @@
+schema_version = 2
+
+# Biotechnology, pharmaceutical, diagnostics, medtech, and life-sciences-tools
+# companies with a headquarters or major R&D/manufacturing site anywhere in the
+# San Francisco Bay Area (San Francisco, South San Francisco/San Mateo County,
+# East Bay, Peninsula/South Bay, and North Bay). Same schema as
+# sources/registry/companies.toml; not referenced by feeds.toml or loader.py,
+# so it is a standalone candidate/reference list, not part of the harvested
+# registry.
+#
+# Compiled by parallel web-search research agents (Sonnet 5, August 2026), not
+# hand-verified. verified = false throughout, matching the convention in
+# companies.toml. The long tail of small private/early-stage companies
+# (particularly Berkeley/Emeryville synthetic-biology and food-tech startups)
+# is more likely to contain stale, merged/acquired, or mis-attributed entries
+# than the well-known public anchors — spot-check before relying on any one
+# entry. Several entries are internal R&D/manufacturing sites of companies
+# headquartered elsewhere (e.g. Pfizer, Bayer, Roche, Thermo Fisher); these are
+# noted in the description rather than split into a separate field.
+
+[[company]]
+id = 1
+name = "Genentech"
+aliases = ["genentech"]
+domain = "gene.com"
+industry = "biotech_pharma"
+desc = "Roche-owned biotech pioneer developing oncology, immunology, and neuroscience medicines. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 2
+name = "Gilead Sciences"
+aliases = ["gilead-sciences"]
+domain = "gilead.com"
+industry = "biotech_pharma"
+desc = "Develops antiviral and oncology therapeutics, global leader in HIV and hepatitis treatments. (Foster City)"
+verified = false
+
+[[company]]
+id = 3
+name = "BioMarin Pharmaceutical"
+aliases = ["biomarin-pharmaceutical"]
+domain = "biomarin.com"
+industry = "biotech_pharma"
+desc = "Develops and commercializes therapies for rare and ultra-rare genetic diseases. (San Rafael)"
+verified = false
+
+[[company]]
+id = 4
+name = "Exelixis"
+aliases = ["exelixis"]
+domain = "exelixis.com"
+industry = "biotech_pharma"
+desc = "Oncology-focused biopharmaceutical company known for cabozantinib (Cabometyx). (Alameda)"
+verified = false
+
+[[company]]
+id = 5
+name = "Cytokinetics"
+aliases = ["cytokinetics"]
+domain = "cytokinetics.com"
+industry = "biotech_pharma"
+desc = "Develops muscle biology-focused therapeutics for cardiovascular and neuromuscular disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 6
+name = "Rigel Pharmaceuticals"
+aliases = ["rigel-pharmaceuticals"]
+domain = "rigel.com"
+industry = "biotech_pharma"
+desc = "Develops small-molecule therapies for hematologic disorders and immune diseases. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 7
+name = "Corcept Therapeutics"
+aliases = ["corcept-therapeutics"]
+domain = "corcept.com"
+industry = "biotech_pharma"
+desc = "Develops cortisol-modulating therapies including Korlym for Cushing's syndrome. (Redwood City)"
+verified = false
+
+[[company]]
+id = 8
+name = "Coherus BioSciences"
+aliases = ["coherus-biosciences"]
+domain = "coherus.com"
+industry = "biotech_pharma"
+desc = "Develops and commercializes biosimilars and immuno-oncology therapies. (Redwood City)"
+verified = false
+
+[[company]]
+id = 9
+name = "Theravance Biopharma"
+aliases = ["theravance-biopharma"]
+domain = "theravance.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing medicines for GI, respiratory and other conditions. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 10
+name = "Denali Therapeutics"
+aliases = ["denali-therapeutics"]
+domain = "denalitherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for neurodegenerative diseases using blood-brain-barrier crossing technology. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 11
+name = "Vir Biotechnology"
+aliases = ["vir-biotechnology"]
+domain = "vir.bio"
+industry = "biotech_pharma"
+desc = "Immunology company developing antibody therapies for infectious disease and cancer. (San Francisco)"
+verified = false
+
+[[company]]
+id = 12
+name = "Alector"
+aliases = ["alector"]
+domain = "alector.com"
+industry = "biotech_pharma"
+desc = "Develops immuno-neurology therapies targeting neurodegeneration. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 13
+name = "Annexon"
+aliases = ["annexon"]
+domain = "annexonbio.com"
+industry = "biotech_pharma"
+desc = "Develops complement-targeted therapies for neurodegenerative and autoimmune diseases. (Brisbane)"
+verified = false
+
+[[company]]
+id = 14
+name = "Sutro Biopharma"
+aliases = ["sutro-biopharma"]
+domain = "sutrobio.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharma using cell-free protein synthesis to build antibody-drug conjugates. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 15
+name = "Ultragenyx Pharmaceutical"
+aliases = ["ultragenyx-pharmaceutical"]
+domain = "ultragenyx.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for rare and ultra-rare genetic diseases. (Novato)"
+verified = false
+
+[[company]]
+id = 16
+name = "CytomX Therapeutics"
+aliases = ["cytomx-therapeutics"]
+domain = "cytomx.com"
+industry = "biotech_pharma"
+desc = "Develops \"Probody\" masked antibody therapeutics for oncology. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 17
+name = "Twist Bioscience"
+aliases = ["twist-bioscience"]
+domain = "twistbioscience.com"
+industry = "biotech_pharma"
+desc = "Manufactures synthetic DNA for genomics, biopharma, and data storage applications. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 18
+name = "Guardant Health"
+aliases = ["guardant-health"]
+domain = "guardanthealth.com"
+industry = "biotech_pharma"
+desc = "Precision oncology company specializing in liquid biopsy blood tests. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 19
+name = "Natera"
+aliases = ["natera"]
+domain = "natera.com"
+industry = "biotech_pharma"
+desc = "Genetic testing company for prenatal, oncology, and organ-transplant diagnostics. (San Carlos)"
+verified = false
+
+[[company]]
+id = 20
+name = "10x Genomics"
+aliases = ["10x-genomics"]
+domain = "10xgenomics.com"
+industry = "biotech_pharma"
+desc = "Develops single-cell and spatial genomics analysis instruments and reagents. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 21
+name = "Pacific Biosciences"
+aliases = ["pacific-biosciences"]
+domain = "pacb.com"
+industry = "biotech_pharma"
+desc = "Develops long-read DNA sequencing (SMRT) technology. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 22
+name = "Veracyte"
+aliases = ["veracyte"]
+domain = "veracyte.com"
+industry = "biotech_pharma"
+desc = "Genomic diagnostics company for cancer and other diseases. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 23
+name = "Intuitive Surgical"
+aliases = ["intuitive-surgical"]
+domain = "intuitive.com"
+industry = "biotech_pharma"
+desc = "Develops and manufactures da Vinci robotic-assisted surgical systems. (Sunnyvale)"
+verified = false
+
+[[company]]
+id = 24
+name = "Penumbra"
+aliases = ["penumbra"]
+domain = "penumbrainc.com"
+industry = "biotech_pharma"
+desc = "Develops medical devices for thrombectomy and neurovascular/peripheral vascular disease. (Alameda)"
+verified = false
+
+[[company]]
+id = 25
+name = "iRhythm Technologies"
+aliases = ["irhythm-technologies"]
+domain = "irhythmtech.com"
+industry = "biotech_pharma"
+desc = "Develops wearable, AI-enabled cardiac arrhythmia monitoring devices. (San Francisco)"
+verified = false
+
+[[company]]
+id = 26
+name = "Bio-Rad Laboratories"
+aliases = ["bio-rad-laboratories"]
+domain = "bio-rad.com"
+industry = "biotech_pharma"
+desc = "Manufactures life science research instruments and clinical diagnostics systems. (Hercules)"
+verified = false
+
+[[company]]
+id = 27
+name = "Nektar Therapeutics"
+aliases = ["nektar-therapeutics"]
+domain = "nektar.com"
+industry = "biotech_pharma"
+desc = "Develops immunotherapy and other biopharmaceutical drug candidates. (San Francisco)"
+verified = false
+
+[[company]]
+id = 28
+name = "Jazz Pharmaceuticals"
+aliases = ["jazz-pharmaceuticals"]
+domain = "jazzpharma.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company focused on neuroscience and oncology medicines. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 29
+name = "BridgeBio Pharma"
+aliases = ["bridgebio-pharma"]
+domain = "bridgebio.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for genetic diseases and cancers with clear genetic drivers. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 30
+name = "Protagonist Therapeutics"
+aliases = ["protagonist-therapeutics"]
+domain = "protagonist-inc.com"
+industry = "biotech_pharma"
+desc = "Develops peptide-based therapies for hematology and inflammatory disease. (Newark)"
+verified = false
+
+[[company]]
+id = 31
+name = "Arcellx"
+aliases = ["arcellx"]
+domain = "arcellx.com"
+industry = "biotech_pharma"
+desc = "Develops next-generation cell therapies for cancer using its ARC-SparX platform. (Redwood City)"
+verified = false
+
+[[company]]
+id = 32
+name = "Adverum Biotechnologies"
+aliases = ["adverum-biotechnologies"]
+domain = "adverum.com"
+industry = "biotech_pharma"
+desc = "Develops gene therapies for ocular and rare diseases. (Redwood City)"
+verified = false
+
+[[company]]
+id = 33
+name = "Nurix Therapeutics"
+aliases = ["nurix-therapeutics"]
+domain = "nurix.com"
+industry = "biotech_pharma"
+desc = "Develops targeted protein degradation therapies for cancer and immune disease. (San Francisco)"
+verified = false
+
+[[company]]
+id = 34
+name = "Prothena"
+aliases = ["prothena"]
+domain = "prothena.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for neurodegenerative and rare peripheral amyloid diseases. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 35
+name = "CareDx"
+aliases = ["caredx"]
+domain = "caredx.com"
+industry = "biotech_pharma"
+desc = "Develops diagnostics for solid organ transplant patient monitoring. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 36
+name = "Day One Biopharmaceuticals"
+aliases = ["day-one-biopharmaceuticals"]
+domain = "dayonebio.com"
+industry = "biotech_pharma"
+desc = "Develops precision therapies for pediatric and adult cancers. (Brisbane)"
+verified = false
+
+[[company]]
+id = 37
+name = "Corvus Pharmaceuticals"
+aliases = ["corvus-pharmaceuticals"]
+domain = "corvuspharma.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage immuno-oncology biopharmaceutical company. (Burlingame)"
+verified = false
+
+[[company]]
+id = 38
+name = "VIVUS"
+aliases = ["vivus"]
+domain = "vivus.com"
+industry = "biotech_pharma"
+desc = "Pharmaceutical company developing therapies for obesity, diabetes, and sexual health. (Campbell)"
+verified = false
+
+[[company]]
+id = 39
+name = "Cerus Corporation"
+aliases = ["cerus-corporation"]
+domain = "cerus.com"
+industry = "biotech_pharma"
+desc = "Develops pathogen-reduction technology for blood transfusion safety. (Concord)"
+verified = false
+
+[[company]]
+id = 40
+name = "Geron Corporation"
+aliases = ["geron-corporation"]
+domain = "geron.com"
+industry = "biotech_pharma"
+desc = "Develops telomerase-inhibitor therapies for hematologic malignancies (imetelstat). (Foster City)"
+verified = false
+
+[[company]]
+id = 41
+name = "Dynavax Technologies"
+aliases = ["dynavax-technologies"]
+domain = "dynavax.com"
+industry = "biotech_pharma"
+desc = "Develops vaccines including the adjuvanted hepatitis B vaccine Heplisav-B. (Emeryville)"
+verified = false
+
+[[company]]
+id = 42
+name = "IGM Biosciences"
+aliases = ["igm-biosciences"]
+domain = "igmbio.com"
+industry = "biotech_pharma"
+desc = "Develops engineered IgM antibody therapeutics for cancer and autoimmune disease. (Mountain View)"
+verified = false
+
+[[company]]
+id = 43
+name = "Kodiak Sciences"
+aliases = ["kodiak-sciences"]
+domain = "kodiak.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for chronic retinal diseases. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 44
+name = "Kezar Life Sciences"
+aliases = ["kezar-life-sciences"]
+domain = "kezarlifesciences.com"
+industry = "biotech_pharma"
+desc = "Develops small-molecule therapies for autoimmune diseases and cancer. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 45
+name = "Jasper Therapeutics"
+aliases = ["jasper-therapeutics"]
+domain = "jaspertherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops antibody-based conditioning therapies for hematopoietic cell transplant. (Redwood City)"
+verified = false
+
+[[company]]
+id = 46
+name = "Iovance Biotherapeutics"
+aliases = ["iovance-biotherapeutics"]
+domain = "iovance.com"
+industry = "biotech_pharma"
+desc = "Develops tumor-infiltrating lymphocyte (TIL) cell therapies for solid tumor cancers. (San Carlos)"
+verified = false
+
+[[company]]
+id = 47
+name = "Codexis"
+aliases = ["codexis"]
+domain = "codexis.com"
+industry = "biotech_pharma"
+desc = "Engineers enzymes for pharmaceutical and industrial biocatalysis. (Redwood City)"
+verified = false
+
+[[company]]
+id = 48
+name = "Amyris"
+aliases = ["amyris"]
+domain = "amyris.com"
+industry = "biotech_pharma"
+desc = "Synthetic biology company producing sustainable ingredients from engineered yeast (bankrupt 2023). (Emeryville)"
+verified = false
+
+[[company]]
+id = 49
+name = "Invitae"
+aliases = ["invitae"]
+domain = "invitae.com"
+industry = "biotech_pharma"
+desc = "Genetic testing company for hereditary disease risk (filed bankruptcy 2024). (San Francisco)"
+verified = false
+
+[[company]]
+id = 50
+name = "Zymergen"
+aliases = ["zymergen"]
+domain = "zymergen.com"
+industry = "biotech_pharma"
+desc = "Synthetic biology company engineering microbes for specialty biomaterials (acquired by Ginkgo Bioworks 2022). (Emeryville)"
+verified = false
+
+[[company]]
+id = 51
+name = "ChemoCentryx"
+aliases = ["chemocentryx"]
+domain = "chemocentryx.com"
+industry = "biotech_pharma"
+desc = "Developed small-molecule therapies for inflammatory and autoimmune disease (acquired by Amgen 2022). (San Carlos)"
+verified = false
+
+[[company]]
+id = 52
+name = "Global Blood Therapeutics"
+aliases = ["global-blood-therapeutics"]
+domain = "globalbloodtx.com"
+industry = "biotech_pharma"
+desc = "Developed therapies for sickle cell disease including Oxbryta (acquired by Pfizer 2022). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 53
+name = "Portola Pharmaceuticals"
+aliases = ["portola-pharmaceuticals"]
+domain = "portola.com"
+industry = "biotech_pharma"
+desc = "Developed anticoagulant reversal therapy Andexxa (acquired by Alexion 2020). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 54
+name = "Five Prime Therapeutics"
+aliases = ["five-prime-therapeutics"]
+domain = "fiveprime.com"
+industry = "biotech_pharma"
+desc = "Developed protein and antibody therapeutics for oncology (acquired by Amgen 2021). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 55
+name = "Aduro Biotech"
+aliases = ["aduro-biotech"]
+domain = "aduro.com"
+industry = "biotech_pharma"
+desc = "Developed cancer immunotherapies (merged into Chinook Therapeutics 2020). (Berkeley)"
+verified = false
+
+[[company]]
+id = 56
+name = "Genomic Health"
+aliases = ["genomic-health"]
+domain = "genomichealth.com"
+industry = "biotech_pharma"
+desc = "Developed the Oncotype DX genomic cancer diagnostic test (acquired by Exact Sciences 2019). (Redwood City)"
+verified = false
+
+[[company]]
+id = 57
+name = "MyoKardia"
+aliases = ["myokardia"]
+domain = "myokardia.com"
+industry = "biotech_pharma"
+desc = "Developed precision cardiovascular medicines including mavacamten (acquired by Bristol Myers Squibb 2020). (Brisbane)"
+verified = false
+
+[[company]]
+id = 58
+name = "Onyx Pharmaceuticals"
+aliases = ["onyx-pharmaceuticals"]
+domain = "onyx-pharm.com"
+industry = "biotech_pharma"
+desc = "Developed oncology therapeutics including Nexavar and Kyprolis (acquired by Amgen 2013). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 59
+name = "Unity Biotechnology"
+aliases = ["unity-biotechnology"]
+domain = "unitybiotechnology.com"
+industry = "biotech_pharma"
+desc = "Developed senolytic therapies targeting cellular aging (ceased operations 2025). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 60
+name = "Assembly Biosciences"
+aliases = ["assembly-biosciences"]
+domain = "assemblybio.com"
+industry = "biotech_pharma"
+desc = "Develops antiviral therapies for hepatitis B/D and herpesviruses. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 61
+name = "Applied Molecular Transport"
+aliases = ["applied-molecular-transport"]
+domain = "appliedmt.com"
+industry = "biotech_pharma"
+desc = "Developed oral biologic drug-delivery therapeutics (dissolved 2023). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 62
+name = "Achaogen"
+aliases = ["achaogen"]
+domain = "achaogen.com"
+industry = "biotech_pharma"
+desc = "Developed antibiotics for multi-drug-resistant infections (bankrupt 2019). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 63
+name = "Astellas Gene Therapies"
+aliases = ["astellas-gene-therapies"]
+domain = "astellasgenetherapies.com"
+industry = "biotech_pharma"
+desc = "Gene-therapy R&D unit formed from the Audentes Therapeutics acquisition (parent HQ Tokyo, Japan). (San Francisco)"
+verified = false
+
+[[company]]
+id = 64
+name = "CooperCompanies"
+aliases = ["coopercompanies"]
+domain = "coopercos.com"
+industry = "biotech_pharma"
+desc = "Diversified medical device maker of contact lenses (CooperVision) and fertility/women's health products (CooperSurgical). (San Ramon)"
+verified = false
+
+[[company]]
+id = 65
+name = "Illumina"
+aliases = ["illumina"]
+domain = "illumina.com"
+industry = "biotech_pharma"
+desc = "Global genomic sequencing leader with a major Bay Area campus (HQ San Diego). (Foster City)"
+verified = false
+
+[[company]]
+id = 66
+name = "Boehringer Ingelheim Fremont"
+aliases = ["boehringer-ingelheim-fremont"]
+domain = "boehringer-ingelheim.com"
+industry = "biotech_pharma"
+desc = "Biologics manufacturing site of the German pharma company (HQ Ingelheim, Germany). (Fremont)"
+verified = false
+
+[[company]]
+id = 67
+name = "Roche Molecular Diagnostics"
+aliases = ["roche-molecular-diagnostics"]
+domain = "roche.com"
+industry = "biotech_pharma"
+desc = "Roche's molecular diagnostics manufacturing and R&D site (HQ Basel, Switzerland). (Pleasanton)"
+verified = false
+
+[[company]]
+id = 68
+name = "Novartis Institutes for BioMedical Research"
+aliases = ["novartis-institutes-for-biomedical-research"]
+domain = "novartis.com"
+industry = "biotech_pharma"
+desc = "Novartis's global drug-discovery research site (HQ Basel, Switzerland). (Emeryville)"
+verified = false
+
+[[company]]
+id = 69
+name = "Bayer Berkeley Biotech Campus"
+aliases = ["bayer-berkeley-biotech-campus"]
+domain = "bayer.com"
+industry = "biotech_pharma"
+desc = "Bayer's largest global biologics manufacturing and cell-therapy site (HQ Leverkusen, Germany). (Berkeley)"
+verified = false
+
+[[company]]
+id = 70
+name = "Amgen South San Francisco"
+aliases = ["amgen-south-san-francisco"]
+domain = "amgen.com"
+industry = "biotech_pharma"
+desc = "Amgen oncology R&D site, anchored by the former Onyx Pharmaceuticals campus (HQ Thousand Oaks, CA). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 71
+name = "Pfizer South San Francisco"
+aliases = ["pfizer-south-san-francisco"]
+domain = "pfizer.com"
+industry = "biotech_pharma"
+desc = "Pfizer rare-disease research site from the Global Blood Therapeutics acquisition, closing 2026 (HQ New York). (South San Francisco)"
+verified = false
+
+[[company]]
+id = 72
+name = "Lonza Vacaville"
+aliases = ["lonza-vacaville"]
+domain = "lonza.com"
+industry = "biotech_pharma"
+desc = "Large-scale biologics manufacturing site acquired from Roche/Genentech in 2024 (HQ Basel, Switzerland). (Vacaville)"
+verified = false
+
+[[company]]
+id = 73
+name = "Abbott Diabetes Care"
+aliases = ["abbott-diabetes-care"]
+domain = "abbott.com"
+industry = "biotech_pharma"
+desc = "Manufactures FreeStyle Libre continuous glucose monitors (HQ Chicago area, Illinois). (Alameda)"
+verified = false
+
+[[company]]
+id = 74
+name = "Thermo Fisher Scientific Fremont"
+aliases = ["thermo-fisher-scientific-fremont"]
+domain = "thermofisher.com"
+industry = "biotech_pharma"
+desc = "Genetic sciences reagent manufacturing and R&D site (HQ Waltham, Massachusetts). (Fremont)"
+verified = false
+
+[[company]]
+id = 75
+name = "Xoma Corporation"
+aliases = ["xoma-corporation"]
+domain = "xoma.com"
+industry = "biotech_pharma"
+desc = "Biotech royalty aggregator and antibody discovery company. (Berkeley)"
+verified = false
+
+[[company]]
+id = 76
+name = "Caribou Biosciences"
+aliases = ["caribou-biosciences"]
+domain = "cariboubio.com"
+industry = "biotech_pharma"
+desc = "CRISPR-based cell therapy and genome-editing company. (Berkeley)"
+verified = false
+
+[[company]]
+id = 77
+name = "Scribe Therapeutics"
+aliases = ["scribe-therapeutics"]
+domain = "scribetx.com"
+industry = "biotech_pharma"
+desc = "Develops CRISPR gene-editing tools for neurodegenerative and genetic diseases. (Berkeley)"
+verified = false
+
+[[company]]
+id = 78
+name = "Carmot Therapeutics"
+aliases = ["carmot-therapeutics"]
+domain = "carmot-tx.com"
+industry = "biotech_pharma"
+desc = "Develops small-molecule and peptide therapeutics for metabolic disease. (Berkeley)"
+verified = false
+
+[[company]]
+id = 79
+name = "Pivot Bio"
+aliases = ["pivot-bio"]
+domain = "pivotbio.com"
+industry = "biotech_pharma"
+desc = "Engineers nitrogen-fixing microbes for agriculture. (Berkeley)"
+verified = false
+
+[[company]]
+id = 80
+name = "Upside Foods"
+aliases = ["upside-foods"]
+domain = "upsidefoods.com"
+industry = "biotech_pharma"
+desc = "Cultivated (lab-grown) meat producer. (Berkeley)"
+verified = false
+
+[[company]]
+id = 81
+name = "Lygos"
+aliases = ["lygos"]
+domain = "lygos.com"
+industry = "biotech_pharma"
+desc = "Synthetic biology company producing specialty chemicals. (Berkeley)"
+verified = false
+
+[[company]]
+id = 82
+name = "Demetrix"
+aliases = ["demetrix"]
+domain = "demetrix.com"
+industry = "biotech_pharma"
+desc = "Uses synthetic biology to produce cannabinoids and bioactive ingredients. (Berkeley)"
+verified = false
+
+[[company]]
+id = 83
+name = "Pendulum Therapeutics"
+aliases = ["pendulum-therapeutics"]
+domain = "pendulumlife.com"
+industry = "biotech_pharma"
+desc = "Develops microbiome-based therapeutics and probiotics. (Berkeley)"
+verified = false
+
+[[company]]
+id = 84
+name = "Xalud Therapeutics"
+aliases = ["xalud-therapeutics"]
+domain = "xaludtx.com"
+industry = "biotech_pharma"
+desc = "Develops gene therapies for chronic pain and inflammation. (Berkeley)"
+verified = false
+
+[[company]]
+id = 85
+name = "YourChoice Therapeutics"
+aliases = ["yourchoice-therapeutics"]
+domain = "yourchoicetx.com"
+industry = "biotech_pharma"
+desc = "Develops non-hormonal contraceptives. (Berkeley)"
+verified = false
+
+[[company]]
+id = 86
+name = "Sense Therapeutics"
+aliases = ["sense-therapeutics"]
+domain = "sensetx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing cell/gene therapy tools. (Berkeley)"
+verified = false
+
+[[company]]
+id = 87
+name = "Mission Barns"
+aliases = ["mission-barns"]
+domain = "missionbarns.com"
+industry = "biotech_pharma"
+desc = "Cultivated meat and fat biotechnology company. (Berkeley)"
+verified = false
+
+[[company]]
+id = 88
+name = "New Age Meats"
+aliases = ["new-age-meats"]
+domain = "newagemeats.com"
+industry = "biotech_pharma"
+desc = "Cultivated meat biotechnology company. (Berkeley)"
+verified = false
+
+[[company]]
+id = 89
+name = "MeliBio"
+aliases = ["melibio"]
+domain = "melibio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company making animal-free honey. (Berkeley)"
+verified = false
+
+[[company]]
+id = 90
+name = "Climax Foods"
+aliases = ["climax-foods"]
+domain = "climaxfoods.com"
+industry = "biotech_pharma"
+desc = "Uses biotech/AI to develop plant-based dairy alternatives. (Berkeley)"
+verified = false
+
+[[company]]
+id = 91
+name = "Cambium Biomaterials"
+aliases = ["cambium-biomaterials"]
+domain = "cambiumbio.com"
+industry = "biotech_pharma"
+desc = "Develops biomaterials from waste biomass. (Berkeley)"
+verified = false
+
+[[company]]
+id = 92
+name = "Nanotein Technologies"
+aliases = ["nanotein-technologies"]
+domain = "nanotein.com"
+industry = "biotech_pharma"
+desc = "Develops technology for CAR-T cell activation and expansion. (Berkeley)"
+verified = false
+
+[[company]]
+id = 93
+name = "Nanomix"
+aliases = ["nanomix"]
+domain = "nanomix.com"
+industry = "biotech_pharma"
+desc = "Point-of-care diagnostics device company. (Emeryville)"
+verified = false
+
+[[company]]
+id = 94
+name = "O.N. Diagnostics"
+aliases = ["o-n-diagnostics"]
+domain = "ondiagnostics.com"
+industry = "biotech_pharma"
+desc = "Develops virtual bone-strength diagnostic testing. (Berkeley)"
+verified = false
+
+[[company]]
+id = 95
+name = "Newomics"
+aliases = ["newomics"]
+domain = "newomics.com"
+industry = "biotech_pharma"
+desc = "Develops microfluidic mass-spectrometry platforms for biomarker discovery. (Berkeley)"
+verified = false
+
+[[company]]
+id = 96
+name = "Machaon Diagnostics"
+aliases = ["machaon-diagnostics"]
+domain = "machaondx.com"
+industry = "biotech_pharma"
+desc = "Clinical reference laboratory for thrombosis and coagulation disorders. (Berkeley)"
+verified = false
+
+[[company]]
+id = 97
+name = "Coagulant Therapeutics"
+aliases = ["coagulant-therapeutics"]
+domain = "coagulanttx.com"
+industry = "biotech_pharma"
+desc = "Develops recombinant Factor VIIa analogs for bleeding disorders. (Berkeley)"
+verified = false
+
+[[company]]
+id = 98
+name = "Channel Medsystems"
+aliases = ["channel-medsystems"]
+domain = "channelmedsystems.com"
+industry = "biotech_pharma"
+desc = "Develops cryotherapy-based women's health medical devices. (Berkeley)"
+verified = false
+
+[[company]]
+id = 99
+name = "Flightpath Biosciences"
+aliases = ["flightpath-biosciences"]
+domain = "flightpathbio.com"
+industry = "biotech_pharma"
+desc = "Develops novel therapeutics for tuberculosis and infectious disease. (Berkeley)"
+verified = false
+
+[[company]]
+id = 100
+name = "Indee Labs"
+aliases = ["indee-labs"]
+domain = "indeelabs.com"
+industry = "biotech_pharma"
+desc = "Develops microfluidic gene-delivery technology for cell engineering. (Berkeley)"
+verified = false
+
+[[company]]
+id = 101
+name = "Chameleon Biosciences"
+aliases = ["chameleon-biosciences"]
+domain = "chameleonbio.com"
+industry = "biotech_pharma"
+desc = "Develops immune-evasive viral vectors for gene therapy. (Berkeley)"
+verified = false
+
+[[company]]
+id = 102
+name = "Actym Therapeutics"
+aliases = ["actym-therapeutics"]
+domain = "actym.com"
+industry = "biotech_pharma"
+desc = "Engineered-bacteria immunotherapy platform for cancer. (Berkeley)"
+verified = false
+
+[[company]]
+id = 103
+name = "Acrigen Biosciences"
+aliases = ["acrigen-biosciences"]
+domain = "acrigenbio.com"
+industry = "biotech_pharma"
+desc = "CRISPR-based precision gene-editing therapeutics company. (Berkeley)"
+verified = false
+
+[[company]]
+id = 104
+name = "Valitor"
+aliases = ["valitor"]
+domain = "valitorbio.com"
+industry = "biotech_pharma"
+desc = "Develops long-acting protein therapeutics. (Berkeley)"
+verified = false
+
+[[company]]
+id = 105
+name = "Solaris Biotech"
+aliases = ["solaris-biotech"]
+domain = "solarisbiotech.com"
+industry = "biotech_pharma"
+desc = "Designs and manufactures bioprocessing/bioreactor equipment. (Berkeley)"
+verified = false
+
+[[company]]
+id = 106
+name = "Prellis Biologics"
+aliases = ["prellis-biologics"]
+domain = "prellisbio.com"
+industry = "biotech_pharma"
+desc = "3D-bioprints vascularized human tissue and antibodies. (Berkeley)"
+verified = false
+
+[[company]]
+id = 107
+name = "Ray Therapeutics"
+aliases = ["ray-therapeutics"]
+domain = "raytherapeutics.com"
+industry = "biotech_pharma"
+desc = "Optogenetic gene therapy for vision restoration. (Berkeley)"
+verified = false
+
+[[company]]
+id = 108
+name = "Profluent Bio"
+aliases = ["profluent-bio"]
+domain = "profluent.bio"
+industry = "biotech_pharma"
+desc = "Uses generative AI for protein and antibody design. (Berkeley)"
+verified = false
+
+[[company]]
+id = 109
+name = "Aeovian Pharmaceuticals"
+aliases = ["aeovian-pharmaceuticals"]
+domain = "aeovian.com"
+industry = "biotech_pharma"
+desc = "Develops selective mTOR-modulating small-molecule drugs. (Berkeley)"
+verified = false
+
+[[company]]
+id = 110
+name = "Iris Medicine"
+aliases = ["iris-medicine"]
+domain = "irismedicine.com"
+industry = "biotech_pharma"
+desc = "Develops small binding RNA therapeutics. (Berkeley)"
+verified = false
+
+[[company]]
+id = 111
+name = "Lumiphore"
+aliases = ["lumiphore"]
+domain = "lumiphore.com"
+industry = "biotech_pharma"
+desc = "Develops chelation chemistry for radiotheranostics and diagnostics. (Berkeley)"
+verified = false
+
+[[company]]
+id = 112
+name = "Berkeley Advanced Biomaterials"
+aliases = ["berkeley-advanced-biomaterials"]
+domain = "berkeleyadvancedbiomaterials.com"
+industry = "biotech_pharma"
+desc = "Manufactures medical-grade hydroxyapatite biomaterials. (Berkeley)"
+verified = false
+
+[[company]]
+id = 113
+name = "Nutcracker Therapeutics"
+aliases = ["nutcracker-therapeutics"]
+domain = "nutcracker.bio"
+industry = "biotech_pharma"
+desc = "Precision mRNA therapeutics manufacturing platform. (Emeryville)"
+verified = false
+
+[[company]]
+id = 114
+name = "4D Molecular Therapeutics"
+aliases = ["4d-molecular-therapeutics"]
+domain = "4dmoleculartherapeutics.com"
+industry = "biotech_pharma"
+desc = "Gene-therapy company using engineered AAV vectors. (Emeryville)"
+verified = false
+
+[[company]]
+id = 115
+name = "Gritstone bio"
+aliases = ["gritstone-bio"]
+domain = "gritstonebio.com"
+industry = "biotech_pharma"
+desc = "Develops immunotherapies and vaccines for cancer and infectious disease. (Emeryville)"
+verified = false
+
+[[company]]
+id = 116
+name = "Eureka Therapeutics"
+aliases = ["eureka-therapeutics"]
+domain = "eurekatherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops antibody-based cell immunotherapies for cancer. (Emeryville)"
+verified = false
+
+[[company]]
+id = 117
+name = "Slingshot Biosciences"
+aliases = ["slingshot-biosciences"]
+domain = "slingshotbio.com"
+industry = "biotech_pharma"
+desc = "Manufactures synthetic cell mimics for diagnostics and cytometry. (Emeryville)"
+verified = false
+
+[[company]]
+id = 118
+name = "Berkeley Lights (PhenomeX)"
+aliases = ["berkeley-lights-phenomex"]
+domain = "berkeleylights.com"
+industry = "biotech_pharma"
+desc = "Develops digital cell biology and single-cell analysis platforms. (Emeryville)"
+verified = false
+
+[[company]]
+id = 119
+name = "Grifols Diagnostic Solutions"
+aliases = ["grifols-diagnostic-solutions"]
+domain = "grifols.com"
+industry = "biotech_pharma"
+desc = "Manufactures blood-screening diagnostic products (former Novartis Diagnostics unit). (Emeryville)"
+verified = false
+
+[[company]]
+id = 120
+name = "Novabay Pharmaceuticals"
+aliases = ["novabay-pharmaceuticals"]
+domain = "novabay.com"
+industry = "biotech_pharma"
+desc = "Develops non-antibiotic anti-infective pharmaceutical products. (Emeryville)"
+verified = false
+
+[[company]]
+id = 121
+name = "Zogenix"
+aliases = ["zogenix"]
+domain = "zogenix.com"
+industry = "biotech_pharma"
+desc = "Pharmaceutical company developing therapies for rare epilepsy disorders. (Emeryville)"
+verified = false
+
+[[company]]
+id = 122
+name = "Kyverna Therapeutics"
+aliases = ["kyverna-therapeutics"]
+domain = "kyvernatx.com"
+industry = "biotech_pharma"
+desc = "Develops engineered Treg cell therapies for autoimmune disease. (Emeryville)"
+verified = false
+
+[[company]]
+id = 123
+name = "Estrella Immunopharma"
+aliases = ["estrella-immunopharma"]
+domain = "estrellabio.com"
+industry = "biotech_pharma"
+desc = "Develops CD19-redirected T-cell immunotherapies. (Emeryville)"
+verified = false
+
+[[company]]
+id = 124
+name = "Metagenomi"
+aliases = ["metagenomi"]
+domain = "metagenomi.com"
+industry = "biotech_pharma"
+desc = "Discovers gene-editing systems for treating genetic disease. (Emeryville)"
+verified = false
+
+[[company]]
+id = 125
+name = "Ansa Biotechnologies"
+aliases = ["ansa-biotechnologies"]
+domain = "ansabio.com"
+industry = "biotech_pharma"
+desc = "Develops enzymatic DNA synthesis technology for biomanufacturing. (Emeryville)"
+verified = false
+
+[[company]]
+id = 126
+name = "Arcadia Science"
+aliases = ["arcadia-science"]
+domain = "arcadiascience.com"
+industry = "biotech_pharma"
+desc = "Evolution-based biological research and drug-discovery company. (Emeryville)"
+verified = false
+
+[[company]]
+id = 127
+name = "Fauna Bio"
+aliases = ["fauna-bio"]
+domain = "faunabio.com"
+industry = "biotech_pharma"
+desc = "Applies comparative genomics from hibernating mammals to human therapeutics. (Emeryville)"
+verified = false
+
+[[company]]
+id = 128
+name = "Profusa"
+aliases = ["profusa"]
+domain = "profusa.com"
+industry = "biotech_pharma"
+desc = "Develops implantable biosensors for continuous biochemical monitoring. (Emeryville)"
+verified = false
+
+[[company]]
+id = 129
+name = "Symic Biomedical"
+aliases = ["symic-biomedical"]
+domain = "symic.bio"
+industry = "biotech_pharma"
+desc = "Develops matrix-binding protein therapeutics. (Emeryville)"
+verified = false
+
+[[company]]
+id = 130
+name = "Mercator MedSystems"
+aliases = ["mercator-medsystems"]
+domain = "mercatormed.com"
+industry = "biotech_pharma"
+desc = "Develops local drug-delivery catheter technology. (Emeryville)"
+verified = false
+
+[[company]]
+id = 131
+name = "Nano Precision Medical"
+aliases = ["nano-precision-medical"]
+domain = "nanoprecisionmedical.com"
+industry = "biotech_pharma"
+desc = "Develops long-term implantable drug-delivery devices. (Emeryville)"
+verified = false
+
+[[company]]
+id = 132
+name = "SuitX (US Bionics)"
+aliases = ["suitx-us-bionics"]
+domain = "suitx.com"
+industry = "biotech_pharma"
+desc = "Develops wearable exoskeleton medical/industrial devices. (Emeryville)"
+verified = false
+
+[[company]]
+id = 133
+name = "Perfect Day"
+aliases = ["perfect-day"]
+domain = "perfectday.com"
+industry = "biotech_pharma"
+desc = "Precision-fermentation biotechnology producing animal-free dairy proteins. (Emeryville)"
+verified = false
+
+[[company]]
+id = 134
+name = "Finless Foods"
+aliases = ["finless-foods"]
+domain = "finlessfoods.com"
+industry = "biotech_pharma"
+desc = "Cultivated seafood biotechnology company. (Emeryville)"
+verified = false
+
+[[company]]
+id = 135
+name = "Triplebar"
+aliases = ["triplebar"]
+domain = "triplebar.bio"
+industry = "biotech_pharma"
+desc = "Antibody and protein discovery biotechnology platform. (Emeryville)"
+verified = false
+
+[[company]]
+id = 136
+name = "Bolt Threads"
+aliases = ["bolt-threads"]
+domain = "boltthreads.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company producing engineered protein-based materials. (Emeryville)"
+verified = false
+
+[[company]]
+id = 137
+name = "i3 Nanotec"
+aliases = ["i3-nanotec"]
+domain = "i3nanotec.com"
+industry = "biotech_pharma"
+desc = "Develops nanotechnology-based drug-delivery formulations. (Emeryville)"
+verified = false
+
+[[company]]
+id = 138
+name = "OmniAb"
+aliases = ["omniab"]
+domain = "omniab.com"
+industry = "biotech_pharma"
+desc = "Develops antibody-discovery and screening technologies. (Emeryville)"
+verified = false
+
+[[company]]
+id = 139
+name = "Octant Bio"
+aliases = ["octant-bio"]
+domain = "octant.bio"
+industry = "biotech_pharma"
+desc = "Uses high-throughput screening and AI for small-molecule drug discovery. (Emeryville)"
+verified = false
+
+[[company]]
+id = 140
+name = "Totus Medicines"
+aliases = ["totus-medicines"]
+domain = "totusmedicines.com"
+industry = "biotech_pharma"
+desc = "Develops covalent small-molecule cancer therapeutics. (Emeryville)"
+verified = false
+
+[[company]]
+id = 141
+name = "Prolific Machines"
+aliases = ["prolific-machines"]
+domain = "prolificmachines.com"
+industry = "biotech_pharma"
+desc = "Develops photomolecular platform for protein/biomanufacturing. (Emeryville)"
+verified = false
+
+[[company]]
+id = 142
+name = "Abalone Bio"
+aliases = ["abalone-bio"]
+domain = "abalonebio.com"
+industry = "biotech_pharma"
+desc = "Develops GPCR-targeted antibody therapeutics. (Emeryville)"
+verified = false
+
+[[company]]
+id = 143
+name = "InjectSense"
+aliases = ["injectsense"]
+domain = "injectsense.com"
+industry = "biotech_pharma"
+desc = "Develops implantable glaucoma-monitoring sensors. (Emeryville)"
+verified = false
+
+[[company]]
+id = 144
+name = "Eko Health"
+aliases = ["eko-health"]
+domain = "ekohealth.com"
+industry = "biotech_pharma"
+desc = "Develops digital stethoscope and cardiac AI diagnostics. (Emeryville)"
+verified = false
+
+[[company]]
+id = 145
+name = "BiosPacific"
+aliases = ["biospacific"]
+domain = "biospacific.com"
+industry = "biotech_pharma"
+desc = "Manufactures antibodies and antigens for diagnostics research. (Emeryville)"
+verified = false
+
+[[company]]
+id = 146
+name = "Arcus Biosciences"
+aliases = ["arcus-biosciences"]
+domain = "arcusbio.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing cancer immunotherapies. (Hayward)"
+verified = false
+
+[[company]]
+id = 147
+name = "Eikon Therapeutics"
+aliases = ["eikon-therapeutics"]
+domain = "eikontx.com"
+industry = "biotech_pharma"
+desc = "Develops therapeutics using high-resolution single-molecule imaging. (Hayward)"
+verified = false
+
+[[company]]
+id = 148
+name = "RefleXion Medical"
+aliases = ["reflexion-medical"]
+domain = "reflexion.com"
+industry = "biotech_pharma"
+desc = "Develops biology-guided radiotherapy systems for cancer. (Hayward)"
+verified = false
+
+[[company]]
+id = 149
+name = "Cytek Biosciences"
+aliases = ["cytek-biosciences"]
+domain = "cytekbio.com"
+industry = "biotech_pharma"
+desc = "Manufactures flow cytometry instruments. (Fremont)"
+verified = false
+
+[[company]]
+id = 150
+name = "Pulse Biosciences"
+aliases = ["pulse-biosciences"]
+domain = "pulsebiosciences.com"
+industry = "biotech_pharma"
+desc = "Develops nano-pulse stimulation medical devices. (Hayward)"
+verified = false
+
+[[company]]
+id = 151
+name = "DiaCarta"
+aliases = ["diacarta"]
+domain = "diacarta.com"
+industry = "biotech_pharma"
+desc = "Develops molecular diagnostic tests for cancer and infectious disease. (Hayward)"
+verified = false
+
+[[company]]
+id = 152
+name = "Predicine"
+aliases = ["predicine"]
+domain = "predicine.com"
+industry = "biotech_pharma"
+desc = "Develops liquid-biopsy cancer diagnostics. (Hayward)"
+verified = false
+
+[[company]]
+id = 153
+name = "Frontage Laboratories"
+aliases = ["frontage-laboratories"]
+domain = "frontagelab.com"
+industry = "biotech_pharma"
+desc = "Contract research organization for drug development services. (Hayward)"
+verified = false
+
+[[company]]
+id = 154
+name = "Multispan"
+aliases = ["multispan"]
+domain = "multispan.com"
+industry = "biotech_pharma"
+desc = "Develops GPCR cell lines and drug-screening assays. (Hayward)"
+verified = false
+
+[[company]]
+id = 155
+name = "BioAssay Systems"
+aliases = ["bioassay-systems"]
+domain = "bioassaysys.com"
+industry = "biotech_pharma"
+desc = "Manufactures biochemical assay kits for research. (Hayward)"
+verified = false
+
+[[company]]
+id = 156
+name = "Biolog"
+aliases = ["biolog"]
+domain = "biolog.com"
+industry = "biotech_pharma"
+desc = "Develops cell phenotyping technology and microbial identification systems. (Hayward)"
+verified = false
+
+[[company]]
+id = 157
+name = "Benitec Biopharma"
+aliases = ["benitec-biopharma"]
+domain = "benitec.com"
+industry = "biotech_pharma"
+desc = "Develops DNA-directed RNAi gene-silencing therapeutics. (Hayward)"
+verified = false
+
+[[company]]
+id = 158
+name = "Rondo Therapeutics"
+aliases = ["rondo-therapeutics"]
+domain = "rondotx.com"
+industry = "biotech_pharma"
+desc = "Develops bispecific antibody immuno-oncology therapeutics. (Hayward)"
+verified = false
+
+[[company]]
+id = 159
+name = "Quintara Bio"
+aliases = ["quintara-bio"]
+domain = "quintarabio.com"
+industry = "biotech_pharma"
+desc = "DNA sequencing and molecular-biology services company. (Hayward)"
+verified = false
+
+[[company]]
+id = 160
+name = "Novodiax"
+aliases = ["novodiax"]
+domain = "novodiax.com"
+industry = "biotech_pharma"
+desc = "Develops companion diagnostics and intraoperative pathology tools. (Hayward)"
+verified = false
+
+[[company]]
+id = 161
+name = "Bionova Scientific"
+aliases = ["bionova-scientific"]
+domain = "bionovascientific.com"
+industry = "biotech_pharma"
+desc = "Biologics contract development and manufacturing organization (CDMO). (Fremont)"
+verified = false
+
+[[company]]
+id = 162
+name = "Personalis"
+aliases = ["personalis"]
+domain = "personalis.com"
+industry = "biotech_pharma"
+desc = "Provides advanced genomic sequencing for cancer and immuno-oncology. (Fremont)"
+verified = false
+
+[[company]]
+id = 163
+name = "Paragon Genomics"
+aliases = ["paragon-genomics"]
+domain = "paragongenomics.com"
+industry = "biotech_pharma"
+desc = "Develops target-enrichment solutions for next-generation sequencing. (Fremont)"
+verified = false
+
+[[company]]
+id = 164
+name = "Biotium"
+aliases = ["biotium"]
+domain = "biotium.com"
+industry = "biotech_pharma"
+desc = "Manufactures fluorescent labeling reagents for life-science research. (Fremont)"
+verified = false
+
+[[company]]
+id = 165
+name = "Confluent Medical Technologies"
+aliases = ["confluent-medical-technologies"]
+domain = "confluentmedical.com"
+industry = "biotech_pharma"
+desc = "Contract manufacturer of medical devices and biomaterials. (Fremont)"
+verified = false
+
+[[company]]
+id = 166
+name = "Q'Apel Medical"
+aliases = ["q-apel-medical"]
+domain = "qapelmedical.com"
+industry = "biotech_pharma"
+desc = "Develops neurovascular access medical devices. (Fremont)"
+verified = false
+
+[[company]]
+id = 167
+name = "THINK Surgical"
+aliases = ["think-surgical"]
+domain = "thinksurgical.com"
+industry = "biotech_pharma"
+desc = "Develops robotic and digital orthopedic surgical systems. (Fremont)"
+verified = false
+
+[[company]]
+id = 168
+name = "AnaSpec"
+aliases = ["anaspec"]
+domain = "anaspec.com"
+industry = "biotech_pharma"
+desc = "Manufactures custom peptides, antibodies and biochemical reagents. (Fremont)"
+verified = false
+
+[[company]]
+id = 169
+name = "BioGenex"
+aliases = ["biogenex"]
+domain = "biogenex.com"
+industry = "biotech_pharma"
+desc = "Develops automated cellular and molecular diagnostics platforms. (Fremont)"
+verified = false
+
+[[company]]
+id = 170
+name = "Alamar Biosciences"
+aliases = ["alamar-biosciences"]
+domain = "alamarbio.com"
+industry = "biotech_pharma"
+desc = "Develops ultra-sensitive proteomic liquid-biopsy platforms. (Fremont)"
+verified = false
+
+[[company]]
+id = 171
+name = "AlterG"
+aliases = ["alterg"]
+domain = "alterg.com"
+industry = "biotech_pharma"
+desc = "Develops anti-gravity treadmill rehabilitation devices. (Fremont)"
+verified = false
+
+[[company]]
+id = 172
+name = "Ark Diagnostics"
+aliases = ["ark-diagnostics"]
+domain = "arkdx.com"
+industry = "biotech_pharma"
+desc = "Develops immunoassay diagnostic tests for therapeutic drug monitoring. (Fremont)"
+verified = false
+
+[[company]]
+id = 173
+name = "Applied Viromics"
+aliases = ["applied-viromics"]
+domain = "appliedviromics.com"
+industry = "biotech_pharma"
+desc = "Manufactures custom recombinant viral vectors. (Fremont)"
+verified = false
+
+[[company]]
+id = 174
+name = "Encoll"
+aliases = ["encoll"]
+domain = "encoll.com"
+industry = "biotech_pharma"
+desc = "Manufactures collagen-based wound-care and biomaterial products. (Fremont)"
+verified = false
+
+[[company]]
+id = 175
+name = "Moximed"
+aliases = ["moximed"]
+domain = "moximed.com"
+industry = "biotech_pharma"
+desc = "Develops implantable joint-unloading devices for osteoarthritis. (Fremont)"
+verified = false
+
+[[company]]
+id = 176
+name = "Neuralink"
+aliases = ["neuralink"]
+domain = "neuralink.com"
+industry = "biotech_pharma"
+desc = "Develops implantable brain-computer interface technology. (Fremont)"
+verified = false
+
+[[company]]
+id = 177
+name = "Ardelyx"
+aliases = ["ardelyx"]
+domain = "ardelyx.com"
+industry = "biotech_pharma"
+desc = "Develops gastrointestinal and cardiorenal therapeutics. (Fremont)"
+verified = false
+
+[[company]]
+id = 178
+name = "Ultima Genomics"
+aliases = ["ultima-genomics"]
+domain = "ultimagenomics.com"
+industry = "biotech_pharma"
+desc = "Develops high-throughput, low-cost DNA-sequencing platforms. (Newark)"
+verified = false
+
+[[company]]
+id = 179
+name = "ATUM"
+aliases = ["atum"]
+domain = "atum.bio"
+industry = "biotech_pharma"
+desc = "Provides gene synthesis and protein-engineering services. (Newark)"
+verified = false
+
+[[company]]
+id = 180
+name = "Advanced Cell Diagnostics"
+aliases = ["advanced-cell-diagnostics"]
+domain = "acdbio.com"
+industry = "biotech_pharma"
+desc = "Develops RNA in-situ hybridization detection technology (Bio-Techne unit). (Newark)"
+verified = false
+
+[[company]]
+id = 181
+name = "Vector Laboratories"
+aliases = ["vector-laboratories"]
+domain = "vectorlabs.com"
+industry = "biotech_pharma"
+desc = "Manufactures antibody labeling and glycobiology research reagents. (Newark)"
+verified = false
+
+[[company]]
+id = 182
+name = "LifeSpan Biosciences"
+aliases = ["lifespan-biosciences"]
+domain = "lsbio.com"
+industry = "biotech_pharma"
+desc = "Manufactures antibodies and immunohistochemistry research products. (Newark)"
+verified = false
+
+[[company]]
+id = 183
+name = "Corsair Pharma"
+aliases = ["corsair-pharma"]
+domain = "corsairpharma.com"
+industry = "biotech_pharma"
+desc = "Develops therapeutics for pulmonary arterial hypertension. (Newark)"
+verified = false
+
+[[company]]
+id = 184
+name = "AceLink Therapeutics"
+aliases = ["acelink-therapeutics"]
+domain = "acelinktherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops small-molecule therapies for rare genetic diseases. (Newark)"
+verified = false
+
+[[company]]
+id = 185
+name = "BioChain Institute"
+aliases = ["biochain-institute"]
+domain = "biochain.com"
+industry = "biotech_pharma"
+desc = "Manufactures biospecimens and sample-preparation products for research. (Newark)"
+verified = false
+
+[[company]]
+id = 186
+name = "X-Therma"
+aliases = ["x-therma"]
+domain = "x-therma.com"
+industry = "biotech_pharma"
+desc = "Develops cryopreservation technology for organs and biologics. (Hercules)"
+verified = false
+
+[[company]]
+id = 187
+name = "JOINN Biologics"
+aliases = ["joinn-biologics"]
+domain = "joinnbiologics.com"
+industry = "biotech_pharma"
+desc = "Biologics contract development and manufacturing organization (CDMO). (Richmond)"
+verified = false
+
+[[company]]
+id = 188
+name = "Nautilus Biotechnology"
+aliases = ["nautilus-biotechnology"]
+domain = "nautilusbio.com"
+industry = "biotech_pharma"
+desc = "Develops a proteomics platform for large-scale protein analysis. (Alameda)"
+verified = false
+
+[[company]]
+id = 189
+name = "Vivani Medical"
+aliases = ["vivani-medical"]
+domain = "vivani.com"
+industry = "biotech_pharma"
+desc = "Develops implantable drug-delivery systems (formerly Nano Precision Medical). (Alameda)"
+verified = false
+
+[[company]]
+id = 190
+name = "Science Corp"
+aliases = ["science-corp"]
+domain = "science.xyz"
+industry = "biotech_pharma"
+desc = "Neurotech/biotech company developing vision-restoration implants. (Alameda)"
+verified = false
+
+[[company]]
+id = 191
+name = "ArsenalBio"
+aliases = ["arsenalbio"]
+domain = "arsenalbio.com"
+industry = "biotech_pharma"
+desc = "Engineers programmable cell therapies for solid-tumor cancers. (Alameda)"
+verified = false
+
+[[company]]
+id = 192
+name = "Acepodia"
+aliases = ["acepodia"]
+domain = "acepodia.com"
+industry = "biotech_pharma"
+desc = "Develops antibody-cell conjugation cancer immunotherapies. (Alameda)"
+verified = false
+
+[[company]]
+id = 193
+name = "Magnetic Insight"
+aliases = ["magnetic-insight"]
+domain = "magneticinsight.com"
+industry = "biotech_pharma"
+desc = "Develops magnetic-particle-imaging preclinical imaging systems. (Alameda)"
+verified = false
+
+[[company]]
+id = 194
+name = "Infinimmune"
+aliases = ["infinimmune"]
+domain = "infinimmune.com"
+industry = "biotech_pharma"
+desc = "Develops fully human antibody therapeutics from natural immune responses. (Alameda)"
+verified = false
+
+[[company]]
+id = 195
+name = "iota Biosciences"
+aliases = ["iota-biosciences"]
+domain = "iota.bio"
+industry = "biotech_pharma"
+desc = "Develops millimeter-scale implantable bioelectronic devices. (Alameda)"
+verified = false
+
+[[company]]
+id = 196
+name = "AllCells"
+aliases = ["allcells"]
+domain = "allcells.com"
+industry = "biotech_pharma"
+desc = "Supplies primary human cells, stem cells and cytokines for research. (Alameda)"
+verified = false
+
+[[company]]
+id = 197
+name = "Alveo Technologies"
+aliases = ["alveo-technologies"]
+domain = "alveotech.com"
+industry = "biotech_pharma"
+desc = "Develops rapid molecular diagnostic testing devices. (Alameda)"
+verified = false
+
+[[company]]
+id = 198
+name = "Bolt Biotherapeutics"
+aliases = ["bolt-biotherapeutics"]
+domain = "boltbio.com"
+industry = "biotech_pharma"
+desc = "Develops immuno-oncology antibody-drug conjugate therapeutics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 199
+name = "Fabric Genomics"
+aliases = ["fabric-genomics"]
+domain = "fabricgenomics.com"
+industry = "biotech_pharma"
+desc = "Develops clinical decision-support software for genomic medicine. (Oakland)"
+verified = false
+
+[[company]]
+id = 200
+name = "NextGen Jane"
+aliases = ["nextgen-jane"]
+domain = "nextgenjane.com"
+industry = "biotech_pharma"
+desc = "Develops menstrual-blood-based diagnostic technology. (Oakland)"
+verified = false
+
+[[company]]
+id = 201
+name = "Promaxo"
+aliases = ["promaxo"]
+domain = "promaxo.com"
+industry = "biotech_pharma"
+desc = "Develops compact point-of-care MRI systems. (Oakland)"
+verified = false
+
+[[company]]
+id = 202
+name = "Koya Medical"
+aliases = ["koya-medical"]
+domain = "koyamedical.com"
+industry = "biotech_pharma"
+desc = "Develops wearable compression devices for lymphedema. (Oakland)"
+verified = false
+
+[[company]]
+id = 203
+name = "SanBio"
+aliases = ["sanbio"]
+domain = "sanbio.com"
+industry = "biotech_pharma"
+desc = "Develops regenerative cell-therapy medicines for neurological disease. (Oakland)"
+verified = false
+
+[[company]]
+id = 204
+name = "Roche Pleasanton"
+aliases = ["roche-pleasanton"]
+domain = "roche.com"
+industry = "biotech_pharma"
+desc = "Diagnostics manufacturing and R&D campus. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 205
+name = "Veeva Systems"
+aliases = ["veeva-systems"]
+domain = "veeva.com"
+industry = "biotech_pharma"
+desc = "Develops cloud software for life-sciences companies. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 206
+name = "Unchained Labs"
+aliases = ["unchained-labs"]
+domain = "unchainedlabs.com"
+industry = "biotech_pharma"
+desc = "Develops instruments and tools for biologics research and development. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 207
+name = "Purigen Biosystems"
+aliases = ["purigen-biosystems"]
+domain = "purigenbiosystems.com"
+industry = "biotech_pharma"
+desc = "Develops automated nucleic-acid purification instruments. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 208
+name = "Air Protein"
+aliases = ["air-protein"]
+domain = "airprotein.com"
+industry = "biotech_pharma"
+desc = "Develops fermentation-based alternative-protein technology. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 209
+name = "Boster Biological Technology"
+aliases = ["boster-biological-technology"]
+domain = "bosterbio.com"
+industry = "biotech_pharma"
+desc = "Manufactures antibodies and ELISA kits for research. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 210
+name = "AAT Bioquest"
+aliases = ["aat-bioquest"]
+domain = "aatbio.com"
+industry = "biotech_pharma"
+desc = "Manufactures bioanalytical research reagents and assay kits. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 211
+name = "Calyxo"
+aliases = ["calyxo"]
+domain = "calyxo.com"
+industry = "biotech_pharma"
+desc = "Develops kidney-stone treatment medical devices. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 212
+name = "Leaf Healthcare"
+aliases = ["leaf-healthcare"]
+domain = "leafhealthcare.com"
+industry = "biotech_pharma"
+desc = "Develops wireless wearable patient-monitoring sensors. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 213
+name = "Providence Medical Technology"
+aliases = ["providence-medical-technology"]
+domain = "providencemt.com"
+industry = "biotech_pharma"
+desc = "Develops cervical spinal-fusion medical devices. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 214
+name = "Surface Ophthalmics"
+aliases = ["surface-ophthalmics"]
+domain = "surfaceophthalmics.com"
+industry = "biotech_pharma"
+desc = "Develops ophthalmic drug therapeutics. (Pleasanton)"
+verified = false
+
+[[company]]
+id = 215
+name = "Kindeva Drug Delivery"
+aliases = ["kindeva-drug-delivery"]
+domain = "kindevadd.com"
+industry = "biotech_pharma"
+desc = "Develops and manufactures inhaled and injectable drug-delivery products. (Union City)"
+verified = false
+
+[[company]]
+id = 216
+name = "NeoBiotechnologies"
+aliases = ["neobiotechnologies"]
+domain = "neobiotechnologies.com"
+industry = "biotech_pharma"
+desc = "Develops and manufactures monoclonal and recombinant antibodies. (Union City)"
+verified = false
+
+[[company]]
+id = 217
+name = "FibroGen"
+aliases = ["fibrogen"]
+domain = "fibrogen.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing therapeutics for fibrosis, anemia and cancer. (San Francisco)"
+verified = false
+
+[[company]]
+id = 218
+name = "Septerna"
+aliases = ["septerna"]
+domain = "septerna.com"
+industry = "biotech_pharma"
+desc = "GPCR-targeted small molecule drug discovery platform. (San Francisco)"
+verified = false
+
+[[company]]
+id = 219
+name = "Medivation"
+aliases = ["medivation"]
+domain = "medivation.com"
+industry = "biotech_pharma"
+desc = "Developed oncology drug enzalutamide (Xtandi), acquired by Pfizer 2016. (San Francisco)"
+verified = false
+
+[[company]]
+id = 220
+name = "Clovis Oncology"
+aliases = ["clovis-oncology"]
+domain = "clovisoncology.com"
+industry = "biotech_pharma"
+desc = "Oncology therapeutics developer with a Mission Bay office. (San Francisco)"
+verified = false
+
+[[company]]
+id = 221
+name = "Benchling"
+aliases = ["benchling"]
+domain = "benchling.com"
+industry = "biotech_pharma"
+desc = "Cloud R&D platform/software for life sciences data management. (San Francisco)"
+verified = false
+
+[[company]]
+id = 222
+name = "Raptor Pharmaceuticals"
+aliases = ["raptor-pharmaceuticals"]
+domain = "raptorpharma.com"
+industry = "biotech_pharma"
+desc = "Developed drugs for rare diseases including cystinosis (acquired by Horizon). (Novato)"
+verified = false
+
+[[company]]
+id = 223
+name = "Biosearch Technologies (LGC)"
+aliases = ["biosearch-technologies-lgc"]
+domain = "biosearchtech.com"
+industry = "biotech_pharma"
+desc = "Nucleic-acid reagents, PCR probes and genomic research tools. (Petaluma)"
+verified = false
+
+[[company]]
+id = 224
+name = "Axolabs (LGC Axolabs)"
+aliases = ["axolabs-lgc-axolabs"]
+domain = "axolabs.com"
+industry = "biotech_pharma"
+desc = "CDMO manufacturing oligonucleotide/nucleic-acid therapeutics. (Petaluma)"
+verified = false
+
+[[company]]
+id = 225
+name = "Cytograft Tissue Engineering"
+aliases = ["cytograft-tissue-engineering"]
+domain = "cytograft.com"
+industry = "biotech_pharma"
+desc = "Tissue-engineered cardiovascular grafts from patients' own cells. (Novato)"
+verified = false
+
+[[company]]
+id = 226
+name = "Marin Biologic Laboratories"
+aliases = ["marin-biologic-laboratories"]
+domain = "marinbio.com"
+industry = "biotech_pharma"
+desc = "Contract research organization providing cell-based bioassay services. (Novato)"
+verified = false
+
+[[company]]
+id = 227
+name = "Buck Institute for Research on Aging"
+aliases = ["buck-institute-for-research-on-aging"]
+domain = "buckinstitute.org"
+industry = "biotech_pharma"
+desc = "Independent biomedical research institute studying aging and age-related disease. (Novato)"
+verified = false
+
+[[company]]
+id = 228
+name = "Endologix"
+aliases = ["endologix"]
+domain = "endologix.com"
+industry = "biotech_pharma"
+desc = "Manufactures endovascular stent-graft devices for aortic aneurysm repair. (Santa Rosa)"
+verified = false
+
+[[company]]
+id = 229
+name = "Janssen/ALZA Vacaville"
+aliases = ["janssen-alza-vacaville"]
+domain = "janssen.com"
+industry = "biotech_pharma"
+desc = "Pharmaceutical manufacturing, inherited from ALZA's transdermal/oral drug delivery plant. (Vacaville)"
+verified = false
+
+[[company]]
+id = 230
+name = "Polaris Pharmaceuticals (Polaris Group)"
+aliases = ["polaris-pharmaceuticals-polaris-group"]
+domain = "polarispharma.com"
+industry = "biotech_pharma"
+desc = "cGMP biologics contract manufacturing for clinical drug supply. (Vacaville)"
+verified = false
+
+[[company]]
+id = 231
+name = "Agenus"
+aliases = ["agenus"]
+domain = "agenusbio.com"
+industry = "biotech_pharma"
+desc = "Immuno-oncology biologics manufacturing campus. (Vacaville)"
+verified = false
+
+[[company]]
+id = 232
+name = "Mettler-Toledo Rainin"
+aliases = ["mettler-toledo-rainin"]
+domain = "mt.com"
+industry = "biotech_pharma"
+desc = "Manufactures precision pipettes and life-science lab instrumentation. (Vacaville)"
+verified = false
+
+[[company]]
+id = 233
+name = "Mango Materials"
+aliases = ["mango-materials"]
+domain = "mangomaterials.com"
+industry = "biotech_pharma"
+desc = "Biomanufacturing of biodegradable bioplastics (PHA) from methane. (Vacaville)"
+verified = false
+
+[[company]]
+id = 234
+name = "Amgen"
+aliases = ["amgen"]
+domain = "amgen.com"
+industry = "biotech_pharma"
+desc = "Global biotechnology company with R&D operations in oncology, inflammation, and biologics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 235
+name = "AbbVie"
+aliases = ["abbvie"]
+domain = "abbvie.com"
+industry = "biotech_pharma"
+desc = "Global biopharmaceutical company with an R&D site in the SSF biotech corridor. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 236
+name = "AstraZeneca"
+aliases = ["astrazeneca"]
+domain = "astrazeneca.com"
+industry = "biotech_pharma"
+desc = "Global biopharmaceutical company with oncology R&D presence. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 237
+name = "Johnson & Johnson Innovation"
+aliases = ["johnson-and-johnson-innovation"]
+domain = "jnjinnovation.com"
+industry = "biotech_pharma"
+desc = "J&J's external innovation and biotech partnership hub. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 238
+name = "Calico Life Sciences"
+aliases = ["calico-life-sciences"]
+domain = "calicolabs.com"
+industry = "biotech_pharma"
+desc = "Alphabet-backed biotech researching the biology of aging. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 239
+name = "23andMe"
+aliases = ["23andme"]
+domain = "23andme.com"
+industry = "biotech_pharma"
+desc = "Consumer genomics and personal genetics testing company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 240
+name = "Allogene Therapeutics"
+aliases = ["allogene-therapeutics"]
+domain = "allogene.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing off-the-shelf allogeneic CAR T cell therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 241
+name = "Atreca"
+aliases = ["atreca"]
+domain = "atreca.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing antibody-based cancer immunotherapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 242
+name = "Audentes Therapeutics"
+aliases = ["audentes-therapeutics"]
+domain = "audentestx.com"
+industry = "biotech_pharma"
+desc = "Gene therapy company for rare monogenic diseases, now part of Astellas. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 243
+name = "Avidbiotics"
+aliases = ["avidbiotics"]
+domain = "avidbiotics.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering protein-based antimicrobial therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 244
+name = "Bioverativ"
+aliases = ["bioverativ"]
+domain = "bioverativ.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company focused on hemophilia and rare blood disorders, acquired by Sanofi. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 245
+name = "Blade Therapeutics"
+aliases = ["blade-therapeutics"]
+domain = "bladetx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing anti-fibrotic small-molecule therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 246
+name = "Catalyst Biosciences"
+aliases = ["catalyst-biosciences"]
+domain = "catalystbiosciences.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company engineering next-generation protease therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 247
+name = "Cellares"
+aliases = ["cellares"]
+domain = "cellares.com"
+industry = "biotech_pharma"
+desc = "Life sciences technology company building automated cell-therapy manufacturing systems. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 248
+name = "Charles River Laboratories"
+aliases = ["charles-river-laboratories"]
+domain = "criver.com"
+industry = "biotech_pharma"
+desc = "Contract research organization providing preclinical and safety-testing services. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 249
+name = "ChemPartner"
+aliases = ["chempartner"]
+domain = "chempartner.com"
+industry = "biotech_pharma"
+desc = "Contract research and development organization supporting drug discovery. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 250
+name = "Circle Pharma"
+aliases = ["circle-pharma"]
+domain = "circlepharma.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing macrocycle therapeutics for cancer. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 251
+name = "Corbion Biotech"
+aliases = ["corbion-biotech"]
+domain = "corbion.com"
+industry = "biotech_pharma"
+desc = "Industrial biotechnology company producing algae-based ingredients. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 252
+name = "Cortexyme (Quince Therapeutics)"
+aliases = ["cortexyme-quince-therapeutics"]
+domain = "quincetx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 253
+name = "DNA Script"
+aliases = ["dna-script"]
+domain = "dnascript.com"
+industry = "biotech_pharma"
+desc = "Enzymatic on-demand DNA synthesis technology company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 254
+name = "Encoded Therapeutics"
+aliases = ["encoded-therapeutics"]
+domain = "encoded.com"
+industry = "biotech_pharma"
+desc = "Gene therapy company treating genetic diseases of the central nervous system. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 255
+name = "Epicrispr Biotechnologies"
+aliases = ["epicrispr-biotechnologies"]
+domain = "epicrispr.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing epigenetic and CRISPR-based gene-modulation therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 256
+name = "Explora BioLabs"
+aliases = ["explora-biolabs"]
+domain = "explorabiolabs.com"
+industry = "biotech_pharma"
+desc = "Vivarium and preclinical research services provider for biotech companies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 257
+name = "First Databank"
+aliases = ["first-databank"]
+domain = "fdbhealth.com"
+industry = "biotech_pharma"
+desc = "Provider of drug knowledge bases and clinical decision-support data. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 258
+name = "Standard BioTools"
+aliases = ["standard-biotools"]
+domain = "standardbio.com"
+industry = "biotech_pharma"
+desc = "Life sciences tools company making mass cytometry and microfluidics instruments. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 259
+name = "Fluxion Biosciences"
+aliases = ["fluxion-biosciences"]
+domain = "fluxionbio.com"
+industry = "biotech_pharma"
+desc = "Life sciences tools company developing cell-analysis and liquid-biopsy instruments. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 260
+name = "Freenome"
+aliases = ["freenome"]
+domain = "freenome.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing blood-based multi-omics cancer screening tests. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 261
+name = "Frontier Medicines"
+aliases = ["frontier-medicines"]
+domain = "frontiermeds.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company using chemoproteomics to discover small-molecule drugs. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 262
+name = "GigaGen"
+aliases = ["gigagen"]
+domain = "giga-gen.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing recombinant polyclonal antibody therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 263
+name = "Gordian Biotechnology"
+aliases = ["gordian-biotechnology"]
+domain = "gordianbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company using in vivo functional genomics for drug discovery. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 264
+name = "Graphite Bio"
+aliases = ["graphite-bio"]
+domain = "graphitebio.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage gene-editing company targeting genetic diseases. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 265
+name = "Harpoon Therapeutics"
+aliases = ["harpoon-therapeutics"]
+domain = "harpoontx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage immunotherapy company developing T-cell engager therapeutics, acquired by Merck. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 266
+name = "Horizon Therapeutics"
+aliases = ["horizon-therapeutics"]
+domain = "horizontherapeutics.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company focused on rare and autoimmune diseases, acquired by Amgen. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 267
+name = "IDEAYA Biosciences"
+aliases = ["ideaya-biosciences"]
+domain = "ideayabio.com"
+industry = "biotech_pharma"
+desc = "Precision-oncology biopharmaceutical company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 268
+name = "Loxo Oncology at Lilly"
+aliases = ["loxo-oncology-at-lilly"]
+domain = "loxooncology.com"
+industry = "biotech_pharma"
+desc = "Precision oncology drug discovery unit of Eli Lilly. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 269
+name = "Lyell Immunopharma"
+aliases = ["lyell-immunopharma"]
+domain = "lyell.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing cell therapies to overcome T-cell exhaustion. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 270
+name = "Maze Therapeutics"
+aliases = ["maze-therapeutics"]
+domain = "mazetx.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company using human genetics to discover precision medicines. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 271
+name = "MedImmune"
+aliases = ["medimmune"]
+domain = "medimmune.com"
+industry = "biotech_pharma"
+desc = "Biologics R&D unit of AstraZeneca. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 272
+name = "Mirvie"
+aliases = ["mirvie"]
+domain = "mirvie.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing RNA-based tests to predict pregnancy complications. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 273
+name = "Mission Bio"
+aliases = ["mission-bio"]
+domain = "missionbio.com"
+industry = "biotech_pharma"
+desc = "Life sciences tools company providing single-cell multi-omics platforms. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 274
+name = "Monogram Biosciences"
+aliases = ["monogram-biosciences"]
+domain = "monogrambio.com"
+industry = "biotech_pharma"
+desc = "Specialty diagnostics company for HIV and oncology testing, part of Labcorp. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 275
+name = "Neuron23"
+aliases = ["neuron23"]
+domain = "neuron23.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing precision therapies for CNS and immune disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 276
+name = "NGM Biopharmaceuticals"
+aliases = ["ngm-biopharmaceuticals"]
+domain = "ngmbio.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing therapies for metabolic disease, cancer, and retinal disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 277
+name = "Nkarta"
+aliases = ["nkarta"]
+domain = "nkartatx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing engineered natural killer cell therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 278
+name = "Novome Biotechnologies"
+aliases = ["novome-biotechnologies"]
+domain = "novome.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering live bacterial therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 279
+name = "ORIC Pharmaceuticals"
+aliases = ["oric-pharmaceuticals"]
+domain = "oricpharma.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing therapies to overcome cancer drug resistance. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 280
+name = "Pact Pharma"
+aliases = ["pact-pharma"]
+domain = "pactpharma.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing personalized neoantigen-targeted T-cell therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 281
+name = "Pionyr Immunotherapeutics"
+aliases = ["pionyr-immunotherapeutics"]
+domain = "pionyrtx.com"
+industry = "biotech_pharma"
+desc = "Immuno-oncology biotech developing myeloid-targeted therapies, acquired by Gilead. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 282
+name = "Plexxikon"
+aliases = ["plexxikon"]
+domain = "plexxikon.com"
+industry = "biotech_pharma"
+desc = "Structure-guided drug discovery company, subsidiary of Daiichi Sankyo. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 283
+name = "Pliant Therapeutics"
+aliases = ["pliant-therapeutics"]
+domain = "pliantrx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing therapies for fibrotic disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 284
+name = "Presidio Medical"
+aliases = ["presidio-medical"]
+domain = "presidiomedical.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing neuromodulation therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 285
+name = "Principia Biopharma"
+aliases = ["principia-biopharma"]
+domain = "principiabio.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing oral therapies for immune-mediated diseases, acquired by Sanofi. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 286
+name = "RAPT Therapeutics"
+aliases = ["rapt-therapeutics"]
+domain = "raptrx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing therapies for inflammatory disease and cancer. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 287
+name = "Rinat Neuroscience"
+aliases = ["rinat-neuroscience"]
+domain = "rinat.com"
+industry = "biotech_pharma"
+desc = "Biotherapeutics research unit of Pfizer. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 288
+name = "Samsung Biologics America"
+aliases = ["samsung-biologics-america"]
+domain = "samsungbiologics.com"
+industry = "biotech_pharma"
+desc = "U.S. commercial office of the contract biologics manufacturer. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 289
+name = "Sana Biotechnology"
+aliases = ["sana-biotechnology"]
+domain = "sana.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering cells as medicines. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 290
+name = "Scorpion Therapeutics"
+aliases = ["scorpion-therapeutics"]
+domain = "scorpiontx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage precision-oncology company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 291
+name = "Senti Biosciences"
+aliases = ["senti-biosciences"]
+domain = "sentibio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering gene circuits for cell and gene therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 292
+name = "Sonoma Biotherapeutics"
+aliases = ["sonoma-biotherapeutics"]
+domain = "sonomabio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing engineered regulatory T-cell therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 293
+name = "Spruce Biosciences"
+aliases = ["spruce-biosciences"]
+domain = "sprucebiosciences.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing therapies for rare endocrine disorders. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 294
+name = "Sunesis Pharmaceuticals"
+aliases = ["sunesis-pharmaceuticals"]
+domain = "sunesis.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company that developed oncology therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 295
+name = "Surrozen"
+aliases = ["surrozen"]
+domain = "surrozen.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotechnology company developing Wnt pathway therapeutics for tissue regeneration. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 296
+name = "Tenaya Therapeutics"
+aliases = ["tenaya-therapeutics"]
+domain = "tenayathera.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing gene therapies for heart disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 297
+name = "Terremoto Biosciences"
+aliases = ["terremoto-biosciences"]
+domain = "terremotobio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing covalent small-molecule medicines, acquired by Eli Lilly. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 298
+name = "Titan Pharmaceuticals"
+aliases = ["titan-pharmaceuticals"]
+domain = "titanpharm.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing long-term drug-delivery implants. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 299
+name = "Tosoh Bioscience"
+aliases = ["tosoh-bioscience"]
+domain = "tosohbioscience.com"
+industry = "biotech_pharma"
+desc = "Life sciences instrumentation and separation sciences company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 300
+name = "Tricida"
+aliases = ["tricida"]
+domain = "tricida.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company that developed treatments for metabolic acidosis. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 301
+name = "Vaxart"
+aliases = ["vaxart"]
+domain = "vaxart.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotechnology company developing oral recombinant vaccines. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 302
+name = "Verge Genomics"
+aliases = ["verge-genomics"]
+domain = "vergegenomics.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company using AI and genomics to discover CNS disease drugs. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 303
+name = "Verily Life Sciences"
+aliases = ["verily-life-sciences"]
+domain = "verily.com"
+industry = "biotech_pharma"
+desc = "Alphabet life sciences and healthcare data company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 304
+name = "VistaGen Therapeutics"
+aliases = ["vistagen-therapeutics"]
+domain = "vistagen.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing therapies for CNS disorders. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 305
+name = "Zenflow"
+aliases = ["zenflow"]
+domain = "zenflowinc.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing minimally invasive BPH treatment. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 306
+name = "Arsenal Bioscience"
+aliases = ["arsenal-bioscience"]
+domain = "arsenalbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering programmable cell therapies for cancer, partnered with BMS. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 307
+name = "Alumis"
+aliases = ["alumis"]
+domain = "alumis.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing oral therapies for autoimmune disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 308
+name = "insitro"
+aliases = ["insitro"]
+domain = "insitro.com"
+industry = "biotech_pharma"
+desc = "AI-native drug discovery company using machine learning and functional genomics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 309
+name = "Atomic AI"
+aliases = ["atomic-ai"]
+domain = "atomic.ai"
+industry = "biotech_pharma"
+desc = "Biotechnology company using AI to design RNA-targeted medicines. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 310
+name = "Nobell Foods"
+aliases = ["nobell-foods"]
+domain = "nobellfoods.com"
+industry = "biotech_pharma"
+desc = "Food-tech/biotech company producing plant-based dairy proteins via molecular farming. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 311
+name = "Nura Bio"
+aliases = ["nura-bio"]
+domain = "nurabio.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing therapies for neurodegenerative disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 312
+name = "Switch Therapeutics"
+aliases = ["switch-therapeutics"]
+domain = "switchtx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing conditionally active biologic therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 313
+name = "Star Therapeutics"
+aliases = ["star-therapeutics"]
+domain = "startherapeutics.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing bispecific antibody therapeutics for rare bleeding disorders. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 314
+name = "Federation Bio"
+aliases = ["federation-bio"]
+domain = "federationbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing live bacterial consortia therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 315
+name = "Gigamune"
+aliases = ["gigamune"]
+domain = "gigamune.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing engineered cytokine and cell therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 316
+name = "Enceladus Bio"
+aliases = ["enceladus-bio"]
+domain = "enceladusbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing targeted protein degradation therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 317
+name = "Amunix Pharmaceuticals"
+aliases = ["amunix-pharmaceuticals"]
+domain = "amunix.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing masked (XTEN) biologics for cancer, part of Sanofi. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 318
+name = "Ankasa Regenerative Therapeutics"
+aliases = ["ankasa-regenerative-therapeutics"]
+domain = "ankasatx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing regenerative therapies for musculoskeletal disease. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 319
+name = "Asher Biotherapeutics"
+aliases = ["asher-biotherapeutics"]
+domain = "asherbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering selective cytokine therapeutics for cancer. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 320
+name = "Interline Therapeutics"
+aliases = ["interline-therapeutics"]
+domain = "interlinetx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing therapies targeting ubiquitin signaling. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 321
+name = "Walking Fish Therapeutics"
+aliases = ["walking-fish-therapeutics"]
+domain = "walkingfishtx.com"
+industry = "biotech_pharma"
+desc = "Cell-therapy biotechnology company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 322
+name = "Xyphos Biosciences"
+aliases = ["xyphos-biosciences"]
+domain = "xyphos.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing engineered T-cell platform for cancer, part of Astellas. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 323
+name = "Terapore Technologies"
+aliases = ["terapore-technologies"]
+domain = "teraporetech.com"
+industry = "biotech_pharma"
+desc = "Bioprocessing membrane technology company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 324
+name = "Quantapore"
+aliases = ["quantapore"]
+domain = "quantapore.com"
+industry = "biotech_pharma"
+desc = "Life sciences company developing nanopore-based DNA sequencing. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 325
+name = "Vibrant America"
+aliases = ["vibrant-america"]
+domain = "vibrant-america.com"
+industry = "biotech_pharma"
+desc = "Clinical diagnostics laboratory company. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 326
+name = "Boost Biomes"
+aliases = ["boost-biomes"]
+domain = "boostbiomes.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company mining microbiome-derived molecules for agriculture and industry. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 327
+name = "Convergent Genomics"
+aliases = ["convergent-genomics"]
+domain = "convergentgenomics.com"
+industry = "biotech_pharma"
+desc = "Molecular diagnostics company focused on urologic cancers. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 328
+name = "Serotiny"
+aliases = ["serotiny"]
+domain = "serotiny.bio"
+industry = "biotech_pharma"
+desc = "Biotechnology company automating protein engineering. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 329
+name = "Mindera Corporation"
+aliases = ["mindera-corporation"]
+domain = "minderacorp.com"
+industry = "biotech_pharma"
+desc = "Diagnostics company developing skin-disease biomarker tests. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 330
+name = "GenEdit"
+aliases = ["genedit"]
+domain = "genedit.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing non-viral gene-editing delivery platforms. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 331
+name = "Jengu Therapeutics"
+aliases = ["jengu-therapeutics"]
+domain = "jengutx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing molecular-glue degrader therapeutics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 332
+name = "Cartography Biosciences"
+aliases = ["cartography-biosciences"]
+domain = "cartographybio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing precision cell therapies for solid tumors using spatial genomics. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 333
+name = "Centivax"
+aliases = ["centivax"]
+domain = "centivax.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing broadly protective vaccines. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 334
+name = "Cero Therapeutics"
+aliases = ["cero-therapeutics"]
+domain = "cero.bio"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing chimeric engulfment receptor cell therapies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 335
+name = "Mispro Biotech Services"
+aliases = ["mispro-biotech-services"]
+domain = "mispro.com"
+industry = "biotech_pharma"
+desc = "Vivarium and lab support services provider for biotech companies. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 336
+name = "Selvita"
+aliases = ["selvita"]
+domain = "selvita.com"
+industry = "biotech_pharma"
+desc = "Contract research organization providing drug discovery services. (South San Francisco)"
+verified = false
+
+[[company]]
+id = 337
+name = "Bristol Myers Squibb Brisbane"
+aliases = ["bristol-myers-squibb-brisbane"]
+domain = "bms.com"
+industry = "biotech_pharma"
+desc = "Global biopharmaceutical company with a cell-therapy manufacturing and R&D site. (Brisbane)"
+verified = false
+
+[[company]]
+id = 338
+name = "Mammoth Biosciences"
+aliases = ["mammoth-biosciences"]
+domain = "mammoth.bio"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing CRISPR-based diagnostics and therapeutics. (Brisbane)"
+verified = false
+
+[[company]]
+id = 339
+name = "Vera Therapeutics"
+aliases = ["vera-therapeutics"]
+domain = "veratx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotechnology company developing therapies for kidney disease. (Brisbane)"
+verified = false
+
+[[company]]
+id = 340
+name = "Tempest Therapeutics"
+aliases = ["tempest-therapeutics"]
+domain = "tempesttx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing oncology therapeutics. (Brisbane)"
+verified = false
+
+[[company]]
+id = 341
+name = "Delpor"
+aliases = ["delpor"]
+domain = "delpor.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing long-acting drug-delivery implants. (Brisbane)"
+verified = false
+
+[[company]]
+id = 342
+name = "Gate Bioscience"
+aliases = ["gate-bioscience"]
+domain = "gatebio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing membrane-protein-targeted therapeutics. (Brisbane)"
+verified = false
+
+[[company]]
+id = 343
+name = "64x Bio"
+aliases = ["64x-bio"]
+domain = "64xbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering cell lines for viral vector manufacturing. (Brisbane)"
+verified = false
+
+[[company]]
+id = 344
+name = "Character Biosciences"
+aliases = ["character-biosciences"]
+domain = "characterbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company using genetics of age-related eye disease for drug discovery. (Brisbane)"
+verified = false
+
+[[company]]
+id = 345
+name = "BreezeBio"
+aliases = ["breezebio"]
+domain = "breezebio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company supporting gene-therapy manufacturing. (Brisbane)"
+verified = false
+
+[[company]]
+id = 346
+name = "Nitrase Therapeutics"
+aliases = ["nitrase-therapeutics"]
+domain = "nitrasetx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing nitrase enzyme inhibitor therapeutics. (Brisbane)"
+verified = false
+
+[[company]]
+id = 347
+name = "Razor Genomics"
+aliases = ["razor-genomics"]
+domain = "razorgenomics.com"
+industry = "biotech_pharma"
+desc = "Molecular diagnostics company for prostate cancer. (Brisbane)"
+verified = false
+
+[[company]]
+id = 348
+name = "ReviR Therapeutics"
+aliases = ["revir-therapeutics"]
+domain = "revirtx.com"
+industry = "biotech_pharma"
+desc = "AI-enabled biotech developing RNA-targeted small molecules for neurogenetic disease. (Brisbane)"
+verified = false
+
+[[company]]
+id = 349
+name = "Tenvie Therapeutics"
+aliases = ["tenvie-therapeutics"]
+domain = "tenvietx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotechnology company developing precision therapies for neurological disease. (Brisbane)"
+verified = false
+
+[[company]]
+id = 350
+name = "YenZym Antibodies"
+aliases = ["yenzym-antibodies"]
+domain = "yenzym.com"
+industry = "biotech_pharma"
+desc = "Custom antibody development and production company. (Brisbane)"
+verified = false
+
+[[company]]
+id = 351
+name = "Second Genome"
+aliases = ["second-genome"]
+domain = "secondgenome.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing microbiome-targeted therapeutics. (Brisbane)"
+verified = false
+
+[[company]]
+id = 352
+name = "Aimmune Therapeutics"
+aliases = ["aimmune-therapeutics"]
+domain = "aimmune.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company that developed food-allergy treatments, acquired by Nestle. (Brisbane)"
+verified = false
+
+[[company]]
+id = 353
+name = "Innoviva"
+aliases = ["innoviva"]
+domain = "innoviva.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical royalty and holding company. (Brisbane)"
+verified = false
+
+[[company]]
+id = 354
+name = "Maverick Therapeutics"
+aliases = ["maverick-therapeutics"]
+domain = "maverick-therapeutics.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing conditionally active T-cell engagers, acquired by Takeda. (Brisbane)"
+verified = false
+
+[[company]]
+id = 355
+name = "NuGEN Technologies"
+aliases = ["nugen-technologies"]
+domain = "nugen.com"
+industry = "biotech_pharma"
+desc = "Genomics sample-preparation technology company, acquired by Tecan. (San Carlos)"
+verified = false
+
+[[company]]
+id = 356
+name = "AcureX Therapeutics"
+aliases = ["acurex-therapeutics"]
+domain = "acurextx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing therapeutics for neurodegenerative disease. (San Carlos)"
+verified = false
+
+[[company]]
+id = 357
+name = "Atropos Therapeutics"
+aliases = ["atropos-therapeutics"]
+domain = "atropostx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing senotherapeutics targeting cellular senescence. (San Carlos)"
+verified = false
+
+[[company]]
+id = 358
+name = "Medic Life Sciences"
+aliases = ["medic-life-sciences"]
+domain = "mediclifesciences.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company using 3D-tumor CRISPR functional genomics for drug discovery. (San Carlos)"
+verified = false
+
+[[company]]
+id = 359
+name = "MBC BioLabs"
+aliases = ["mbc-biolabs"]
+domain = "mbcbiolabs.com"
+industry = "biotech_pharma"
+desc = "Shared lab space and incubator for life sciences startups. (San Carlos)"
+verified = false
+
+[[company]]
+id = 360
+name = "Solve Therapeutics"
+aliases = ["solve-therapeutics"]
+domain = "solvetx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing protein and antibody therapeutics. (Belmont)"
+verified = false
+
+[[company]]
+id = 361
+name = "Supercede Therapeutics"
+aliases = ["supercede-therapeutics"]
+domain = "supercedetx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company in early-stage drug discovery. (Belmont)"
+verified = false
+
+[[company]]
+id = 362
+name = "Optimal Biotech Group"
+aliases = ["optimal-biotech-group"]
+domain = "optimalbiotechgroup.com"
+industry = "biotech_pharma"
+desc = "Process measurement and instrumentation provider for biotech and pharma manufacturing. (Belmont)"
+verified = false
+
+[[company]]
+id = 363
+name = "Aerogen Pharma"
+aliases = ["aerogen-pharma"]
+domain = "aerogenpharma.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage specialty pharmaceutical company developing inhaled medications. (San Mateo)"
+verified = false
+
+[[company]]
+id = 364
+name = "Antibody Solutions"
+aliases = ["antibody-solutions"]
+domain = "antibodysolutions.com"
+industry = "biotech_pharma"
+desc = "Custom antibody development and characterization services company. (San Mateo)"
+verified = false
+
+[[company]]
+id = 365
+name = "Mirum Pharmaceuticals"
+aliases = ["mirum-pharmaceuticals"]
+domain = "mirumpharma.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing therapies for rare liver diseases. (Foster City)"
+verified = false
+
+[[company]]
+id = 366
+name = "Apollomics"
+aliases = ["apollomics"]
+domain = "apollomicsinc.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing oncology therapeutics. (Foster City)"
+verified = false
+
+[[company]]
+id = 367
+name = "Asegua Therapeutics"
+aliases = ["asegua-therapeutics"]
+domain = "asegua.com"
+industry = "biotech_pharma"
+desc = "Generic antiviral medicines subsidiary of Gilead. (Foster City)"
+verified = false
+
+[[company]]
+id = 368
+name = "MicuRx Pharmaceuticals"
+aliases = ["micurx-pharmaceuticals"]
+domain = "micurx.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company developing antibiotics for drug-resistant infections. (Foster City)"
+verified = false
+
+[[company]]
+id = 369
+name = "TrueBinding"
+aliases = ["truebinding"]
+domain = "truebinding.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotherapeutic company developing monoclonal antibody therapeutics. (Foster City)"
+verified = false
+
+[[company]]
+id = 370
+name = "Cellanome"
+aliases = ["cellanome"]
+domain = "cellanome.com"
+industry = "biotech_pharma"
+desc = "Life sciences technology company developing single-cell functional analysis tools. (Foster City)"
+verified = false
+
+[[company]]
+id = 371
+name = "Pointcross Life Sciences"
+aliases = ["pointcross-life-sciences"]
+domain = "pointcross.com"
+industry = "biotech_pharma"
+desc = "Life sciences informatics and data-platform company. (Foster City)"
+verified = false
+
+[[company]]
+id = 372
+name = "Adicet Bio"
+aliases = ["adicet-bio"]
+domain = "adicetbio.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing allogeneic gamma-delta T-cell therapies. (Redwood City)"
+verified = false
+
+[[company]]
+id = 373
+name = "Altos Labs"
+aliases = ["altos-labs"]
+domain = "altoslabs.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company researching cellular rejuvenation programming. (Redwood City)"
+verified = false
+
+[[company]]
+id = 374
+name = "Karius"
+aliases = ["karius"]
+domain = "karius.com"
+industry = "biotech_pharma"
+desc = "Genomics diagnostics company for infectious-disease detection. (Redwood City)"
+verified = false
+
+[[company]]
+id = 375
+name = "Kartos Therapeutics"
+aliases = ["kartos-therapeutics"]
+domain = "kartostx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biopharmaceutical company developing precision oncology therapies. (Redwood City)"
+verified = false
+
+[[company]]
+id = 376
+name = "Kriya Therapeutics"
+aliases = ["kriya-therapeutics"]
+domain = "kriyatx.com"
+industry = "biotech_pharma"
+desc = "Gene therapy company developing programmable genetic medicines. (Redwood City)"
+verified = false
+
+[[company]]
+id = 377
+name = "Ashvattha Therapeutics"
+aliases = ["ashvattha-therapeutics"]
+domain = "ashvatthatx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing nanomedicine therapeutics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 378
+name = "Avinger"
+aliases = ["avinger"]
+domain = "avinger.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing image-guided systems for vascular disease. (Redwood City)"
+verified = false
+
+[[company]]
+id = 379
+name = "Synthego"
+aliases = ["synthego"]
+domain = "synthego.com"
+industry = "biotech_pharma"
+desc = "Genome-engineering company producing CRISPR reagents and synthetic RNA. (Redwood City)"
+verified = false
+
+[[company]]
+id = 380
+name = "N-Power Medicine"
+aliases = ["n-power-medicine"]
+domain = "npowermedicine.com"
+industry = "biotech_pharma"
+desc = "Clinical research and precision-oncology platform company. (Redwood City)"
+verified = false
+
+[[company]]
+id = 381
+name = "Juvena Therapeutics"
+aliases = ["juvena-therapeutics"]
+domain = "juvenatherapeutics.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing protein therapeutics for tissue regeneration. (Redwood City)"
+verified = false
+
+[[company]]
+id = 382
+name = "InterVene"
+aliases = ["intervene"]
+domain = "intervenemd.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing minimally invasive venous valve therapy. (Redwood City)"
+verified = false
+
+[[company]]
+id = 383
+name = "Earli"
+aliases = ["earli"]
+domain = "earli.bio"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing synthetic biomarkers for early cancer detection. (Redwood City)"
+verified = false
+
+[[company]]
+id = 384
+name = "GRAIL"
+aliases = ["grail"]
+domain = "grail.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing multi-cancer early-detection blood tests. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 385
+name = "Orca Bio"
+aliases = ["orca-bio"]
+domain = "orcabio.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotechnology company developing engineered cell therapies for blood cancers. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 386
+name = "BillionToOne"
+aliases = ["billiontoone"]
+domain = "billiontoone.com"
+industry = "biotech_pharma"
+desc = "Molecular diagnostics company for prenatal and cancer genetic testing. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 387
+name = "Synthekine"
+aliases = ["synthekine"]
+domain = "synthekine.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company engineering cytokine therapeutics. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 388
+name = "SRI International"
+aliases = ["sri-international"]
+domain = "sri.com"
+industry = "biotech_pharma"
+desc = "Nonprofit research institute with biomedical and life sciences R&D. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 389
+name = "Deepcell"
+aliases = ["deepcell"]
+domain = "deepcell.com"
+industry = "biotech_pharma"
+desc = "Life sciences tools company using AI-powered morphological cell analysis. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 390
+name = "RapidAI"
+aliases = ["rapidai"]
+domain = "rapidai.com"
+industry = "biotech_pharma"
+desc = "Medical imaging AI company for stroke and vascular care. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 391
+name = "Hexagon Bio"
+aliases = ["hexagon-bio"]
+domain = "hexagonbio.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company mining fungal genomes for novel therapeutics. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 392
+name = "ReCode Therapeutics"
+aliases = ["recode-therapeutics"]
+domain = "recodetx.com"
+industry = "biotech_pharma"
+desc = "Clinical-stage biotech developing genetic medicines via lipid nanoparticle delivery. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 393
+name = "Antheia"
+aliases = ["antheia"]
+domain = "antheia.bio"
+industry = "biotech_pharma"
+desc = "Synthetic biology company producing pharmaceutical ingredients via fermentation. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 394
+name = "Sight Sciences"
+aliases = ["sight-sciences"]
+domain = "sightsciences.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing ophthalmic surgical technologies. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 395
+name = "Octave Bioscience"
+aliases = ["octave-bioscience"]
+domain = "octavebio.com"
+industry = "biotech_pharma"
+desc = "Precision neurology diagnostics company for multiple sclerosis. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 396
+name = "LevitasBio"
+aliases = ["levitasbio"]
+domain = "levitasbio.com"
+industry = "biotech_pharma"
+desc = "Life sciences tools company developing gentle cell-handling technology. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 397
+name = "Genesis Therapeutics"
+aliases = ["genesis-therapeutics"]
+domain = "genesistherapeutics.ai"
+industry = "biotech_pharma"
+desc = "AI-driven drug discovery biotechnology company. (Burlingame)"
+verified = false
+
+[[company]]
+id = 398
+name = "Color Health"
+aliases = ["color-health"]
+domain = "color.com"
+industry = "biotech_pharma"
+desc = "Genomics and population health testing company. (Burlingame)"
+verified = false
+
+[[company]]
+id = 399
+name = "Neptune Medical"
+aliases = ["neptune-medical"]
+domain = "neptunemedical.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing advanced endoscopy technology. (Burlingame)"
+verified = false
+
+[[company]]
+id = 400
+name = "Magnus Medical"
+aliases = ["magnus-medical"]
+domain = "magnusmed.com"
+industry = "biotech_pharma"
+desc = "Medical device company developing neuromodulation therapy for depression. (Burlingame)"
+verified = false
+
+[[company]]
+id = 401
+name = "Collaborative Drug Discovery"
+aliases = ["collaborative-drug-discovery"]
+domain = "collaborativedrug.com"
+industry = "biotech_pharma"
+desc = "Software platform for managing and mining drug-discovery data. (Burlingame)"
+verified = false
+
+[[company]]
+id = 402
+name = "Tallac Therapeutics"
+aliases = ["tallac-therapeutics"]
+domain = "tallactx.com"
+industry = "biotech_pharma"
+desc = "Biotechnology company developing bispecific immune-modulating antibodies. (Burlingame)"
+verified = false
+
+[[company]]
+id = 403
+name = "Seer"
+aliases = ["seer"]
+domain = "seer.bio"
+industry = "biotech_pharma"
+desc = "Proteomics profiling platform. (Redwood City)"
+verified = false
+
+[[company]]
+id = 404
+name = "HeartFlow"
+aliases = ["heartflow"]
+domain = "heartflow.com"
+industry = "biotech_pharma"
+desc = "AI-based noninvasive cardiac blood-flow analysis. (Redwood City)"
+verified = false
+
+[[company]]
+id = 405
+name = "Auris Health"
+aliases = ["auris-health"]
+domain = "aurishealth.com"
+industry = "biotech_pharma"
+desc = "Robotic bronchoscopy and surgical robotics (part of J&J). (Redwood City)"
+verified = false
+
+[[company]]
+id = 406
+name = "Biomea Fusion"
+aliases = ["biomea-fusion"]
+domain = "biomeafusion.com"
+industry = "biotech_pharma"
+desc = "Covalent small-molecule therapeutics for genetically defined diseases. (Redwood City)"
+verified = false
+
+[[company]]
+id = 407
+name = "PMV Pharmaceuticals"
+aliases = ["pmv-pharmaceuticals"]
+domain = "pmvpharma.com"
+industry = "biotech_pharma"
+desc = "Precision oncology targeting mutant p53. (Redwood City)"
+verified = false
+
+[[company]]
+id = 408
+name = "Heron Therapeutics"
+aliases = ["heron-therapeutics"]
+domain = "herontx.com"
+industry = "biotech_pharma"
+desc = "Therapeutics for cancer supportive care and acute pain. (Redwood City)"
+verified = false
+
+[[company]]
+id = 409
+name = "AcelRx Pharmaceuticals"
+aliases = ["acelrx-pharmaceuticals"]
+domain = "acelrx.com"
+industry = "biotech_pharma"
+desc = "Acute pain management therapeutics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 410
+name = "Relypsa"
+aliases = ["relypsa"]
+domain = "relypsa.com"
+industry = "biotech_pharma"
+desc = "Hyperkalemia treatment (Veltassa). (Redwood City)"
+verified = false
+
+[[company]]
+id = 411
+name = "Soleno Therapeutics"
+aliases = ["soleno-therapeutics"]
+domain = "solenotx.com"
+industry = "biotech_pharma"
+desc = "Therapeutics for Prader-Willi syndrome. (Redwood City)"
+verified = false
+
+[[company]]
+id = 412
+name = "OncoMed Pharmaceuticals"
+aliases = ["oncomed-pharmaceuticals"]
+domain = "oncomed.com"
+industry = "biotech_pharma"
+desc = "Cancer stem cell-targeted antibody therapeutics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 413
+name = "Maxygen"
+aliases = ["maxygen"]
+domain = "maxygen.com"
+industry = "biotech_pharma"
+desc = "Directed molecular evolution of protein therapeutics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 414
+name = "Nevro Corp"
+aliases = ["nevro-corp"]
+domain = "nevro.com"
+industry = "biotech_pharma"
+desc = "Spinal cord stimulation devices for chronic pain. (Redwood City)"
+verified = false
+
+[[company]]
+id = 415
+name = "Procept BioRobotics"
+aliases = ["procept-biorobotics"]
+domain = "proceptbiorobotics.com"
+industry = "biotech_pharma"
+desc = "Aquablation robotic surgery system for BPH. (Redwood City)"
+verified = false
+
+[[company]]
+id = 416
+name = "Nuvig Therapeutics"
+aliases = ["nuvig-therapeutics"]
+domain = "nuvig.com"
+industry = "biotech_pharma"
+desc = "Immune-modulating antibody therapeutics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 417
+name = "Zeit Medical"
+aliases = ["zeit-medical"]
+domain = "zeitmedical.com"
+industry = "biotech_pharma"
+desc = "AI-enabled wearable stroke/seizure detection. (Redwood City)"
+verified = false
+
+[[company]]
+id = 418
+name = "Imricor Medical Systems"
+aliases = ["imricor-medical-systems"]
+domain = "imricor.com"
+industry = "biotech_pharma"
+desc = "MRI-compatible cardiac ablation catheters. (Redwood City)"
+verified = false
+
+[[company]]
+id = 419
+name = "Athelas"
+aliases = ["athelas"]
+domain = "athelas.com"
+industry = "biotech_pharma"
+desc = "AI-powered point-of-care blood diagnostics and monitoring. (Redwood City)"
+verified = false
+
+[[company]]
+id = 420
+name = "Genapsys"
+aliases = ["genapsys"]
+domain = "genapsys.com"
+industry = "biotech_pharma"
+desc = "Semiconductor-based DNA sequencing technology. (Redwood City)"
+verified = false
+
+[[company]]
+id = 421
+name = "CardioDx"
+aliases = ["cardiodx"]
+domain = "cardiodx.com"
+industry = "biotech_pharma"
+desc = "Genomic cardiovascular diagnostics. (Redwood City)"
+verified = false
+
+[[company]]
+id = 422
+name = "MyoScience"
+aliases = ["myoscience"]
+domain = "myoscience.com"
+industry = "biotech_pharma"
+desc = "Cryoanalgesia devices for pain relief. (Redwood City)"
+verified = false
+
+[[company]]
+id = 423
+name = "Neurotrack"
+aliases = ["neurotrack"]
+domain = "neurotrack.com"
+industry = "biotech_pharma"
+desc = "Digital cognitive health assessment platform. (Redwood City)"
+verified = false
+
+[[company]]
+id = 424
+name = "Calibra Medical"
+aliases = ["calibra-medical"]
+domain = "calibramedical.com"
+industry = "biotech_pharma"
+desc = "Wearable insulin delivery patch devices. (Redwood City)"
+verified = false
+
+[[company]]
+id = 425
+name = "Teon Therapeutics"
+aliases = ["teon-therapeutics"]
+domain = "teontx.com"
+industry = "biotech_pharma"
+desc = "Oncology-focused biotechnology company. (Redwood City)"
+verified = false
+
+[[company]]
+id = 426
+name = "An2 Therapeutics"
+aliases = ["an2-therapeutics"]
+domain = "an2therapeutics.com"
+industry = "biotech_pharma"
+desc = "Small-molecule therapeutics for infectious and fibrotic disease. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 427
+name = "Talis Biomedical"
+aliases = ["talis-biomedical"]
+domain = "talis.com"
+industry = "biotech_pharma"
+desc = "Rapid point-of-care molecular diagnostics. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 428
+name = "Refuge Biotechnologies"
+aliases = ["refuge-biotechnologies"]
+domain = "refugebio.com"
+industry = "biotech_pharma"
+desc = "Gene-circuit engineered cell therapies. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 429
+name = "Endovascular Engineering"
+aliases = ["endovascular-engineering"]
+domain = "endovasculareng.com"
+industry = "biotech_pharma"
+desc = "Thrombectomy devices for vascular occlusion. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 430
+name = "Corium International"
+aliases = ["corium-international"]
+domain = "corium.com"
+industry = "biotech_pharma"
+desc = "Transdermal and oral drug delivery technologies. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 431
+name = "Tivic Health"
+aliases = ["tivic-health"]
+domain = "tivichealth.com"
+industry = "biotech_pharma"
+desc = "Bioelectronic medicine devices. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 432
+name = "Credence Medsystems"
+aliases = ["credence-medsystems"]
+domain = "credencemed.com"
+industry = "biotech_pharma"
+desc = "Safety syringe and drug delivery systems. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 433
+name = "ForSight Labs"
+aliases = ["forsight-labs"]
+domain = "forsightlabs.com"
+industry = "biotech_pharma"
+desc = "Ophthalmic medical device incubator/developer. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 434
+name = "Gamma Biosciences"
+aliases = ["gamma-biosciences"]
+domain = "gammabiosciences.com"
+industry = "biotech_pharma"
+desc = "Cell and gene therapy tools investment platform. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 435
+name = "Assertio Therapeutics"
+aliases = ["assertio-therapeutics"]
+domain = "assertiotx.com"
+industry = "biotech_pharma"
+desc = "Specialty pharmaceutical company, pain and CNS drugs. (Menlo Park)"
+verified = false
+
+[[company]]
+id = 436
+name = "Varian Medical Systems"
+aliases = ["varian-medical-systems"]
+domain = "varian.com"
+industry = "biotech_pharma"
+desc = "Radiotherapy and oncology imaging systems (Siemens Healthineers). (Palo Alto)"
+verified = false
+
+[[company]]
+id = 437
+name = "Forty Seven Inc"
+aliases = ["forty-seven-inc"]
+domain = "fortyseveninc.com"
+industry = "biotech_pharma"
+desc = "Macrophage checkpoint immuno-oncology (acquired by Gilead). (Palo Alto)"
+verified = false
+
+[[company]]
+id = 438
+name = "Cognoa"
+aliases = ["cognoa"]
+domain = "cognoa.com"
+industry = "biotech_pharma"
+desc = "AI-based pediatric behavioral health diagnostics. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 439
+name = "Ascendis Pharma"
+aliases = ["ascendis-pharma"]
+domain = "ascendispharma.com"
+industry = "biotech_pharma"
+desc = "TransCon sustained-release drug delivery technology. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 440
+name = "Eidos Therapeutics"
+aliases = ["eidos-therapeutics"]
+domain = "eidostx.com"
+industry = "biotech_pharma"
+desc = "Genetic cardiovascular disease therapeutics. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 441
+name = "Immune-Onc Therapeutics"
+aliases = ["immune-onc-therapeutics"]
+domain = "immuneonc.com"
+industry = "biotech_pharma"
+desc = "Myeloid checkpoint cancer immunotherapies. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 442
+name = "Cellular Biomedicine Group"
+aliases = ["cellular-biomedicine-group"]
+domain = "cellbiomedgroup.com"
+industry = "biotech_pharma"
+desc = "Cell therapies for cancer and autoimmune disease. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 443
+name = "Inscopix"
+aliases = ["inscopix"]
+domain = "inscopix.com"
+industry = "biotech_pharma"
+desc = "Neuroscience brain-imaging tools. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 444
+name = "Combinati"
+aliases = ["combinati"]
+domain = "combinati.com"
+industry = "biotech_pharma"
+desc = "Digital PCR genomics instruments. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 445
+name = "QED Therapeutics"
+aliases = ["qed-therapeutics"]
+domain = "qedtx.com"
+industry = "biotech_pharma"
+desc = "Targeted oncology therapeutics (BridgeBio affiliate). (Palo Alto)"
+verified = false
+
+[[company]]
+id = 446
+name = "NanoDx"
+aliases = ["nanodx"]
+domain = "nanodxinc.com"
+industry = "biotech_pharma"
+desc = "Rapid point-of-care sepsis and brain injury diagnostics. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 447
+name = "Teal Health"
+aliases = ["teal-health"]
+domain = "tealhealth.co"
+industry = "biotech_pharma"
+desc = "At-home cervical cancer screening device. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 448
+name = "Medable"
+aliases = ["medable"]
+domain = "medable.com"
+industry = "biotech_pharma"
+desc = "Decentralized clinical trial software platform. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 449
+name = "Roche Bioscience (Roche Palo Alto)"
+aliases = ["roche-bioscience-roche-palo-alto"]
+domain = "roche.com"
+industry = "biotech_pharma"
+desc = "Pharmaceutical R&D site, successor to Syntex. (Palo Alto)"
+verified = false
+
+[[company]]
+id = 450
+name = "Vivus Inc"
+aliases = ["vivus-inc"]
+domain = "vivus.com"
+industry = "biotech_pharma"
+desc = "Pharmaceuticals for weight management and sexual health. (Mountain View)"
+verified = false
+
+[[company]]
+id = 451
+name = "Alexza Pharmaceuticals"
+aliases = ["alexza-pharmaceuticals"]
+domain = "alexza.com"
+industry = "biotech_pharma"
+desc = "Staccato inhalation drug delivery technology. (Mountain View)"
+verified = false
+
+[[company]]
+id = 452
+name = "MAP Pharmaceuticals"
+aliases = ["map-pharmaceuticals"]
+domain = "mappharma.com"
+industry = "biotech_pharma"
+desc = "Inhalation-based migraine therapeutics. (Mountain View)"
+verified = false
+
+[[company]]
+id = 453
+name = "NeuroPace"
+aliases = ["neuropace"]
+domain = "neuropace.com"
+industry = "biotech_pharma"
+desc = "Implantable responsive neurostimulation for epilepsy. (Mountain View)"
+verified = false
+
+[[company]]
+id = 454
+name = "Perlegen Sciences"
+aliases = ["perlegen-sciences"]
+domain = "perlegen.com"
+industry = "biotech_pharma"
+desc = "Genetic variation and pharmacogenomics research. (Mountain View)"
+verified = false
+
+[[company]]
+id = 455
+name = "Hansen Medical"
+aliases = ["hansen-medical"]
+domain = "hansenmedical.com"
+industry = "biotech_pharma"
+desc = "Robotic catheter systems for cardiology. (Mountain View)"
+verified = false
+
+[[company]]
+id = 456
+name = "Atila BioSystems"
+aliases = ["atila-biosystems"]
+domain = "atilabiosystems.com"
+industry = "biotech_pharma"
+desc = "Molecular diagnostic reagents and testing kits. (Mountain View)"
+verified = false
+
+[[company]]
+id = 457
+name = "DNAnexus"
+aliases = ["dnanexus"]
+domain = "dnanexus.com"
+industry = "biotech_pharma"
+desc = "Cloud platform for genomic and multiomic data analysis. (Mountain View)"
+verified = false
+
+[[company]]
+id = 458
+name = "Cepheid"
+aliases = ["cepheid"]
+domain = "cepheid.com"
+industry = "biotech_pharma"
+desc = "Molecular diagnostics systems (GeneXpert), part of Danaher. (Sunnyvale)"
+verified = false
+
+[[company]]
+id = 459
+name = "Accuray"
+aliases = ["accuray"]
+domain = "accuray.com"
+industry = "biotech_pharma"
+desc = "CyberKnife and TomoTherapy radiation oncology systems. (Sunnyvale)"
+verified = false
+
+[[company]]
+id = 460
+name = "CeriBell"
+aliases = ["ceribell"]
+domain = "ceribell.com"
+industry = "biotech_pharma"
+desc = "AI-enabled point-of-care EEG seizure detection. (Sunnyvale)"
+verified = false
+
+[[company]]
+id = 461
+name = "Amarantus Bioscience"
+aliases = ["amarantus-bioscience"]
+domain = "amarantusbio.com"
+industry = "biotech_pharma"
+desc = "Regenerative medicine and neurodegenerative disease therapeutics. (Sunnyvale)"
+verified = false
+
+[[company]]
+id = 462
+name = "QuantumCyte"
+aliases = ["quantumcyte"]
+domain = "quantumcyte.com"
+industry = "biotech_pharma"
+desc = "Laser capture microdissection tools for research. (Sunnyvale)"
+verified = false
+
+[[company]]
+id = 463
+name = "Agilent Technologies"
+aliases = ["agilent-technologies"]
+domain = "agilent.com"
+industry = "biotech_pharma"
+desc = "Analytical instruments for life sciences and diagnostics. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 464
+name = "Affymetrix"
+aliases = ["affymetrix"]
+domain = "affymetrix.com"
+industry = "biotech_pharma"
+desc = "DNA microarray technology (acquired by Thermo Fisher). (Santa Clara)"
+verified = false
+
+[[company]]
+id = 465
+name = "XenoPort"
+aliases = ["xenoport"]
+domain = "xenoport.com"
+industry = "biotech_pharma"
+desc = "Prodrug therapeutics developer. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 466
+name = "Abbott Santa Clara"
+aliases = ["abbott-santa-clara"]
+domain = "abbott.com"
+industry = "biotech_pharma"
+desc = "Diagnostics and structural heart/vascular medical devices. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 467
+name = "Shockwave Medical"
+aliases = ["shockwave-medical"]
+domain = "shockwavemedical.com"
+industry = "biotech_pharma"
+desc = "Intravascular lithotripsy for calcified plaque (acquired by J&J). (Santa Clara)"
+verified = false
+
+[[company]]
+id = 468
+name = "Ancora Heart"
+aliases = ["ancora-heart"]
+domain = "ancoraheart.com"
+industry = "biotech_pharma"
+desc = "Catheter-based mitral valve repair devices. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 469
+name = "Minerva Surgical"
+aliases = ["minerva-surgical"]
+domain = "minervasurgical.com"
+industry = "biotech_pharma"
+desc = "Minimally invasive gynecological devices. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 470
+name = "Zeto"
+aliases = ["zeto"]
+domain = "zetoinc.com"
+industry = "biotech_pharma"
+desc = "Wireless EEG headset systems. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 471
+name = "Benvenue Medical"
+aliases = ["benvenue-medical"]
+domain = "benvenuemedical.com"
+industry = "biotech_pharma"
+desc = "Minimally invasive spine devices. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 472
+name = "Vave Health"
+aliases = ["vave-health"]
+domain = "vavehealth.com"
+industry = "biotech_pharma"
+desc = "Handheld point-of-care ultrasound devices. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 473
+name = "Physiowave"
+aliases = ["physiowave"]
+domain = "physiowave.com"
+industry = "biotech_pharma"
+desc = "Connected clinical body composition scales. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 474
+name = "VivaLnk"
+aliases = ["vivalnk"]
+domain = "vivalnk.com"
+industry = "biotech_pharma"
+desc = "Wearable medical biosensors. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 475
+name = "miraDry"
+aliases = ["miradry"]
+domain = "miradry.com"
+industry = "biotech_pharma"
+desc = "Device for underarm sweat and odor reduction. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 476
+name = "Shape Memory Medical"
+aliases = ["shape-memory-medical"]
+domain = "shapememorymedical.com"
+industry = "biotech_pharma"
+desc = "Shape-memory polymer devices for aneurysm treatment. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 477
+name = "LumiQuick Diagnostics"
+aliases = ["lumiquick-diagnostics"]
+domain = "lumiquick.com"
+industry = "biotech_pharma"
+desc = "Rapid diagnostic test kits. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 478
+name = "EndoClot Plus"
+aliases = ["endoclot-plus"]
+domain = "endoclot.com"
+industry = "biotech_pharma"
+desc = "Endoscopic hemostasis devices. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 479
+name = "Lin-Zhi International"
+aliases = ["lin-zhi-international"]
+domain = "lin-zhi.com"
+industry = "biotech_pharma"
+desc = "Immunoassay reagents for drug testing. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 480
+name = "Roche Sequencing Solutions"
+aliases = ["roche-sequencing-solutions"]
+domain = "roche.com"
+industry = "biotech_pharma"
+desc = "Genomic sequencing and diagnostics. (Santa Clara)"
+verified = false
+
+[[company]]
+id = 481
+name = "Align Technology"
+aliases = ["align-technology"]
+domain = "aligntech.com"
+industry = "biotech_pharma"
+desc = "Invisalign clear aligners and iTero intraoral scanners. (San Jose)"
+verified = false
+
+[[company]]
+id = 482
+name = "Lumenis"
+aliases = ["lumenis"]
+domain = "lumenis.com"
+industry = "biotech_pharma"
+desc = "Laser and light-based surgical and aesthetic systems. (San Jose)"
+verified = false
+
+[[company]]
+id = 483
+name = "Sony Biotechnology"
+aliases = ["sony-biotechnology"]
+domain = "sonybiotechnology.com"
+industry = "biotech_pharma"
+desc = "Flow cytometry and cell imaging instruments. (San Jose)"
+verified = false
+
+[[company]]
+id = 484
+name = "Element Biosciences"
+aliases = ["element-biosciences"]
+domain = "elementbiosciences.com"
+industry = "biotech_pharma"
+desc = "Next-generation DNA sequencing platform. (San Jose)"
+verified = false
+
+[[company]]
+id = 485
+name = "Miltenyi Biotec"
+aliases = ["miltenyi-biotec"]
+domain = "miltenyibiotec.com"
+industry = "biotech_pharma"
+desc = "Cell and gene therapy research tools. (San Jose)"
+verified = false
+
+[[company]]
+id = 486
+name = "Paradromics"
+aliases = ["paradromics"]
+domain = "paradromics.com"
+industry = "biotech_pharma"
+desc = "Brain-computer interface implant platform. (San Jose)"
+verified = false
+
+[[company]]
+id = 487
+name = "Bio-Techne / ProteinSimple"
+aliases = ["bio-techne-proteinsimple"]
+domain = "bio-techne.com"
+industry = "biotech_pharma"
+desc = "Protein analysis instruments and reagents. (San Jose)"
+verified = false
+
+[[company]]
+id = 488
+name = "ICU Medical"
+aliases = ["icu-medical"]
+domain = "icumedical.com"
+industry = "biotech_pharma"
+desc = "IV therapy and infusion delivery systems. (San Jose)"
+verified = false
+
+[[company]]
+id = 489
+name = "Finesse Solutions"
+aliases = ["finesse-solutions"]
+domain = "finesse.com"
+industry = "biotech_pharma"
+desc = "Bioprocessing automation and single-use systems. (San Jose)"
+verified = false
+
+[[company]]
+id = 490
+name = "VitroLabs"
+aliases = ["vitrolabs"]
+domain = "vitrolabs.com"
+industry = "biotech_pharma"
+desc = "Lab-grown leather via cellular agriculture. (San Jose)"
+verified = false
+
+[[company]]
+id = 491
+name = "Outset Medical"
+aliases = ["outset-medical"]
+domain = "outsetmedical.com"
+industry = "biotech_pharma"
+desc = "Tablo portable hemodialysis system. (San Jose)"
+verified = false
+
+[[company]]
+id = 492
+name = "Eargo"
+aliases = ["eargo"]
+domain = "eargo.com"
+industry = "biotech_pharma"
+desc = "Virtually invisible hearing aids. (San Jose)"
+verified = false
+
+[[company]]
+id = 493
+name = "VitalConnect"
+aliases = ["vitalconnect"]
+domain = "vitalconnect.com"
+industry = "biotech_pharma"
+desc = "Wearable biosensor patches for remote patient monitoring. (San Jose)"
+verified = false
+
+[[company]]
+id = 494
+name = "Ablative Solutions"
+aliases = ["ablative-solutions"]
+domain = "ablativesolutions.com"
+industry = "biotech_pharma"
+desc = "Renal denervation catheter systems for hypertension. (San Jose)"
+verified = false
+
+[[company]]
+id = 495
+name = "Anatomage"
+aliases = ["anatomage"]
+domain = "anatomage.com"
+industry = "biotech_pharma"
+desc = "3D medical imaging and virtual dissection tables. (San Jose)"
+verified = false
+
+[[company]]
+id = 496
+name = "DFine"
+aliases = ["dfine"]
+domain = "dfineinc.com"
+industry = "biotech_pharma"
+desc = "Minimally invasive spine tumor and fracture devices. (San Jose)"
+verified = false
+
+[[company]]
+id = 497
+name = "Xoft"
+aliases = ["xoft"]
+domain = "xoftinc.com"
+industry = "biotech_pharma"
+desc = "Electronic brachytherapy radiation therapy systems. (San Jose)"
+verified = false
+
+[[company]]
+id = 498
+name = "ACROBiosystems"
+aliases = ["acrobiosystems"]
+domain = "acrobiosystems.com"
+industry = "biotech_pharma"
+desc = "Recombinant proteins for biopharma research. (San Jose)"
+verified = false
+
+[[company]]
+id = 499
+name = "Nodexus"
+aliases = ["nodexus"]
+domain = "nodexus.com"
+industry = "biotech_pharma"
+desc = "Droplet microfluidics single-cell platform. (San Jose)"
+verified = false
+
+[[company]]
+id = 500
+name = "Specific Diagnostics"
+aliases = ["specific-diagnostics"]
+domain = "specificdx.com"
+industry = "biotech_pharma"
+desc = "Rapid antimicrobial susceptibility testing. (San Jose)"
+verified = false
+
+[[company]]
+id = 501
+name = "Collagen Solutions"
+aliases = ["collagen-solutions"]
+domain = "collagensolutions.com"
+industry = "biotech_pharma"
+desc = "Medical-grade collagen biomaterials. (San Jose)"
+verified = false
+
+[[company]]
+id = 502
+name = "Restoration Robotics"
+aliases = ["restoration-robotics"]
+domain = "restorationrobotics.com"
+industry = "biotech_pharma"
+desc = "Robotic hair transplantation systems. (San Jose)"
+verified = false
+
+[[company]]
+id = 503
+name = "Rani Therapeutics"
+aliases = ["rani-therapeutics"]
+domain = "ranitherapeutics.com"
+industry = "biotech_pharma"
+desc = "Robotic pill for oral delivery of biologics. (San Jose)"
+verified = false
+
+[[company]]
+id = 504
+name = "Applied StemCell"
+aliases = ["applied-stemcell"]
+domain = "appliedstemcell.com"
+industry = "biotech_pharma"
+desc = "Gene editing and stem cell engineering tools. (Milpitas)"
+verified = false
+
+[[company]]
+id = 505
+name = "Bigfoot Biomedical"
+aliases = ["bigfoot-biomedical"]
+domain = "bigfootbiomedical.com"
+industry = "biotech_pharma"
+desc = "Automated insulin delivery systems. (Milpitas)"
+verified = false
+
+[[company]]
+id = 506
+name = "Elixir Medical"
+aliases = ["elixir-medical"]
+domain = "elixirmedical.com"
+industry = "biotech_pharma"
+desc = "Drug-eluting coronary stent systems. (Milpitas)"
+verified = false
+
+[[company]]
+id = 507
+name = "MagArray"
+aliases = ["magarray"]
+domain = "magarray.com"
+industry = "biotech_pharma"
+desc = "Magnetic nanosensor immunoassay diagnostics. (Milpitas)"
+verified = false
+
+[[company]]
+id = 508
+name = "Clip Health"
+aliases = ["clip-health"]
+domain = "cliphealth.com"
+industry = "biotech_pharma"
+desc = "Accessible point-of-care diagnostic devices. (Milpitas)"
+verified = false
+
+[[company]]
+id = 509
+name = "Stellartech Research"
+aliases = ["stellartech-research"]
+domain = "stellartech.com"
+industry = "biotech_pharma"
+desc = "Electrosurgical generator design and engineering. (Milpitas)"
+verified = false
+

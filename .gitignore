@@ -10,8 +10,6 @@ xjobscore/discover.log
 /build/
 
 # Local scratch and generated output, never committed.
-/doc
-/docs
 /local
 /resume
 /study materials

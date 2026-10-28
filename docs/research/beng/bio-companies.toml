@@ -1,0 +1,1573 @@
+schema_version = 2
+
+# Life-science / bio-sector companies. Same schema as sources/registry/companies.toml.
+
+# industry labels (single label; classify by the vertical/problem served, not the
+# delivery model — e.g. Ramp is fintech, not enterprise_saas):
+#
+#   ai_ml                    - AI/ML models, infra, or AI-first products
+#   developer_tools          - devtools, cloud/infra, APIs, observability
+#   data_analytics           - data platforms, BI, ETL, databases
+#   cybersecurity            - security products and services
+#   enterprise_saas          - B2B software with no clearer vertical fit
+#   consumer                 - consumer apps, social, marketplaces
+#   fintech                  - payments, banking, lending, accounting
+#   crypto_web3              - blockchain, exchanges, protocols
+#   insurance                - insurtech, carriers, brokers
+#   investment               - VC, PE, asset management, trading firms
+#   healthcare               - care delivery, health tech, medical devices
+#   biotech_pharma           - drug discovery, therapeutics, lab science
+#   edtech                   - education and learning
+#   hr_recruiting            - hiring, HR, payroll, workforce tools
+#   legal_govtech            - legal tech, compliance, government software
+#   real_estate              - proptech, construction tech, housing
+#   ecommerce_retail         - online/offline retail and enabling tech
+#   marketing_adtech         - marketing, ads, sales tools, CRM
+#   media_gaming             - media, entertainment, games, creator tools
+#   travel_hospitality       - travel, lodging, restaurants, events
+#   robotics_hardware        - robots, devices, semiconductors, hardware
+#   aerospace_defense        - space, aviation, defense
+#   transportation_logistics - mobility, automotive, freight, delivery
+#   energy_climate           - energy, climate tech, sustainability
+#   manufacturing_industrial - manufacturing, industrial tech, materials
+#   agriculture_food         - agtech, food production, food brands
+#   other                    - real company, fits no label above
+#   unknown                  - not yet classified / undecidable
+
+[[company]]
+id = 1
+name = "10x Genomics"
+aliases = ["10x-genomics"]
+domain = "10xgenomics.com"
+industry = "biotech_pharma"
+desc = "Makes single-cell and spatial genomics instruments and reagents for research."
+verified = false
+
+[[company]]
+id = 2
+name = "AbbVie"
+aliases = ["abbvie"]
+domain = "abbvie.com"
+industry = "biotech_pharma"
+desc = "Global biopharma company; immunology, oncology, neuroscience, and aesthetics medicines."
+verified = false
+
+[[company]]
+id = 3
+name = "Actalent"
+aliases = ["actalent"]
+domain = "actalentservices.com"
+industry = "hr_recruiting"
+desc = "Engineering and sciences staffing and services firm spun out of Aerotek."
+verified = false
+
+[[company]]
+id = 4
+name = "Adecco Medical & Science"
+aliases = ["adecco-medical-and-science"]
+domain = "adeccousa.com"
+industry = "hr_recruiting"
+desc = "Adecco division staffing medical, scientific, and clinical roles."
+verified = false
+
+[[company]]
+id = 5
+name = "Advanced Bionics"
+aliases = ["advanced-bionics"]
+domain = "advancedbionics.com"
+industry = "healthcare"
+desc = "Makes cochlear implant systems; part of Sonova."
+verified = false
+
+[[company]]
+id = 6
+name = "Aerotek"
+aliases = ["aerotek"]
+domain = "aerotek.com"
+industry = "hr_recruiting"
+desc = "Staffing agency for industrial, manufacturing, and skilled-trades roles."
+verified = false
+
+[[company]]
+id = 7
+name = "Agilent Technologies"
+aliases = ["agilent-technologies"]
+domain = "agilent.com"
+industry = "biotech_pharma"
+desc = "Makes analytical and lab instruments, software, and consumables for life sciences."
+verified = false
+
+[[company]]
+id = 8
+name = "Alcami"
+aliases = ["alcami"]
+domain = "alcaminow.com"
+industry = "biotech_pharma"
+desc = "Contract development and manufacturing organization (CDMO) for pharmaceuticals."
+verified = false
+
+[[company]]
+id = 9
+name = "Alcon"
+aliases = ["alcon"]
+domain = "alcon.com"
+industry = "healthcare"
+desc = "Eye-care company: surgical equipment, intraocular lenses, and contact lenses."
+verified = false
+
+[[company]]
+id = 10
+name = "Allegis"
+aliases = ["allegis"]
+domain = "allegisgroup.com"
+industry = "hr_recruiting"
+desc = "Global staffing holding company; parent of Aerotek and Actalent."
+verified = false
+
+[[company]]
+id = 11
+name = "Allergan"
+aliases = ["allergan"]
+domain = "allergan.com"
+industry = "biotech_pharma"
+desc = "Pharmaceutical maker (Botox, aesthetics); acquired by AbbVie in 2020."
+verified = false
+
+[[company]]
+id = 12
+name = "Alphatec Spine"
+aliases = ["alphatec-spine"]
+domain = "atecspine.com"
+industry = "healthcare"
+desc = "Designs spine-surgery implants and navigation systems."
+verified = false
+
+[[company]]
+id = 13
+name = "Amgen"
+aliases = ["amgen"]
+domain = "amgen.com"
+industry = "biotech_pharma"
+desc = "Large biotechnology company developing biologic medicines across many disease areas."
+verified = false
+
+[[company]]
+id = 14
+name = "Ambry Genetics"
+aliases = ["ambry-genetics"]
+domain = "ambrygen.com"
+industry = "healthcare"
+desc = "Clinical genetic-testing lab for hereditary disease; acquired by Tempus."
+verified = false
+
+[[company]]
+id = 15
+name = "Arthrex"
+aliases = ["arthrex"]
+domain = "arthrex.com"
+industry = "healthcare"
+desc = "Makes orthopedic surgical devices for sports medicine and arthroscopy."
+verified = false
+
+[[company]]
+id = 16
+name = "ASGN"
+aliases = ["asgn"]
+domain = "asgn.com"
+industry = "hr_recruiting"
+desc = "IT and professional staffing and consulting holding company."
+verified = false
+
+[[company]]
+id = 17
+name = "Avidity Biosciences"
+aliases = ["avidity-biosciences"]
+domain = "aviditybiosciences.com"
+industry = "biotech_pharma"
+desc = "Develops antibody-oligonucleotide conjugate therapeutics for muscle diseases."
+verified = false
+
+[[company]]
+id = 18
+name = "Axonics"
+aliases = ["axonics"]
+domain = "axonics.com"
+industry = "healthcare"
+desc = "Makes sacral neuromodulation devices for incontinence; acquired by Boston Scientific."
+verified = false
+
+[[company]]
+id = 19
+name = "B. Braun"
+aliases = ["b-braun"]
+domain = "bbraun.com"
+industry = "healthcare"
+desc = "German medical device and pharma company: infusion therapy and surgical products."
+verified = false
+
+[[company]]
+id = 20
+name = "Bachem"
+aliases = ["bachem"]
+domain = "bachem.com"
+industry = "biotech_pharma"
+desc = "Manufactures peptides and oligonucleotides for pharmaceutical companies."
+verified = false
+
+[[company]]
+id = 21
+name = "Baxter"
+aliases = ["baxter"]
+domain = "baxter.com"
+industry = "healthcare"
+desc = "Medical products company: IV therapies, infusion pumps, and hospital products."
+verified = false
+
+[[company]]
+id = 22
+name = "Beckman Coulter"
+aliases = ["beckman-coulter"]
+domain = "beckmancoulter.com"
+industry = "healthcare"
+desc = "Makes clinical diagnostics instruments for hospitals and labs; Danaher subsidiary."
+verified = false
+
+[[company]]
+id = 23
+name = "BigHat Biosciences"
+aliases = ["bighat-biosciences"]
+domain = "bighatbio.com"
+industry = "biotech_pharma"
+desc = "Designs antibody therapeutics with a machine-learning-guided wet lab."
+verified = false
+
+[[company]]
+id = 24
+name = "Biolog"
+aliases = ["biolog"]
+domain = "biolog.com"
+industry = "biotech_pharma"
+desc = "Makes microbial identification and phenotype microarray assay systems."
+verified = false
+
+[[company]]
+id = 25
+name = "Bionano Genomics"
+aliases = ["bionano-genomics"]
+domain = "bionano.com"
+industry = "biotech_pharma"
+desc = "Makes optical genome mapping systems for cytogenetics research."
+verified = false
+
+[[company]]
+id = 26
+name = "BioMarin"
+aliases = ["biomarin"]
+domain = "biomarin.com"
+industry = "biotech_pharma"
+desc = "Develops enzyme and gene therapies for rare genetic diseases."
+verified = false
+
+[[company]]
+id = 27
+name = "Bio-Rad Laboratories"
+aliases = ["bio-rad-laboratories"]
+domain = "bio-rad.com"
+industry = "biotech_pharma"
+desc = "Makes life-science research and clinical diagnostics instruments and reagents."
+verified = false
+
+[[company]]
+id = 28
+name = "Bristol Myers Squibb"
+aliases = ["bristol-myers-squibb"]
+domain = "bms.com"
+industry = "biotech_pharma"
+desc = "Global biopharma; oncology, hematology, immunology, and cardiovascular medicines."
+verified = false
+
+[[company]]
+id = 29
+name = "Bruker"
+aliases = ["bruker"]
+domain = "bruker.com"
+industry = "biotech_pharma"
+desc = "Makes scientific instruments: mass spectrometry, NMR, and imaging systems."
+verified = false
+
+[[company]]
+id = 30
+name = "Butterfly Network"
+aliases = ["butterfly-network"]
+domain = "butterflynetwork.com"
+industry = "healthcare"
+desc = "Makes handheld chip-based ultrasound devices."
+verified = false
+
+[[company]]
+id = 31
+name = "Cardea"
+aliases = ["cardea"]
+domain = "cardeabio.com"
+industry = "biotech_pharma"
+desc = "Graphene biosensor chip developer; acquired by Paragraf in 2023."
+verified = false
+
+[[company]]
+id = 32
+name = "Catalent"
+aliases = ["catalent"]
+domain = "catalent.com"
+industry = "biotech_pharma"
+desc = "CDMO for drug formulation and manufacturing; acquired by Novo Holdings in 2024."
+verified = false
+
+[[company]]
+id = 33
+name = "Celgene"
+aliases = ["celgene"]
+domain = "celgene.com"
+industry = "biotech_pharma"
+desc = "Cancer and immunology drug maker; acquired by Bristol Myers Squibb in 2019."
+verified = false
+
+[[company]]
+id = 34
+name = "Cepheid"
+aliases = ["cepheid"]
+domain = "cepheid.com"
+industry = "healthcare"
+desc = "Makes rapid molecular diagnostic test systems; Danaher subsidiary."
+verified = false
+
+[[company]]
+id = 35
+name = "Charles River Laboratories"
+aliases = ["charles-river-laboratories"]
+domain = "criver.com"
+industry = "biotech_pharma"
+desc = "Preclinical contract research organization: lab animal models and safety testing."
+verified = false
+
+[[company]]
+id = 36
+name = "Covance"
+aliases = ["covance"]
+domain = "covance.com"
+industry = "biotech_pharma"
+desc = "Former Labcorp drug-development CRO; clinical business now operates as Fortrea."
+verified = false
+
+[[company]]
+id = 37
+name = "Crinetics Pharmaceuticals"
+aliases = ["crinetics-pharmaceuticals"]
+domain = "crinetics.com"
+industry = "biotech_pharma"
+desc = "Develops oral small-molecule drugs for endocrine diseases and tumors."
+verified = false
+
+[[company]]
+id = 38
+name = "Curia"
+aliases = ["curia"]
+domain = "curiaglobal.com"
+industry = "biotech_pharma"
+desc = "Contract research, development, and manufacturing organization for pharma; formerly AMRI."
+verified = false
+
+[[company]]
+id = 39
+name = "Danaher"
+aliases = ["danaher"]
+domain = "danaher.com"
+industry = "biotech_pharma"
+desc = "Conglomerate of life-science, diagnostics, and biotech tool companies."
+verified = false
+
+[[company]]
+id = 40
+name = "Denali Therapeutics"
+aliases = ["denali-therapeutics"]
+domain = "denalitherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops therapies that cross the blood-brain barrier for neurodegenerative diseases."
+verified = false
+
+[[company]]
+id = 41
+name = "DePuy Synthes"
+aliases = ["depuy-synthes"]
+domain = "jnjmedtech.com"
+industry = "healthcare"
+desc = "Johnson & Johnson orthopedics business: joint reconstruction, trauma, and spine."
+verified = false
+
+[[company]]
+id = 42
+name = "Digital Proteomics"
+aliases = ["digital-proteomics"]
+domain = "digitalproteomics.com"
+industry = "biotech_pharma"
+desc = "San Diego antibody-discovery company using immunoglobulin sequencing."
+verified = false
+
+[[company]]
+id = 43
+name = "Eli Lilly"
+aliases = ["eli-lilly"]
+domain = "lilly.com"
+industry = "biotech_pharma"
+desc = "Global pharma company; diabetes, obesity, oncology, and neuroscience medicines."
+verified = false
+
+[[company]]
+id = 44
+name = "Element Biosciences"
+aliases = ["element-biosciences"]
+domain = "elementbiosciences.com"
+industry = "biotech_pharma"
+desc = "Makes the AVITI benchtop DNA sequencing platform."
+verified = false
+
+[[company]]
+id = 45
+name = "Emergent BioSolutions"
+aliases = ["emergent-biosolutions"]
+domain = "emergentbiosolutions.com"
+industry = "biotech_pharma"
+desc = "Makes vaccines, Narcan, and medical countermeasures for public health threats."
+verified = false
+
+[[company]]
+id = 46
+name = "Ethicon"
+aliases = ["ethicon"]
+domain = "jnjmedtech.com"
+industry = "healthcare"
+desc = "Johnson & Johnson surgical business: sutures, staplers, and energy devices."
+verified = false
+
+[[company]]
+id = 47
+name = "Eurofins"
+aliases = ["eurofins"]
+domain = "eurofins.com"
+industry = "biotech_pharma"
+desc = "Global network of bioanalytical testing labs: pharma, food, environment."
+verified = false
+
+[[company]]
+id = 48
+name = "Exelixis"
+aliases = ["exelixis"]
+domain = "exelixis.com"
+industry = "biotech_pharma"
+desc = "Oncology-focused biotech; developer of cabozantinib (Cabometyx)."
+verified = false
+
+[[company]]
+id = 49
+name = "Fate Therapeutics"
+aliases = ["fate-therapeutics"]
+domain = "fatetherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops iPSC-derived off-the-shelf NK and T-cell cancer immunotherapies."
+verified = false
+
+[[company]]
+id = 50
+name = "Fortrea"
+aliases = ["fortrea"]
+domain = "fortrea.com"
+industry = "biotech_pharma"
+desc = "Clinical contract research organization spun off from Labcorp."
+verified = false
+
+[[company]]
+id = 51
+name = "Freenome"
+aliases = ["freenome"]
+domain = "freenome.com"
+industry = "healthcare"
+desc = "Develops blood tests for early cancer detection using multiomics."
+verified = false
+
+[[company]]
+id = 52
+name = "GE HealthCare"
+aliases = ["ge-healthcare"]
+domain = "gehealthcare.com"
+industry = "healthcare"
+desc = "Medical imaging, ultrasound, patient monitoring, and diagnostics company."
+verified = false
+
+[[company]]
+id = 53
+name = "Gen-Probe"
+aliases = ["gen-probe"]
+domain = "hologic.com"
+industry = "healthcare"
+desc = "Molecular diagnostics maker; acquired by Hologic in 2012."
+verified = false
+
+[[company]]
+id = 54
+name = "Gilead Sciences"
+aliases = ["gilead-sciences"]
+domain = "gilead.com"
+industry = "biotech_pharma"
+desc = "Biopharma company; antivirals for HIV and hepatitis, plus oncology."
+verified = false
+
+[[company]]
+id = 55
+name = "Ginkgo Bioworks"
+aliases = ["ginkgo-bioworks"]
+domain = "ginkgobioworks.com"
+industry = "biotech_pharma"
+desc = "Cell programming and biosecurity platform for synthetic biology."
+verified = false
+
+[[company]]
+id = 56
+name = "Glaukos"
+aliases = ["glaukos"]
+domain = "glaukos.com"
+industry = "healthcare"
+desc = "Makes micro-scale surgical devices and therapies for glaucoma and corneal disease."
+verified = false
+
+[[company]]
+id = 57
+name = "GRAIL"
+aliases = ["grail"]
+domain = "grail.com"
+industry = "healthcare"
+desc = "Developer of the Galleri multi-cancer early-detection blood test."
+verified = false
+
+[[company]]
+id = 58
+name = "Greenhouse"
+aliases = ["greenhouse"]
+domain = "greenhouse.com"
+industry = "hr_recruiting"
+desc = "Applicant tracking system and structured-hiring software."
+verified = false
+
+[[company]]
+id = 59
+name = "Grifols"
+aliases = ["grifols"]
+domain = "grifols.com"
+industry = "biotech_pharma"
+desc = "Spanish maker of plasma-derived medicines and transfusion diagnostics."
+verified = false
+
+[[company]]
+id = 60
+name = "Guardant Health"
+aliases = ["guardant-health"]
+domain = "guardanthealth.com"
+industry = "healthcare"
+desc = "Liquid biopsy company: blood tests for cancer profiling and screening."
+verified = false
+
+[[company]]
+id = 61
+name = "Halozyme Therapeutics"
+aliases = ["halozyme-therapeutics"]
+domain = "halozyme.com"
+industry = "biotech_pharma"
+desc = "Licenses ENHANZE subcutaneous drug-delivery technology to pharma companies."
+verified = false
+
+[[company]]
+id = 62
+name = "Human Longevity"
+aliases = ["human-longevity"]
+domain = "humanlongevity.com"
+industry = "healthcare"
+desc = "Genomics-driven preventive health and longevity clinic company."
+verified = false
+
+[[company]]
+id = 63
+name = "ICU Medical"
+aliases = ["icu-medical"]
+domain = "icumed.com"
+industry = "healthcare"
+desc = "Makes infusion systems, IV consumables, and vascular access devices."
+verified = false
+
+[[company]]
+id = 64
+name = "ICON plc"
+aliases = ["icon-plc"]
+domain = "iconplc.com"
+industry = "biotech_pharma"
+desc = "Global contract research organization running clinical trials for pharma."
+verified = false
+
+[[company]]
+id = 65
+name = "iCIMS"
+aliases = ["icims"]
+domain = "icims.com"
+industry = "hr_recruiting"
+desc = "Enterprise talent acquisition and applicant tracking software."
+verified = false
+
+[[company]]
+id = 66
+name = "Inari Medical"
+aliases = ["inari-medical"]
+domain = "inarimedical.com"
+industry = "healthcare"
+desc = "Makes mechanical thrombectomy devices for blood clots; acquired by Stryker."
+verified = false
+
+[[company]]
+id = 67
+name = "Insight Global"
+aliases = ["insight-global"]
+domain = "insightglobal.com"
+industry = "hr_recruiting"
+desc = "Staffing company for IT, healthcare, and professional roles."
+verified = false
+
+[[company]]
+id = 68
+name = "Integrated Resources"
+aliases = ["integrated-resources"]
+domain = "irionline.com"
+industry = "hr_recruiting"
+desc = "New Jersey staffing agency for clinical, scientific, and IT roles."
+verified = false
+
+[[company]]
+id = 69
+name = "Insitro"
+aliases = ["insitro"]
+domain = "insitro.com"
+industry = "biotech_pharma"
+desc = "Machine-learning-driven drug discovery company."
+verified = false
+
+[[company]]
+id = 70
+name = "Integra LifeSciences"
+aliases = ["integra-lifesciences"]
+domain = "integralife.com"
+industry = "healthcare"
+desc = "Makes neurosurgery products and regenerative tissue technologies."
+verified = false
+
+[[company]]
+id = 71
+name = "Intuitive Surgical"
+aliases = ["intuitive-surgical"]
+domain = "intuitive.com"
+industry = "healthcare"
+desc = "Makes the da Vinci surgical robot and Ion lung-biopsy system."
+verified = false
+
+[[company]]
+id = 72
+name = "Ionis Pharmaceuticals"
+aliases = ["ionis-pharmaceuticals"]
+domain = "ionis.com"
+industry = "biotech_pharma"
+desc = "Pioneer of antisense oligonucleotide RNA-targeted medicines."
+verified = false
+
+[[company]]
+id = 73
+name = "iRhythm Technologies"
+aliases = ["irhythm-technologies"]
+domain = "irhythmtech.com"
+industry = "healthcare"
+desc = "Makes the Zio wearable cardiac rhythm monitoring service."
+verified = false
+
+[[company]]
+id = 74
+name = "IQVIA"
+aliases = ["iqvia"]
+domain = "iqvia.com"
+industry = "biotech_pharma"
+desc = "Clinical research services and healthcare data analytics giant."
+verified = false
+
+[[company]]
+id = 75
+name = "Janssen R&D"
+aliases = ["janssen-randd"]
+domain = "janssen.com"
+industry = "biotech_pharma"
+desc = "Johnson & Johnson pharmaceutical R&D arm, now J&J Innovative Medicine."
+verified = false
+
+[[company]]
+id = 76
+name = "Johnson & Johnson MedTech"
+aliases = ["johnson-and-johnson-medtech"]
+domain = "jnjmedtech.com"
+industry = "healthcare"
+desc = "J&J medical device segment: surgery, orthopedics, cardiovascular, vision."
+verified = false
+
+[[company]]
+id = 77
+name = "Kelly Science & Clinical"
+aliases = ["kelly-science-and-clinical"]
+domain = "kellyservices.com"
+industry = "hr_recruiting"
+desc = "Kelly Services division staffing scientific and clinical research roles."
+verified = false
+
+[[company]]
+id = 78
+name = "Kforce"
+aliases = ["kforce"]
+domain = "kforce.com"
+industry = "hr_recruiting"
+desc = "Technology and finance/accounting staffing firm."
+verified = false
+
+[[company]]
+id = 79
+name = "Kite Pharma"
+aliases = ["kite-pharma"]
+domain = "kitepharma.com"
+industry = "biotech_pharma"
+desc = "Gilead subsidiary making CAR T-cell cancer therapies (Yescarta, Tecartus)."
+verified = false
+
+[[company]]
+id = 80
+name = "Lab Support"
+aliases = ["lab-support"]
+domain = "unknown"
+industry = "hr_recruiting"
+desc = "Former On Assignment/ASGN scientific staffing brand; standalone website no longer online."
+verified = false
+
+[[company]]
+id = 81
+name = "Labcorp Drug Development"
+aliases = ["labcorp-drug-development"]
+domain = "labcorp.com"
+industry = "biotech_pharma"
+desc = "Labcorp former CRO division; clinical development spun off as Fortrea."
+verified = false
+
+[[company]]
+id = 82
+name = "Leica Biosystems"
+aliases = ["leica-biosystems"]
+domain = "leicabiosystems.com"
+industry = "healthcare"
+desc = "Makes anatomic pathology and cancer-diagnostics workflow instruments; Danaher subsidiary."
+verified = false
+
+[[company]]
+id = 83
+name = "Lever"
+aliases = ["lever"]
+domain = "lever.co"
+industry = "hr_recruiting"
+desc = "Recruiting and ATS software; acquired by Employ Inc. in 2022."
+verified = false
+
+[[company]]
+id = 84
+name = "Lonza"
+aliases = ["lonza"]
+domain = "lonza.com"
+industry = "biotech_pharma"
+desc = "Swiss contract development and manufacturing organization for biologics."
+verified = false
+
+[[company]]
+id = 85
+name = "Masimo"
+aliases = ["masimo"]
+domain = "masimo.com"
+industry = "healthcare"
+desc = "Makes pulse oximetry and noninvasive patient-monitoring technology."
+verified = false
+
+[[company]]
+id = 86
+name = "Medix"
+aliases = ["medix"]
+domain = "medixteam.com"
+industry = "hr_recruiting"
+desc = "Staffing agency for healthcare, scientific, and IT roles."
+verified = false
+
+[[company]]
+id = 87
+name = "Medpace"
+aliases = ["medpace"]
+domain = "medpace.com"
+industry = "biotech_pharma"
+desc = "Full-service clinical CRO for small and mid-size biotech."
+verified = false
+
+[[company]]
+id = 88
+name = "Nanome"
+aliases = ["nanome"]
+domain = "nanome.ai"
+industry = "biotech_pharma"
+desc = "VR software for molecular design and drug-discovery collaboration."
+verified = false
+
+[[company]]
+id = 89
+name = "Natera"
+aliases = ["natera"]
+domain = "natera.com"
+industry = "healthcare"
+desc = "Cell-free DNA testing: prenatal screening, oncology, and transplant monitoring."
+verified = false
+
+[[company]]
+id = 90
+name = "Neuralink"
+aliases = ["neuralink"]
+domain = "neuralink.com"
+industry = "healthcare"
+desc = "Develops implantable brain-computer interfaces."
+verified = false
+
+[[company]]
+id = 91
+name = "Neurocrine Biosciences"
+aliases = ["neurocrine-biosciences"]
+domain = "neurocrine.com"
+industry = "biotech_pharma"
+desc = "Neuroscience pharma; movement-disorder and endocrine drugs including Ingrezza."
+verified = false
+
+[[company]]
+id = 92
+name = "Nevro"
+aliases = ["nevro"]
+domain = "nevro.com"
+industry = "healthcare"
+desc = "Makes spinal cord stimulation for chronic pain; acquired by Globus Medical."
+verified = false
+
+[[company]]
+id = 93
+name = "Novo Holdings"
+aliases = ["novo-holdings"]
+domain = "novoholdings.dk"
+industry = "investment"
+desc = "Investment arm of the Novo Nordisk Foundation; major life-science investor."
+verified = false
+
+[[company]]
+id = 94
+name = "Novartis"
+aliases = ["novartis"]
+domain = "novartis.com"
+industry = "biotech_pharma"
+desc = "Swiss global pharmaceutical company."
+verified = false
+
+[[company]]
+id = 95
+name = "Olympus"
+aliases = ["olympus"]
+domain = "olympus-global.com"
+industry = "healthcare"
+desc = "Japanese maker of endoscopes and medical imaging and surgical devices."
+verified = false
+
+[[company]]
+id = 96
+name = "Parexel"
+aliases = ["parexel"]
+domain = "parexel.com"
+industry = "biotech_pharma"
+desc = "Global clinical research organization for drug development."
+verified = false
+
+[[company]]
+id = 97
+name = "Penumbra"
+aliases = ["penumbra"]
+domain = "penumbrainc.com"
+industry = "healthcare"
+desc = "Makes neurovascular and vascular thrombectomy and embolization devices."
+verified = false
+
+[[company]]
+id = 98
+name = "PerkinElmer / Revvity"
+aliases = ["perkinelmer-revvity"]
+domain = "revvity.com"
+industry = "biotech_pharma"
+desc = "Life-science tools and diagnostics company; PerkinElmer's renamed life-science business."
+verified = false
+
+[[company]]
+id = 99
+name = "Pfizer"
+aliases = ["pfizer"]
+domain = "pfizer.com"
+industry = "biotech_pharma"
+desc = "Global pharmaceutical company; vaccines, oncology, and internal medicine."
+verified = false
+
+[[company]]
+id = 100
+name = "Philips Healthcare"
+aliases = ["philips-healthcare"]
+domain = "philips.com"
+industry = "healthcare"
+desc = "Philips health-technology business: imaging, monitoring, and personal health."
+verified = false
+
+[[company]]
+id = 101
+name = "Planet Pharma"
+aliases = ["planet-pharma"]
+domain = "planet-pharma.com"
+industry = "hr_recruiting"
+desc = "Pharmaceutical and life-science staffing agency."
+verified = false
+
+[[company]]
+id = 102
+name = "PPD"
+aliases = ["ppd"]
+domain = "ppd.com"
+industry = "biotech_pharma"
+desc = "Clinical research organization; part of Thermo Fisher Scientific."
+verified = false
+
+[[company]]
+id = 103
+name = "Precision for Medicine"
+aliases = ["precision-for-medicine"]
+domain = "precisionformedicine.com"
+industry = "biotech_pharma"
+desc = "Clinical research and manufacturing services for precision-medicine trials."
+verified = false
+
+[[company]]
+id = 104
+name = "Procept BioRobotics"
+aliases = ["procept-biorobotics"]
+domain = "procept-biorobotics.com"
+industry = "healthcare"
+desc = "Makes the AquaBeam robotic waterjet therapy system for BPH."
+verified = false
+
+[[company]]
+id = 105
+name = "ProPharma Group"
+aliases = ["propharma-group"]
+domain = "propharmagroup.com"
+industry = "biotech_pharma"
+desc = "Regulatory, compliance, and pharmacovigilance consulting for life sciences."
+verified = false
+
+[[company]]
+id = 106
+name = "QuidelOrtho"
+aliases = ["quidelortho"]
+domain = "quidelortho.com"
+industry = "healthcare"
+desc = "Diagnostics company: rapid tests and clinical-lab immunoassay systems."
+verified = false
+
+[[company]]
+id = 107
+name = "Randstad Life Sciences"
+aliases = ["randstad-life-sciences"]
+domain = "randstadusa.com"
+industry = "hr_recruiting"
+desc = "Randstad division staffing life-science and pharma roles."
+verified = false
+
+[[company]]
+id = 108
+name = "Real Staffing"
+aliases = ["real-staffing"]
+domain = "realstaffing.com"
+industry = "hr_recruiting"
+desc = "Life-science staffing brand within SThree."
+verified = false
+
+[[company]]
+id = 109
+name = "Roche Molecular / Diagnostics"
+aliases = ["roche-molecular-diagnostics"]
+domain = "diagnostics.roche.com"
+industry = "healthcare"
+desc = "Roche diagnostics division: molecular, tissue, and point-of-care testing."
+verified = false
+
+[[company]]
+id = 110
+name = "Sartorius"
+aliases = ["sartorius"]
+domain = "sartorius.com"
+industry = "biotech_pharma"
+desc = "German supplier of bioprocess equipment and lab instruments."
+verified = false
+
+[[company]]
+id = 111
+name = "Shockwave Medical"
+aliases = ["shockwave-medical"]
+domain = "shockwavemedical.com"
+industry = "healthcare"
+desc = "Makes intravascular lithotripsy for calcified artery disease; part of J&J."
+verified = false
+
+[[company]]
+id = 112
+name = "Siemens Healthineers"
+aliases = ["siemens-healthineers"]
+domain = "siemens-healthineers.com"
+industry = "healthcare"
+desc = "Medical imaging, lab diagnostics, and cancer-care (Varian) company."
+verified = false
+
+[[company]]
+id = 113
+name = "Singular Genomics"
+aliases = ["singular-genomics"]
+domain = "singulargenomics.com"
+industry = "biotech_pharma"
+desc = "Makes benchtop NGS sequencing and spatial multiomics instruments."
+verified = false
+
+[[company]]
+id = 114
+name = "Smith+Nephew"
+aliases = ["smith-nephew"]
+domain = "smith-nephew.com"
+industry = "healthcare"
+desc = "British maker of orthopedics, sports medicine, and wound-care products."
+verified = false
+
+[[company]]
+id = 115
+name = "SThree"
+aliases = ["sthree"]
+domain = "sthree.com"
+industry = "hr_recruiting"
+desc = "UK STEM-specialist staffing group; brands include Real and Progressive."
+verified = false
+
+[[company]]
+id = 116
+name = "Syneos"
+aliases = ["syneos"]
+domain = "syneoshealth.com"
+industry = "biotech_pharma"
+desc = "Clinical research organization with integrated commercial services."
+verified = false
+
+[[company]]
+id = 117
+name = "System One"
+aliases = ["system-one"]
+domain = "systemone.com"
+industry = "hr_recruiting"
+desc = "Staffing and workforce solutions for engineering, scientific, and IT roles."
+verified = false
+
+[[company]]
+id = 118
+name = "Takeda"
+aliases = ["takeda"]
+domain = "takeda.com"
+industry = "biotech_pharma"
+desc = "Japanese global biopharmaceutical company."
+verified = false
+
+[[company]]
+id = 119
+name = "Tandem Diabetes Care"
+aliases = ["tandem-diabetes-care"]
+domain = "tandemdiabetes.com"
+industry = "healthcare"
+desc = "Makes t:slim insulin pumps and diabetes-management software."
+verified = false
+
+[[company]]
+id = 120
+name = "Truvian"
+aliases = ["truvian"]
+domain = "truvianhealth.com"
+industry = "healthcare"
+desc = "Developing automated benchtop blood-testing systems."
+verified = false
+
+[[company]]
+id = 121
+name = "Twist Bioscience"
+aliases = ["twist-bioscience"]
+domain = "twistbioscience.com"
+industry = "biotech_pharma"
+desc = "Silicon-based DNA synthesis: genes, oligo pools, NGS panels, antibody libraries."
+verified = false
+
+[[company]]
+id = 122
+name = "Ultragenyx"
+aliases = ["ultragenyx"]
+domain = "ultragenyx.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for rare and ultrarare genetic diseases."
+verified = false
+
+[[company]]
+id = 123
+name = "Veeva Systems"
+aliases = ["veeva-systems"]
+domain = "veeva.com"
+industry = "biotech_pharma"
+desc = "Cloud software (CRM, regulatory, quality) for the life-sciences industry."
+verified = false
+
+[[company]]
+id = 124
+name = "Verily"
+aliases = ["verily"]
+domain = "verily.com"
+industry = "healthcare"
+desc = "Alphabet precision-health company: data platforms, devices, and research."
+verified = false
+
+[[company]]
+id = 125
+name = "Vertex Pharmaceuticals"
+aliases = ["vertex-pharmaceuticals"]
+domain = "vrtx.com"
+industry = "biotech_pharma"
+desc = "Develops cystic fibrosis therapies plus pain and gene-editing medicines."
+verified = false
+
+[[company]]
+id = 126
+name = "Vir Biotechnology"
+aliases = ["vir-biotechnology"]
+domain = "vir.bio"
+industry = "biotech_pharma"
+desc = "Develops antibody and T-cell therapies for infectious disease and cancer."
+verified = false
+
+[[company]]
+id = 127
+name = "Waters Corporation"
+aliases = ["waters-corporation"]
+domain = "waters.com"
+industry = "biotech_pharma"
+desc = "Makes liquid chromatography and mass spectrometry instruments."
+verified = false
+
+[[company]]
+id = 128
+name = "WuXi AppTec"
+aliases = ["wuxi-apptec"]
+domain = "wuxiapptec.com"
+industry = "biotech_pharma"
+desc = "Chinese contract research and manufacturing platform for small-molecule drugs."
+verified = false
+
+[[company]]
+id = 129
+name = "WuXi Biologics"
+aliases = ["wuxi-biologics"]
+domain = "wuxibiologics.com"
+industry = "biotech_pharma"
+desc = "Chinese CDMO for biologics discovery, development, and manufacturing."
+verified = false
+
+[[company]]
+id = 130
+name = "Yoh Life Sciences"
+aliases = ["yoh-life-sciences"]
+domain = "yoh.com"
+industry = "hr_recruiting"
+desc = "Yoh staffing division for life-science and clinical roles."
+verified = false
+
+[[company]]
+id = 131
+name = "Zimmer Biomet"
+aliases = ["zimmer-biomet"]
+domain = "zimmerbiomet.com"
+industry = "healthcare"
+desc = "Makes orthopedic implants: knees, hips, sports medicine, and ROSA robotics."
+verified = false
+
+[[company]]
+id = 132
+name = "Zymergen"
+aliases = ["zymergen"]
+domain = "zymergen.com"
+industry = "biotech_pharma"
+desc = "Synthetic-biology materials company; acquired by Ginkgo Bioworks and wound down."
+verified = false
+[[company]]
+id = 133
+name = "Illumina"
+aliases = ["illumina"]
+domain = "illumina.com"
+industry = "biotech_pharma"
+desc = "Makes DNA sequencing systems and reagents; genomics market leader."
+verified = false
+
+[[company]]
+id = 134
+name = "Dexcom"
+aliases = ["dexcom"]
+domain = "dexcom.com"
+industry = "healthcare"
+desc = "Makes continuous glucose monitoring systems for diabetes."
+verified = false
+
+[[company]]
+id = 135
+name = "ResMed"
+aliases = ["resmed"]
+domain = "resmed.com"
+industry = "healthcare"
+desc = "Makes CPAP machines and cloud-connected respiratory care devices."
+verified = false
+
+[[company]]
+id = 136
+name = "Becton Dickinson"
+aliases = ["becton-dickinson"]
+domain = "bd.com"
+industry = "healthcare"
+desc = "Medical technology giant: syringes, infusion, diagnostics, and biosciences instruments."
+verified = false
+
+[[company]]
+id = 137
+name = "Thermo Fisher Scientific"
+aliases = ["thermo-fisher-scientific"]
+domain = "thermofisher.com"
+industry = "biotech_pharma"
+desc = "World's largest life-science instruments, reagents, and services company."
+verified = false
+
+[[company]]
+id = 138
+name = "Hologic"
+aliases = ["hologic"]
+domain = "hologic.com"
+industry = "healthcare"
+desc = "Women's health company: molecular diagnostics, breast imaging, and surgical products."
+verified = false
+
+[[company]]
+id = 139
+name = "Abbott"
+aliases = ["abbott"]
+domain = "abbott.com"
+industry = "healthcare"
+desc = "Diversified healthcare company: diagnostics, medical devices, and nutrition."
+verified = false
+
+[[company]]
+id = 140
+name = "Boston Scientific"
+aliases = ["boston-scientific"]
+domain = "bostonscientific.com"
+industry = "healthcare"
+desc = "Makes cardiovascular, endoscopy, and neuromodulation medical devices."
+verified = false
+
+[[company]]
+id = 141
+name = "Stryker"
+aliases = ["stryker"]
+domain = "stryker.com"
+industry = "healthcare"
+desc = "Makes orthopedic implants, surgical equipment, and neurovascular devices."
+verified = false
+
+[[company]]
+id = 142
+name = "Medtronic"
+aliases = ["medtronic"]
+domain = "medtronic.com"
+industry = "healthcare"
+desc = "World's largest medical device company: cardiac, surgical, neuro, diabetes."
+verified = false
+
+[[company]]
+id = 143
+name = "Genentech"
+aliases = ["genentech"]
+domain = "gene.com"
+industry = "biotech_pharma"
+desc = "Pioneering biotech; Roche's US biologics R&D and manufacturing arm."
+verified = false
+
+[[company]]
+id = 144
+name = "Bayer"
+aliases = ["bayer"]
+domain = "bayer.com"
+industry = "biotech_pharma"
+desc = "German pharma and crop-science conglomerate; Berkeley biologics manufacturing site."
+verified = false
+
+[[company]]
+id = 145
+name = "Edwards Lifesciences"
+aliases = ["edwards-lifesciences"]
+domain = "edwards.com"
+industry = "healthcare"
+desc = "Makes heart valves and hemodynamic monitoring systems."
+verified = false
+
+[[company]]
+id = 146
+name = "Calico"
+aliases = ["calico"]
+domain = "calicolabs.com"
+industry = "biotech_pharma"
+desc = "Alphabet-backed research company targeting aging biology and lifespan."
+verified = false
+
+[[company]]
+id = 147
+name = "Qualcomm"
+aliases = ["qualcomm"]
+domain = "qualcomm.com"
+industry = "robotics_hardware"
+desc = "Designs smartphone and wireless chips; San Diego semiconductor giant."
+verified = false
+
+[[company]]
+id = 148
+name = "Apple"
+aliases = ["apple"]
+domain = "apple.com"
+industry = "robotics_hardware"
+desc = "Consumer electronics maker; health sensing via Apple Watch teams."
+verified = false
+
+[[company]]
+id = 149
+name = "Salk Institute for Biological Studies"
+aliases = ["salk-institute-for-biological-studies"]
+domain = "salk.edu"
+industry = "biotech_pharma"
+desc = "Nonprofit basic-research institute: neuroscience, cancer, aging, plant biology."
+verified = false
+
+[[company]]
+id = 150
+name = "Scripps Research"
+aliases = ["scripps-research"]
+domain = "scripps.edu"
+industry = "biotech_pharma"
+desc = "Nonprofit biomedical research institute: chemistry, immunology, drug discovery."
+verified = false
+
+[[company]]
+id = 151
+name = "Sanford Burnham Prebys"
+aliases = ["sanford-burnham-prebys"]
+domain = "sbpdiscovery.org"
+industry = "biotech_pharma"
+desc = "Nonprofit medical research institute: cancer, metabolism, drug discovery."
+verified = false
+
+[[company]]
+id = 152
+name = "La Jolla Institute for Immunology"
+aliases = ["la-jolla-institute-for-immunology"]
+domain = "lji.org"
+industry = "biotech_pharma"
+desc = "Nonprofit research institute focused on immunology and vaccines."
+verified = false
+
+[[company]]
+id = 153
+name = "J. Craig Venter Institute"
+aliases = ["j-craig-venter-institute"]
+domain = "jcvi.org"
+industry = "biotech_pharma"
+desc = "Nonprofit genomics and synthetic-biology research institute."
+verified = false
+
+[[company]]
+id = 154
+name = "Rady Children's Institute for Genomic Medicine"
+aliases = ["rady-childrens-institute-for-genomic-medicine"]
+domain = "radygenomics.org"
+industry = "healthcare"
+desc = "Clinical institute doing rapid whole-genome sequencing for sick children."
+verified = false
+
+[[company]]
+id = 155
+name = "Chan Zuckerberg Biohub"
+aliases = ["chan-zuckerberg-biohub"]
+domain = "czbiohub.org"
+industry = "biotech_pharma"
+desc = "Nonprofit research network funded by the Chan Zuckerberg Initiative."
+verified = false
+
+[[company]]
+id = 156
+name = "Gladstone Institutes"
+aliases = ["gladstone-institutes"]
+domain = "gladstone.org"
+industry = "biotech_pharma"
+desc = "Nonprofit biomedical research institute, UCSF-affiliated: cardiovascular, neuro, virology."
+verified = false
+
+[[company]]
+id = 157
+name = "Lawrence Berkeley National Laboratory"
+aliases = ["lawrence-berkeley-national-laboratory"]
+domain = "lbl.gov"
+industry = "energy_climate"
+desc = "DOE national lab: energy, materials, and biosciences including Joint Genome Institute."
+verified = false
+
+[[company]]
+id = 158
+name = "UC San Diego"
+aliases = ["uc-san-diego"]
+domain = "ucsd.edu"
+industry = "edtech"
+desc = "Public research university; bioengineering department and research labs."
+verified = false
+
+[[company]]
+id = 159
+name = "UC San Diego Health"
+aliases = ["uc-san-diego-health"]
+domain = "health.ucsd.edu"
+industry = "healthcare"
+desc = "Academic medical center of UC San Diego, including Moores Cancer Center."
+verified = false
+
+[[company]]
+id = 160
+name = "Scripps Health"
+aliases = ["scripps-health"]
+domain = "scripps.org"
+industry = "healthcare"
+desc = "San Diego nonprofit hospital system."
+verified = false
+
+[[company]]
+id = 161
+name = "Sharp HealthCare"
+aliases = ["sharp-healthcare"]
+domain = "sharp.com"
+industry = "healthcare"
+desc = "San Diego's largest health system."
+verified = false
+
+[[company]]
+id = 162
+name = "Kaiser Permanente"
+aliases = ["kaiser-permanente"]
+domain = "kp.org"
+industry = "healthcare"
+desc = "Integrated managed-care health system and hospital network."
+verified = false
+
+[[company]]
+id = 163
+name = "Rady Children's Hospital"
+aliases = ["rady-childrens-hospital"]
+domain = "rchsd.org"
+industry = "healthcare"
+desc = "Pediatric hospital serving San Diego."
+verified = false
+
+[[company]]
+id = 164
+name = "VA San Diego Healthcare System"
+aliases = ["va-san-diego-healthcare-system"]
+domain = "va.gov"
+industry = "healthcare"
+desc = "Federal veterans hospital and clinics in San Diego."
+verified = false
+
+[[company]]
+id = 165
+name = "Naval Medical Center San Diego"
+aliases = ["naval-medical-center-san-diego"]
+domain = "sandiego.tricare.mil"
+industry = "healthcare"
+desc = "US Navy military hospital (Balboa) in San Diego."
+verified = false
+
+[[company]]
+id = 166
+name = "City of Hope"
+aliases = ["city-of-hope"]
+domain = "cityofhope.org"
+industry = "healthcare"
+desc = "Cancer research and treatment center near Los Angeles."
+verified = false
+
+[[company]]
+id = 167
+name = "Cedars-Sinai"
+aliases = ["cedars-sinai"]
+domain = "cedars-sinai.org"
+industry = "healthcare"
+desc = "Los Angeles academic medical center."
+verified = false
+
+[[company]]
+id = 168
+name = "UCLA Health"
+aliases = ["ucla-health"]
+domain = "uclahealth.org"
+industry = "healthcare"
+desc = "Academic medical center of UCLA."
+verified = false
+
+[[company]]
+id = 169
+name = "Stanford Medicine"
+aliases = ["stanford-medicine"]
+domain = "med.stanford.edu"
+industry = "healthcare"
+desc = "Stanford's academic medical enterprise: hospitals and school of medicine."
+verified = false
+
+[[company]]
+id = 170
+name = "UCSF"
+aliases = ["ucsf"]
+domain = "ucsf.edu"
+industry = "healthcare"
+desc = "University of California health-sciences campus and medical center."
+verified = false
+
+[[company]]
+id = 171
+name = "Sutter Health"
+aliases = ["sutter-health"]
+domain = "sutterhealth.org"
+industry = "healthcare"
+desc = "Northern California nonprofit health system."
+verified = false

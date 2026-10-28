@@ -1,0 +1,611 @@
+schema_version = 2
+
+# San Diego biotech/pharma companies compiled from general knowledge + web search
+# (2026-08-12). Not merged into companies.toml and not verified against the
+# canonical Postgres company table — IDs here are provisional (starting after
+# the last companies.toml id, 3618) and would need reconciliation before use
+# by feader.py. domain = "unknown" where a current/authoritative domain could
+# not be confirmed (often legacy companies that were acquired or dissolved).
+
+[[company]]
+id = 3619
+name = "Illumina"
+aliases = ["illumina"]
+domain = "illumina.com"
+industry = "biotech_pharma"
+desc = "Makes DNA sequencing and genomic analysis systems; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3620
+name = "Neurocrine Biosciences"
+aliases = ["neurocrine-biosciences", "neurocrine"]
+domain = "neurocrine.com"
+industry = "biotech_pharma"
+desc = "Develops treatments for neurological, endocrine, and psychiatric disorders; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3621
+name = "Ionis Pharmaceuticals"
+aliases = ["ionis-pharmaceuticals", "ionis"]
+domain = "ionispharma.com"
+industry = "biotech_pharma"
+desc = "Develops RNA-targeted therapeutics; headquartered in Carlsbad, San Diego County."
+verified = false
+
+[[company]]
+id = 3622
+name = "Gilead Sciences"
+aliases = ["gilead-sciences", "gilead"]
+domain = "gilead.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical company with a significant San Diego research presence; HQ in Foster City, CA."
+verified = false
+
+[[company]]
+id = 3623
+name = "Vertex Pharmaceuticals"
+aliases = ["vertex-pharmaceuticals", "vertex"]
+domain = "vrtx.com"
+industry = "biotech_pharma"
+desc = "Runs an R&D site in San Diego/La Jolla; HQ in Boston."
+verified = false
+
+[[company]]
+id = 3624
+name = "Novartis"
+aliases = ["novartis", "genomics-institute-of-the-novartis-research-foundation", "gnf"]
+domain = "novartis.com"
+industry = "biotech_pharma"
+desc = "Operates the Genomics Institute of the Novartis Research Foundation (GNF) in Torrey Pines."
+verified = false
+
+[[company]]
+id = 3625
+name = "Pfizer"
+aliases = ["pfizer", "pfizer-la-jolla"]
+domain = "pfizer.com"
+industry = "biotech_pharma"
+desc = "Operates an R&D site in La Jolla, San Diego."
+verified = false
+
+[[company]]
+id = 3626
+name = "Bristol Myers Squibb"
+aliases = ["bristol-myers-squibb", "bms"]
+domain = "bms.com"
+industry = "biotech_pharma"
+desc = "Operates a biologics manufacturing and R&D site in San Diego (legacy Celgene)."
+verified = false
+
+[[company]]
+id = 3627
+name = "Eli Lilly"
+aliases = ["eli-lilly", "lilly"]
+domain = "lilly.com"
+industry = "biotech_pharma"
+desc = "Operates the Lilly Biotechnology Center in San Diego."
+verified = false
+
+[[company]]
+id = 3628
+name = "Takeda"
+aliases = ["takeda", "takeda-san-diego"]
+domain = "takeda.com"
+industry = "biotech_pharma"
+desc = "Operates a San Diego R&D site."
+verified = false
+
+[[company]]
+id = 3629
+name = "Johnson & Johnson Innovation JLABS"
+aliases = ["johnson-johnson-innovation-jlabs", "jlabs-san-diego"]
+domain = "jnjinnovation.com"
+industry = "biotech_pharma"
+desc = "Runs a life sciences startup incubator (JLABS) in San Diego."
+verified = false
+
+[[company]]
+id = 3630
+name = "Regeneron"
+aliases = ["regeneron"]
+domain = "regeneron.com"
+industry = "biotech_pharma"
+desc = "Operates a San Diego research site."
+verified = false
+
+[[company]]
+id = 3631
+name = "Genentech"
+aliases = ["genentech"]
+domain = "gene.com"
+industry = "biotech_pharma"
+desc = "Roche subsidiary with a San Diego presence."
+verified = false
+
+[[company]]
+id = 3632
+name = "Thermo Fisher Scientific"
+aliases = ["thermo-fisher-scientific", "thermo-fisher"]
+domain = "thermofisher.com"
+industry = "biotech_pharma"
+desc = "Operates major campuses in Carlsbad and Sorrento Valley."
+verified = false
+
+[[company]]
+id = 3633
+name = "Agilent Technologies"
+aliases = ["agilent-technologies", "agilent"]
+domain = "agilent.com"
+industry = "biotech_pharma"
+desc = "Life sciences and diagnostics tools company with San Diego operations."
+verified = false
+
+[[company]]
+id = 3634
+name = "Abbott Laboratories"
+aliases = ["abbott-laboratories", "abbott"]
+domain = "abbott.com"
+industry = "biotech_pharma"
+desc = "Diagnostics and medical device maker with San Diego operations."
+verified = false
+
+[[company]]
+id = 3635
+name = "Acadia Pharmaceuticals"
+aliases = ["acadia-pharmaceuticals", "acadia"]
+domain = "acadia-pharm.com"
+industry = "biotech_pharma"
+desc = "Develops treatments for central nervous system disorders; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3636
+name = "Halozyme Therapeutics"
+aliases = ["halozyme-therapeutics", "halozyme"]
+domain = "halozyme.com"
+industry = "biotech_pharma"
+desc = "Develops drug-delivery technology; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3637
+name = "Ligand Pharmaceuticals"
+aliases = ["ligand-pharmaceuticals", "ligand"]
+domain = "ligand.com"
+industry = "biotech_pharma"
+desc = "Biopharmaceutical royalty/licensing company; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3638
+name = "Fate Therapeutics"
+aliases = ["fate-therapeutics"]
+domain = "fatetherapeutics.com"
+industry = "biotech_pharma"
+desc = "Develops cell-based cancer and immune therapies; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3639
+name = "Crinetics Pharmaceuticals"
+aliases = ["crinetics-pharmaceuticals", "crinetics"]
+domain = "crinetics.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for rare endocrine diseases; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3640
+name = "Turning Point Therapeutics"
+aliases = ["turning-point-therapeutics"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego oncology biotech; acquired by Bristol Myers Squibb in 2022."
+verified = false
+
+[[company]]
+id = 3641
+name = "Cidara Therapeutics"
+aliases = ["cidara-therapeutics", "cidara"]
+domain = "cidara.com"
+industry = "biotech_pharma"
+desc = "Develops long-acting antifungal/antiviral therapies; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3642
+name = "Mirati Therapeutics"
+aliases = ["mirati-therapeutics", "mirati"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego oncology biotech; acquired by Bristol Myers Squibb in 2024."
+verified = false
+
+[[company]]
+id = 3643
+name = "Sorrento Therapeutics"
+aliases = ["sorrento-therapeutics", "sorrento"]
+domain = "sorrentotherapeutics.com"
+industry = "biotech_pharma"
+desc = "San Diego biopharmaceutical company (restructured after 2023 bankruptcy)."
+verified = false
+
+[[company]]
+id = 3644
+name = "Arena Pharmaceuticals"
+aliases = ["arena-pharmaceuticals", "arena"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company; acquired by Pfizer in 2022."
+verified = false
+
+[[company]]
+id = 3645
+name = "Optimer Pharmaceuticals"
+aliases = ["optimer-pharmaceuticals", "optimer"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company; acquired by Cubist in 2013."
+verified = false
+
+[[company]]
+id = 3646
+name = "Genoptix"
+aliases = ["genoptix"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego-area clinical diagnostics lab company; acquired by Novartis (2011), later divested."
+verified = false
+
+[[company]]
+id = 3647
+name = "Otonomy"
+aliases = ["otonomy"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company focused on ear disease; dissolved 2022."
+verified = false
+
+[[company]]
+id = 3648
+name = "Apricus Biosciences"
+aliases = ["apricus-biosciences", "apricus"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company; later renamed Seelos Therapeutics."
+verified = false
+
+[[company]]
+id = 3649
+name = "Genomatica"
+aliases = ["genomatica"]
+domain = "genomatica.com"
+industry = "biotech_pharma"
+desc = "Develops bio-based chemical manufacturing processes; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3650
+name = "Maravai LifeSciences"
+aliases = ["maravai-lifesciences", "maravai"]
+domain = "maravai.com"
+industry = "biotech_pharma"
+desc = "Supplies life science reagents (mRNA, nucleic acid production); headquartered in San Diego (Carlsbad)."
+verified = false
+
+[[company]]
+id = 3651
+name = "Biosite"
+aliases = ["biosite"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego point-of-care diagnostics company; acquired by Inverness Medical in 2007."
+verified = false
+
+[[company]]
+id = 3652
+name = "Natera"
+aliases = ["natera"]
+domain = "natera.com"
+industry = "biotech_pharma"
+desc = "Genetic testing company with a major San Diego office; HQ in Austin, TX."
+verified = false
+
+[[company]]
+id = 3653
+name = "Singular Genomics"
+aliases = ["singular-genomics"]
+domain = "singulargenomics.com"
+industry = "biotech_pharma"
+desc = "Develops next-generation DNA sequencing systems; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3654
+name = "Encoded Therapeutics"
+aliases = ["encoded-therapeutics", "encoded"]
+domain = "encoded.com"
+industry = "biotech_pharma"
+desc = "Develops genetic medicines for neurodevelopmental disorders; headquartered in South San Francisco with a San Diego presence."
+verified = false
+
+[[company]]
+id = 3655
+name = "CardioDx"
+aliases = ["cardiodx"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former cardiovascular genomic diagnostics company; ceased operations 2017."
+verified = false
+
+[[company]]
+id = 3656
+name = "Genalyte"
+aliases = ["genalyte"]
+domain = "genalyte.com"
+industry = "biotech_pharma"
+desc = "Develops point-of-care diagnostic testing platforms; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3657
+name = "Travere Therapeutics"
+aliases = ["travere-therapeutics", "travere", "retrophin"]
+domain = "travere.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for rare kidney diseases; headquartered in San Diego (formerly Retrophin)."
+verified = false
+
+[[company]]
+id = 3658
+name = "Avidity Biosciences"
+aliases = ["avidity-biosciences", "avidity"]
+domain = "aviditybiosciences.com"
+industry = "biotech_pharma"
+desc = "Develops RNA-conjugate therapeutics; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3659
+name = "Vividion Therapeutics"
+aliases = ["vividion-therapeutics", "vividion"]
+domain = "vividion.com"
+industry = "biotech_pharma"
+desc = "Chemoproteomics-based drug discovery company; headquartered in San Diego; acquired by Bayer in 2021."
+verified = false
+
+[[company]]
+id = 3660
+name = "Janux Therapeutics"
+aliases = ["janux-therapeutics", "janux"]
+domain = "januxrx.com"
+industry = "biotech_pharma"
+desc = "Develops T-cell engager immunotherapies for cancer; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3661
+name = "Gossamer Bio"
+aliases = ["gossamer-bio", "gossamer"]
+domain = "gossamerbio.com"
+industry = "biotech_pharma"
+desc = "Develops therapies for pulmonary and immunological diseases; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3662
+name = "Artiva Biotherapeutics"
+aliases = ["artiva-biotherapeutics", "artiva"]
+domain = "artivabio.com"
+industry = "biotech_pharma"
+desc = "Develops allogeneic NK-cell cancer therapies; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3663
+name = "Boundless Bio"
+aliases = ["boundless-bio"]
+domain = "boundlessbio.com"
+industry = "biotech_pharma"
+desc = "Develops therapies targeting extrachromosomal DNA in cancer; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3664
+name = "Continuum Therapeutics"
+aliases = ["continuum-therapeutics"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "San Diego clinical-stage biotech, partnered with Johnson & Johnson."
+verified = false
+
+[[company]]
+id = 3665
+name = "Erasca"
+aliases = ["erasca"]
+domain = "erasca.com"
+industry = "biotech_pharma"
+desc = "Develops RAS/MAPK pathway cancer therapies; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3666
+name = "Tallac Therapeutics"
+aliases = ["tallac-therapeutics", "tallac"]
+domain = "tallactx.com"
+industry = "biotech_pharma"
+desc = "Develops immune-mediated cancer therapies; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3667
+name = "Homology Medicines"
+aliases = ["homology-medicines"]
+domain = "homologymedicines.com"
+industry = "biotech_pharma"
+desc = "Gene therapy company with a San Diego presence; HQ in Bedford, MA."
+verified = false
+
+[[company]]
+id = 3668
+name = "Kura Oncology"
+aliases = ["kura-oncology", "kura"]
+domain = "kuraoncology.com"
+industry = "biotech_pharma"
+desc = "Develops precision medicines for cancer; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3669
+name = "Synthorx"
+aliases = ["synthorx"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biotech developing synthetic cytokine therapies; acquired by Sanofi in 2020."
+verified = false
+
+[[company]]
+id = 3670
+name = "Poseida Therapeutics"
+aliases = ["poseida-therapeutics", "poseida"]
+domain = "poseida.com"
+industry = "biotech_pharma"
+desc = "Develops genetically engineered cell and gene therapies; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3671
+name = "Prometheus Biosciences"
+aliases = ["prometheus-biosciences", "prometheus"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biotech developing precision therapies for immune-mediated diseases; acquired by Merck in 2023."
+verified = false
+
+[[company]]
+id = 3672
+name = "Biosplice Therapeutics"
+aliases = ["biosplice-therapeutics", "biosplice", "samumed"]
+domain = "biosplice.com"
+industry = "biotech_pharma"
+desc = "Develops small-molecule therapies targeting signaling pathways; headquartered in San Diego (formerly Samumed)."
+verified = false
+
+[[company]]
+id = 3673
+name = "Conatus Pharmaceuticals"
+aliases = ["conatus-pharmaceuticals", "conatus"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company; merged into Histogen in 2020."
+verified = false
+
+[[company]]
+id = 3674
+name = "Tocagen"
+aliases = ["tocagen"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego gene therapy company for brain cancer; merged into Forte Biosciences in 2020."
+verified = false
+
+[[company]]
+id = 3675
+name = "Epirium Bio"
+aliases = ["epirium-bio", "epirium"]
+domain = "epiriumbio.com"
+industry = "biotech_pharma"
+desc = "Develops small-molecule therapies for muscle and mitochondrial disease; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3676
+name = "Bionano Genomics"
+aliases = ["bionano-genomics", "bionano"]
+domain = "bionano.com"
+industry = "biotech_pharma"
+desc = "Develops optical genome mapping technology; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3677
+name = "Sitari Pharmaceuticals"
+aliases = ["sitari-pharmaceuticals", "sitari"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "San Diego biotech developing therapies for celiac disease and immune disorders."
+verified = false
+
+[[company]]
+id = 3678
+name = "Aiolos Bio"
+aliases = ["aiolos-bio", "aiolos"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biotech developing respiratory/inflammatory therapies; acquired by GSK in 2024."
+verified = false
+
+[[company]]
+id = 3679
+name = "Amylin Pharmaceuticals"
+aliases = ["amylin-pharmaceuticals", "amylin"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company (diabetes therapies); acquired by Bristol Myers Squibb in 2012."
+verified = false
+
+[[company]]
+id = 3680
+name = "Cypress Bioscience"
+aliases = ["cypress-bioscience"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biopharmaceutical company; acquired by Ligand Pharmaceuticals in 2010."
+verified = false
+
+[[company]]
+id = 3681
+name = "Genta Incorporated"
+aliases = ["genta-incorporated", "genta"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego-area biopharmaceutical company; ceased operations."
+verified = false
+
+[[company]]
+id = 3682
+name = "Trius Therapeutics"
+aliases = ["trius-therapeutics", "trius"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego antibiotics biotech; acquired by Cubist Pharmaceuticals in 2013."
+verified = false
+
+[[company]]
+id = 3683
+name = "Ambrx"
+aliases = ["ambrx"]
+domain = "ambrx.com"
+industry = "biotech_pharma"
+desc = "Develops synthetic biology-based biologics and antibody-drug conjugates; headquartered in San Diego."
+verified = false
+
+[[company]]
+id = 3684
+name = "Cardium Therapeutics"
+aliases = ["cardium-therapeutics", "cardium"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Former San Diego biotechnology company focused on cardiovascular therapies; defunct."
+verified = false
+
+[[company]]
+id = 3685
+name = "AltraVista Diagnostics"
+aliases = ["altravista-diagnostics", "altravista"]
+domain = "unknown"
+industry = "biotech_pharma"
+desc = "Develops biomarker-based diagnostics for neurodegenerative diseases; headquartered in San Diego."
+verified = false
